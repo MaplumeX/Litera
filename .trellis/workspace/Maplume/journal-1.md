@@ -132,3 +132,26 @@ Upgraded sidecar from single inMemory session to Map<sessionId, ManagedSession> 
 ### Status
 
 [OK] **Completed**
+
+
+## Session 7: Library Management: book library with import/delete/search/persistence
+
+**Date**: 2026-08-12
+**Task**: Library Management: book library with import/delete/search/persistence
+**Branch**: `main`
+
+### Summary
+
+Implemented the library-management child task: Rust book persistence commands (import_book, save_book_metadata, list_books, open_book, delete_book, update_reading_state) with library.json + books/<id>/ storage, LibraryView + BookCard components with cover grid and search, App.tsx view routing (library|reader), foliate.js offscreen metadata extraction, Tauri asset protocol for cover display. Fixed position-restore ordering (await init before goToFraction) and language-map metadata extraction. Updated specs (Tauri commands contract, foliate.js patterns). Planned parent + reader-enhancement child task.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `64e363e` | (see git log) |
+| `6c44ac1` | (see git log) |
+| `120396f` | (see git log) |
+
+### Status
+
+[OK] **Completed**
