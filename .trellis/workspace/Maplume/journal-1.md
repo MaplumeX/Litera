@@ -26,3 +26,24 @@ Planned the Agent-Enhanced EPUB Reader (parent task agent-epub-reader) with full
 ### Status
 
 [OK] **Completed**
+
+
+## Session 2: Child 2: EPUB rendering (foliate.js)
+
+**Date**: 2026-08-11
+**Task**: Child 2: EPUB rendering (foliate.js)
+**Branch**: `main`
+
+### Summary
+
+Integrated foliate.js via git submodule. Rust open_file command with tauri-plugin-dialog. ReaderView React component mounting <foliate-view> web component. Prev/next navigation, chapter progress display, selection capture with floating 'ask agent' button. fixFoliateGlob Vite plugin for pdf.js glob pattern. All checks pass.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `88fc63b` | (see git log) |
+
+### Status
+
+[OK] **Completed**
