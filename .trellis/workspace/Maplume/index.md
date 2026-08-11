@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 5
+- **Total Sessions**: 6
 - **Last Active**: 2026-08-12
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~113 | Active |
+| `journal-1.md` | ~134 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 6 | 2026-08-12 | 修复 open_file 主线程死锁 | `32781c7` | `main` |
 | 5 | 2026-08-12 | Child 5: multi-session management + list UI | `25b4350` | `main` |
 | 4 | 2026-08-12 | Child 4: reading assistant integration | `9acdd13`, `b32e54e` | `main` |
 | 3 | 2026-08-12 | Child 3: pi agent sidecar | `604e69d` | `main` |

@@ -111,3 +111,24 @@ Upgraded sidecar from single inMemory session to Map<sessionId, ManagedSession> 
 ### Status
 
 [OK] **Completed**
+
+
+## Session 6: 修复 open_file 主线程死锁
+
+**Date**: 2026-08-12
+**Task**: 修复 open_file 主线程死锁
+**Branch**: `main`
+
+### Summary
+
+点击'打开文件'卡死的根因是 open_file 同步命令在主线程跑 blocking_pick_file() 导致死锁。改为 async fn 并用 spawn_blocking 包裹阻塞 API，前端接口不变。修复记录到 backend/error-handling.md。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `32781c7` | (see git log) |
+
+### Status
+
+[OK] **Completed**
