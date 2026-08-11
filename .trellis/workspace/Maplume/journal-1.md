@@ -90,3 +90,24 @@ Integrated all layers: sidecar EPUB parsing (adm-zip) + FTS5 index (fts5-sql-bun
 ### Status
 
 [OK] **Completed**
+
+
+## Session 5: Child 5: multi-session management + list UI
+
+**Date**: 2026-08-12
+**Task**: Child 5: multi-session management + list UI
+**Branch**: `main`
+
+### Summary
+
+Upgraded sidecar from single inMemory session to Map<sessionId, ManagedSession> with SessionManager.create persistent jsonl. Implemented new/switch/delete/list session handlers with disk recovery fallback. Rust IPC commands + 4 new event types. open_file passes sessionsDir + auto list_sessions. ChatPanel session list UI (overlay panel, new/switch/delete), auto-switch to most recent, history render on switch. All checks pass.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `25b4350` | (see git log) |
+
+### Status
+
+[OK] **Completed**
