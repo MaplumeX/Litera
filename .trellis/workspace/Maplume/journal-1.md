@@ -68,3 +68,25 @@ Implemented pi agent sidecar: Node.js child process with stdio JSON lines protoc
 ### Status
 
 [OK] **Completed**
+
+
+## Session 4: Child 4: reading assistant integration
+
+**Date**: 2026-08-12
+**Task**: Child 4: reading assistant integration
+**Branch**: `main`
+
+### Summary
+
+Integrated all layers: sidecar EPUB parsing (adm-zip) + FTS5 index (fts5-sql-bundle WASM trigram) + 4 custom tools (get_book_metadata/get_toc/read_chapter/search_in_book) + system prompt + prompt context injection. Rust open_file sends book_opened, agent_prompt accepts selection+chapterIndex. Frontend react-resizable-panels split layout, formal ChatPanel with Markdown rendering, selection quote blocks, collapsible tool cards, streaming output. Selection trigger wired ReaderView->ChatPanel fillInput. Fixed FTS5 snippet alias bug. All checks pass.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9acdd13` | (see git log) |
+| `b32e54e` | (see git log) |
+
+### Status
+
+[OK] **Completed**

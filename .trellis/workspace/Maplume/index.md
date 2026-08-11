@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 3
+- **Total Sessions**: 4
 - **Last Active**: 2026-08-12
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~70 | Active |
+| `journal-1.md` | ~92 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 4 | 2026-08-12 | Child 4: reading assistant integration | `9acdd13`, `b32e54e` | `main` |
 | 3 | 2026-08-12 | Child 3: pi agent sidecar | `604e69d` | `main` |
 | 2 | 2026-08-11 | Child 2: EPUB rendering (foliate.js) | `88fc63b` | `main` |
 | 1 | 2026-08-11 | Plan agent-epub-reader + scaffold Tauri/React | `cf5c690` | `main` |
