@@ -316,22 +316,29 @@ struct OpenFileResult {
 }
 
 #[tauri::command]
-fn open_file(app: tauri::AppHandle) -> Result<OpenFileResult, String> {
-    let file_path = app
-        .dialog()
-        .file()
-        .add_filter("EPUB", &["epub"])
-        .blocking_pick_file()
-        .ok_or("No file selected")?;
+async fn open_file(app: tauri::AppHandle) -> Result<OpenFileResult, String> {
+    let app_clone = app.clone();
+    let (path_str, name, bytes) = tauri::async_runtime::spawn_blocking(move || {
+        let file_path = app_clone
+            .dialog()
+            .file()
+            .add_filter("EPUB", &["epub"])
+            .blocking_pick_file()
+            .ok_or("No file selected")?;
 
-    let path = file_path.into_path().map_err(|_| "Invalid path")?;
-    let path_str = path.to_string_lossy().to_string();
-    let name = path
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("book.epub")
-        .to_string();
-    let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
+        let path = file_path.into_path().map_err(|_| "Invalid path")?;
+        let path_str = path.to_string_lossy().to_string();
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("book.epub")
+            .to_string();
+        let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
+
+        Ok::<_, String>((path_str, name, bytes))
+    })
+    .await
+    .map_err(|e| e.to_string())??;
 
     // Compute bookId from file path hash (simplified; Child 5 will use epub metadata identifier).
     let book_id = {
