@@ -445,10 +445,12 @@ function extractUserText(content: string | { type: string; text: string }[]): st
 // --- Book handling -----------------------------------------------------------
 
 async function handleBookOpened(path: string, bookId: string, dir: string): Promise<void> {
+  // Set session metadata first so list_sessions arriving before book load
+  // completes can be served without racing loadBook's async work.
+  sessionsDir = dir;
+  currentBookId = bookId;
   try {
     await loadBook(path);
-    sessionsDir = dir;
-    currentBookId = bookId;
     sendMessage({ type: "book_ready" });
   } catch (err) {
     sendError(`Failed to load book: ${err instanceof Error ? err.message : String(err)}`);
