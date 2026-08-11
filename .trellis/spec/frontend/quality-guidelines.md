@@ -1,51 +1,61 @@
 # Quality Guidelines
 
-> Code quality standards for frontend development.
+> Code standards and forbidden patterns for the Litera project.
 
 ---
 
-## Overview
+## CSP Configuration (Tauri 2)
 
-<!--
-Document your project's quality standards here.
+### Convention: foliate.js CSP Requirements
 
-Questions to answer:
-- What patterns are forbidden?
-- What linting rules do you enforce?
-- What are your testing requirements?
-- What code review standards apply?
--->
+**What**: `src-tauri/tauri.conf.json` must configure CSP to block EPUB-embedded scripts while allowing `blob:` URLs for foliate.js rendering.
 
-(To be filled by the team)
+**Why**: EPUB files can contain scripted content (JavaScript in e-book HTML). foliate.js renders chapters via `blob:` URLs. CSP must block scripts except `'self'` but allow `blob:` in resource directives.
 
----
+**Current CSP** (production):
+```
+default-src 'self';
+script-src 'self';
+img-src 'self' blob: data:;
+style-src 'self' 'unsafe-inline';
+font-src 'self' blob: data:;
+media-src 'self' blob:;
+connect-src 'self' ipc: http://ipc.localhost;
+frame-src 'self' blob:
+```
 
-## Forbidden Patterns
+**Dev CSP** (`devCsp`): additionally allows `script-src 'unsafe-inline'` for Vite HMR.
 
-<!-- Patterns that should never be used and why -->
+### Don't: Allow blob: in script-src
 
-(To be filled by the team)
+**Problem**:
+```json
+"script-src 'self' blob:"
+```
 
----
+**Why it's bad**: EPUB-embedded scripts could execute via blob: URLs, bypassing the security boundary foliate.js requires.
 
-## Required Patterns
+**Instead**: Keep `script-src 'self'` only. `blob:` goes in `img-src`, `font-src`, `media-src`, `frame-src` where foliate.js needs it for rendering, not script execution.
 
-<!-- Patterns that must always be used -->
+## Tauri 2 Plugin Registration
 
-(To be filled by the team)
+### Convention: Plugins in lib.rs, permissions in capabilities/
 
----
+```rust
+// src-tauri/src/lib.rs
+pub fn run() {
+    tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}
+```
 
-## Testing Requirements
+```json
+// src-tauri/capabilities/default.json
+{
+  "permissions": ["dialog:default"]
+}
+```
 
-<!-- What level of testing is expected -->
-
-(To be filled by the team)
-
----
-
-## Code Review Checklist
-
-<!-- What reviewers should check -->
-
-(To be filled by the team)
+**Why**: Tauri 2 separates plugin registration (builder code) from permission grants (capabilities JSON). Don't inline permissions in Rust code.

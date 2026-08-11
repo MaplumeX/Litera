@@ -1,54 +1,39 @@
 # Directory Structure
 
-> How frontend code is organized in this project.
+> Module organization and file layout for the Litera frontend.
 
 ---
 
-## Overview
-
-<!--
-Document your project's frontend directory structure here.
-
-Questions to answer:
-- Where do components live?
-- How are features/modules organized?
-- Where are shared utilities?
-- How are assets organized?
--->
-
-(To be filled by the team)
-
----
-
-## Directory Layout
+## Project Layout
 
 ```
-<!-- Replace with your actual structure -->
-src/
-├── ...
-└── ...
+litera/
+├── src/                    # React frontend (WebView)
+│   ├── main.tsx            # React entry, imports index.css
+│   ├── App.tsx             # Root component
+│   ├── index.css           # Tailwind v4 entry + shadcn/ui theme variables
+│   ├── components/
+│   │   └── ui/             # shadcn/ui components (code-owned, not npm)
+│   │       └── button.tsx
+│   ├── lib/
+│   │   └── utils.ts        # cn() helper for shadcn/ui
+│   └── assets/
+├── src-tauri/              # Tauri Rust backend
+│   ├── src/
+│   │   ├── main.rs         # Entry point
+│   │   └── lib.rs          # Tauri builder + plugin registration
+│   ├── capabilities/       # Tauri 2 permission capabilities
+│   │   └── default.json
+│   ├── tauri.conf.json     # Tauri config (CSP, window, bundle)
+│   └── Cargo.toml
+├── sidecar/                # pi agent Node.js sidecar (Child 3+)
+├── vite.config.ts          # Vite + Tailwind plugin + path aliases
+├── tsconfig.json           # TS config with @/* path alias
+└── components.json         # shadcn/ui config
 ```
 
----
+## Key Conventions
 
-## Module Organization
-
-<!-- How should new features be organized? -->
-
-(To be filled by the team)
-
----
-
-## Naming Conventions
-
-<!-- File and folder naming rules -->
-
-(To be filled by the team)
-
----
-
-## Examples
-
-<!-- Link to well-organized modules as examples -->
-
-(To be filled by the team)
+- **shadcn/ui components are code-owned**: `src/components/ui/*.tsx` are copied source files, not an npm dependency. Modify them freely.
+- **Path alias `@/*`**: maps to `src/*` in both `tsconfig.json` and `vite.config.ts`. Use `@/components/ui/button` not relative paths.
+- **Tauri 2 capabilities**: permissions live in `src-tauri/capabilities/default.json`, not inline in builder code.

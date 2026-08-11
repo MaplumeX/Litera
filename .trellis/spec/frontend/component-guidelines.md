@@ -1,59 +1,41 @@
 # Component Guidelines
 
-> How components are built in this project.
+> Component patterns for the Litera frontend.
 
 ---
 
-## Overview
+## Component Library: shadcn/ui
 
-<!--
-Document your project's component conventions here.
+**Decision**: shadcn/ui (Radix UI primitives + Tailwind CSS, code-copy model).
 
-Questions to answer:
-- What component patterns do you use?
-- How are props defined?
-- How do you handle composition?
-- What accessibility standards apply?
--->
+**Why**: Desktop reader aesthetic needs restraint and full customizability. shadcn/ui copies component source into the project (`src/components/ui/`), giving full ownership without npm runtime dependency or version lock.
 
-(To be filled by the team)
+**How to add components**:
+```bash
+npx shadcn@latest add <component-name>
+```
 
----
+## Companion Libraries
 
-## Component Structure
+| Library | Purpose |
+|---------|---------|
+| `react-resizable-panels` | Draggable split-pane layout (shadcn/ui Resizable component base) |
+| `react-markdown` + `remark-gfm` | Agent response Markdown rendering (lists, code blocks, tables) |
 
-<!-- Standard structure of a component file -->
+## Patterns
 
-(To be filled by the team)
+### Import shadcn/ui components via path alias
+```typescript
+// Good
+import { Button } from "@/components/ui/button"
 
----
+// Bad — relative path
+import { Button } from "../../components/ui/button"
+```
 
-## Props Conventions
+### cn() for conditional classes
+```typescript
+import { cn } from "@/lib/utils"
 
-<!-- How props should be defined and typed -->
-
-(To be filled by the team)
-
----
-
-## Styling Patterns
-
-<!-- How styles are applied (CSS modules, styled-components, Tailwind, etc.) -->
-
-(To be filled by the team)
-
----
-
-## Accessibility
-
-<!-- A11y requirements and patterns -->
-
-(To be filled by the team)
-
----
-
-## Common Mistakes
-
-<!-- Component-related mistakes your team has made -->
-
-(To be filled by the team)
+<div className={cn("flex gap-4", isActive && "bg-muted")} />
+```
