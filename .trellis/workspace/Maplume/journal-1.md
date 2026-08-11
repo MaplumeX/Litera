@@ -47,3 +47,24 @@ Integrated foliate.js via git submodule. Rust open_file command with tauri-plugi
 ### Status
 
 [OK] **Completed**
+
+
+## Session 3: Child 3: pi agent sidecar
+
+**Date**: 2026-08-12
+**Task**: Child 3: pi agent sidecar
+**Branch**: `main`
+
+### Summary
+
+Implemented pi agent sidecar: Node.js child process with stdio JSON lines protocol. sidecar/index.ts uses createAgentSession + SessionManager.inMemory + session.subscribe. Rust spawns node sidecar/dist/index.js, reads stdout in thread, emits agent_* Tauri events, kills on window destroy. ChatPanel temporary UI for verification. All checks pass (sidecar tsc, npm build, cargo check).
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `604e69d` | (see git log) |
+
+### Status
+
+[OK] **Completed**
