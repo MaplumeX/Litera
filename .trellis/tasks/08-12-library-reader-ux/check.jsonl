@@ -1,0 +1,2 @@
+{"file": ".trellis/tasks/08-12-library-reader-ux/prd.md", "reason": "父任务验收标准——集成 check 时逐项核对"}
+{"file": ".trellis/tasks/08-12-library-reader-ux/design.md", "reason": "跨子任务契约——集成 check 时验证数据流一致性"}

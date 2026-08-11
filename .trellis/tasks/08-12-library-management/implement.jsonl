@@ -1,0 +1,6 @@
+{"file": ".trellis/tasks/08-12-library-management/prd.md", "reason": "本任务的需求与验收标准——实现时核对每项需求"}
+{"file": ".trellis/tasks/08-12-library-management/design.md", "reason": "书库数据模型、Rust 命令契约、持久化目录结构、导入/打开/删除数据流——主设计参考"}
+{"file": ".trellis/tasks/08-12-library-management/implement.md", "reason": "有序执行清单与验证命令——按步骤实现"}
+{"file": ".trellis/tasks/08-11-agent-epub-reader/design.md", "reason": "现有架构边界（WebView/Rust/sidecar 三进程）、现有 IPC 契约——改动需保持兼容"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "前端 React 组件模式约定（LibraryView/BookCard 新组件需遵循）"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Rust 命令错误处理约定（新增 Tauri 命令的 Result 返回模式）"}

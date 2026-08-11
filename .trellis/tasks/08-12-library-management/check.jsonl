@@ -1,0 +1,3 @@
+{"file": ".trellis/tasks/08-12-library-management/prd.md", "reason": "验收标准——check 时逐项核对"}
+{"file": ".trellis/tasks/08-12-library-management/design.md", "reason": "契约与数据流——check 时验证实现与设计一致"}
+{"file": ".trellis/tasks/08-11-agent-epub-reader/design.md", "reason": "现有架构边界——check 时验证未破坏 sidecar 协议与 ChatPanel 集成"}

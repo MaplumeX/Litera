@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/08-12-library-reader-ux/prd.md", "reason": "父任务整体需求与验收标准——跨子任务集成验收基准"}
+{"file": ".trellis/tasks/08-12-library-reader-ux/design.md", "reason": "跨子任务契约与依赖顺序——父任务集成参考"}
+{"file": ".trellis/tasks/08-12-library-management/design.md", "reason": "子任务1设计：书库数据模型与 Rust 命令——集成验收需了解"}
+{"file": ".trellis/tasks/08-12-reader-enhancement/design.md", "reason": "子任务2设计：foliate.js API 调用与 CSS 注入——集成验收需了解"}
