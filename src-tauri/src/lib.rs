@@ -174,6 +174,9 @@ fn forward_sidecar_event(app: &tauri::AppHandle, line: &str) {
         "ready" => {
             let _ = app.emit("agent_ready", serde_json::json!({}));
         }
+        "book_ready" => {
+            let _ = app.emit("agent_book_ready", serde_json::json!({}));
+        }
         other => {
             eprintln!("[sidecar] unhandled message type: {other}");
         }
@@ -186,10 +189,26 @@ fn forward_sidecar_event(app: &tauri::AppHandle, line: &str) {
 
 /// WebView → Rust → sidecar stdin: send a prompt to the agent.
 #[tauri::command]
-fn agent_prompt(prompt: String, state: tauri::State<'_, Mutex<SidecarState>>) -> Result<(), String> {
+fn agent_prompt(
+    prompt: String,
+    selection: Option<String>,
+    chapter_index: Option<i32>,
+    state: tauri::State<'_, Mutex<SidecarState>>,
+) -> Result<(), String> {
     let mut state = state.lock().map_err(|e| format!("Lock error: {e}"))?;
-    let json = serde_json::json!({ "type": "prompt", "text": prompt }).to_string();
-    write_to_sidecar(&mut state, &json)
+    let mut json = serde_json::json!({ "type": "prompt", "text": prompt });
+    let context = serde_json::json!({});
+    let mut context = context;
+    if let Some(s) = selection {
+        context["selection"] = serde_json::Value::String(s);
+    }
+    if let Some(idx) = chapter_index {
+        context["chapterIndex"] = serde_json::Value::Number(serde_json::Number::from(idx));
+    }
+    if context.as_object().map_or(false, |m| !m.is_empty()) {
+        json["context"] = context;
+    }
+    write_to_sidecar(&mut state, &json.to_string())
 }
 
 /// WebView → Rust → sidecar stdin: abort the current agent operation.
@@ -214,6 +233,8 @@ struct OpenFileResult {
     path: String,
     name: String,
     bytes: Vec<u8>,
+    #[serde(rename = "bookId")]
+    book_id: String,
 }
 
 #[tauri::command]
@@ -233,10 +254,31 @@ fn open_file(app: tauri::AppHandle) -> Result<OpenFileResult, String> {
         .unwrap_or("book.epub")
         .to_string();
     let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
+
+    // Compute bookId from file path hash (simplified; Child 5 will use epub metadata identifier).
+    let book_id = {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        let mut hasher = DefaultHasher::new();
+        path_str.hash(&mut hasher);
+        format!("{:x}", hasher.finish())
+    };
+
+    // Notify sidecar that a book was opened (for EPUB parsing + FTS5 indexing).
+    if let Some(state) = app.try_state::<Mutex<SidecarState>>() {
+        if let Ok(mut state) = state.lock() {
+            let json = serde_json::json!({ "type": "book_opened", "path": &path_str, "bookId": &book_id });
+            if let Err(e) = write_to_sidecar(&mut state, &json.to_string()) {
+                eprintln!("[sidecar] Failed to send book_opened: {e}");
+            }
+        }
+    }
+
     Ok(OpenFileResult {
         path: path_str,
         name,
         bytes,
+        book_id,
     })
 }
 

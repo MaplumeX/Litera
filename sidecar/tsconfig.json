@@ -11,5 +11,5 @@
     "declaration": false,
     "noEmitOnError": false
   },
-  "include": ["index.ts"]
+  "include": ["index.ts", "book.ts"]
 }

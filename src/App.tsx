@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from "react";
+import { Group, Panel, Separator } from "react-resizable-panels";
 import { Button } from "@/components/ui/button";
 import {
   ReaderView,
@@ -6,7 +7,7 @@ import {
   type ReaderViewHandle,
   type SelectionCapture,
 } from "@/components/ReaderView";
-import { ChatPanel } from "@/components/ChatPanel";
+import { ChatPanel, type ChatPanelHandle } from "@/components/ChatPanel";
 
 interface FileData {
   bytes: number[];
@@ -19,8 +20,9 @@ function App() {
     index: 0,
     fraction: 0,
   });
-  const [lastCapture, setLastCapture] = useState<SelectionCapture | null>(null);
+  const [chatCollapsed, setChatCollapsed] = useState(false);
   const readerRef = useRef<ReaderViewHandle>(null);
+  const chatRef = useRef<ChatPanelHandle>(null);
 
   const handleOpenFile = useCallback(async () => {
     const result = await openEpubFile();
@@ -37,8 +39,7 @@ function App() {
   );
 
   const handleSelectionCapture = useCallback((capture: SelectionCapture) => {
-    setLastCapture(capture);
-    console.log("Selection captured:", capture);
+    chatRef.current?.fillInput(capture.text, capture.chapterIndex);
   }, []);
 
   const fractionPct = Math.round(progress.fraction * 100);
@@ -55,31 +56,64 @@ function App() {
         {fileData && (
           <span className="truncate text-sm text-muted-foreground">{fileData.name}</span>
         )}
+        <div className="ml-auto">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setChatCollapsed((v) => !v)}
+          >
+            {chatCollapsed ? "显示对话" : "隐藏对话"}
+          </Button>
+        </div>
       </header>
 
       {/* Reader + Chat panel split */}
       <div className="relative flex flex-1 overflow-hidden">
-        <div className="relative flex-1 overflow-hidden">
-          {fileData ? (
-            <ReaderView
-              ref={readerRef}
-              fileData={fileData}
-              onRelocate={handleRelocate}
-              onSelectionCapture={handleSelectionCapture}
-            />
-          ) : (
-            <div className="flex h-full items-center justify-center">
-              <div className="text-center space-y-2">
-                <p className="text-muted-foreground">还没有打开的书籍</p>
-                <Button onClick={handleOpenFile}>打开 EPUB 文件</Button>
+        {chatCollapsed ? (
+          <div className="relative h-full w-full overflow-hidden">
+            {fileData ? (
+              <ReaderView
+                ref={readerRef}
+                fileData={fileData}
+                onRelocate={handleRelocate}
+                onSelectionCapture={handleSelectionCapture}
+              />
+            ) : (
+              <div className="flex h-full items-center justify-center">
+                <div className="text-center space-y-2">
+                  <p className="text-muted-foreground">还没有打开的书籍</p>
+                  <Button onClick={handleOpenFile}>打开 EPUB 文件</Button>
+                </div>
               </div>
-            </div>
-          )}
-        </div>
-        {/* Temporary chat panel for sidecar verification */}
-        <div className="w-80 shrink-0">
-          <ChatPanel />
-        </div>
+            )}
+          </div>
+        ) : (
+          <Group orientation="horizontal" className="h-full">
+            <Panel defaultSize={65} minSize={30}>
+              <div className="relative h-full w-full overflow-hidden">
+                {fileData ? (
+                  <ReaderView
+                    ref={readerRef}
+                    fileData={fileData}
+                    onRelocate={handleRelocate}
+                    onSelectionCapture={handleSelectionCapture}
+                  />
+                ) : (
+                  <div className="flex h-full items-center justify-center">
+                    <div className="text-center space-y-2">
+                      <p className="text-muted-foreground">还没有打开的书籍</p>
+                      <Button onClick={handleOpenFile}>打开 EPUB 文件</Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </Panel>
+            <Separator className="w-px bg-border hover:bg-primary/30 transition-colors cursor-col-resize" />
+            <Panel defaultSize={35} minSize={20}>
+              <ChatPanel ref={chatRef} currentChapterIndex={progress.index} />
+            </Panel>
+          </Group>
+        )}
       </div>
 
       {/* Bottom navigation bar */}
@@ -103,19 +137,6 @@ function App() {
             下一页
           </Button>
         </footer>
-      )}
-
-      {/* Selection capture debug display */}
-      {lastCapture && (
-        <div className="fixed bottom-16 right-4 max-w-sm rounded-lg border bg-card p-3 text-xs shadow-lg">
-          <p className="font-medium">已捕获选段：</p>
-          <p className="mt-1 line-clamp-3 text-muted-foreground">
-            &ldquo;{lastCapture.text}&rdquo;
-          </p>
-          <p className="mt-1 text-muted-foreground">
-            章节 #{lastCapture.chapterIndex}
-          </p>
-        </div>
       )}
     </main>
   );
