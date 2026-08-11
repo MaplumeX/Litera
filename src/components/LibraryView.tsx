@@ -1,0 +1,133 @@
+import { useCallback, useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import type { BookRecord, ImportBookResult } from "@/types/library";
+import { extractEpubMetadata } from "@/lib/book-utils";
+import { Button } from "@/components/ui/button";
+import { BookCard } from "@/components/BookCard";
+
+interface LibraryViewProps {
+  onOpenBook: (bookId: string) => void;
+}
+
+export function LibraryView({ onOpenBook }: LibraryViewProps) {
+  const [books, setBooks] = useState<BookRecord[]>([]);
+  const [search, setSearch] = useState("");
+  const [importing, setImporting] = useState(false);
+
+  // Load books from the library on mount.
+  const refreshBooks = useCallback(async () => {
+    try {
+      const list = await invoke<BookRecord[]>("list_books");
+      setBooks(list);
+    } catch (err) {
+      console.error("list_books error:", err);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshBooks();
+  }, [refreshBooks]);
+
+  const handleImport = useCallback(async () => {
+    if (importing) return;
+    setImporting(true);
+    try {
+      // 1. Rust picks file, copies epub to app data, returns bytes + bookId.
+      const result = await invoke<ImportBookResult>("import_book");
+      // 2. Frontend extracts metadata + cover using foliate.js offscreen.
+      const metadata = await extractEpubMetadata(result.bytes, "book.epub");
+      // 3. Save metadata + cover to app data via Rust.
+      await invoke<BookRecord>("save_book_metadata", {
+        bookId: result.bookId,
+        title: metadata.title,
+        author: metadata.author,
+        coverBytes: metadata.coverBytes ?? null,
+      });
+      // 4. Refresh the grid.
+      await refreshBooks();
+    } catch (err) {
+      if (String(err).includes("No file selected")) {
+        // User cancelled — no error.
+      } else {
+        console.error("import error:", err);
+        alert(`导入失败: ${err}`);
+      }
+    } finally {
+      setImporting(false);
+    }
+  }, [importing, refreshBooks]);
+
+  const handleDelete = useCallback(
+    async (bookId: string) => {
+      try {
+        await invoke("delete_book", { bookId });
+        await refreshBooks();
+      } catch (err) {
+        console.error("delete error:", err);
+        alert(`删除失败: ${err}`);
+      }
+    },
+    [refreshBooks],
+  );
+
+  // Filter books by search query (title or author).
+  const filtered = search.trim()
+    ? books.filter((b) => {
+        const q = search.toLowerCase();
+        return (
+          b.title.toLowerCase().includes(q) ||
+          b.author.toLowerCase().includes(q)
+        );
+      })
+    : books;
+
+  return (
+    <div className="flex h-full flex-col">
+      {/* Toolbar */}
+      <header className="flex items-center gap-3 border-b px-4 py-3">
+        <h1 className="text-lg font-bold">Litera</h1>
+        <div className="ml-auto flex items-center gap-2">
+          <input
+            type="text"
+            placeholder="搜索书名或作者…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-56 rounded-md border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+          />
+          <Button size="sm" onClick={() => void handleImport()} disabled={importing}>
+            {importing ? "导入中…" : "导入"}
+          </Button>
+        </div>
+      </header>
+
+      {/* Grid or empty state */}
+      <div className="flex-1 overflow-y-auto p-4">
+        {books.length === 0 ? (
+          <div className="flex h-full items-center justify-center">
+            <div className="text-center space-y-3">
+              <p className="text-muted-foreground">还没有书籍</p>
+              <Button onClick={() => void handleImport()} disabled={importing}>
+                {importing ? "导入中…" : "导入 EPUB"}
+              </Button>
+            </div>
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="flex h-full items-center justify-center">
+            <p className="text-muted-foreground">没有匹配的书籍</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-6">
+            {filtered.map((book) => (
+              <BookCard
+                key={book.id}
+                book={book}
+                onOpen={onOpenBook}
+                onDelete={handleDelete}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

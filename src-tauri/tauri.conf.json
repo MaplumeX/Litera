@@ -18,8 +18,12 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; font-src 'self' blob: data:; media-src 'self' blob:; connect-src 'self' ipc: http://ipc.localhost; frame-src 'self' blob:",
-      "devCsp": "default-src 'self'; script-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; font-src 'self' blob: data:; media-src 'self' blob:; connect-src 'self' ipc: http://ipc.localhost; frame-src 'self' blob:"
+      "csp": "default-src 'self'; script-src 'self'; img-src 'self' blob: data: asset: http://asset.localhost; style-src 'self' 'unsafe-inline'; font-src 'self' blob: data:; media-src 'self' blob:; connect-src 'self' ipc: http://ipc.localhost; frame-src 'self' blob:",
+      "devCsp": "default-src 'self'; script-src 'self' 'unsafe-inline'; img-src 'self' blob: data: asset: http://asset.localhost; style-src 'self' 'unsafe-inline'; font-src 'self' blob: data:; media-src 'self' blob:; connect-src 'self' ipc: http://ipc.localhost; frame-src 'self' blob:",
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["$APPDATA/books/**"]
+      }
     }
   },
   "bundle": {

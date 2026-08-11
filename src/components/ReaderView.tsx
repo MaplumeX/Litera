@@ -36,10 +36,12 @@ interface ReaderViewProps {
   onRelocate?: (index: number, fraction: number, label?: string) => void;
   /** Called when the user clicks the "问 agent" button on a selection. */
   onSelectionCapture?: (capture: SelectionCapture) => void;
+  /** Last reading fraction to restore (0-1), from library persistence. */
+  initialFraction?: number;
 }
 
 export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
-  function ReaderView({ fileData, onRelocate, onSelectionCapture }, ref) {
+  function ReaderView({ fileData, onRelocate, onSelectionCapture, initialFraction }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
     const viewRef = useRef<HTMLElement | null>(null);
     const currentChapterRef = useRef(0);
@@ -84,14 +86,27 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       const view = viewRef.current as unknown as {
         open: (file: File) => Promise<void>;
         init: (opts: Record<string, unknown>) => Promise<void>;
+        goToFraction: (frac: number) => Promise<void>;
       };
       const { bytes, name } = fileData;
       const file = new File([new Uint8Array(bytes)], name);
+      const fractionToRestore = initialFraction;
       view
         .open(file)
-        .then(() => view.init({}).catch((err: unknown) => console.error("foliate init error:", err)))
+        .then(async () => {
+          await view.init({}).catch((err: unknown) =>
+            console.error("foliate init error:", err),
+          );
+          // Restore reading position after init completes (init internally calls
+          // next(), so goToFraction must run after to avoid conflicting navigation).
+          if (fractionToRestore != null && fractionToRestore > 0) {
+            await view.goToFraction(fractionToRestore).catch((err: unknown) =>
+              console.error("foliate goToFraction error:", err),
+            );
+          }
+        })
         .catch((err: unknown) => console.error("foliate open error:", err));
-    }, [fileData]);
+    }, [fileData, initialFraction]);
 
     // Selection capture: listen for selectionchange inside the foliate-view.
     useEffect(() => {
