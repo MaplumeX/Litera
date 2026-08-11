@@ -1,51 +1,83 @@
 # Quality Guidelines
 
-> Code quality standards for backend development.
+> Code standards for the Litera Rust backend + Node.js sidecar.
 
 ---
 
-## Overview
+## Sidecar stdio JSON Lines Protocol
 
-<!--
-Document your project's quality standards here.
+### Convention: sidecar stdout MUST only emit JSON lines
 
-Questions to answer:
-- What patterns are forbidden?
-- What linting rules do you enforce?
-- What are your testing requirements?
-- What code review standards apply?
--->
+**What**: The sidecar process communicates with Rust via stdout. Every line must be a valid JSON object. No non-JSON output on stdout.
 
-(To be filled by the team)
+**Why**: Rust reads sidecar stdout with `BufReader::lines()` and parses each line as JSON. Non-JSON lines (e.g., from `console.log`) break the parser.
 
----
+**Correct**:
+```typescript
+// sidecar/index.ts
+function send(obj: object) {
+  process.stdout.write(JSON.stringify(obj) + "\n")
+}
+send({ type: "text_delta", delta: "hello" })
+```
 
-## Forbidden Patterns
+**Wrong**:
+```typescript
+// NEVER do this in sidecar
+console.log("processing prompt")  // breaks Rust JSON parser
+console.error("debug info")       // use process.stderr for diagnostics
+```
 
-<!-- Patterns that should never be used and why -->
+**Rule**: Use `process.stdout.write(JSON.stringify(obj) + "\n")` for all protocol output. Use `process.stderr.write()` for diagnostics (Rust logs stderr separately).
 
-(To be filled by the team)
+### Convention: sidecar is a long-running process
 
----
+**What**: `node sidecar/dist/index.js` blocks forever waiting for stdin input. It never exits on its own.
 
-## Required Patterns
+**Why**: The sidecar is a stdio server. It reads stdin line-by-line and processes prompts.
 
-<!-- Patterns that must always be used -->
+**Implication for testing**: Do NOT run `node dist/index.js` directly in tests or CI — it will hang. Only verify via `tsc --noEmit` (compile check) and static code review. Runtime verification requires the Tauri app to spawn it with piped stdin/stdout.
 
-(To be filled by the team)
+## Sidecar Process Management (Rust)
 
----
+### Convention: spawn in setup, kill on window destroy
 
-## Testing Requirements
+```rust
+// Spawn in tauri::Builder::default().setup()
+let mut child = Command::new("node")
+    .arg("sidecar/dist/index.js")
+    .stdin(Stdio::piped())
+    .stdout(Stdio::piped())
+    .stderr(Stdio::piped())
+    .spawn()?;
 
-<!-- What level of testing is expected -->
+// Kill on window destroy
+.on_window_event(|window, event| {
+    if let WindowEvent::Destroyed = event {
+        // kill sidecar child
+    }
+})
+```
 
-(To be filled by the team)
+### Convention: read stdout in separate thread
 
----
+```rust
+let stdout = child.stdout.take().unwrap();
+std::thread::spawn(move || {
+    let reader = BufReader::new(stdout);
+    for line in reader.lines() {
+        let line = line.unwrap();
+        // parse JSON, app.emit("agent_*", payload)
+    }
+});
+```
 
-## Code Review Checklist
+**Why**: Reading stdout is blocking. Must be on a separate thread to avoid freezing the Tauri event loop.
 
-<!-- What reviewers should check -->
+### Don't: block the main thread on sidecar I/O
 
-(To be filled by the team)
+**Problem**: Reading sidecar stdout synchronously in a command handler.
+
+**Why it's bad**: Blocks the Tauri event loop, freezing the UI.
+
+**Instead**: Always use `std::thread::spawn` for stdout reading. Write to stdin from command handlers (fast, non-blocking).

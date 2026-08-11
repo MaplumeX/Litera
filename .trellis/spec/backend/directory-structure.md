@@ -1,54 +1,33 @@
 # Directory Structure
 
-> How backend code is organized in this project.
+> Module organization for the Litera Rust backend + Node.js sidecar.
 
 ---
 
-## Overview
-
-<!--
-Document your project's backend directory structure here.
-
-Questions to answer:
-- How are modules/packages organized?
-- Where does business logic live?
-- Where are API endpoints defined?
-- How are utilities and helpers organized?
--->
-
-(To be filled by the team)
-
----
-
-## Directory Layout
+## Layout
 
 ```
-<!-- Replace with your actual structure -->
-src/
-├── ...
-└── ...
+src-tauri/
+├── src/
+│   ├── main.rs            # Entry point (calls lib::run())
+│   └── lib.rs              # Tauri builder, commands, sidecar management
+├── capabilities/
+│   └── default.json        # Tauri 2 permissions
+├── tauri.conf.json         # Tauri config (CSP, window, bundle)
+├── Cargo.toml
+└── build.rs
+
+sidecar/                    # pi agent Node.js sidecar
+├── index.ts                # stdio JSON lines protocol entry
+├── tsconfig.json           # TS config (outDir ./dist)
+├── package.json            # @earendil-works/pi-coding-agent
+├── dist/                   # tsc output (gitignored)
+└── node_modules/           # gitignored
 ```
 
----
+## Key Conventions
 
-## Module Organization
-
-<!-- How should new features/modules be organized? -->
-
-(To be filled by the team)
-
----
-
-## Naming Conventions
-
-<!-- File and folder naming rules -->
-
-(To be filled by the team)
-
----
-
-## Examples
-
-<!-- Link to well-organized modules as examples -->
-
-(To be filled by the team)
+- **All Tauri commands in `lib.rs`**: `#[tauri::command]` functions + `invoke_handler` registration in `run()`.
+- **Sidecar is a separate npm project**: `sidecar/package.json` is independent from root `package.json`. It has its own `node_modules` and `tsconfig.json`.
+- **Sidecar compiled to `sidecar/dist/`**: `cd sidecar && npx tsc` produces `dist/index.js`. Rust spawns `node sidecar/dist/index.js`.
+- **Sidecar path resolution**: Rust uses `env!("CARGO_MANIFEST_DIR")` to locate `sidecar/dist/index.js` relative to `src-tauri/`.

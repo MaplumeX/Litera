@@ -6,6 +6,7 @@ import {
   type ReaderViewHandle,
   type SelectionCapture,
 } from "@/components/ReaderView";
+import { ChatPanel } from "@/components/ChatPanel";
 
 interface FileData {
   bytes: number[];
@@ -56,23 +57,29 @@ function App() {
         )}
       </header>
 
-      {/* Reader area */}
-      <div className="relative flex-1 overflow-hidden">
-        {fileData ? (
-          <ReaderView
-            ref={readerRef}
-            fileData={fileData}
-            onRelocate={handleRelocate}
-            onSelectionCapture={handleSelectionCapture}
-          />
-        ) : (
-          <div className="flex h-full items-center justify-center">
-            <div className="text-center space-y-2">
-              <p className="text-muted-foreground">还没有打开的书籍</p>
-              <Button onClick={handleOpenFile}>打开 EPUB 文件</Button>
+      {/* Reader + Chat panel split */}
+      <div className="relative flex flex-1 overflow-hidden">
+        <div className="relative flex-1 overflow-hidden">
+          {fileData ? (
+            <ReaderView
+              ref={readerRef}
+              fileData={fileData}
+              onRelocate={handleRelocate}
+              onSelectionCapture={handleSelectionCapture}
+            />
+          ) : (
+            <div className="flex h-full items-center justify-center">
+              <div className="text-center space-y-2">
+                <p className="text-muted-foreground">还没有打开的书籍</p>
+                <Button onClick={handleOpenFile}>打开 EPUB 文件</Button>
+              </div>
             </div>
-          </div>
-        )}
+          )}
+        </div>
+        {/* Temporary chat panel for sidecar verification */}
+        <div className="w-80 shrink-0">
+          <ChatPanel />
+        </div>
       </div>
 
       {/* Bottom navigation bar */}
