@@ -12,6 +12,7 @@ import { ChatPanel, type ChatPanelHandle } from "@/components/ChatPanel";
 interface FileData {
   bytes: number[];
   name: string;
+  bookId: string;
 }
 
 function App() {
@@ -27,7 +28,7 @@ function App() {
   const handleOpenFile = useCallback(async () => {
     const result = await openEpubFile();
     if (result) {
-      setFileData({ bytes: result.bytes, name: result.name });
+      setFileData({ bytes: result.bytes, name: result.name, bookId: result.bookId });
     }
   }, []);
 
@@ -110,7 +111,7 @@ function App() {
             </Panel>
             <Separator className="w-px bg-border hover:bg-primary/30 transition-colors cursor-col-resize" />
             <Panel defaultSize={35} minSize={20}>
-              <ChatPanel ref={chatRef} currentChapterIndex={progress.index} />
+              <ChatPanel ref={chatRef} currentChapterIndex={progress.index} bookId={fileData?.bookId ?? ""} />
             </Panel>
           </Group>
         )}

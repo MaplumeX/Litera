@@ -173,9 +173,10 @@ export async function openEpubFile(): Promise<{
   bytes: number[];
   name: string;
   path: string;
+  bookId: string;
 } | null> {
   try {
-    const result = await invoke<{ path: string; name: string; bytes: number[] }>(
+    const result = await invoke<{ path: string; name: string; bytes: number[]; bookId: string }>(
       "open_file",
     );
     return result;

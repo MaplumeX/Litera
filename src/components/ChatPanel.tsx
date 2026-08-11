@@ -33,6 +33,20 @@ interface ChatMessage {
   toolCalls?: ToolCall[];
 }
 
+interface SessionSummary {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** A serialized message from session history (matches sidecar SerializedMessage). */
+interface HistoryMessage {
+  role: "user" | "assistant";
+  content: string;
+  toolCalls?: { tool: string; params: unknown; result?: unknown; done: boolean }[];
+}
+
 export interface ChatPanelHandle {
   /** Fill the input with selected text and focus it. */
   fillInput: (text: string, chapterIndex: number) => void;
@@ -41,6 +55,8 @@ export interface ChatPanelHandle {
 interface ChatPanelProps {
   /** Current chapter index (for prompt context when no selection). */
   currentChapterIndex: number;
+  /** Current book id (empty when no book open). */
+  bookId: string;
 }
 
 // --- ToolCallCard component --------------------------------------------------
@@ -76,7 +92,7 @@ function ToolCallCard({ call }: { call: ToolCall }) {
 // --- ChatPanel component ----------------------------------------------------
 
 export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
-  function ChatPanel({ currentChapterIndex }, ref) {
+  function ChatPanel({ currentChapterIndex, bookId }, ref) {
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [input, setInput] = useState("");
     const [pendingSelection, setPendingSelection] = useState<{
@@ -86,9 +102,14 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     const [isStreaming, setIsStreaming] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [bookReady, setBookReady] = useState(false);
+    const [sessions, setSessions] = useState<SessionSummary[]>([]);
+    const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+    const [showSessionList, setShowSessionList] = useState(false);
 
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
+    const bookIdRef = useRef(bookId);
+    bookIdRef.current = bookId;
 
     // Listen to agent events from Rust (sidecar stdout → Tauri events).
     useEffect(() => {
@@ -166,6 +187,80 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
             setBookReady(true);
           }),
         );
+
+        // --- Session management events ---
+
+        unlisteners.push(
+          await listen<{ sessionId: string }>("session_created", (event) => {
+            setCurrentSessionId(event.payload.sessionId);
+            setShowSessionList(false);
+            // Refresh the session list to include the new session.
+            if (bookIdRef.current) {
+              void invoke("list_sessions", { bookId: bookIdRef.current }).catch(() => {});
+            }
+          }),
+        );
+
+        unlisteners.push(
+          await listen<{ sessionId: string; messages: HistoryMessage[] }>(
+            "session_switched",
+            (event) => {
+              const { sessionId, messages: history } = event.payload;
+              setCurrentSessionId(sessionId);
+              setError(null);
+              setIsStreaming(false);
+              // Replace current messages with the session history.
+              setMessages(
+                history.map((m) => ({
+                  role: m.role,
+                  content: m.content,
+                  toolCalls: m.toolCalls?.map((tc) => ({
+                    tool: tc.tool,
+                    params: tc.params,
+                    result: tc.result,
+                    done: tc.done,
+                  })),
+                })),
+              );
+              setShowSessionList(false);
+            },
+          ),
+        );
+
+        unlisteners.push(
+          await listen<{ sessionId: string }>("session_deleted", (event) => {
+            const deletedId = event.payload.sessionId;
+            setCurrentSessionId((prev) => {
+              if (prev === deletedId) {
+                setMessages([]);
+                return null;
+              }
+              return prev;
+            });
+            // Refresh the session list.
+            if (bookIdRef.current) {
+              void invoke("list_sessions", { bookId: bookIdRef.current }).catch(() => {});
+            }
+          }),
+        );
+
+        unlisteners.push(
+          await listen<{ sessions: SessionSummary[] }>("sessions_list", (event) => {
+            const list = event.payload.sessions;
+            setSessions(list);
+            // If no session is active yet, auto-switch to the most recently updated session.
+            setCurrentSessionId((prev) => {
+              if (prev) return prev;
+              if (list.length > 0) {
+                // list is sorted by updatedAt desc from sidecar (SessionManager.list sorts by modified desc)
+                const target = list[0];
+                void invoke("switch_session", { sessionId: target.id }).catch(() => {});
+                return target.id;
+              }
+              return prev;
+            });
+          }),
+        );
       })();
 
       return () => {
@@ -177,6 +272,22 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     useEffect(() => {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }, [messages]);
+
+    // Reset session state when switching books.
+    useEffect(() => {
+      setSessions([]);
+      setCurrentSessionId(null);
+      setMessages([]);
+      setError(null);
+      setBookReady(false);
+      setShowSessionList(false);
+      // If a book is open, request the session list from the sidecar.
+      if (bookId) {
+        void invoke("list_sessions", { bookId }).catch((err) => {
+          console.error("list_sessions error:", err);
+        });
+      }
+    }, [bookId]);
 
     const handleSend = useCallback(async () => {
       const text = input.trim();
@@ -232,17 +343,116 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 
     useImperativeHandle(ref, () => ({ fillInput }), [fillInput]);
 
+    // --- Session list actions ---
+
+    const handleNewSession = useCallback(async () => {
+      if (!bookId) return;
+      try {
+        await invoke("new_session", { bookId });
+      } catch (err) {
+        setError(String(err));
+      }
+    }, [bookId]);
+
+    const handleSwitchSession = useCallback(async (sessionId: string) => {
+      try {
+        await invoke("switch_session", { sessionId });
+      } catch (err) {
+        setError(String(err));
+      }
+    }, []);
+
+    const handleDeleteSession = useCallback(
+      async (sessionId: string) => {
+        try {
+          await invoke("delete_session", { sessionId });
+        } catch (err) {
+          setError(String(err));
+        }
+      },
+      [],
+    );
+
     return (
-      <div className="flex h-full flex-col bg-card">
+      <div className="relative flex h-full flex-col bg-card">
         {/* Header */}
         <div className="flex items-center justify-between border-b px-3 py-2">
-          <h2 className="text-sm font-semibold">阅读助手</h2>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 px-2 text-xs"
+              onClick={() => setShowSessionList((v) => !v)}
+              disabled={!bookId}
+            >
+              ☰ 会话
+            </Button>
+            <h2 className="text-sm font-semibold">阅读助手</h2>
+          </div>
           {bookReady ? (
             <span className="text-xs text-muted-foreground">📖 已就绪</span>
           ) : (
             <span className="text-xs text-muted-foreground">等待书籍…</span>
           )}
         </div>
+
+        {/* Session list overlay (covers the messages area) */}
+        {showSessionList && (
+          <div className="absolute inset-x-0 top-[37px] bottom-0 z-10 flex flex-col bg-card">
+            <div className="flex items-center justify-between border-b px-3 py-2">
+              <span className="text-sm font-semibold">会话列表</span>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 px-2 text-xs"
+                onClick={() => setShowSessionList(false)}
+              >
+                ✕
+              </Button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-2 space-y-1">
+              <Button
+                size="sm"
+                variant="outline"
+                className="w-full justify-start"
+                onClick={() => void handleNewSession()}
+              >
+                + 新建会话
+              </Button>
+              {sessions.length === 0 && (
+                <p className="px-2 py-4 text-center text-xs text-muted-foreground">
+                  暂无会话，点击「新建会话」开始。
+                </p>
+              )}
+              {sessions.map((s) => (
+                <div
+                  key={s.id}
+                  className={cn(
+                    "group flex items-center gap-1 rounded px-2 py-1.5 text-sm hover:bg-muted/70",
+                    currentSessionId === s.id && "bg-muted",
+                  )}
+                >
+                  <button
+                    className="flex-1 truncate text-left"
+                    onClick={() => void handleSwitchSession(s.id)}
+                    title={s.title}
+                  >
+                    <div className="truncate font-medium">{s.title}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {new Date(s.updatedAt).toLocaleString()}
+                    </div>
+                  </button>
+                  <button
+                    className="opacity-0 group-hover:opacity-100 text-destructive hover:underline px-1 text-xs"
+                    onClick={() => void handleDeleteSession(s.id)}
+                  >
+                    删除
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Messages */}
         <div className="flex-1 overflow-y-auto p-3 space-y-3">

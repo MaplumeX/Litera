@@ -177,6 +177,38 @@ fn forward_sidecar_event(app: &tauri::AppHandle, line: &str) {
         "book_ready" => {
             let _ = app.emit("agent_book_ready", serde_json::json!({}));
         }
+        "session_created" => {
+            let session_id = parsed
+                .get("sessionId")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let _ = app.emit("session_created", serde_json::json!({ "sessionId": session_id }));
+        }
+        "session_switched" => {
+            let session_id = parsed
+                .get("sessionId")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let messages = parsed.get("messages").cloned().unwrap_or(serde_json::Value::Array(vec![]));
+            let _ = app.emit(
+                "session_switched",
+                serde_json::json!({ "sessionId": session_id, "messages": messages }),
+            );
+        }
+        "session_deleted" => {
+            let session_id = parsed
+                .get("sessionId")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let _ = app.emit("session_deleted", serde_json::json!({ "sessionId": session_id }));
+        }
+        "sessions_list" => {
+            let sessions = parsed.get("sessions").cloned().unwrap_or(serde_json::Value::Array(vec![]));
+            let _ = app.emit("sessions_list", serde_json::json!({ "sessions": sessions }));
+        }
         other => {
             eprintln!("[sidecar] unhandled message type: {other}");
         }
@@ -216,6 +248,52 @@ fn agent_prompt(
 fn agent_abort(state: tauri::State<'_, Mutex<SidecarState>>) -> Result<(), String> {
     let mut state = state.lock().map_err(|e| format!("Lock error: {e}"))?;
     let json = serde_json::json!({ "type": "abort" }).to_string();
+    write_to_sidecar(&mut state, &json)
+}
+
+// --- Session management commands --------------------------------------------
+
+/// WebView → Rust → sidecar stdin: list sessions for a book.
+#[tauri::command]
+fn list_sessions(
+    book_id: String,
+    state: tauri::State<'_, Mutex<SidecarState>>,
+) -> Result<(), String> {
+    let mut state = state.lock().map_err(|e| format!("Lock error: {e}"))?;
+    let json = serde_json::json!({ "type": "list_sessions", "bookId": book_id }).to_string();
+    write_to_sidecar(&mut state, &json)
+}
+
+/// WebView → Rust → sidecar stdin: create a new session for a book.
+#[tauri::command]
+fn new_session(
+    book_id: String,
+    state: tauri::State<'_, Mutex<SidecarState>>,
+) -> Result<(), String> {
+    let mut state = state.lock().map_err(|e| format!("Lock error: {e}"))?;
+    let json = serde_json::json!({ "type": "new_session", "bookId": book_id }).to_string();
+    write_to_sidecar(&mut state, &json)
+}
+
+/// WebView → Rust → sidecar stdin: switch to an existing session.
+#[tauri::command]
+fn switch_session(
+    session_id: String,
+    state: tauri::State<'_, Mutex<SidecarState>>,
+) -> Result<(), String> {
+    let mut state = state.lock().map_err(|e| format!("Lock error: {e}"))?;
+    let json = serde_json::json!({ "type": "switch_session", "sessionId": session_id }).to_string();
+    write_to_sidecar(&mut state, &json)
+}
+
+/// WebView → Rust → sidecar stdin: delete a session.
+#[tauri::command]
+fn delete_session(
+    session_id: String,
+    state: tauri::State<'_, Mutex<SidecarState>>,
+) -> Result<(), String> {
+    let mut state = state.lock().map_err(|e| format!("Lock error: {e}"))?;
+    let json = serde_json::json!({ "type": "delete_session", "sessionId": session_id }).to_string();
     write_to_sidecar(&mut state, &json)
 }
 
@@ -265,11 +343,25 @@ fn open_file(app: tauri::AppHandle) -> Result<OpenFileResult, String> {
     };
 
     // Notify sidecar that a book was opened (for EPUB parsing + FTS5 indexing).
+    // Also pass the sessions directory (Tauri app data dir + "/sessions") for persistence.
     if let Some(state) = app.try_state::<Mutex<SidecarState>>() {
         if let Ok(mut state) = state.lock() {
-            let json = serde_json::json!({ "type": "book_opened", "path": &path_str, "bookId": &book_id });
+            let sessions_dir = app.path().app_data_dir()
+                .map(|d| d.join("sessions").to_string_lossy().to_string())
+                .unwrap_or_default();
+            let json = serde_json::json!({
+                "type": "book_opened",
+                "path": &path_str,
+                "bookId": &book_id,
+                "sessionsDir": sessions_dir,
+            });
             if let Err(e) = write_to_sidecar(&mut state, &json.to_string()) {
                 eprintln!("[sidecar] Failed to send book_opened: {e}");
+            }
+            // Auto-list sessions so the frontend can default to the most recent one.
+            let list_json = serde_json::json!({ "type": "list_sessions", "bookId": &book_id }).to_string();
+            if let Err(e) = write_to_sidecar(&mut state, &list_json) {
+                eprintln!("[sidecar] Failed to send list_sessions: {e}");
             }
         }
     }
@@ -325,7 +417,11 @@ pub fn run() {
             greet,
             open_file,
             agent_prompt,
-            agent_abort
+            agent_abort,
+            list_sessions,
+            new_session,
+            switch_session,
+            delete_session
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
