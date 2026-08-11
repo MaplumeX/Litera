@@ -24,6 +24,20 @@ npx shadcn@latest add <component-name>
 
 ## Patterns
 
+### Mount foliate-view web component in React
+
+```typescript
+// foliate-view is a custom element, not a React component
+import "../foliate-js/view.js"  // registers <foliate-view> in customElements
+
+const ref = useRef<HTMLElement>(null)
+useEffect(() => {
+  const view = document.createElement("foliate-view")
+  ref.current?.appendChild(view)
+  return () => view.remove()
+}, [])
+```
+
 ### Import shadcn/ui components via path alias
 ```typescript
 // Good

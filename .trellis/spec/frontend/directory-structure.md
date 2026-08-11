@@ -37,3 +37,7 @@ litera/
 - **shadcn/ui components are code-owned**: `src/components/ui/*.tsx` are copied source files, not an npm dependency. Modify them freely.
 - **Path alias `@/*`**: maps to `src/*` in both `tsconfig.json` and `vite.config.ts`. Use `@/components/ui/button` not relative paths.
 - **Tauri 2 capabilities**: permissions live in `src-tauri/capabilities/default.json`, not inline in builder code.
+- **foliate-js as git submodule**: `src/foliate-js/` is a git submodule (commit `78914ae`). foliate.js API is unstable; submodule locks the version. Do NOT npm install foliate-js.
+- **`<foliate-view>` is a web component**: Mount via `document.createElement("foliate-view")` + ref in React. Do NOT use it as a React component (`<foliate-view />`).
+- **foliate.js internal imports are relative**: All foliate.js modules import each other via relative paths (`./epub.js`, `./vendor/zip.js`). No Vite alias needed for them.
+- **Vite glob fix required**: foliate-js `pdf.js` uses `new URL('vendor/pdfjs/${path}', import.meta.url)` which Vite's import-glob plugin misinterprets. `fixFoliateGlob` plugin in `vite.config.ts` extracts `import.meta.url` to a variable to prevent this. See `vite.config.ts`.
