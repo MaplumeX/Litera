@@ -11,6 +11,8 @@ import remarkGfm from "remark-gfm";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useAgentBridge } from "@/lib/use-agent-bridge";
+import { useAgentConfig } from "@/lib/use-agent-config";
+import { AgentConfigDialog } from "@/components/AgentConfigDialog";
 import type { AgentToolCall } from "@/types/agent";
 
 export interface ChatPanelHandle {
@@ -66,8 +68,10 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       chapterIndex: number;
     } | null>(null);
     const [showSessionList, setShowSessionList] = useState(false);
+    const [showConfig, setShowConfig] = useState(false);
     const [submitting, setSubmitting] = useState(false);
     const [invokeError, setInvokeError] = useState<string | null>(null);
+    const { snapshot: configSnapshot, load: loadConfig } = useAgentConfig();
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const autoSwitchRef = useRef<string | null>(null);
@@ -75,6 +79,10 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     const isStreaming = submitting || state.status === "prompting";
     const bookReady = state.status === "bookReady" || state.status === "prompting";
     const error = invokeError ?? state.error?.message ?? null;
+
+    useEffect(() => {
+      void loadConfig();
+    }, [loadConfig]);
 
     useEffect(() => {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -175,13 +183,32 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
           {state.status === "restarting" ? (
             <span className="text-xs text-amber-600">正在恢复…</span>
           ) : state.status === "unavailable" ? (
-            <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => void handleRestart()}>
-              重启助手
-            </Button>
-          ) : bookReady ? (
-            <span className="text-xs text-muted-foreground">📖 已就绪</span>
+            <div className="flex items-center gap-2">
+              <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => void handleRestart()}>
+                重启助手
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 px-2 text-xs"
+                onClick={() => setShowConfig(true)}
+              >
+                ⚙ 设置
+              </Button>
+            </div>
           ) : (
-            <span className="text-xs text-muted-foreground">等待书籍…</span>
+            <div className="flex items-center gap-2">
+              {bookReady && <span className="text-xs text-muted-foreground">📖 已就绪</span>}
+              {!bookReady && <span className="text-xs text-muted-foreground">等待书籍…</span>}
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 px-2 text-xs"
+                onClick={() => setShowConfig(true)}
+              >
+                ⚙ 设置
+              </Button>
+            </div>
           )}
         </div>
 
@@ -250,6 +277,19 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         )}
 
         <div className="flex-1 space-y-3 overflow-y-auto p-3">
+          {configSnapshot && !configSnapshot.configured && (
+            <div className="rounded border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-400">
+              未配置 LLM provider，请先打开设置。
+              <Button
+                size="sm"
+                variant="outline"
+                className="ml-2 h-6 text-xs"
+                onClick={() => setShowConfig(true)}
+              >
+                打开设置
+              </Button>
+            </div>
+          )}
           {state.messages.length === 0 && !error && (
             <div className="mt-8 text-center text-sm text-muted-foreground">
               打开一本书，选中段落或直接提问。
@@ -317,6 +357,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
             </Button>
           </div>
         </div>
+        <AgentConfigDialog open={showConfig} onClose={() => setShowConfig(false)} />
       </div>
     );
   },

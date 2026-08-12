@@ -118,6 +118,34 @@ interface BookOpenContext {
 - `tauri` Cargo dependency with `features = ["protocol-asset"]`
 - CSP `img-src` must include `asset:` and `http://asset.localhost`
 
+### Agent Config Commands
+
+**Scope / Trigger**: LLM provider / API key / default model configuration for the sidecar agent. Read/write the Litera-owned `<app_data>/agent/` directory (see quality-guidelines "sidecar agent config is injected").
+
+```rust
+#[tauri::command]
+async fn get_agent_config(app: AppHandle) -> AppResult<AgentConfigSnapshot>
+
+#[tauri::command]
+async fn save_agent_config(app: AppHandle, provider: String, api_key: String, model: String) -> AppResult<()>
+```
+
+```typescript
+interface AgentConfigSnapshot {
+  configured: boolean;
+  provider: string | null;
+  model: string | null;
+  hasApiKey: boolean;
+}
+```
+
+**Contracts**:
+- `get_agent_config` reads `<app_data>/agent/auth.json` + `settings.json` and returns a masked snapshot (no plaintext key).
+- `save_agent_config` merge-writes: preserves other provider entries in `auth.json` and other fields in `settings.json`. Uses the shared `atomic_write` pattern (temp file + persist + sync_parent_dir).
+- Frontend calls `restart_sidecar` after `save_agent_config` so the sidecar re-reads config on next `configure` + session creation.
+- The API key MUST NOT appear in logs, journal, or non-`auth.json` files.
+- Provider/model selection is a frontend-hardcoded list of common api_key providers (`src/types/agent-config.ts`); model id is free-text. This avoids coupling the UI to the pi-ai built-in catalog (which only exists inside the sidecar Node process).
+
 ### Validation & Error Matrix
 
 | Condition | Error |

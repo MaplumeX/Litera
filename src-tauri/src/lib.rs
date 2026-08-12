@@ -1,5 +1,6 @@
 use tauri::Manager;
 
+mod agent_config;
 mod error;
 mod library;
 mod sidecar;
@@ -92,6 +93,8 @@ pub fn run() {
             sidecar::delete_session,
             sidecar::close_book,
             sidecar::restart_sidecar,
+            agent_config::get_agent_config,
+            agent_config::save_agent_config,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

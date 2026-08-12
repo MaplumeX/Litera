@@ -1,1 +1,7 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend architecture: Tauri + app_data_dir context for new agent_config module"}
+{"file": ".trellis/spec/backend/tauri-commands.md", "reason": "Tauri command contract patterns — for get_agent_config / save_agent_config"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "AppResult error handling for new commands"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Module organization for new agent_config.rs"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend architecture context for new config UI"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Component conventions for AgentConfigDialog"}
+{"file": ".trellis/spec/frontend/hook-guidelines.md", "reason": "Hook conventions for useAgentConfig"}

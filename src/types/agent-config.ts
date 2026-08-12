@@ -1,0 +1,33 @@
+/** Snapshot of the agent configuration returned by `get_agent_config`. */
+export interface AgentConfigSnapshot {
+  configured: boolean;
+  provider: string | null;
+  model: string | null;
+  hasApiKey: boolean;
+}
+
+/** A built-in provider entry shown in the settings dropdown. */
+export interface AgentProviderEntry {
+  id: string;
+  label: string;
+  exampleModel: string;
+}
+
+/** Common api_key-type providers extracted from the pi-ai catalog. */
+export const AGENT_PROVIDERS: AgentProviderEntry[] = [
+  { id: "anthropic", label: "Anthropic", exampleModel: "claude-opus-4-5" },
+  { id: "openai", label: "OpenAI", exampleModel: "gpt-4o" },
+  { id: "deepseek", label: "DeepSeek", exampleModel: "deepseek-v4-pro" },
+  { id: "google", label: "Google", exampleModel: "gemini-2.5-pro" },
+  { id: "openrouter", label: "OpenRouter", exampleModel: "anthropic/claude-opus-4-5" },
+  { id: "groq", label: "Groq", exampleModel: "llama-4-70b-versatile" },
+  { id: "mistral", label: "Mistral", exampleModel: "mistral-large-latest" },
+  { id: "xai", label: "xAI", exampleModel: "grok-4" },
+  { id: "together", label: "Together", exampleModel: "meta-llama/Llama-4-70b-chat-hf" },
+  { id: "fireworks", label: "Fireworks", exampleModel: "accounts/fireworks/models/llama-v4-70b-instruct-basic" },
+];
+
+/** Returns the example model id for a provider, or an empty string if unknown. */
+export function findProviderExample(providerId: string): string {
+  return AGENT_PROVIDERS.find((p) => p.id === providerId)?.exampleModel ?? "";
+}

@@ -1198,7 +1198,7 @@ fn recoverable_atomic_write(path: &Path, bytes: &[u8], label: &str) -> AppResult
     Err(error)
 }
 
-fn atomic_write(path: &Path, bytes: &[u8], label: &str) -> AppResult<()> {
+pub(crate) fn atomic_write(path: &Path, bytes: &[u8], label: &str) -> AppResult<()> {
     let parent = path
         .parent()
         .ok_or_else(|| AppError::storage_io(format!("{label} target has no parent directory")))?;
@@ -1227,14 +1227,14 @@ fn atomic_write(path: &Path, bytes: &[u8], label: &str) -> AppResult<()> {
 }
 
 #[cfg(unix)]
-fn sync_parent_directory(parent: &Path, label: &str) -> AppResult<()> {
+pub(crate) fn sync_parent_directory(parent: &Path, label: &str) -> AppResult<()> {
     File::open(parent)
         .and_then(|directory| directory.sync_all())
         .map_err(|error| AppError::storage_io(format!("Failed to sync {label} directory: {error}")))
 }
 
 #[cfg(not(unix))]
-fn sync_parent_directory(_parent: &Path, _label: &str) -> AppResult<()> {
+pub(crate) fn sync_parent_directory(_parent: &Path, _label: &str) -> AppResult<()> {
     // Windows does not support opening directories through std::fs::File.
     Ok(())
 }
