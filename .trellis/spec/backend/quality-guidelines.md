@@ -10,7 +10,7 @@
 
 **What**: The sidecar process communicates with Rust via stdout. Every line must be a valid JSON object. No non-JSON output on stdout.
 
-**Why**: Rust reads sidecar stdout with `BufReader::lines()` and parses each line as JSON. Non-JSON lines (e.g., from `console.log`) break the parser.
+**Why**: Tauri shell events deliver arbitrary stdout byte chunks. Rust's `JsonLineFramer` reassembles newline-delimited frames before parsing JSON. Non-JSON lines (e.g., from `console.log`) still break the protocol.
 
 **Correct**:
 ```typescript
@@ -32,23 +32,22 @@ console.error("debug info")       // use process.stderr for diagnostics
 
 ### Convention: sidecar is a long-running process
 
-**What**: `node sidecar/dist/index.js` blocks forever waiting for stdin input. It never exits on its own.
+**What**: the packaged `litera-sidecar-$TARGET_TRIPLE[.exe]` blocks waiting for stdin input. It does not require a system Node.js runtime.
 
 **Why**: The sidecar is a stdio server. It reads stdin line-by-line and processes prompts.
 
-**Implication for testing**: Do NOT run `node dist/index.js` directly in tests or CI — it will hang. Only verify via `tsc --noEmit` (compile check) and static code review. Runtime verification requires the Tauri app to spawn it with piped stdin/stdout.
+**Implication for testing**: do not launch the executable without a harness. `npm run smoke:sidecar` spawns it with pipes, removes Node from `PATH`, waits for `ready`, sends `ping`, and requires `pong` after a real FTS5 WASM query.
 
 ## Sidecar Process Management (Rust)
 
-### Convention: spawn in setup, kill on window destroy
+### Convention: resolve through Tauri, spawn in setup, kill on window destroy
 
 ```rust
 // Spawn in tauri::Builder::default().setup()
-let mut child = Command::new("node")
-    .arg("sidecar/dist/index.js")
-    .stdin(Stdio::piped())
-    .stdout(Stdio::piped())
-    .stderr(Stdio::piped())
+let (events, child) = app
+    .shell()
+    .sidecar("litera-sidecar")?
+    .set_raw_out(true)
     .spawn()?;
 
 // Kill on window destroy
@@ -59,20 +58,34 @@ let mut child = Command::new("node")
 })
 ```
 
-### Convention: read stdout in separate thread
+The WebView capability file does not grant shell execute/spawn permissions. The fixed external-binary name is selected only by Rust.
+
+### Convention: frame raw chunks and serialize writes through one owner
 
 ```rust
-let stdout = child.stdout.take().unwrap();
-std::thread::spawn(move || {
-    let reader = BufReader::new(stdout);
-    for line in reader.lines() {
-        let line = line.unwrap();
-        // parse JSON, app.emit("agent_*", payload)
+tauri::async_runtime::spawn(async move {
+    while let Some(event) = events.recv().await {
+        match event {
+            CommandEvent::Stdout(chunk) => {
+                for line in stdout_framer.push(&chunk) {
+                    forward_sidecar_event(&app, &line);
+                }
+            }
+            // stderr, Error, and Terminated are handled explicitly
+            _ => {}
+        }
     }
 });
 ```
 
-**Why**: Reading stdout is blocking. Must be on a separate thread to avoid freezing the Tauri event loop.
+`CommandChild` is owned by a background writer thread. Command handlers enqueue complete JSONL byte frames; they never perform `ChildStdin::write_all` or `flush` while holding Tauri state on the main thread.
+
+### Convention: terminal events update transport status
+
+- stdin write failure, `CommandEvent::Error`, and unexpected `CommandEvent::Terminated` transition the shared status to `Stopped(reason)` and emit `agent_error`.
+- Later commands reject from the recorded status instead of successfully queueing into a dead transport.
+- Intentional window shutdown first transitions to `Stopping`, sends `Kill`, and suppresses the expected termination error event.
+- The receiver tells the writer to release its child handle after termination, so no writer/child lifetime is leaked.
 
 ### Don't: block the main thread on sidecar I/O
 
@@ -80,4 +93,70 @@ std::thread::spawn(move || {
 
 **Why it's bad**: Blocks the Tauri event loop, freezing the UI.
 
-**Instead**: Always use `std::thread::spawn` for stdout reading. Write to stdin from command handlers (fast, non-blocking).
+**Instead**: consume shell events on Tauri's async runtime, frame stdout chunks there, and enqueue stdin writes to the dedicated child owner.
+
+## Scenario: Packaged External Sidecar
+
+### 1. Scope / Trigger
+
+Apply this contract whenever the sidecar entry, dependencies, WASM assets, target matrix, or Tauri bundle configuration changes. It prevents development-only source paths or a system Node installation from becoming hidden release requirements.
+
+### 2. Signatures
+
+```text
+npm run build:sidecar              # build the native host executable
+npm run smoke:sidecar              # empty-PATH ready/ping/FTS5 probe
+node sidecar/scripts/build.mjs --target <rust-triple>
+bundle.externalBin = ["binaries/litera-sidecar"]
+app.shell().sidecar("litera-sidecar")
+```
+
+### 3. Contracts
+
+- Build output is `src-tauri/binaries/litera-sidecar-$TARGET_TRIPLE[.exe]`; generated binaries, `sidecar/dist`, and the pkg cache remain untracked.
+- esbuild emits the CommonJS entry and copies `sql-wasm.wasm`; `@yao-pkg/pkg` embeds both into a self-contained executable. Keep pkg compression disabled because compressed source snapshots fail to read the WASM with the pinned pkg version.
+- An explicit target comes from `--target`, `TAURI_TARGET_TRIPLE`, `TAURI_ENV_TARGET_TRIPLE`, or `CARGO_BUILD_TARGET`. A requested non-host target fails and must be built on that native OS/architecture runner.
+- Rust alone resolves the fixed external binary. WebView capabilities do not grant shell execute/spawn permissions.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+|-----------|-----------------|
+| Unsupported Rust triple | Build fails with the supported target list |
+| Explicit target differs from native host | Build fails; no relabeled host artifact |
+| pkg/esbuild/WASM dependency missing | Locked `npm ci` is attempted, then failure propagates |
+| Output missing or implausibly small | Build fails before Tauri packaging |
+| Executable needs system Node or cannot load FTS5 | Empty-PATH smoke fails |
+| Child write/error/termination | Transport becomes `Stopped(reason)` and later commands reject |
+
+### 5. Good/Base/Bad Cases
+
+- **Good**: fresh checkout root build creates the triple-suffixed executable, Tauri copies it into the release output, and empty-PATH FTS5 smoke passes.
+- **Base**: local `npm run dev` rebuilds the native sidecar through `predev` and uses the same JSONL protocol as production.
+- **Bad**: production resolves `sidecar/dist/index.js` with `CARGO_MANIFEST_DIR` or calls `Command::new("node")`.
+
+### 6. Tests Required
+
+- Unit-test every supported Rust triple to pkg target/suffix mapping and rejection of unsupported targets.
+- Simulate missing generated `dist` and `binaries` directories, then assert the standard root build recreates them.
+- Run empty-PATH smoke and require `ready`, `pong`, and a real FTS5 WASM query.
+- Run `tauri build --no-bundle` and assert the copied release sidecar matches the generated executable.
+- Scan tracked/generated release inputs for compile-machine source paths, legacy system-Node launch code, and accidentally tracked large binaries.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```rust
+Command::new("node").arg(source_tree.join("sidecar/dist/index.js"));
+```
+
+#### Correct
+
+```rust
+let (events, child) = app
+    .shell()
+    .sidecar("litera-sidecar")?
+    .set_raw_out(true)
+    .spawn()?;
+```

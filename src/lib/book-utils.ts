@@ -50,10 +50,10 @@ function extractFirstValue(raw: unknown): string | null {
  * then close the book. Does not mount anything to the DOM.
  */
 export async function extractEpubMetadata(
-  bytes: number[],
+  bytes: Uint8Array<ArrayBuffer>,
   name: string,
 ): Promise<ExtractedMetadata> {
-  const file = new File([new Uint8Array(bytes)], name);
+  const file = new File([bytes], name);
   const book = await makeBook(file);
 
   // Extract title — foliate metadata.title can be a string or a language map.

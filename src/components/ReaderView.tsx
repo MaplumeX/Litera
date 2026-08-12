@@ -6,7 +6,6 @@ import {
   useRef,
   useState,
 } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { cn } from "@/lib/utils";
 
 // foliate.js view.js defines the <foliate-view> custom element.
@@ -41,7 +40,7 @@ export interface ReaderViewHandle {
 
 interface ReaderViewProps {
   /** Bytes of an opened EPUB file, or null when no file is loaded. */
-  fileData: { bytes: number[]; name: string } | null;
+  fileData: { bytes: Uint8Array<ArrayBuffer>; name: string } | null;
   /** Called when the reader relocates (page turn / scroll). */
   onRelocate?: (index: number, fraction: number, label?: string) => void;
   /** Called when the user clicks the "问 agent" button on a selection. */
@@ -107,7 +106,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         goToFraction: (frac: number) => Promise<void>;
       };
       const { bytes, name } = fileData;
-      const file = new File([new Uint8Array(bytes)], name);
+      const file = new File([bytes], name);
       const fractionToRestore = initialFraction;
       view
         .open(file)
@@ -226,21 +225,3 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
     );
   },
 );
-
-/** Helper to open a file via the Rust open_file command. */
-export async function openEpubFile(): Promise<{
-  bytes: number[];
-  name: string;
-  path: string;
-  bookId: string;
-} | null> {
-  try {
-    const result = await invoke<{ path: string; name: string; bytes: number[]; bookId: string }>(
-      "open_file",
-    );
-    return result;
-  } catch (err) {
-    console.error("open_file error:", err);
-    return null;
-  }
-}

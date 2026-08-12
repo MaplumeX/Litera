@@ -7,11 +7,8 @@
  */
 
 import AdmZip from "adm-zip";
-import initSqlJs, { type Database, type SqlJsStatic } from "fts5-sql-bundle";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
+import { initSqlJs, type Database, type SqlJsStatic } from "fts5-sql-bundle";
+import { join } from "node:path";
 
 // --- Types ------------------------------------------------------------------
 
@@ -48,6 +45,33 @@ interface ParsedEpub {
 // --- Global state -----------------------------------------------------------
 
 let sqlStatic: SqlJsStatic | null = null;
+
+async function getSqlStatic(): Promise<SqlJsStatic> {
+  if (!sqlStatic) {
+    // The build copies this asset next to the bundled entry. @yao-pkg/pkg then
+    // embeds the same relative path in its read-only snapshot filesystem.
+    sqlStatic = await initSqlJs({
+      locateFile: (file: string) => join(__dirname, file),
+    });
+  }
+  return sqlStatic;
+}
+
+/** Exercise the packaged FTS5 WASM without requiring an EPUB fixture. */
+export async function runFtsSmoke(): Promise<void> {
+  const sql = await getSqlStatic();
+  const db = new sql.Database();
+  try {
+    db.run("CREATE VIRTUAL TABLE smoke USING fts5(content)");
+    db.run("INSERT INTO smoke(content) VALUES (?)", ["litera sidecar ready"]);
+    const result = db.exec("SELECT count(*) AS matches FROM smoke WHERE content MATCH 'sidecar'");
+    if (result[0]?.values[0]?.[0] !== 1) {
+      throw new Error("FTS5 smoke query returned an unexpected result");
+    }
+  } finally {
+    db.close();
+  }
+}
 
 /** Current book state — reset on each book_opened. */
 let currentBook: {
@@ -293,15 +317,8 @@ export async function loadBook(filePath: string): Promise<BookMetadata> {
   }
 
   // Initialize FTS5 database.
-  if (!sqlStatic) {
-    // dist/ is one level below sidecar/ root. node_modules is at sidecar/ root.
-    const sidecarRoot = join(__dirname, "..");
-    sqlStatic = await initSqlJs({
-      locateFile: (file: string) =>
-        join(sidecarRoot, "node_modules", "fts5-sql-bundle", "dist", file),
-    });
-  }
-  const db = new sqlStatic.Database();
+  const sql = await getSqlStatic();
+  const db = new sql.Database();
   db.run("CREATE VIRTUAL TABLE chapters USING fts5(content, tokenize='trigram')");
   for (const [index, text] of chapterTexts) {
     db.run("INSERT INTO chapters (rowid, content) VALUES (?, ?)", [index + 1, text]);

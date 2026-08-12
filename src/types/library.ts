@@ -19,16 +19,16 @@ export interface BookRecord {
 
 /** Result of staging an import for frontend metadata extraction. */
 export interface ImportBookResult {
-  bytes: number[];
   bookId: string;
   importId: string;
+  name: string;
 }
 
-/** Result of opening a book from the library. */
-export interface OpenBookResult {
-  bytes: number[];
+/** Lightweight context loaded separately from the raw EPUB body. */
+export interface BookOpenContext {
   name: string;
   bookId: string;
+  contentVersion: string;
   lastFraction?: number;
   settings?: ReadingSettings;
 }

@@ -42,6 +42,7 @@ import {
   getToc,
   readChapter,
   searchInBook,
+  runFtsSmoke,
   type BookMetadata,
 } from "./book.js";
 
@@ -516,6 +517,12 @@ async function main(): Promise<void> {
     output: undefined, // don't echo to stdout
     terminal: false,
   });
+  // Keep stdin flowing and hold an explicit event-loop reference. In a pkg
+  // executable, a resumed pipe alone can still race process exit before the
+  // first command arrives.
+  process.stdin.resume();
+  const keepAlive = setInterval(() => undefined, 60_000);
+  rl.once("close", () => clearInterval(keepAlive));
 
   rl.on("line", (line: string) => {
     if (!line.trim()) return;
@@ -534,6 +541,14 @@ async function main(): Promise<void> {
     }
 
     switch (typed.type) {
+      case "ping":
+        void runFtsSmoke()
+          .then(() => sendMessage({ type: "pong", fts5: true }))
+          .catch((err) =>
+            sendError(`FTS5 smoke failed: ${err instanceof Error ? err.message : String(err)}`),
+          );
+        break;
+
       case "book_opened": {
         if (typeof typed.path !== "string" || typeof typed.bookId !== "string" || typeof typed.sessionsDir !== "string") {
           sendError("book_opened requires 'path', 'bookId', and 'sessionsDir' string fields");

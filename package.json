@@ -4,7 +4,11 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "build:sidecar": "npm --prefix sidecar run build",
+    "smoke:sidecar": "npm --prefix sidecar run smoke",
+    "predev": "npm run build:sidecar",
     "dev": "vite",
+    "prebuild": "npm run build:sidecar",
     "build": "tsc && vite build",
     "test": "vitest",
     "preview": "vite preview",

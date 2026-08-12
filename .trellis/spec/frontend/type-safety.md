@@ -9,7 +9,7 @@
 Litera's frontend uses TypeScript 5.8 with strict mode. Shared types live in `src/types/`, component-local types live in their component files. The critical type contract is between frontend TypeScript interfaces and Rust `#[serde(rename = "camelCase")]` structs.
 
 Reference files:
-- `src/types/library.ts` — shared domain types (`BookRecord`, `ReadingSettings`, `ImportBookResult`, `OpenBookResult`)
+- `src/types/library.ts` — shared domain types (`BookRecord`, `ReadingSettings`, `ImportBookResult`, `BookOpenContext`)
 - `src/components/ReaderView.tsx` — `ReaderViewHandle`, `TocItem`, `SelectionCapture`, `RelocateDetail`
 - `src/components/ChatPanel.tsx` — `ChatMessage`, `ToolCall`, `SessionSummary`, `HistoryMessage`
 - `src/foliate-js.d.ts` — ambient declarations for foliate.js modules
@@ -97,7 +97,8 @@ interface BookRecord {
 ### Rules
 
 - `Option<T>` → `T | undefined` → optional field (`field?: T`).
-- `Vec<u8>` → `number[]` (bytes serialized as JSON array).
+- Structured `Vec<u8>` fields (for small values such as cover bytes) → `number[]` through JSON serialization.
+- Large EPUB `Vec<u8>` values must return `tauri::ipc::Response::new(bytes)` and be received with `invoke<ArrayBuffer>()`; create a `Uint8Array` view without `Array.from` or another full-payload copy.
 - `skip_serializing_if = "Option::is_none"` → frontend field must be optional (`?:`), not nullable.
 - `#[serde(rename = "...")]` must match the TS field name exactly.
 - `invoke<T>("command_name")` must specify the return type: `invoke<BookRecord[]>("list_books")`.

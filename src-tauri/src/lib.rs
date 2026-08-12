@@ -1,12 +1,7 @@
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
-use std::io::{BufRead, BufReader, Write};
-use std::process::{Child, Command, Stdio};
-use std::sync::Mutex;
+use std::sync::{mpsc, Arc, Mutex};
 
-use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager};
-use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_shell::{process::CommandEvent, ShellExt};
 
 mod error;
 mod library;
@@ -17,115 +12,220 @@ use library::LibraryStore;
 // Sidecar process management
 // ---------------------------------------------------------------------------
 
-/// Holds the spawned sidecar child process so we can kill it on app exit.
+enum SidecarControl {
+    Write(Vec<u8>),
+    Kill,
+    Close,
+}
+
+#[derive(Debug, PartialEq)]
+enum SidecarTransportStatus {
+    Running,
+    Stopping,
+    Stopped(String),
+}
+
+/// The child is owned by a background writer thread; commands only enqueue I/O.
 struct SidecarState {
-    child: Option<Child>,
-    stdin: Option<std::process::ChildStdin>,
+    control: Option<mpsc::Sender<SidecarControl>>,
+    status: Arc<Mutex<SidecarTransportStatus>>,
+}
+
+impl SidecarState {
+    fn unavailable(reason: impl Into<String>) -> Self {
+        Self {
+            control: None,
+            status: Arc::new(Mutex::new(SidecarTransportStatus::Stopped(reason.into()))),
+        }
+    }
 }
 
 /// Safely write a JSON line to the sidecar's stdin.
-fn write_to_sidecar(state: &mut SidecarState, json: &str) -> Result<(), String> {
-    let stdin = state.stdin.as_mut().ok_or("Sidecar stdin not available")?;
-    stdin
-        .write_all(json.as_bytes())
-        .map_err(|e| format!("Failed to write to sidecar: {e}"))?;
-    stdin
-        .write_all(b"\n")
-        .map_err(|e| format!("Failed to write newline to sidecar: {e}"))?;
-    stdin
-        .flush()
-        .map_err(|e| format!("Failed to flush sidecar stdin: {e}"))?;
+fn write_to_sidecar(state: &SidecarState, json: &str) -> Result<(), String> {
+    let control = state
+        .control
+        .as_ref()
+        .ok_or("Sidecar transport is not available")?;
+    let mut status = state
+        .status
+        .lock()
+        .map_err(|_| "Sidecar transport status lock is poisoned".to_string())?;
+    match &*status {
+        SidecarTransportStatus::Running => {}
+        SidecarTransportStatus::Stopping => return Err("Sidecar transport is stopping".to_string()),
+        SidecarTransportStatus::Stopped(reason) => {
+            return Err(format!("Sidecar transport has stopped: {reason}"))
+        }
+    }
+    let mut line = Vec::with_capacity(json.len() + 1);
+    line.extend_from_slice(json.as_bytes());
+    line.push(b'\n');
+    if control.send(SidecarControl::Write(line)).is_err() {
+        *status = SidecarTransportStatus::Stopped("Sidecar writer channel is closed".to_string());
+        return Err("Sidecar transport has stopped".to_string());
+    }
     Ok(())
 }
 
-/// Spawn the pi agent sidecar child process.
-///
-/// In dev mode we run `node sidecar/dist/index.js` directly.
-/// The sidecar path is resolved relative to the project root.
-fn spawn_sidecar(app: &tauri::AppHandle) -> Result<SidecarState, String> {
-    // Resolve sidecar path relative to the executable / project root.
-    // In dev mode, the CARGO_MANIFEST_DIR / tauri dev working directory is src-tauri.
-    // The sidecar lives at <project_root>/sidecar/dist/index.js
-    let sidecar_path = {
-        let manifest_dir = env!("CARGO_MANIFEST_DIR");
-        let path = std::path::Path::new(manifest_dir)
-            .join("..")
-            .join("sidecar")
-            .join("dist")
-            .join("index.js");
-        path.canonicalize().unwrap_or(path)
+/// Record a terminal transport state. Returns whether callers should be
+/// notified; intentional shutdown transitions are silent.
+fn mark_sidecar_stopped(status: &Arc<Mutex<SidecarTransportStatus>>, reason: String) -> bool {
+    let Ok(mut status) = status.lock() else {
+        eprintln!("[sidecar] transport status lock is poisoned");
+        return true;
     };
-
-    if !sidecar_path.exists() {
-        return Err(format!(
-            "Sidecar not built: {} does not exist. Run `cd sidecar && npm run build`.",
-            sidecar_path.display()
-        ));
+    match &*status {
+        SidecarTransportStatus::Running => {
+            *status = SidecarTransportStatus::Stopped(reason);
+            true
+        }
+        SidecarTransportStatus::Stopping => {
+            *status = SidecarTransportStatus::Stopped(reason);
+            false
+        }
+        SidecarTransportStatus::Stopped(_) => false,
     }
+}
 
-    let mut child = Command::new("node")
-        .arg(&sidecar_path)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+fn emit_sidecar_transport_error(app: &tauri::AppHandle, message: &str) {
+    let _ = app.emit("agent_error", serde_json::json!({ "message": message }));
+}
+
+fn stop_sidecar(state: &SidecarState) {
+    if let Ok(mut status) = state.status.lock() {
+        if matches!(*status, SidecarTransportStatus::Running) {
+            *status = SidecarTransportStatus::Stopping;
+        }
+    }
+    if let Some(control) = &state.control {
+        if control.send(SidecarControl::Kill).is_err() {
+            mark_sidecar_stopped(
+                &state.status,
+                "Sidecar writer stopped before shutdown".to_string(),
+            );
+        }
+    }
+}
+
+#[derive(Default)]
+struct JsonLineFramer {
+    pending: Vec<u8>,
+}
+
+impl JsonLineFramer {
+    fn push(&mut self, chunk: &[u8]) -> Vec<String> {
+        self.pending.extend_from_slice(chunk);
+        let mut lines = Vec::new();
+        while let Some(index) = self.pending.iter().position(|byte| *byte == b'\n') {
+            let mut line = self.pending.drain(..=index).collect::<Vec<_>>();
+            line.pop();
+            if line.last() == Some(&b'\r') {
+                line.pop();
+            }
+            match String::from_utf8(line) {
+                Ok(line) if !line.trim().is_empty() => lines.push(line),
+                Ok(_) => {}
+                Err(error) => eprintln!("[sidecar stdout] invalid UTF-8 line: {error}"),
+            }
+        }
+        lines
+    }
+}
+
+/// Spawn the bundled executable through Tauri's external-binary resolver.
+fn spawn_sidecar(app: &tauri::AppHandle) -> Result<SidecarState, String> {
+    let (mut events, mut child) = app
+        .shell()
+        .sidecar("litera-sidecar")
+        .map_err(|error| format!("Failed to resolve bundled sidecar: {error}"))?
+        .set_raw_out(true)
         .spawn()
-        .map_err(|e| format!("Failed to spawn sidecar: {e}"))?;
+        .map_err(|error| format!("Failed to spawn bundled sidecar: {error}"))?;
 
-    // Take stdout and stderr before moving stdin into state.
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or("Failed to capture sidecar stdout")?;
-    let stderr = child
-        .stderr
-        .take()
-        .ok_or("Failed to capture sidecar stderr")?;
-    let stdin = child
-        .stdin
-        .take()
-        .ok_or("Failed to capture sidecar stdin")?;
-
-    // Spawn a thread to read sidecar stdout line-by-line and forward as Tauri events.
-    {
-        let app = app.clone();
-        std::thread::spawn(move || {
-            let reader = BufReader::new(stdout);
-            for line in reader.lines() {
-                match line {
-                    Ok(text) => {
-                        if text.trim().is_empty() {
-                            continue;
+    let (control, controls) = mpsc::channel();
+    let status = Arc::new(Mutex::new(SidecarTransportStatus::Running));
+    let writer_status = status.clone();
+    let writer_app = app.clone();
+    std::thread::spawn(move || {
+        while let Ok(message) = controls.recv() {
+            match message {
+                SidecarControl::Write(bytes) => {
+                    if let Err(error) = child.write(&bytes) {
+                        let message = format!("Sidecar stdin write failed: {error}");
+                        eprintln!("[sidecar] {message}");
+                        if mark_sidecar_stopped(&writer_status, message.clone()) {
+                            emit_sidecar_transport_error(&writer_app, &message);
                         }
-                        // Parse the JSON line and forward to WebView as a Tauri event.
-                        forward_sidecar_event(&app, &text);
-                    }
-                    Err(e) => {
-                        eprintln!("[sidecar stdout] read error: {e}");
                         break;
                     }
                 }
-            }
-        });
-    }
-
-    // Spawn a thread to read sidecar stderr for logging.
-    std::thread::spawn(move || {
-        let reader = BufReader::new(stderr);
-        for line in reader.lines() {
-            match line {
-                Ok(text) => eprintln!("[sidecar stderr] {text}"),
-                Err(e) => {
-                    eprintln!("[sidecar stderr] read error: {e}");
+                SidecarControl::Kill => {
+                    if let Err(error) = child.kill() {
+                        eprintln!("[sidecar] kill failed: {error}");
+                    }
                     break;
                 }
+                SidecarControl::Close => break,
             }
         }
     });
 
-    Ok(SidecarState {
-        child: Some(child),
-        stdin: Some(stdin),
-    })
+    let event_app = app.clone();
+    let event_status = status.clone();
+    let event_control = control.clone();
+    tauri::async_runtime::spawn(async move {
+        let mut stdout = JsonLineFramer::default();
+        let mut stderr = JsonLineFramer::default();
+        while let Some(event) = events.recv().await {
+            match event {
+                CommandEvent::Stdout(chunk) => {
+                    for line in stdout.push(&chunk) {
+                        forward_sidecar_event(&event_app, &line);
+                    }
+                }
+                CommandEvent::Stderr(chunk) => {
+                    for line in stderr.push(&chunk) {
+                        eprintln!("[sidecar stderr] {line}");
+                    }
+                }
+                CommandEvent::Error(error) => {
+                    let message = format!("Sidecar transport error: {error}");
+                    eprintln!("[sidecar] {message}");
+                    if mark_sidecar_stopped(&event_status, message.clone()) {
+                        emit_sidecar_transport_error(&event_app, &message);
+                    }
+                    let _ = event_control.send(SidecarControl::Kill);
+                }
+                CommandEvent::Terminated(payload) => {
+                    let message = format!(
+                        "Sidecar terminated (code: {:?}, signal: {:?})",
+                        payload.code, payload.signal
+                    );
+                    eprintln!("[sidecar] {message}");
+                    if mark_sidecar_stopped(&event_status, message.clone()) {
+                        emit_sidecar_transport_error(&event_app, &message);
+                    }
+                    let _ = event_control.send(SidecarControl::Close);
+                    break;
+                }
+                _ => {}
+            }
+        }
+        let message = "Sidecar event stream closed".to_string();
+        if mark_sidecar_stopped(&event_status, message.clone()) {
+            emit_sidecar_transport_error(&event_app, &message);
+        }
+        let _ = event_control.send(SidecarControl::Close);
+    });
+
+    let state = SidecarState {
+        control: Some(control),
+        status,
+    };
+    // Bootstrap stdin immediately. The packaged Node runtime can otherwise
+    // observe an idle pipe before the WebView sends its first command.
+    write_to_sidecar(&state, r#"{"type":"ping"}"#)?;
+    Ok(state)
 }
 
 /// Parse a sidecar stdout JSON line and emit the corresponding Tauri event.
@@ -188,6 +288,13 @@ fn forward_sidecar_event(app: &tauri::AppHandle, line: &str) {
         }
         "ready" => {
             let _ = app.emit("agent_ready", serde_json::json!({}));
+        }
+        "pong" => {
+            let fts5 = parsed
+                .get("fts5")
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false);
+            let _ = app.emit("agent_pong", serde_json::json!({ "fts5": fts5 }));
         }
         "book_ready" => {
             let _ = app.emit("agent_book_ready", serde_json::json!({}));
@@ -254,7 +361,7 @@ fn agent_prompt(
     chapter_index: Option<i32>,
     state: tauri::State<'_, Mutex<SidecarState>>,
 ) -> Result<(), String> {
-    let mut state = state.lock().map_err(|e| format!("Lock error: {e}"))?;
+    let state = state.lock().map_err(|e| format!("Lock error: {e}"))?;
     let mut json = serde_json::json!({ "type": "prompt", "text": prompt });
     let context = serde_json::json!({});
     let mut context = context;
@@ -267,15 +374,15 @@ fn agent_prompt(
     if context.as_object().is_some_and(|map| !map.is_empty()) {
         json["context"] = context;
     }
-    write_to_sidecar(&mut state, &json.to_string())
+    write_to_sidecar(&state, &json.to_string())
 }
 
 /// WebView → Rust → sidecar stdin: abort the current agent operation.
 #[tauri::command]
 fn agent_abort(state: tauri::State<'_, Mutex<SidecarState>>) -> Result<(), String> {
-    let mut state = state.lock().map_err(|e| format!("Lock error: {e}"))?;
+    let state = state.lock().map_err(|e| format!("Lock error: {e}"))?;
     let json = serde_json::json!({ "type": "abort" }).to_string();
-    write_to_sidecar(&mut state, &json)
+    write_to_sidecar(&state, &json)
 }
 
 // --- Session management commands --------------------------------------------
@@ -286,9 +393,9 @@ fn list_sessions(
     book_id: String,
     state: tauri::State<'_, Mutex<SidecarState>>,
 ) -> Result<(), String> {
-    let mut state = state.lock().map_err(|e| format!("Lock error: {e}"))?;
+    let state = state.lock().map_err(|e| format!("Lock error: {e}"))?;
     let json = serde_json::json!({ "type": "list_sessions", "bookId": book_id }).to_string();
-    write_to_sidecar(&mut state, &json)
+    write_to_sidecar(&state, &json)
 }
 
 /// WebView → Rust → sidecar stdin: create a new session for a book.
@@ -297,9 +404,9 @@ fn new_session(
     book_id: String,
     state: tauri::State<'_, Mutex<SidecarState>>,
 ) -> Result<(), String> {
-    let mut state = state.lock().map_err(|e| format!("Lock error: {e}"))?;
+    let state = state.lock().map_err(|e| format!("Lock error: {e}"))?;
     let json = serde_json::json!({ "type": "new_session", "bookId": book_id }).to_string();
-    write_to_sidecar(&mut state, &json)
+    write_to_sidecar(&state, &json)
 }
 
 /// WebView → Rust → sidecar stdin: switch to an existing session.
@@ -308,9 +415,9 @@ fn switch_session(
     session_id: String,
     state: tauri::State<'_, Mutex<SidecarState>>,
 ) -> Result<(), String> {
-    let mut state = state.lock().map_err(|e| format!("Lock error: {e}"))?;
+    let state = state.lock().map_err(|e| format!("Lock error: {e}"))?;
     let json = serde_json::json!({ "type": "switch_session", "sessionId": session_id }).to_string();
-    write_to_sidecar(&mut state, &json)
+    write_to_sidecar(&state, &json)
 }
 
 /// WebView → Rust → sidecar stdin: delete a session.
@@ -319,15 +426,15 @@ fn delete_session(
     session_id: String,
     state: tauri::State<'_, Mutex<SidecarState>>,
 ) -> Result<(), String> {
-    let mut state = state.lock().map_err(|e| format!("Lock error: {e}"))?;
+    let state = state.lock().map_err(|e| format!("Lock error: {e}"))?;
     let json = serde_json::json!({ "type": "delete_session", "sessionId": session_id }).to_string();
-    write_to_sidecar(&mut state, &json)
+    write_to_sidecar(&state, &json)
 }
 
 /// Notify sidecar that a book was opened, and auto-list its sessions.
 fn notify_sidecar_book_opened(app: &tauri::AppHandle, path: &str, book_id: &str) {
     if let Some(state) = app.try_state::<Mutex<SidecarState>>() {
-        if let Ok(mut state) = state.lock() {
+        if let Ok(state) = state.lock() {
             let sessions_dir = app
                 .path()
                 .app_data_dir()
@@ -339,78 +446,17 @@ fn notify_sidecar_book_opened(app: &tauri::AppHandle, path: &str, book_id: &str)
                 "bookId": book_id,
                 "sessionsDir": sessions_dir,
             });
-            if let Err(e) = write_to_sidecar(&mut state, &json.to_string()) {
+            if let Err(e) = write_to_sidecar(&state, &json.to_string()) {
                 eprintln!("[sidecar] Failed to send book_opened: {e}");
             }
             // Auto-list sessions so the frontend can default to the most recent one.
             let list_json =
                 serde_json::json!({ "type": "list_sessions", "bookId": book_id }).to_string();
-            if let Err(e) = write_to_sidecar(&mut state, &list_json) {
+            if let Err(e) = write_to_sidecar(&state, &list_json) {
                 eprintln!("[sidecar] Failed to send list_sessions: {e}");
             }
         }
     }
-}
-
-// ---------------------------------------------------------------------------
-// File dialog command (existing)
-// ---------------------------------------------------------------------------
-
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
-}
-
-#[derive(Serialize, Deserialize)]
-struct OpenFileResult {
-    path: String,
-    name: String,
-    bytes: Vec<u8>,
-    #[serde(rename = "bookId")]
-    book_id: String,
-}
-
-#[tauri::command]
-async fn open_file(app: tauri::AppHandle) -> Result<OpenFileResult, String> {
-    let app_clone = app.clone();
-    let (path_str, name, bytes) = tauri::async_runtime::spawn_blocking(move || {
-        let file_path = app_clone
-            .dialog()
-            .file()
-            .add_filter("EPUB", &["epub"])
-            .blocking_pick_file()
-            .ok_or("No file selected")?;
-
-        let path = file_path.into_path().map_err(|_| "Invalid path")?;
-        let path_str = path.to_string_lossy().to_string();
-        let name = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("book.epub")
-            .to_string();
-        let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
-
-        Ok::<_, String>((path_str, name, bytes))
-    })
-    .await
-    .map_err(|e| e.to_string())??;
-
-    // Compute bookId from file path hash.
-    let book_id = {
-        let mut hasher = DefaultHasher::new();
-        path_str.hash(&mut hasher);
-        format!("{:x}", hasher.finish())
-    };
-
-    // Notify sidecar that a book was opened (for EPUB parsing + FTS5 indexing).
-    notify_sidecar_book_opened(&app, &path_str, &book_id);
-
-    Ok(OpenFileResult {
-        path: path_str,
-        name,
-        bytes,
-        book_id,
-    })
 }
 
 // ---------------------------------------------------------------------------
@@ -422,6 +468,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_shell::init())
         .setup(|app| {
             let root_result = app.path().app_data_dir().map_err(|error| {
                 error::AppError::storage_io(format!("Failed to resolve app data dir: {error}"))
@@ -462,18 +509,12 @@ pub fn run() {
                     Ok(state) => state,
                     Err(error) => {
                         eprintln!("[sidecar] Failed to start: {error}");
-                        SidecarState {
-                            child: None,
-                            stdin: None,
-                        }
+                        SidecarState::unavailable(error)
                     }
                 }
             } else {
                 eprintln!("[sidecar] Not started because library initialization failed");
-                SidecarState {
-                    child: None,
-                    stdin: None,
-                }
+                SidecarState::unavailable("Library initialization failed")
             };
             app.manage(Mutex::new(sidecar_state));
             Ok(())
@@ -482,21 +523,20 @@ pub fn run() {
             // Kill the sidecar when the main window closes.
             if let tauri::WindowEvent::Destroyed = event {
                 if let Some(state) = window.app_handle().try_state::<Mutex<SidecarState>>() {
-                    if let Ok(mut state) = state.lock() {
-                        if let Some(child) = state.child.as_mut() {
-                            let _ = child.kill();
-                        }
+                    if let Ok(state) = state.lock() {
+                        stop_sidecar(&state);
                     }
                 }
             }
         })
         .invoke_handler(tauri::generate_handler![
-            greet,
-            open_file,
             library::import_book,
+            library::read_import_bytes,
             library::save_book_metadata,
             library::list_books,
-            library::open_book,
+            library::get_book_open_context,
+            library::read_book_bytes,
+            library::open_book_bytes,
             library::delete_book,
             library::update_reading_state,
             agent_prompt,
@@ -508,4 +548,50 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{mpsc, Arc, Mutex};
+
+    use super::{
+        write_to_sidecar, JsonLineFramer, SidecarControl, SidecarState, SidecarTransportStatus,
+    };
+
+    #[test]
+    fn json_line_framer_reassembles_fragmented_chunks() {
+        let mut framer = JsonLineFramer::default();
+        assert!(framer.push(br#"{"type":"rea"#).is_empty());
+        assert_eq!(
+            framer.push(b"dy\"}\r\n{\"type\":\"pong\"}\npartial"),
+            vec![
+                r#"{"type":"ready"}"#.to_string(),
+                r#"{"type":"pong"}"#.to_string(),
+            ]
+        );
+        assert_eq!(framer.push(b"-line\n"), vec!["partial-line".to_string()]);
+    }
+
+    #[test]
+    fn stopped_transport_rejects_writes_before_enqueueing() {
+        let (control, receiver) = mpsc::channel();
+        let status = Arc::new(Mutex::new(SidecarTransportStatus::Running));
+        let state = SidecarState {
+            control: Some(control),
+            status: status.clone(),
+        };
+
+        write_to_sidecar(&state, r#"{"type":"ping"}"#).expect("running transport");
+        match receiver.recv().expect("queued command") {
+            SidecarControl::Write(bytes) => assert_eq!(bytes, b"{\"type\":\"ping\"}\n"),
+            _ => panic!("expected a queued write"),
+        }
+
+        *status.lock().expect("status") =
+            SidecarTransportStatus::Stopped("process exited".to_string());
+        let error = write_to_sidecar(&state, r#"{"type":"prompt"}"#)
+            .expect_err("stopped transport must reject writes");
+        assert!(error.contains("process exited"));
+        assert!(receiver.try_recv().is_err());
+    }
 }

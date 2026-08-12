@@ -59,24 +59,29 @@ pub struct BookRecord {
 
 #[derive(Debug, Serialize)]
 pub struct ImportBookResult {
-    pub bytes: Vec<u8>,
     #[serde(rename = "bookId")]
     pub book_id: String,
     #[serde(rename = "importId")]
     pub import_id: String,
+    pub name: String,
 }
 
 #[derive(Debug, Serialize)]
-pub struct OpenBookResult {
-    pub bytes: Vec<u8>,
+pub struct BookOpenContext {
     pub name: String,
     #[serde(rename = "bookId")]
     pub book_id: String,
+    #[serde(rename = "contentVersion")]
+    pub content_version: String,
     #[serde(rename = "lastFraction", skip_serializing_if = "Option::is_none")]
     pub last_fraction: Option<f64>,
     pub settings: Option<ReadingSettings>,
-    #[serde(skip)]
-    pub file_path: String,
+}
+
+#[derive(Debug)]
+pub(crate) struct BookContent {
+    pub bytes: Vec<u8>,
+    pub path: PathBuf,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -219,7 +224,10 @@ impl LibraryStore {
         let book_dir = self.book_dir(&book_id)?;
         let epub_path = book_dir.join("book.epub");
         let existed = library.books.iter().any(|book| book.id == book_id);
-        let import_id = operation_id();
+        // This token is returned to the WebView and authorizes access to one
+        // staged import. Keep it unpredictable rather than reusing the
+        // timestamp-based identifiers used only for internal trash paths.
+        let import_id = uuid::Uuid::new_v4().simple().to_string();
         let pending_path = self.pending_import_path(&book_id, &import_id)?;
 
         if existed {
@@ -249,7 +257,7 @@ impl LibraryStore {
             }
             library.books.push(BookRecord {
                 id: book_id.clone(),
-                title: display_name,
+                title: display_name.clone(),
                 author: String::new(),
                 cover_path: String::new(),
                 file_path: epub_path.to_string_lossy().into_owned(),
@@ -270,9 +278,9 @@ impl LibraryStore {
         }
 
         Ok(ImportBookResult {
-            bytes,
             book_id,
             import_id,
+            name: display_name,
         })
     }
 
@@ -399,7 +407,26 @@ impl LibraryStore {
         Ok(updated)
     }
 
-    pub fn open_book(&self, book_id: &str) -> AppResult<OpenBookResult> {
+    pub fn read_import_bytes(&self, book_id: &str, import_id: &str) -> AppResult<Vec<u8>> {
+        validate_book_id(book_id)?;
+        validate_import_id(import_id)?;
+        let _guard = self.transaction()?;
+        let library = self.read_library()?;
+        if !library.books.iter().any(|book| book.id == book_id) {
+            return Err(AppError::book_not_found(book_id));
+        }
+        let path = self.pending_import_path(book_id, import_id)?;
+        require_regular_file(&path, "staged EPUB")?;
+        let bytes = fs::read(&path).map_err(|error| {
+            AppError::storage_io(format!("Failed to read staged EPUB: {error}"))
+        })?;
+        if bytes.is_empty() {
+            return Err(AppError::storage_corrupt("Staged EPUB is empty"));
+        }
+        Ok(bytes)
+    }
+
+    pub fn get_book_open_context(&self, book_id: &str) -> AppResult<BookOpenContext> {
         validate_book_id(book_id)?;
         let _guard = self.transaction()?;
         let library = self.read_library()?;
@@ -408,17 +435,51 @@ impl LibraryStore {
             .iter()
             .find(|book| book.id == book_id)
             .ok_or_else(|| AppError::book_not_found(book_id))?;
-        let epub_path = self.book_dir(book_id)?.join("book.epub");
-        let bytes = fs::read(&epub_path)
-            .map_err(|error| AppError::storage_io(format!("Failed to read EPUB: {error}")))?;
 
-        Ok(OpenBookResult {
-            bytes,
+        Ok(BookOpenContext {
             name: "book.epub".to_string(),
             book_id: book_id.to_string(),
+            content_version: record.content_version.clone().ok_or_else(|| {
+                AppError::storage_corrupt(format!("Book {book_id} has no committed contentVersion"))
+            })?,
             last_fraction: record.last_fraction,
             settings: record.settings.clone(),
-            file_path: epub_path.to_string_lossy().into_owned(),
+        })
+    }
+
+    pub(crate) fn read_book_content(
+        &self,
+        book_id: &str,
+        content_version: &str,
+    ) -> AppResult<BookContent> {
+        validate_book_id(book_id)?;
+        validate_import_id(content_version)?;
+        let _guard = self.transaction()?;
+        let library = self.read_library()?;
+        let record = library
+            .books
+            .iter()
+            .find(|book| book.id == book_id)
+            .ok_or_else(|| AppError::book_not_found(book_id))?;
+        let active_version = record.content_version.as_deref().ok_or_else(|| {
+            AppError::storage_corrupt(format!("Book {book_id} has no committed contentVersion"))
+        })?;
+        if active_version != content_version {
+            return Err(AppError::invalid_input(
+                "Book content changed after its open context was loaded; reload the book",
+            ));
+        }
+        let epub_path = self.book_dir(book_id)?.join("book.epub");
+        require_regular_file(&epub_path, "EPUB")?;
+        let bytes = fs::read(&epub_path)
+            .map_err(|error| AppError::storage_io(format!("Failed to read EPUB: {error}")))?;
+        if bytes.is_empty() {
+            return Err(AppError::storage_corrupt("EPUB file is empty"));
+        }
+
+        Ok(BookContent {
+            bytes,
+            path: epub_path,
         })
     }
 
@@ -1347,6 +1408,21 @@ pub async fn import_book(
     run_blocking(move || store.import_bytes(&picked.0, picked.1, picked.2)).await
 }
 
+fn raw_response(bytes: Vec<u8>) -> tauri::ipc::Response {
+    tauri::ipc::Response::new(bytes)
+}
+
+#[tauri::command]
+pub async fn read_import_bytes(
+    store: tauri::State<'_, LibraryStore>,
+    book_id: String,
+    import_id: String,
+) -> AppResult<tauri::ipc::Response> {
+    let store = store.inner().clone();
+    let bytes = run_blocking(move || store.read_import_bytes(&book_id, &import_id)).await?;
+    Ok(raw_response(bytes))
+}
+
 #[tauri::command]
 pub async fn save_book_metadata(
     store: tauri::State<'_, LibraryStore>,
@@ -1368,15 +1444,37 @@ pub async fn list_books(store: tauri::State<'_, LibraryStore>) -> AppResult<Vec<
 }
 
 #[tauri::command]
-pub async fn open_book(
+pub async fn get_book_open_context(
+    store: tauri::State<'_, LibraryStore>,
+    book_id: String,
+) -> AppResult<BookOpenContext> {
+    let store = store.inner().clone();
+    run_blocking(move || store.get_book_open_context(&book_id)).await
+}
+
+#[tauri::command]
+pub async fn read_book_bytes(
+    store: tauri::State<'_, LibraryStore>,
+    book_id: String,
+    content_version: String,
+) -> AppResult<tauri::ipc::Response> {
+    let store = store.inner().clone();
+    let content = run_blocking(move || store.read_book_content(&book_id, &content_version)).await?;
+    Ok(raw_response(content.bytes))
+}
+
+#[tauri::command]
+pub async fn open_book_bytes(
     app: tauri::AppHandle,
     store: tauri::State<'_, LibraryStore>,
     book_id: String,
-) -> AppResult<OpenBookResult> {
+    content_version: String,
+) -> AppResult<tauri::ipc::Response> {
+    let notification_book_id = book_id.clone();
     let store = store.inner().clone();
-    let result = run_blocking(move || store.open_book(&book_id)).await?;
-    crate::notify_sidecar_book_opened(&app, &result.file_path, &result.book_id);
-    Ok(result)
+    let content = run_blocking(move || store.read_book_content(&book_id, &content_version)).await?;
+    crate::notify_sidecar_book_opened(&app, &content.path.to_string_lossy(), &notification_book_id);
+    Ok(raw_response(content.bytes))
 }
 
 #[tauri::command]
@@ -1704,7 +1802,12 @@ mod tests {
             .import_bytes(source, "book.epub".to_string(), version_two.clone())
             .expect("reimport");
 
-        assert_eq!(result.bytes, version_two);
+        assert_eq!(
+            store
+                .read_import_bytes(&result.book_id, &result.import_id)
+                .expect("staged bytes"),
+            version_two
+        );
         assert_eq!(
             fs::read(directory.path().join("books").join(&id).join("book.epub"))
                 .expect("stored epub"),
@@ -1730,7 +1833,7 @@ mod tests {
         assert_eq!(
             fs::read(directory.path().join("books").join(&id).join("book.epub"))
                 .expect("stored epub"),
-            result.bytes
+            version_two
         );
         let committed = store.list_books().expect("list").remove(0);
         assert_eq!(committed.title, "Version Two");
@@ -1830,5 +1933,65 @@ mod tests {
             )
             .expect_err("settings validation");
         assert_eq!(error.code, AppErrorCode::InvalidInput);
+    }
+
+    #[test]
+    fn open_context_version_rejects_stale_or_uncommitted_content() {
+        let (_directory, store) = test_store();
+        let source = Path::new("/source/version-bound-open.epub");
+        let id = import_test_book(&store, source);
+        let first_context = store.get_book_open_context(&id).expect("first context");
+        assert_eq!(
+            store
+                .read_book_content(&id, &first_context.content_version)
+                .expect("first content")
+                .bytes,
+            b"version-one"
+        );
+
+        let pending = store
+            .import_bytes(source, "book.epub".to_string(), b"version-two".to_vec())
+            .expect("stage second version");
+        assert_ne!(pending.import_id, first_context.content_version);
+        let error = store
+            .read_book_content(&id, &pending.import_id)
+            .expect_err("uncommitted content must not open as the active book");
+        assert_eq!(error.code, AppErrorCode::InvalidInput);
+
+        store
+            .save_book_metadata(
+                &id,
+                "Version Two".to_string(),
+                "Author Two".to_string(),
+                None,
+                &pending.import_id,
+            )
+            .expect("commit second version");
+        let stale_error = store
+            .read_book_content(&id, &first_context.content_version)
+            .expect_err("old context must not open new bytes");
+        assert_eq!(stale_error.code, AppErrorCode::InvalidInput);
+
+        let second_context = store.get_book_open_context(&id).expect("second context");
+        assert_eq!(second_context.content_version, pending.import_id);
+        assert_eq!(
+            store
+                .read_book_content(&id, &second_context.content_version)
+                .expect("second content")
+                .bytes,
+            b"version-two"
+        );
+    }
+
+    #[test]
+    fn raw_response_keeps_large_epub_payload_out_of_json() {
+        use tauri::ipc::{InvokeResponseBody, IpcResponse};
+
+        let payload = vec![0xA5; 2 * 1024 * 1024];
+        let body = raw_response(payload.clone()).body().expect("raw body");
+        match body {
+            InvokeResponseBody::Raw(bytes) => assert_eq!(bytes, payload),
+            InvokeResponseBody::Json(_) => panic!("EPUB bytes must not be JSON serialized"),
+        }
     }
 }

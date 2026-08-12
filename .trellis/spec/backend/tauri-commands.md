@@ -19,9 +19,13 @@ Book library persistence: import, metadata, list, open, delete, and reading stat
 ### Signatures
 
 ```rust
-// Import: pick/read once → stage exact bytes → return bytes + transaction identity
+// Import: pick/read once → stage exact bytes → return lightweight identity
 #[tauri::command]
 async fn import_book(app: AppHandle, store: State<'_, LibraryStore>) -> AppResult<ImportBookResult>
+
+// Read only that staged import as a Raw IPC body
+#[tauri::command]
+async fn read_import_bytes(store: State<'_, LibraryStore>, book_id: String, import_id: String) -> AppResult<tauri::ipc::Response>
 
 // Commit extracted metadata + cover and the staged EPUB as one recoverable import version
 #[tauri::command]
@@ -31,9 +35,17 @@ async fn save_book_metadata(store: State<'_, LibraryStore>, book_id: String, tit
 #[tauri::command]
 async fn list_books(store: State<'_, LibraryStore>) -> AppResult<Vec<BookRecord>>
 
-// Open book from library: read epub bytes + notify sidecar
+// Read lightweight metadata and the active committed content version
 #[tauri::command]
-async fn open_book(app: AppHandle, store: State<'_, LibraryStore>, book_id: String) -> AppResult<OpenBookResult>
+async fn get_book_open_context(store: State<'_, LibraryStore>, book_id: String) -> AppResult<BookOpenContext>
+
+// Read the exact active version as a Raw IPC body
+#[tauri::command]
+async fn read_book_bytes(store: State<'_, LibraryStore>, book_id: String, content_version: String) -> AppResult<tauri::ipc::Response>
+
+// Read the exact active version as Raw IPC and notify the sidecar after success
+#[tauri::command]
+async fn open_book_bytes(app: AppHandle, store: State<'_, LibraryStore>, book_id: String, content_version: String) -> AppResult<tauri::ipc::Response>
 
 // Delete book: remove record + directory
 #[tauri::command]
@@ -67,9 +79,19 @@ interface ReadingSettings {
   theme?: string;  // "light" | "dark" | "sepia"
 }
 
-interface ImportBookResult { bytes: number[]; bookId: string; importId: string }
-interface OpenBookResult  { bytes: number[]; name: string; bookId: string; lastFraction?: number; settings?: ReadingSettings }
+interface ImportBookResult { bookId: string; importId: string; name: string }
+interface BookOpenContext {
+  name: string;
+  bookId: string;
+  contentVersion: string;
+  lastFraction?: number;
+  settings?: ReadingSettings;
+}
 ```
+
+**Raw byte boundary**: `read_import_bytes`, `read_book_bytes`, and `open_book_bytes` return `tauri::ipc::Response::new(Vec<u8>)`. Frontend callers use `invoke<ArrayBuffer>()` and create a `Uint8Array` view; EPUB payloads are never JSON `number[]`.
+
+**Version-bound open**: `get_book_open_context` returns the active `contentVersion`. Both book byte commands require that token and validate it under the same `LibraryStore` gate used to locate and read the controlled `book.epub`. A re-import committed between the context and byte calls makes the old token fail with `InvalidInput`, so metadata/progress cannot be paired with bytes from another version. A staged but uncommitted import token cannot open canonical content.
 
 **Storage layout** (Tauri app data dir):
 ```
@@ -85,7 +107,7 @@ interface OpenBookResult  { bytes: number[]; name: string; bookId: string; lastF
 └── sessions/<bookId>/    # sidecar-managed, not touched by library commands
 ```
 
-**bookId generation**: `DefaultHasher` hash of the **source file path** (not the app data copy path). Same source file maps to the same record. Each import also receives a validated `importId` that binds frontend-extracted metadata to the exact staged bytes.
+**bookId generation**: `DefaultHasher` hash of the **source file path** (not the app data copy path). Same source file maps to the same record. Each import also receives an unpredictable UUID `importId` that binds frontend-extracted metadata and staged Raw IPC access to the exact bytes.
 
 **Repeat-import transaction**: `import_book` reads the selected EPUB once and stages those exact bytes without replacing the current EPUB. `save_book_metadata(importId)` creates a persistent rollback journal, switches EPUB/cover, and atomically commits metadata plus an internal `contentVersion` in `library.json`. A parse/save failure leaves the previous complete version active. Startup restores a prepared transaction when `contentVersion` did not commit, and keeps the new version when it did.
 
@@ -102,6 +124,7 @@ interface OpenBookResult  { bytes: number[]; name: string; bookId: string; lastF
 |-----------|-------|
 | User cancels file picker | `{ code: "Cancelled", ... }` — frontend ignores only this code |
 | Invalid ID/path/fraction/settings/import token | `{ code: "InvalidInput", ... }` |
+| Stale `contentVersion` after a committed re-import | `{ code: "InvalidInput", ... }` |
 | Book not found before any file mutation | `{ code: "BookNotFound", ... }` |
 | Invalid JSON/schema/record fields/controlled paths | `{ code: "StorageCorrupt", ... }` |
 | File read/write/sync/rename failure | `{ code: "StorageIo", ... }` |
@@ -164,9 +187,7 @@ let book_id = {
 >
 > **Rule**: Any command calling `blocking_*` dialog APIs or sync blocking I/O must be `async fn` with `spawn_blocking` for the blocking part.
 
-### Existing: open_file (legacy)
-
-The original `open_file` command is retained for compatibility but the app now defaults to library-first flow. `import_book` is the primary entry point for adding books.
+The legacy `open_file` command is removed. `import_book` is the only file-dialog entry point, and all EPUB bytes cross IPC through the Raw commands above.
 
 ---
 
@@ -176,4 +197,4 @@ Existing commands (`agent_prompt`, `agent_abort`, `list_sessions`, `new_session`
 
 ### Convention: sidecar book_opened notification
 
-Both `open_file` and `open_book` notify the sidecar via `notify_sidecar_book_opened()` with the epub path + bookId + sessionsDir. This must be called whenever a book is opened for rendering, so the sidecar can parse the epub and index it for the agent tools.
+`open_book_bytes` notifies the sidecar via `notify_sidecar_book_opened()` with the controlled EPUB path + bookId + sessionsDir only after the version-bound read succeeds. Runtime callers never supply a filesystem path.

@@ -18,12 +18,13 @@ import {
   normalizeSettings,
   type ReaderStyleState,
 } from "@/lib/reader-styles";
-import type { BookRecord, OpenBookResult } from "@/types/library";
+import type { BookOpenContext, BookRecord } from "@/types/library";
 import { useDebouncedCallback } from "@/lib/use-debounced-callback";
 import { invokeErrorMessage } from "@/lib/app-error";
+import { epubBytesFromIpc } from "@/lib/ipc-bytes";
 
 interface FileData {
-  bytes: number[];
+  bytes: Uint8Array<ArrayBuffer>;
   name: string;
   bookId: string;
 }
@@ -169,32 +170,36 @@ function App() {
   const handleOpenBook = useCallback(async (bookId: string) => {
     try {
       await flushReadingState();
-      const result = await invoke<OpenBookResult>("open_book", { bookId });
+      const context = await invoke<BookOpenContext>("get_book_open_context", { bookId });
+      const buffer = await invoke<ArrayBuffer>("open_book_bytes", {
+        bookId,
+        contentVersion: context.contentVersion,
+      });
       setFileData({
-        bytes: result.bytes,
-        name: result.name,
-        bookId: result.bookId,
+        bytes: epubBytesFromIpc(buffer),
+        name: context.name,
+        bookId: context.bookId,
       });
 
       // Build a partial BookRecord for passing lastFraction + settings to ReaderView.
-      // The full record is fetched from list_books; we use the open_book result fields.
+      // The full record is fetched from list_books; this context stays lightweight.
       setCurrentBook({
-        id: result.bookId,
+        id: context.bookId,
         title: "",
         author: "",
         coverPath: "",
         filePath: "",
         importedAt: "",
-        lastFraction: result.lastFraction,
-        settings: result.settings,
+        lastFraction: context.lastFraction,
+        settings: context.settings,
       });
 
       // Initialize style state from saved settings.
-      setStyleState(normalizeSettings(result.settings));
+      setStyleState(normalizeSettings(context.settings));
 
       setView("reader");
     } catch (err) {
-      console.error("open_book error:", err);
+      console.error("open_book_bytes error:", err);
       alert(`打开书籍失败: ${invokeErrorMessage(err)}`);
     }
   }, [flushReadingState]);

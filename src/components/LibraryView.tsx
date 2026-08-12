@@ -8,6 +8,7 @@ import {
   invokeErrorMessage,
   isInvokeAppError,
 } from "@/lib/app-error";
+import { epubBytesFromIpc } from "@/lib/ipc-bytes";
 
 interface LibraryViewProps {
   onOpenBook: (bookId: string) => void;
@@ -39,10 +40,14 @@ export function LibraryView({ onOpenBook }: LibraryViewProps) {
     if (importing) return;
     setImporting(true);
     try {
-      // 1. Rust picks file, copies epub to app data, returns bytes + bookId.
+      // 1. Rust picks and stages the file, returning only lightweight metadata.
       const result = await invoke<ImportBookResult>("import_book");
-      // 2. Frontend extracts metadata + cover using foliate.js offscreen.
-      const metadata = await extractEpubMetadata(result.bytes, "book.epub");
+      // 2. Fetch the staged EPUB through Raw IPC, then extract metadata offscreen.
+      const buffer = await invoke<ArrayBuffer>("read_import_bytes", {
+        bookId: result.bookId,
+        importId: result.importId,
+      });
+      const metadata = await extractEpubMetadata(epubBytesFromIpc(buffer), result.name);
       // 3. Save metadata + cover to app data via Rust.
       await invoke<BookRecord>("save_book_metadata", {
         bookId: result.bookId,
