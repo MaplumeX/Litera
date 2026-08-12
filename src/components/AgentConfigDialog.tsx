@@ -1,6 +1,25 @@
 import { useEffect, useState } from "react";
 import { Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectSeparator,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { useAgentConfig } from "@/lib/use-agent-config";
 import {
@@ -11,7 +30,6 @@ import {
 } from "@/types/agent-config";
 
 const ADD_CUSTOM_VALUE = "__add_custom__";
-const SEPARATOR_VALUE = "__separator__";
 
 interface AgentConfigDialogProps {
   open: boolean;
@@ -72,8 +90,6 @@ export function AgentConfigDialog({ open, onClose }: AgentConfigDialogProps) {
     setModel(snapshot.model ?? "");
     setApiKey("");
   }, [open, snapshot]);
-
-  if (!open) return null;
 
   const selectedCustom = isCustomProviderId(provider)
     ? snapshot?.customProviders.find((p) => p.id === provider) ?? null
@@ -202,23 +218,16 @@ export function AgentConfigDialog({ open, onClose }: AgentConfigDialogProps) {
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
-      onClick={onClose}
-    >
-      <div
-        className={cn(
-          "w-full max-w-md rounded-lg border bg-popover p-5 shadow-lg",
-          "max-h-[85vh] overflow-y-auto",
-        )}
-        onClick={(e) => e.stopPropagation()}
+    <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent
+        className={cn("max-h-[85vh] overflow-y-auto", "sm:max-w-md")}
       >
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-base font-semibold">LLM 设置</h2>
-          <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={onClose}>
-            ✕
-          </Button>
-        </div>
+        <DialogHeader>
+          <DialogTitle>LLM 设置</DialogTitle>
+          <DialogDescription className="sr-only">
+            配置 LLM 供应商、API Key 与模型。
+          </DialogDescription>
+        </DialogHeader>
 
         {loading && (
           <p className="mb-3 text-xs text-muted-foreground">加载中…</p>
@@ -227,36 +236,44 @@ export function AgentConfigDialog({ open, onClose }: AgentConfigDialogProps) {
         <div className="space-y-4">
           {/* Provider */}
           <div>
-            <label className="mb-1 block text-xs font-medium text-muted-foreground">
+            <Label className="mb-1 block text-xs font-medium text-muted-foreground">
               Provider
-            </label>
-            <select
+            </Label>
+            <Select
               value={showAddForm ? ADD_CUSTOM_VALUE : provider}
-              onChange={(e) => handleProviderChange(e.target.value)}
+              onValueChange={handleProviderChange}
               disabled={saving}
-              className={cn(
-                "w-full rounded border bg-background px-2 py-1.5 text-sm",
-                "focus:outline-none focus:ring-1 focus:ring-ring",
-                saving && "opacity-60",
-              )}
             >
-              {AGENT_PROVIDERS.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.label}
-                </option>
-              ))}
-              {snapshot && snapshot.customProviders.length > 0 && (
-                <option disabled value={SEPARATOR_VALUE}>
-                  ────── 自定义 ──────
-                </option>
-              )}
-              {snapshot?.customProviders.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name} (自定义)
-                </option>
-              ))}
-              <option value={ADD_CUSTOM_VALUE}>＋ 添加自定义供应商…</option>
-            </select>
+              <SelectTrigger className="w-full" disabled={saving}>
+                <SelectValue placeholder="选择供应商" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  {AGENT_PROVIDERS.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.label}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+                {snapshot && snapshot.customProviders.length > 0 && (
+                  <>
+                    <SelectSeparator />
+                    <SelectGroup>
+                      <SelectLabel>自定义</SelectLabel>
+                      {snapshot.customProviders.map((p) => (
+                        <SelectItem key={p.id} value={p.id}>
+                          {p.name} (自定义)
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </>
+                )}
+                <SelectSeparator />
+                <SelectItem value={ADD_CUSTOM_VALUE}>
+                  ＋ 添加自定义供应商…
+                </SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           {/* Add custom provider form */}
@@ -264,43 +281,43 @@ export function AgentConfigDialog({ open, onClose }: AgentConfigDialogProps) {
             <div className="space-y-3 rounded border border-border bg-muted/30 p-3">
               <p className="text-xs font-medium text-muted-foreground">添加自定义 OpenAI 兼容供应商</p>
               <div>
-                <label className="mb-1 block text-xs text-muted-foreground">名称</label>
-                <input
+                <Label className="mb-1 block text-xs text-muted-foreground">名称</Label>
+                <Input
                   type="text"
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
                   placeholder="如：本地 Ollama"
-                  className="w-full rounded border bg-background px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                  className="w-full"
                 />
               </div>
               <div>
-                <label className="mb-1 block text-xs text-muted-foreground">Base URL</label>
-                <input
+                <Label className="mb-1 block text-xs text-muted-foreground">Base URL</Label>
+                <Input
                   type="text"
                   value={newBaseUrl}
                   onChange={(e) => setNewBaseUrl(e.target.value)}
                   placeholder="如：http://localhost:11434/v1"
-                  className="w-full rounded border bg-background px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                  className="w-full"
                 />
               </div>
               <div>
-                <label className="mb-1 block text-xs text-muted-foreground">API Key</label>
-                <input
+                <Label className="mb-1 block text-xs text-muted-foreground">API Key</Label>
+                <Input
                   type="password"
                   value={newApiKey}
                   onChange={(e) => setNewApiKey(e.target.value)}
                   placeholder={isLocalBaseUrl(newBaseUrl) ? "本地服务填任意占位值" : "输入 API Key"}
-                  className="w-full rounded border bg-background px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                  className="w-full"
                 />
               </div>
               <div>
-                <label className="mb-1 block text-xs text-muted-foreground">Model</label>
-                <input
+                <Label className="mb-1 block text-xs text-muted-foreground">Model</Label>
+                <Input
                   type="text"
                   value={newModel}
                   onChange={(e) => setNewModel(e.target.value)}
                   placeholder="如：llama-3.1"
-                  className="w-full rounded border bg-background px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                  className="w-full"
                 />
               </div>
               <div className="flex justify-end gap-2">
@@ -366,28 +383,28 @@ export function AgentConfigDialog({ open, onClose }: AgentConfigDialogProps) {
             <div className="space-y-3 rounded border border-border bg-muted/30 p-3">
               <p className="text-xs font-medium text-muted-foreground">编辑自定义供应商</p>
               <div>
-                <label className="mb-1 block text-xs text-muted-foreground">名称</label>
-                <input
+                <Label className="mb-1 block text-xs text-muted-foreground">名称</Label>
+                <Input
                   type="text"
                   value={editName}
                   onChange={(e) => setEditName(e.target.value)}
                   placeholder="如：本地 Ollama"
-                  className="w-full rounded border bg-background px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                  className="w-full"
                 />
               </div>
               <div>
-                <label className="mb-1 block text-xs text-muted-foreground">Base URL</label>
-                <input
+                <Label className="mb-1 block text-xs text-muted-foreground">Base URL</Label>
+                <Input
                   type="text"
                   value={editBaseUrl}
                   onChange={(e) => setEditBaseUrl(e.target.value)}
                   placeholder="如：http://localhost:11434/v1"
-                  className="w-full rounded border bg-background px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                  className="w-full"
                 />
               </div>
               <div>
-                <label className="mb-1 block text-xs text-muted-foreground">API Key</label>
-                <input
+                <Label className="mb-1 block text-xs text-muted-foreground">API Key</Label>
+                <Input
                   type="password"
                   value={editApiKey}
                   onChange={(e) => setEditApiKey(e.target.value)}
@@ -398,17 +415,17 @@ export function AgentConfigDialog({ open, onClose }: AgentConfigDialogProps) {
                         ? "本地服务填任意占位值"
                         : "输入 API Key"
                   }
-                  className="w-full rounded border bg-background px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                  className="w-full"
                 />
               </div>
               <div>
-                <label className="mb-1 block text-xs text-muted-foreground">Model</label>
-                <input
+                <Label className="mb-1 block text-xs text-muted-foreground">Model</Label>
+                <Input
                   type="text"
                   value={editModel}
                   onChange={(e) => setEditModel(e.target.value)}
                   placeholder="如：llama-3.1"
-                  className="w-full rounded border bg-background px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                  className="w-full"
                 />
               </div>
               <div className="flex justify-end gap-2">
@@ -435,18 +452,15 @@ export function AgentConfigDialog({ open, onClose }: AgentConfigDialogProps) {
           {!isCustom && !showAddForm && (
             <>
               <div>
-                <label className="mb-1 block text-xs font-medium text-muted-foreground">
+                <Label className="mb-1 block text-xs font-medium text-muted-foreground">
                   API Key
-                </label>
-                <input
+                </Label>
+                <Input
                   type="password"
                   value={apiKey}
                   onChange={(e) => setApiKey(e.target.value)}
                   placeholder={apiKeyPlaceholder}
-                  className={cn(
-                    "w-full rounded border bg-background px-2 py-1.5 text-sm",
-                    "focus:outline-none focus:ring-1 focus:ring-ring",
-                  )}
+                  className="w-full"
                 />
                 {hasExistingKey && !apiKey && (
                   <p className="mt-1 text-xs text-muted-foreground">
@@ -456,18 +470,15 @@ export function AgentConfigDialog({ open, onClose }: AgentConfigDialogProps) {
               </div>
 
               <div>
-                <label className="mb-1 block text-xs font-medium text-muted-foreground">
+                <Label className="mb-1 block text-xs font-medium text-muted-foreground">
                   Model
-                </label>
-                <input
+                </Label>
+                <Input
                   type="text"
                   value={model}
                   onChange={(e) => setModel(e.target.value)}
                   placeholder={modelPlaceholder}
-                  className={cn(
-                    "w-full rounded border bg-background px-2 py-1.5 text-sm",
-                    "focus:outline-none focus:ring-1 focus:ring-ring",
-                  )}
+                  className="w-full"
                 />
               </div>
             </>
@@ -509,7 +520,7 @@ export function AgentConfigDialog({ open, onClose }: AgentConfigDialogProps) {
             </Button>
           </div>
         )}
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
