@@ -19,29 +19,29 @@ Book library persistence: import, metadata, list, open, delete, and reading stat
 ### Signatures
 
 ```rust
-// Import: pick file → copy epub to app_data/books/<id>/ → return bytes + bookId for frontend metadata extraction
+// Import: pick/read once → stage exact bytes → return bytes + transaction identity
 #[tauri::command]
-async fn import_book(app: AppHandle) -> Result<ImportBookResult, String>
+async fn import_book(app: AppHandle, store: State<'_, LibraryStore>) -> AppResult<ImportBookResult>
 
-// Save extracted metadata + cover (called by frontend after foliate.js extraction)
+// Commit extracted metadata + cover and the staged EPUB as one recoverable import version
 #[tauri::command]
-async fn save_book_metadata(app: AppHandle, book_id: String, title: String, author: String, cover_bytes: Option<Vec<u8>>) -> Result<BookRecord, String>
+async fn save_book_metadata(store: State<'_, LibraryStore>, book_id: String, title: String, author: String, cover_bytes: Option<Vec<u8>>, import_id: String) -> AppResult<BookRecord>
 
 // List all books
 #[tauri::command]
-fn list_books(app: AppHandle) -> Result<Vec<BookRecord>, String>
+async fn list_books(store: State<'_, LibraryStore>) -> AppResult<Vec<BookRecord>>
 
 // Open book from library: read epub bytes + notify sidecar
 #[tauri::command]
-async fn open_book(app: AppHandle, book_id: String) -> Result<OpenBookResult, String>
+async fn open_book(app: AppHandle, store: State<'_, LibraryStore>, book_id: String) -> AppResult<OpenBookResult>
 
 // Delete book: remove record + directory
 #[tauri::command]
-async fn delete_book(app: AppHandle, book_id: String) -> Result<(), String>
+async fn delete_book(store: State<'_, LibraryStore>, book_id: String) -> AppResult<()>
 
 // Update reading position/settings (called on relocate debounce + settings change debounce)
 #[tauri::command]
-fn update_reading_state(app: AppHandle, book_id: String, last_fraction: Option<f64>, settings: Option<ReadingSettings>) -> Result<(), String>
+async fn update_reading_state(store: State<'_, LibraryStore>, book_id: String, last_fraction: Option<f64>, settings: Option<ReadingSettings>) -> AppResult<()>
 ```
 
 ### Contracts
@@ -67,21 +67,29 @@ interface ReadingSettings {
   theme?: string;  // "light" | "dark" | "sepia"
 }
 
-interface ImportBookResult { bytes: number[]; bookId: string }
+interface ImportBookResult { bytes: number[]; bookId: string; importId: string }
 interface OpenBookResult  { bytes: number[]; name: string; bookId: string; lastFraction?: number; settings?: ReadingSettings }
 ```
 
 **Storage layout** (Tauri app data dir):
 ```
 <app_data>/
-├── library.json         # { books: BookRecord[] }
+├── library.json         # { schemaVersion: 1, books: BookRecord[] }
 ├── books/<bookId>/
 │   ├── book.epub
-│   └── cover.png
+│   ├── cover.png
+│   ├── .imports/        # uncommitted exact import bytes
+│   └── .transactions/   # crash-recovery journals (temporary)
+├── books/.trash/        # recoverable staged deletions
+├── backup/legacy-*/     # legacy reset backups; never silently discarded
 └── sessions/<bookId>/    # sidecar-managed, not touched by library commands
 ```
 
-**bookId generation**: `DefaultHasher` hash of the **source file path** (not the app data copy path). Same source file → same bookId → duplicate import is a no-op (skips copy, returns existing).
+**bookId generation**: `DefaultHasher` hash of the **source file path** (not the app data copy path). Same source file maps to the same record. Each import also receives a validated `importId` that binds frontend-extracted metadata to the exact staged bytes.
+
+**Repeat-import transaction**: `import_book` reads the selected EPUB once and stages those exact bytes without replacing the current EPUB. `save_book_metadata(importId)` creates a persistent rollback journal, switches EPUB/cover, and atomically commits metadata plus an internal `contentVersion` in `library.json`. A parse/save failure leaves the previous complete version active. Startup restores a prepared transaction when `contentVersion` did not commit, and keeps the new version when it did.
+
+**Serialization boundary**: all commands return serializable `{ code, message }` errors. Frontend cancellation handling checks `code === "Cancelled"`; storage failures must be rendered to the user rather than silently converted to an empty library.
 
 **Cover display**: Frontend uses `convertFileSrc(coverPath)` from `@tauri-apps/api/core` to render covers via Tauri's asset protocol. Requires:
 - `tauri.conf.json` → `app.security.assetProtocol.enable = true` + `scope = ["$APPDATA/books/**"]`
@@ -92,17 +100,37 @@ interface OpenBookResult  { bytes: number[]; name: string; bookId: string; lastF
 
 | Condition | Error |
 |-----------|-------|
-| User cancels file picker | `Err("No file selected")` — frontend should catch and ignore |
-| Book not found in library.json (open/delete/update) | `Err("Book not found: <id>")` |
-| epub read failure (missing file) | `Err("Failed to read epub: <io error>")` |
-| library.json parse failure | `Err("Failed to parse library.json: <serde error>")` |
-| Cover write failure | `Err("Failed to write cover: <io error>")` |
+| User cancels file picker | `{ code: "Cancelled", ... }` — frontend ignores only this code |
+| Invalid ID/path/fraction/settings/import token | `{ code: "InvalidInput", ... }` |
+| Book not found before any file mutation | `{ code: "BookNotFound", ... }` |
+| Invalid JSON/schema/record fields/controlled paths | `{ code: "StorageCorrupt", ... }` |
+| File read/write/sync/rename failure | `{ code: "StorageIo", ... }` |
+| Failed compensating restore | `{ code: "RollbackFailed", ... }` |
 
 ### Good/Base/Bad Cases
 
 - **Good**: Import epub with cover → grid shows cover, title, author; reopen app → book persists
 - **Base**: Import epub without cover → grid shows placeholder (first char of title)
-- **Bad**: Re-import same file → no duplicate (bookId dedup), returns existing bytes
+- **Bad**: Re-import same file, then metadata extraction fails → old EPUB/title/author/cover remain active; staged bytes never partially replace them
+
+### Tests Required
+
+- **Atomic library writes**: inject a write failure and assert the prior `library.json` bytes remain complete and parseable.
+- **Concurrent partial updates**: race fraction and settings updates, then assert the final record contains both values.
+- **Import commit boundary**: stage changed bytes for an existing book, fail metadata/library commit, and assert EPUB, metadata, and cover all remain on the previous version.
+- **Crash recovery**: leave a prepared import journal and a staged deletion on disk, reinitialize `LibraryStore`, and assert the uncommitted import is rolled back while the referenced deleted directory is restored.
+- **Path safety**: reject traversal-like IDs, forged stored paths, duplicate IDs, symlink book directories, and non-regular EPUB/cover files before mutation.
+- **Frontend lifecycle**: assert debounce keeps the latest call, `flush()` waits and propagates failures, and repeated `cancel()` is safe under StrictMode cleanup.
+
+### Storage and path rules
+
+- Every `library.json` read/modify/write and every related file transition is inside the shared `LibraryStore` gate.
+- `library.json` writes use a same-directory temporary file, flush + `sync_all`, atomic persist, and parent-directory sync. Post-persist failures restore the prior complete bytes.
+- Stored `filePath` must equal `<appData>/books/<bookId>/book.epub`; non-empty `coverPath` must equal `<appData>/books/<bookId>/cover.png`. Commands derive operational paths again from the trusted root and never follow stored paths.
+- `books`, `.trash`, book directories, `.imports`, and `.transactions` must be real directories, not symlinks. EPUB/cover/transaction files must be regular files.
+- Delete renames the book directory into `.trash` before committing metadata. A write failure renames it back; startup also restores an interrupted pre-commit staged deletion. Committed trash is retained for an explicit future retention policy.
+- Startup moves an unregistered real book directory (for example, a crash during first import before `library.json` commit) into `.trash/orphan-*`; it rejects unregistered files and symlinks instead of following them.
+- All synchronous dialog and filesystem work runs inside `spawn_blocking`; library commands are async.
 
 ### Wrong vs Correct
 
@@ -122,7 +150,8 @@ let book_id = {
     path_str.hash(&mut hasher);
     format!("{:x}", hasher.finish())
 };
-// Then check dedup against library.json BEFORE copying
+// Then stage each import under its importId; do not replace the active EPUB
+// until save_book_metadata commits that exact staged version.
 ```
 
 ---

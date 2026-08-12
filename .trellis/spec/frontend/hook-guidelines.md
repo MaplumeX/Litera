@@ -1,15 +1,15 @@
 # Hook Guidelines
 
-> Custom hook patterns used in the Litera frontend. The project has no dedicated hooks directory — hooks are defined inline in components or as small helpers in `App.tsx`.
+> Custom hook patterns used in the Litera frontend. Small reusable lifecycle helpers live under `src/lib/`.
 
 ---
 
 ## Overview
 
-Litera's frontend uses React 19 hooks directly. There is no `src/hooks/` directory and no shared custom hooks file. Hook patterns are minimal and purpose-driven: one debounced-callback helper and heavy use of refs for stable identities.
+Litera's frontend uses React 19 hooks directly. Hook patterns are minimal and purpose-driven: one tested debounced-callback controller/hook and heavy use of refs for stable identities.
 
 Reference files:
-- `src/App.tsx` — `useDebouncedCallback`
+- `src/lib/debounced-callback.ts`, `src/lib/use-debounced-callback.ts` — controller and React lifecycle wrapper
 - `src/components/ReaderView.tsx` — ref-stable callbacks, `useImperativeHandle`
 - `src/components/ChatPanel.tsx` — `listen()` event subscription, auto-scroll
 - `src/components/LibraryView.tsx` — data fetch on mount
@@ -20,30 +20,25 @@ Reference files:
 
 ### Pattern: `useDebouncedCallback` for persisted state
 
-Reading position and settings changes are debounced before invoking the Rust backend. The helper lives in `App.tsx`, not a shared file.
+Reading position and settings changes are debounced before invoking the Rust backend. The pure controller owns timer/queue behavior; the React hook owns latest-callback refs and unmount cleanup.
 
 ```typescript
-// src/App.tsx
-function useDebouncedCallback<T extends (...args: never[]) => void>(
-  fn: T,
-  delay: number,
-): T {
-  const ref = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const fnRef = useRef(fn);
-  fnRef.current = fn;  // keep latest fn without re-creating the debounced wrapper
-  return useCallback(
-    (...args: Parameters<T>) => {
-      if (ref.current) clearTimeout(ref.current);
-      ref.current = setTimeout(() => fnRef.current(...args), delay);
-    },
-    [delay],
-  ) as T;
-}
+const controller = useDebouncedCallback(callback, 500, reportError);
+controller.schedule(bookId, value);
+await controller.flush();
+controller.cancel();
+controller.pending;
 ```
 
-**Usage**: debounced `update_reading_state` calls on relocate and style change (500ms delay).
+**Usage**: debounced `update_reading_state` calls on relocate and style change (500ms delay), then `flush()` before book/view/close transitions.
 
-**Key detail**: `fnRef.current = fn` updates on every render so the latest callback runs, but the returned function is stable (only depends on `delay`). This prevents effect re-runs when the debounced callback is in a dependency array.
+**Key details**:
+
+- `schedule()` keeps only the latest pending arguments.
+- `flush()` executes pending work immediately and waits for already-running work; persistence errors reject to the caller.
+- `cancel()` discards only pending work and is idempotent, including React StrictMode's setup/cleanup replay.
+- Calls are serialized so a later invocation cannot race an earlier backend write.
+- Callback/error refs update every render while the controller identity changes only with `delay`.
 
 ### Pattern: ref-stable callbacks to avoid effect re-runs
 
@@ -135,7 +130,7 @@ useEffect(() => { void refreshBooks(); }, [refreshBooks]);
 
 ## Naming Conventions
 
-- **Custom hooks**: `use*` prefix (only `useDebouncedCallback` exists as a standalone hook).
+- **Custom hooks**: `use*` prefix (`useDebouncedCallback`).
 - **Refs for latest values**: `*Ref` suffix (`onRelocateRef`, `onBookReadyRef`, `styleStateRef`, `bookIdRef`).
 - **Imperative handles**: `*Handle` type suffix (`ReaderViewHandle`, `ChatPanelHandle`).
 

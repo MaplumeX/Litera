@@ -4,6 +4,10 @@ import type { BookRecord, ImportBookResult } from "@/types/library";
 import { extractEpubMetadata } from "@/lib/book-utils";
 import { Button } from "@/components/ui/button";
 import { BookCard } from "@/components/BookCard";
+import {
+  invokeErrorMessage,
+  isInvokeAppError,
+} from "@/lib/app-error";
 
 interface LibraryViewProps {
   onOpenBook: (bookId: string) => void;
@@ -13,14 +17,17 @@ export function LibraryView({ onOpenBook }: LibraryViewProps) {
   const [books, setBooks] = useState<BookRecord[]>([]);
   const [search, setSearch] = useState("");
   const [importing, setImporting] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // Load books from the library on mount.
   const refreshBooks = useCallback(async () => {
     try {
       const list = await invoke<BookRecord[]>("list_books");
       setBooks(list);
+      setLoadError(null);
     } catch (err) {
       console.error("list_books error:", err);
+      setLoadError(invokeErrorMessage(err));
     }
   }, []);
 
@@ -42,15 +49,19 @@ export function LibraryView({ onOpenBook }: LibraryViewProps) {
         title: metadata.title,
         author: metadata.author,
         coverBytes: metadata.coverBytes ?? null,
+        importId: result.importId,
       });
       // 4. Refresh the grid.
       await refreshBooks();
     } catch (err) {
-      if (String(err).includes("No file selected")) {
+      if (
+        (isInvokeAppError(err) && err.code === "Cancelled") ||
+        String(err).includes("No file selected")
+      ) {
         // User cancelled — no error.
       } else {
         console.error("import error:", err);
-        alert(`导入失败: ${err}`);
+        alert(`导入失败: ${invokeErrorMessage(err)}`);
       }
     } finally {
       setImporting(false);
@@ -64,7 +75,7 @@ export function LibraryView({ onOpenBook }: LibraryViewProps) {
         await refreshBooks();
       } catch (err) {
         console.error("delete error:", err);
-        alert(`删除失败: ${err}`);
+        alert(`删除失败: ${invokeErrorMessage(err)}`);
       }
     },
     [refreshBooks],
@@ -82,7 +93,7 @@ export function LibraryView({ onOpenBook }: LibraryViewProps) {
     : books;
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex min-h-0 flex-1 flex-col">
       {/* Toolbar */}
       <header className="flex items-center gap-3 border-b px-4 py-3">
         <h1 className="text-lg font-bold">Litera</h1>
@@ -99,6 +110,12 @@ export function LibraryView({ onOpenBook }: LibraryViewProps) {
           </Button>
         </div>
       </header>
+
+      {loadError && (
+        <div role="alert" className="border-b border-destructive/40 bg-destructive/10 px-4 py-2 text-sm text-destructive">
+          书库加载失败：{loadError}
+        </div>
+      )}
 
       {/* Grid or empty state */}
       <div className="flex-1 overflow-y-auto p-4">

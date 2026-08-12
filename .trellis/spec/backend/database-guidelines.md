@@ -13,7 +13,7 @@ Litera uses two distinct persistence mechanisms, neither of which is a relationa
 3. **Full-text search** — In-memory SQLite FTS5 (WASM via `fts5-sql-bundle`), rebuilt on each book open. Not persisted to disk.
 
 Reference files:
-- `src-tauri/src/lib.rs` — `read_library()`, `write_library()`, `LibraryData`, `BookRecord`
+- `src-tauri/src/library.rs` — `LibraryStore`, strict reads, atomic writes, recovery transactions
 - `sidecar/book.ts` — `loadBook()`, FTS5 index construction
 - `sidecar/index.ts` — `SessionManager` usage
 
@@ -23,50 +23,46 @@ Reference files:
 
 ### Pattern: read-modify-write the entire file
 
-Every library mutation reads the full `library.json`, modifies the `books` vector, and writes the entire file back. There is no incremental update.
+Every library mutation acquires the shared `LibraryStore` gate, strictly reads the full versioned `library.json`, modifies the `books` vector, and atomically replaces the entire file. There is no incremental update and no independent read-modify-write snapshot outside the gate.
 
 ```rust
-// src-tauri/src/lib.rs
-fn read_library(app: &tauri::AppHandle) -> Result<LibraryData, String> {
-    let path = app_data_dir(app)?.join("library.json");
-    if !path.exists() {
-        return Ok(LibraryData { books: vec![] });
-    }
-    let content = std::fs::read_to_string(&path)
-        .map_err(|e| format!("Failed to read library.json: {e}"))?;
-    serde_json::from_str::<LibraryData>(&content)
-        .map_err(|e| format!("Failed to parse library.json: {e}"))
-}
-
-fn write_library(app: &tauri::AppHandle, data: &LibraryData) -> Result<(), String> {
-    let path = app_data_dir(app)?.join("library.json");
-    let json = serde_json::to_string_pretty(data)
-        .map_err(|e| format!("Failed to serialize library: {e}"))?;
-    std::fs::write(&path, json).map_err(|e| format!("Failed to write library.json: {e}"))
+fn update_reading_state(&self, book_id: &str, fraction: Option<f64>, settings: Option<ReadingSettings>) -> AppResult<()> {
+    let _guard = self.transaction()?;
+    let mut library = self.read_library()?;
+    let record = library.books.iter_mut()
+        .find(|book| book.id == book_id)
+        .ok_or_else(|| AppError::book_not_found(book_id))?;
+    // validate + merge only supplied fields
+    self.write_library(&library)
 }
 ```
 
 ### Conventions
 
-- **`serde_json::to_string_pretty`** for human-readable output (debugging-friendly).
-- **Missing file = empty state**: `read_library` returns `LibraryData { books: vec![] }` if `library.json` doesn't exist. Never error on a missing file.
-- **`unwrap_or(LibraryData { books: vec![] })`** as a defensive fallback when reading before writing (see `import_book`, `delete_book`, `update_reading_state`).
-- **bookId dedup check before write**: `if library.books.iter().any(|b| b.id == book_id)` — check existence before inserting to avoid duplicates.
+- **`schemaVersion: 1` is mandatory**. Legacy unversioned storage is moved to `backup/legacy-<timestamp>/` before a new empty store is created.
+- **Strict reads**: missing files, malformed JSON, unknown/missing fields, duplicate IDs, invalid settings, unsafe stored paths, missing files, and symlinks are errors. Never use `unwrap_or(empty)`.
+- **Recoverable atomic write**: same-directory tempfile → write → flush → file `sync_all` → atomic persist → parent-directory sync. If failure occurs after persist, restore the prior complete bytes.
+- **All filesystem work is blocking work**: every Tauri library command is async and delegates store operations to `spawn_blocking`.
+- **Partial updates merge under the gate** so concurrent fraction/settings calls cannot overwrite one another.
 
 ### Storage Layout
 
 ```
 <app_data>/
-├── library.json              # { "books": [BookRecord, ...] }
+├── library.json              # { "schemaVersion": 1, "books": [...] }
 ├── books/<bookId>/
-│   ├── book.epub             # copied epub
-│   └── cover.png             # optional cover
+│   ├── book.epub             # active canonical epub
+│   ├── cover.png             # optional active cover
+│   ├── .imports/             # exact bytes awaiting metadata commit
+│   └── .transactions/        # persistent rollback journals
+├── books/.trash/             # staged/committed recoverable deletions
+├── backup/legacy-*/          # recoverable legacy artifacts
 └── sessions/<bookId>/        # sidecar-managed JSONL session files
 ```
 
 ### bookId Generation
 
-`bookId` is a `DefaultHasher` hash of the **source file path** (not the app data copy path). Same source file → same bookId → duplicate import is a no-op.
+`bookId` is a `DefaultHasher` hash of the **source file path** (not the app data copy path). Same source file maps to the same record. Re-import is not a no-op: it stages exact bytes under a unique `importId`, then commits EPUB + extracted metadata/cover through the recovery protocol described in `tauri-commands.md`.
 
 ```rust
 let book_id = {
@@ -138,14 +134,14 @@ const { session: s } = await createAgentSession({ sessionManager, customTools, r
 
 **Wrong**: hashing the app data copy path (`dest_path`) — it's stable per bookId but changes if the library is rebuilt, and two different source files could theoretically collide.
 
-**Correct**: hash the **source file path** before copying. See `import_book` in `src-tauri/src/lib.rs`.
+**Correct**: hash the **source file path** before staging. See `import_book` in `src-tauri/src/library.rs`.
 
-### Forgetting to handle missing library.json
+### Treating missing or corrupt library.json as an empty library
 
-**Wrong**: erroring when `library.json` doesn't exist on first run.
+**Wrong**: `read_library().unwrap_or(LibraryData::empty())` after initialization.
 
-**Correct**: return `LibraryData { books: vec![] }` for a missing file. See `read_library`.
+**Correct**: initialization alone creates the first empty versioned file. Runtime reads propagate `StorageIo` / `StorageCorrupt` so existing data is never overwritten by an empty fallback.
 
 ### Writing library.json without creating the directory first
 
-`write_library` calls `std::fs::create_dir_all(&dir)` before writing. Any new write path must ensure the parent directory exists.
+Initialization creates and validates real (non-symlink) storage directories. Any new internal path must be derived from the trusted root, validate its identifier, verify its direct parent, and use the atomic writer.

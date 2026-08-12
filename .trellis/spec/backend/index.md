@@ -16,7 +16,7 @@ Litera's backend is a Tauri v2 Rust application (`src-tauri/`) with a Node.js si
 |-------|-------------|
 | [Directory Structure](./directory-structure.md) | Module organization: `src-tauri/`, `sidecar/`, capabilities |
 | [Database Guidelines](./database-guidelines.md) | library.json file storage, in-memory FTS5, JSONL sessions |
-| [Error Handling](./error-handling.md) | `Result<T, String>` returns, Tauri deadlock avoidance |
+| [Error Handling](./error-handling.md) | Structured `AppError`, frontend visibility, Tauri deadlock avoidance |
 | [Tauri Commands](./tauri-commands.md) | IPC command contracts (WebView ↔ Rust ↔ sidecar) |
 | [Quality Guidelines](./quality-guidelines.md) | Sidecar stdio JSON lines protocol, process management |
 | [Logging Guidelines](./logging-guidelines.md) | `eprintln!` stderr, sidecar error protocol messages |

@@ -17,10 +17,11 @@ export interface BookRecord {
   settings?: ReadingSettings;
 }
 
-/** Result of importing a book (bytes for frontend metadata extraction + bookId). */
+/** Result of staging an import for frontend metadata extraction. */
 export interface ImportBookResult {
   bytes: number[];
   bookId: string;
+  importId: string;
 }
 
 /** Result of opening a book from the library. */

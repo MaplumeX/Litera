@@ -98,12 +98,14 @@ Reading position and settings persist via the Rust backend, not frontend state:
 
 ```typescript
 // src/App.tsx — debounced persistence
-const persistFraction = useDebouncedCallback((bookId, fraction) => {
-  void invoke("update_reading_state", { bookId, lastFraction: fraction }).catch(() => {});
-}, 500);
+const persistFraction = useDebouncedCallback(
+  (bookId, fraction) => invoke("update_reading_state", { bookId, lastFraction: fraction }),
+  500,
+  reportPersistenceError,
+);
 ```
 
-**Pattern**: state change → local `setStyleState` (immediate UI update) → debounced `invoke("update_reading_state")` (persistence). The UI never waits for persistence; failures are silently caught.
+**Pattern**: state change → local state update (immediate UI) → debounced persistence. Timer-triggered failures set a visible inline alert. Return-to-library, book switching, and close request call `flush()` and wait for active writes; a failed navigation flush keeps the reader open. Hook cleanup calls `cancel()` so React StrictMode/unmount cannot replay a stale timer.
 
 ---
 
@@ -113,7 +115,12 @@ const persistFraction = useDebouncedCallback((bookId, fraction) => {
 User action (click, select, type)
   → local setState (immediate render)
   → callback prop → parent setState (if cross-component)
-  → debounced invoke() (persistence, fire-and-forget)
+  → debounced invoke() (background persistence with visible errors)
+
+Navigation / close
+  → flush pending fraction + settings
+  → await active backend transactions
+  → change view / destroy window only after success (close has a bounded timeout)
 
 Tauri event (agent_text_delta, session_switched, etc.)
   → ChatPanel listen() handler → local setState

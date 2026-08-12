@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import { Button } from "@/components/ui/button";
 import {
@@ -18,6 +19,8 @@ import {
   type ReaderStyleState,
 } from "@/lib/reader-styles";
 import type { BookRecord, OpenBookResult } from "@/types/library";
+import { useDebouncedCallback } from "@/lib/use-debounced-callback";
+import { invokeErrorMessage } from "@/lib/app-error";
 
 interface FileData {
   bytes: number[];
@@ -25,21 +28,25 @@ interface FileData {
   bookId: string;
 }
 
-// Debounce helper for persisting reading state.
-function useDebouncedCallback<T extends (...args: never[]) => void>(
-  fn: T,
-  delay: number,
-): T {
-  const ref = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const fnRef = useRef(fn);
-  fnRef.current = fn;
-  return useCallback(
-    (...args: Parameters<T>) => {
-      if (ref.current) clearTimeout(ref.current);
-      ref.current = setTimeout(() => fnRef.current(...args), delay);
-    },
-    [delay],
-  ) as T;
+function PersistenceErrorBanner({
+  message,
+  onDismiss,
+}: {
+  message: string | null;
+  onDismiss: () => void;
+}) {
+  if (!message) return null;
+  return (
+    <div
+      role="alert"
+      className="flex items-center gap-3 border-b border-destructive/40 bg-destructive/10 px-4 py-2 text-sm text-destructive"
+    >
+      <span className="min-w-0 flex-1">阅读状态保存失败：{message}</span>
+      <Button size="sm" variant="ghost" onClick={onDismiss}>
+        关闭
+      </Button>
+    </div>
+  );
 }
 
 function App() {
@@ -54,6 +61,7 @@ function App() {
   const [tocVisible, setTocVisible] = useState(false);
   const [toc, setToc] = useState<TocItem[]>([]);
   const [controlsOpen, setControlsOpen] = useState(false);
+  const [persistenceError, setPersistenceError] = useState<string | null>(null);
   const [styleState, setStyleState] = useState<ReaderStyleState>({
     fontSize: 16,
     fontFamily: "serif",
@@ -61,29 +69,96 @@ function App() {
   });
   const readerRef = useRef<ReaderViewHandle>(null);
   const chatRef = useRef<ChatPanelHandle>(null);
+  const closingRef = useRef(false);
   // Track latest style state so handleBookReady can apply it after renderer mounts.
   const styleStateRef = useRef(styleState);
   styleStateRef.current = styleState;
 
+  const reportPersistenceError = useCallback((error: unknown) => {
+    console.error("Failed to persist reading state:", error);
+    setPersistenceError(invokeErrorMessage(error));
+  }, []);
+
   // Persist reading position (debounced).
-  const persistFraction = useDebouncedCallback((bookId: string, fraction: number) => {
-    void invoke("update_reading_state", { bookId, lastFraction: fraction }).catch(() => {});
-  }, 500);
+  const persistFraction = useDebouncedCallback(
+    async (bookId: string, fraction: number) => {
+      await invoke("update_reading_state", { bookId, lastFraction: fraction });
+    },
+    500,
+    reportPersistenceError,
+  );
 
   // Persist reading settings (debounced).
   const persistSettings = useDebouncedCallback(
-    (bookId: string, state: ReaderStyleState) => {
-      void invoke("update_reading_state", {
+    async (bookId: string, state: ReaderStyleState) => {
+      await invoke("update_reading_state", {
         bookId,
         settings: {
           fontSize: state.fontSize,
           fontFamily: state.fontFamily,
           theme: state.theme,
         },
-      }).catch(() => {});
+      });
     },
     500,
+    reportPersistenceError,
   );
+
+  const flushReadingState = useCallback(
+    async () => {
+      try {
+        await Promise.all([persistFraction.flush(), persistSettings.flush()]);
+      } catch (error) {
+        reportPersistenceError(error);
+        throw error;
+      }
+    },
+    [persistFraction, persistSettings, reportPersistenceError],
+  );
+
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void getCurrentWindow()
+      .onCloseRequested(async (event) => {
+        event.preventDefault();
+        if (closingRef.current) return;
+        closingRef.current = true;
+        let timeout: ReturnType<typeof setTimeout> | undefined;
+        try {
+          const outcome = await Promise.race([
+            flushReadingState().then(() => "flushed" as const),
+            new Promise<"timeout">((resolve) => {
+              timeout = setTimeout(() => resolve("timeout"), 2_000);
+            }),
+          ]);
+          if (outcome === "timeout") {
+            console.warn("Timed out while flushing reading state before close");
+          }
+        } catch (error) {
+          reportPersistenceError(error);
+          closingRef.current = false;
+          return;
+        } finally {
+          if (timeout) clearTimeout(timeout);
+        }
+        try {
+          await getCurrentWindow().destroy();
+        } catch (error) {
+          reportPersistenceError(error);
+          closingRef.current = false;
+        }
+      })
+      .then((cleanup) => {
+        if (disposed) cleanup();
+        else unlisten = cleanup;
+      })
+      .catch((error) => console.error("Failed to register close handler:", error));
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [flushReadingState, reportPersistenceError]);
 
   // Apply styles + persist whenever style state changes.
   useEffect(() => {
@@ -93,6 +168,7 @@ function App() {
 
   const handleOpenBook = useCallback(async (bookId: string) => {
     try {
+      await flushReadingState();
       const result = await invoke<OpenBookResult>("open_book", { bookId });
       setFileData({
         bytes: result.bytes,
@@ -119,25 +195,30 @@ function App() {
       setView("reader");
     } catch (err) {
       console.error("open_book error:", err);
-      alert(`打开书籍失败: ${err}`);
+      alert(`打开书籍失败: ${invokeErrorMessage(err)}`);
     }
-  }, []);
+  }, [flushReadingState]);
 
-  const handleBackToLibrary = useCallback(() => {
+  const handleBackToLibrary = useCallback(async () => {
+    try {
+      await flushReadingState();
+    } catch {
+      return;
+    }
     setView("library");
     setFileData(null);
     setCurrentBook(null);
     setToc([]);
     setTocVisible(false);
     setControlsOpen(false);
-  }, []);
+  }, [flushReadingState]);
 
   const handleRelocate = useCallback(
     (index: number, fraction: number, label?: string) => {
       setProgress({ index, fraction, label });
       // Persist reading position.
       if (fileData?.bookId) {
-        persistFraction(fileData.bookId, fraction);
+        persistFraction.schedule(fileData.bookId, fraction);
       }
     },
     [fileData?.bookId, persistFraction],
@@ -157,7 +238,7 @@ function App() {
     (state: ReaderStyleState) => {
       setStyleState(state);
       if (fileData?.bookId) {
-        persistSettings(fileData.bookId, state);
+        persistSettings.schedule(fileData.bookId, state);
       }
     },
     [fileData?.bookId, persistSettings],
@@ -173,7 +254,11 @@ function App() {
 
   if (view === "library") {
     return (
-      <main className="h-screen bg-background text-foreground">
+      <main className="flex h-screen flex-col bg-background text-foreground">
+        <PersistenceErrorBanner
+          message={persistenceError}
+          onDismiss={() => setPersistenceError(null)}
+        />
         <LibraryView onOpenBook={handleOpenBook} />
       </main>
     );
@@ -181,9 +266,13 @@ function App() {
 
   return (
     <main className="flex h-screen flex-col bg-background text-foreground">
+      <PersistenceErrorBanner
+        message={persistenceError}
+        onDismiss={() => setPersistenceError(null)}
+      />
       {/* Top toolbar */}
       <header className="flex items-center gap-3 border-b px-4 py-2">
-        <Button size="sm" variant="outline" onClick={handleBackToLibrary}>
+        <Button size="sm" variant="outline" onClick={() => void handleBackToLibrary()}>
           ← 书库
         </Button>
         <h1 className="text-lg font-bold">Litera</h1>

@@ -6,14 +6,15 @@
 
 ## Overview
 
-Litera uses simple, string-based error handling throughout. There is no custom error type hierarchy. The key patterns are:
+Litera uses different error contracts at its two backend boundaries:
 
-- **Rust commands**: return `Result<T, String>` — errors are human-readable strings surfaced to the WebView.
+- **Rust library commands**: return `AppResult<T>` with serializable `{ code, message }` errors.
+- **Legacy/non-library Rust commands**: may still return `Result<T, String>` until migrated.
 - **Sidecar**: sends `{ type: "error", message }` protocol messages (never writes to stdout directly).
-- **Frontend**: `try/catch` around `invoke()`, with `console.error` + user-facing `alert()`.
+- **Frontend**: decodes structured invoke errors and makes storage failures visible.
 
 Reference files:
-- `src-tauri/src/lib.rs` — all `#[tauri::command]` functions return `Result<_, String>`
+- `src-tauri/src/error.rs`, `src-tauri/src/library.rs` — `AppError` and library commands
 - `sidecar/index.ts` — `sendError()`, `errorResult()`, catch blocks
 - `src/components/LibraryView.tsx`, `src/App.tsx` — frontend catch blocks
 
@@ -21,48 +22,44 @@ Reference files:
 
 ## Error Types
 
-There are no custom error classes. All errors are `String`:
+Library persistence has an explicit error taxonomy:
 
-- **Rust**: `Result<T, String>` where the `Err` variant is a formatted string like `"Book not found: <id>"`.
+- `Cancelled`, `InvalidInput`, `BookNotFound`, `StorageCorrupt`, `StorageIo`, `RollbackFailed`.
+- **Rust**: `AppResult<T> = Result<T, AppError>`; `AppError` serializes as `{ code, message }`.
 - **Sidecar**: `{ type: "error", message: string }` protocol messages.
-- **Frontend**: `catch (err)` — `err` is `unknown` in TypeScript, typically stringified with `String(err)` or template literals.
+- **Frontend**: `catch (err)` remains `unknown`; use `isInvokeAppError` / `invokeErrorMessage`.
 
 ```rust
-// src-tauri/src/lib.rs
-fn read_library(app: &tauri::AppHandle) -> Result<LibraryData, String> {
-    let content = std::fs::read_to_string(&path)
-        .map_err(|e| format!("Failed to read library.json: {e}"))?;
-    serde_json::from_str::<LibraryData>(&content)
-        .map_err(|e| format!("Failed to parse library.json: {e}"))
-}
+return Err(AppError::storage_corrupt(format!(
+    "Failed to parse library.json: {error}"
+)));
 ```
 
 ---
 
 ## Error Handling Patterns
 
-### Rust: `map_err` to format human-readable strings
+### Rust library: map failures to a stable code with contextual messages
 
 Every fallible operation uses `.map_err(|e| format!("Context: {e}"))` to wrap the underlying error with context:
 
 ```rust
-std::fs::read(&path).map_err(|e| format!("Failed to read epub: {e}"))
-std::fs::create_dir_all(&dir).map_err(|e| format!("Failed to create app data dir: {e}"))
+fs::read(&path).map_err(|error| AppError::storage_io(format!("Failed to read EPUB: {error}")))
 ```
 
 ### Rust: `ok_or` / `ok_or_else` for missing values
 
 ```rust
-let record = lib.books.iter().find(|b| b.id == book_id)
-    .ok_or_else(|| format!("Book not found: {book_id}"))?;
+let record = library.books.iter().find(|book| book.id == book_id)
+    .ok_or_else(|| AppError::book_not_found(book_id))?;
 ```
 
-### Rust: `unwrap_or` for non-fatal fallbacks
+### Rust library: never turn storage failure into empty state
 
-Missing `library.json` or a missing book entry in a read-before-write context uses `unwrap_or` instead of erroring:
+After initialization, a missing, unreadable, malformed, or schema-mismatched `library.json` is an error. Never use `unwrap_or(empty)` in a read-modify-write path; it can overwrite recoverable data.
 
 ```rust
-let mut lib = read_library(&app).unwrap_or(LibraryData { books: vec![] });
+let mut library = self.read_library()?;
 ```
 
 ### Sidecar: `sendError()` for protocol errors
@@ -119,23 +116,27 @@ try {
 }
 ```
 
-### Frontend: silent catch for non-critical persistence
+### Frontend: debounced persistence still surfaces failures
 
-Debounced persistence calls use `.catch(() => {})` — failures are non-fatal:
+Debounced persistence is asynchronous but not silent. The controller reports timer-triggered failures, while `flush()` rejects so navigation/close logic can respond:
 
 ```typescript
 // src/App.tsx
-void invoke("update_reading_state", { bookId, lastFraction: fraction }).catch(() => {});
+const persistFraction = useDebouncedCallback(
+  (bookId, fraction) => invoke("update_reading_state", { bookId, lastFraction: fraction }),
+  500,
+  reportPersistenceError,
+);
 ```
 
 ### Frontend: user-cancel-aware error suppression
 
-File picker cancellation returns `"No file selected"`. The frontend detects and ignores it:
+File picker cancellation returns `{ code: "Cancelled", message: "No file selected" }`. Ignore only the stable code:
 
 ```typescript
 // src/components/LibraryView.tsx
 } catch (err) {
-  if (String(err).includes("No file selected")) {
+  if (isInvokeAppError(err) && err.code === "Cancelled") {
     // User cancelled — no error.
   } else {
     console.error("import error:", err);
@@ -148,11 +149,11 @@ File picker cancellation returns `"No file selected"`. The frontend detects and 
 
 ## API Error Responses
 
-Tauri command errors return `Err(String)` which the frontend receives as a rejected promise. There is no structured error code system — the string is the error. The frontend typically:
+Library Tauri command errors reject with a structured object. The frontend:
 
 1. Logs with `console.error`.
 2. Shows a user-facing message via `alert()` (Chinese UI labels like `打开书籍失败`).
-3. For non-critical operations, silently catches.
+3. Keeps persistence failures visible in an inline alert; `flush()` failure prevents leaving the reader.
 
 ---
 
@@ -172,7 +173,7 @@ Tauri command errors return `Err(String)` which the frontend receives as a rejec
 
 **Wrong**: `.catch(() => {})` on critical operations like `open_book`.
 
-**Correct**: `.catch(() => {})` only for debounced persistence (`update_reading_state`). Critical operations (`open_book`, `import_book`) must `try/catch` and `alert()` the user.
+**Correct**: no library persistence error is swallowed. Timer-triggered debounce errors update visible state; explicit `flush()` calls reject. Critical operations (`open_book`, `import_book`) use `try/catch` and a user-facing message.
 
 ### Throwing from sidecar tool execute
 
