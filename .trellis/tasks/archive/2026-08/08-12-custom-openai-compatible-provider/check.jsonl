@@ -1,0 +1,9 @@
+{"file": ".trellis/spec/backend/tauri-commands.md", "reason": "校验新命令是否遵循 IPC 契约"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "校验 models.json 读写遵循 atomic_write 与严格读写"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "校验错误处理符合 AppError 规范"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "校验 Rust 代码质量与测试覆盖"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "校验 UI 重构符合组件规范"}
+{"file": ".trellis/spec/frontend/hook-guidelines.md", "reason": "校验 hook 扩展符合模式"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "校验类型安全"}
+{"file": ".trellis/tasks/08-12-custom-openai-compatible-provider/prd.md", "reason": "验收基准"}
+{"file": ".trellis/tasks/08-12-custom-openai-compatible-provider/design.md", "reason": "设计契约校验"}

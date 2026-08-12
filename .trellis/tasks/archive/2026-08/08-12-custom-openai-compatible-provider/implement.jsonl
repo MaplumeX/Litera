@@ -1,0 +1,12 @@
+{"file": ".trellis/spec/backend/tauri-commands.md", "reason": "Tauri 命令注册与 IPC 契约规范，新增命令须遵循"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "agent 配置文件存储遵循 atomic_write 与严格读写约定"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Rust 命令错误处理与 AppError 使用规范"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Rust 代码质量与测试要求"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "AgentConfigDialog 重构须遵循 shadcn/ui 与图标按钮规范"}
+{"file": ".trellis/spec/frontend/hook-guidelines.md", "reason": "use-agent-config.ts 扩展须遵循 hook 模式"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "agent-config.ts 类型扩展规范"}
+{"file": "src-tauri/src/agent_config.rs", "reason": "现有 agent 配置读写实现，扩展基准"}
+{"file": "src/types/agent-config.ts", "reason": "现有供应商类型定义，扩展基准"}
+{"file": "src/components/AgentConfigDialog.tsx", "reason": "现有设置对话框，重构基准"}
+{"file": "src/lib/use-agent-config.ts", "reason": "现有配置 hook，扩展基准"}
+{"file": "src-tauri/src/lib.rs", "reason": "Tauri 命令注册入口"}
