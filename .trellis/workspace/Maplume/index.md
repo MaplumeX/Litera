@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 9
+- **Total Sessions**: 10
 - **Last Active**: 2026-08-12
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~198 | Active |
+| `journal-1.md` | ~219 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 10 | 2026-08-12 | Bootstrap spec: fill all backend + frontend guidelines | `b9df4b0` | `main` |
 | 9 | 2026-08-12 | Library & Reader UX Overhaul: parent integration verification | - | `main` |
 | 8 | 2026-08-12 | Reader Enhancement: TOC sidebar, font/theme controls, position restore | `307f23f`, `2c6bef1` | `main` |
 | 7 | 2026-08-12 | Library Management: book library with import/delete/search/persistence | `64e363e`, `6c44ac1`, `120396f` | `main` |

@@ -196,3 +196,24 @@ Parent task 08-12-library-reader-ux integration verification. Both child tasks c
 ### Status
 
 [OK] **Completed**
+
+
+## Session 10: Bootstrap spec: fill all backend + frontend guidelines
+
+**Date**: 2026-08-12
+**Task**: Bootstrap spec: fill all backend + frontend guidelines
+**Branch**: `main`
+
+### Summary
+
+Filled the 5 remaining template spec files with real codebase patterns: database-guidelines (library.json file storage + in-memory FTS5 + JSONL sessions), logging-guidelines (eprintln + sidecar error protocol), hook-guidelines (useDebouncedCallback, ref-stable callbacks, useImperativeHandle, Tauri listen), state-management (local useState + props + Tauri events, no global store), type-safety (Rust serde camelCase contract, foliate.js typing, no any). Rewrote error-handling.md to cover full-stack patterns instead of template stubs. Updated backend + frontend index.md files with accurate descriptions. Archived 00-bootstrap-guidelines task.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b9df4b0` | (see git log) |
+
+### Status
+
+[OK] **Completed**
