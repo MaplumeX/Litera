@@ -143,8 +143,11 @@ useEffect(() => {
 3. Keep a disposed flag. If the listener promise resolves after cleanup, immediately call the returned unlisten function.
 4. Filter live events and snapshots by monotonic `version`, `generation`, and operation correlation in the pure reducer.
 5. Use `bookIdRef` for current-book reads inside stable callbacks; change visible book state in a separate reducer action.
+6. The `book_changed` effect must only `dispatch({ type: "book_changed", bookId })`; it must NOT issue `list_sessions` / `switch_session` / `agent_prompt` or any other sidecar command that depends on `currentBook`. The sidecar's `handleOpenBook` sets `currentBook` asynchronously (it only enters the child-writer queue before `open_book_bytes` returns), so a command sent from the `book_changed` effect can arrive while `currentBook` is still `null` or the previous book and hit `requireCurrentBook`'s `Command does not match the current book`. Session-list refresh, pending-session restore, and the first prompt must be driven by the `book_ready` event instead.
+7. For snapshot hydration during sidecar restart/replay: when `onSnapshot` arrives with `status !== "bookReady"` but carries a `sessionId`, store it in a `pendingRestoreSessionIdRef` and consume it on the next `book_ready` event. Only `switchSession` immediately when `status === "bookReady"`.
+8. Gate `prompt()` with a `statusRef` (latest `state.status`) so it rejects before invoking `agent_prompt` unless `status === "bookReady"`. This is the bridge-layer backstop behind `ChatPanel`'s `bookReady` send-enable check.
 
-Book/session/prompt state must be recoverable from the snapshot and persisted session history. Do not rely on `agent_ready`/`book_ready` UI timing or add multiple per-event listeners again.
+Book/session/prompt state must be recoverable from the snapshot and persisted session history. Do not add multiple per-event listeners, and do not infer readiness from React render timing — the protocol-level `book_ready` event is the only green light for `currentBook`-dependent commands.
 
 ### Pattern: data fetch on mount
 
@@ -195,6 +198,29 @@ useEffect(() => {
 **Wrong**: adding per-event Agent listeners or putting `bookId` itself in the subscription effect dependencies. This causes duplicate listeners during book switches.
 
 **Correct**: use the single `registerAgentSubscription`, refs for changing values, and stable callback dependencies.
+
+### Issuing currentBook-dependent commands from the `book_changed` effect
+
+**Symptom**: opening or switching a book intermittently surfaces `Command does not match the current book` in the AI chat panel.
+
+**Cause**: `open_book_bytes` only confirms the `OpenBook` command entered the sidecar child-writer queue before returning EPUB bytes; it does NOT confirm the sidecar's `SerialDispatcher` has consumed it and set `currentBook`. A `list_sessions` / `switch_session` / `agent_prompt` fired from the `book_changed` effect can arrive while the sidecar's `currentBook` is still `null` or the previous book, so `requireCurrentBook` rejects it.
+
+**Wrong**:
+```typescript
+useEffect(() => {
+  dispatch({ type: "book_changed", bookId });
+  if (bookId) void listSessions();        // races sidecar's async OpenBook handling
+}, [bookId]);
+```
+
+**Correct**: drive session-list refresh and session restore from the `book_ready` event; keep `book_changed` effect command-free.
+```typescript
+useEffect(() => {
+  dispatch({ type: "book_changed", bookId: bookId || null });
+  pendingRestoreSessionIdRef.current = null;
+}, [bookId]);
+// onEvent: event.type === "book_ready" → listSessions() + consume pendingRestoreSessionIdRef
+```
 
 ### Calling foliate.js methods before init() completes
 
