@@ -43,8 +43,16 @@ export function ChatInput({
   useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+    const resize = () => {
+      el.style.height = "auto";
+      el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+    };
+    resize();
+    // Panel width is resizable; scrollHeight changes with wrapping, so
+    // recompute on element resize too, not just on value changes.
+    const observer = new ResizeObserver(resize);
+    observer.observe(el);
+    return () => observer.disconnect();
   }, [value, textareaRef]);
 
   return (
