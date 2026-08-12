@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 13
+- **Total Sessions**: 14
 - **Last Active**: 2026-08-12
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~285 | Active |
+| `journal-1.md` | ~306 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 14 | 2026-08-12 | 现代化阅读器 UI 重构:lucide 图标化 + 进度条集成 | `6297588` | `main` |
 | 13 | 2026-08-12 | Decouple sidecar from host pi: child 2 (config UI) + parent complete | `158a274` | `main` |
 | 12 | 2026-08-12 | Decouple sidecar from host pi: child 1 (agent dir protocol) | `add98b1` | `main` |
 | 11 | 2026-08-12 | 修复 Tauri 运行时完整性 | `321f21b`, `a14cf08`, `3c7b449`, `950fb46` | `main` |

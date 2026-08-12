@@ -283,3 +283,24 @@ Added LLM provider config UI (AgentConfigDialog) and Rust agent_config module (g
 ### Status
 
 [OK] **Completed**
+
+
+## Session 14: 现代化阅读器 UI 重构:lucide 图标化 + 进度条集成
+
+**Date**: 2026-08-12
+**Task**: 现代化阅读器 UI 重构:lucide 图标化 + 进度条集成
+**Branch**: `main`
+
+### Summary
+
+将阅读器界面从文字按钮平铺重构为现代阅读软件形态:顶栏按钮全部 lucide 图标化并按左右分组,删除底栏翻页按钮改用键盘/点击区域翻页,进度条集成进顶栏右侧,聊天面板头部按钮图标化移除 emoji,书库导入按钮加 Plus 图标。引入 9 个 lucide-react 图标。研究并参照 Apple Books/Readwise Reader/微信读书的 UI 模式。npm run build 通过,全量 check 通过。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6297588` | (see git log) |
+
+### Status
+
+[OK] **Completed**
