@@ -165,6 +165,29 @@ Combine font + theme into one CSS string per call. Each style change replaces th
 
 **Caveat**: `view.renderer` is a non-official public field (not documented in foliate.js README). Submodule commit lock mitigates upgrade risk. Fixed-layout epub (foliate-fxl) may not support `setStyles` — MVP targets reflowable only.
 
+### Pattern: auto-growing textarea inside a resizable panel
+
+**Problem**: The chat input auto-grows via `el.style.height = Math.min(el.scrollHeight, 120) + "px"`. `scrollHeight` changes not only with the typed value but also with the element width (line wrapping), and the chat panel width is user-resizable (`react-resizable-panels`). Resizing the panel without typing would leave a stale height.
+
+**Solution**: Recompute height on both value changes and element resizes; disconnect the observer on cleanup.
+
+```typescript
+useEffect(() => {
+  const el = textareaRef.current;
+  if (!el) return;
+  const resize = () => {
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+  };
+  resize();
+  const observer = new ResizeObserver(resize);
+  observer.observe(el);
+  return () => observer.disconnect();
+}, [value]);
+```
+
+See `src/components/chat/ChatInput.tsx`. Do not add a third-party autosize library for this.
+
 ### Pattern: ref-stable callbacks to avoid effect re-runs
 
 **Problem**: A component receives callback props (e.g. `onBookReady`, `onRelocate`) that change identity on every parent render. If these are used in a `useEffect` dependency array (e.g. the file-open effect), the effect re-runs on every parent render — causing the book to re-open repeatedly.
