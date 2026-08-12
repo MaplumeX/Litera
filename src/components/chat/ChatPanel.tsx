@@ -264,7 +264,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
           />
         )}
 
-        <div className="flex-1 space-y-3 overflow-y-auto p-3">
+        <div className="flex-1 space-y-4 overflow-y-auto p-3">
           {configSnapshot && !configSnapshot.configured && (
             <div className="rounded border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-400">
               未配置 LLM provider，请先打开设置。
@@ -280,7 +280,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
           )}
           {state.messages.length === 0 && !error && <EmptyState />}
           {state.messages.map((message, index) => (
-            <div key={index} className="space-y-1">
+            <div key={index}>
               {message.role === "user" && (
                 <MessageBubble message={message} onEdit={handleEdit} />
               )}

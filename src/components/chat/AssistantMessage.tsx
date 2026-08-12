@@ -1,7 +1,7 @@
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Check, Copy } from "lucide-react";
+import { Bot, Check, Copy } from "lucide-react";
 import type { AgentMessage } from "@/types/agent";
 import { ToolCallCard } from "./ToolCallCard";
 
@@ -23,18 +23,32 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
+export function BotAvatar() {
+  return (
+    <div
+      className="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted"
+      aria-hidden="true"
+    >
+      <Bot className="h-4 w-4" />
+    </div>
+  );
+}
+
 export function AssistantMessage({ message }: { message: AgentMessage }) {
   return (
-    <div className="space-y-1">
-      {message.toolCalls?.map((call) => <ToolCallCard key={call.toolCallId} call={call} />)}
-      {message.content && (
-        <div className="group relative">
-          <CopyButton text={message.content} />
-          <div className="prose prose-sm max-w-none dark:prose-invert">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
+    <div className="flex gap-2">
+      <BotAvatar />
+      <div className="min-w-0 max-w-[90%] space-y-1">
+        {message.toolCalls?.map((call) => <ToolCallCard key={call.toolCallId} call={call} />)}
+        {message.content && (
+          <div className="group relative">
+            <CopyButton text={message.content} />
+            <div className="prose prose-sm max-w-none dark:prose-invert">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }
