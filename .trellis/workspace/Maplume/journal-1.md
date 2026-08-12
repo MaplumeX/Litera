@@ -412,3 +412,26 @@ Provider config UX: (1) selecting a custom provider in the dropdown now switches
 ### Status
 
 [OK] **Completed**
+
+
+## Session 20: Migrate AgentConfigDialog to shadcn/ui
+
+**Date**: 2026-08-12
+**Task**: Migrate AgentConfigDialog to shadcn/ui
+**Branch**: `main`
+
+### Summary
+
+Added shadcn dialog/select/input/label components via npx shadcn@latest add. Migrated AgentConfigDialog from native <select>/<input>/<label>/hand-written overlay to shadcn Dialog/Select/Input/Label. Select grouping uses SelectGroup/SelectLabel/SelectSeparator; __add_custom__ sentinel value handled in onValueChange. All interaction logic preserved (select-switch, edit form, empty-key save, auto-close). Updated component-guidelines spec with installed-components registry and select grouping rule. Build + vitest green.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `339e1c2` | (see git log) |
+| `c827c5d` | (see git log) |
+| `e955fd5` | (see git log) |
+
+### Status
+
+[OK] **Completed**
