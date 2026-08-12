@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/08-12-chat-panel-ui-redesign/prd.md", "reason": "验收标准逐条核对依据"}
+{"file": ".trellis/tasks/08-12-chat-panel-ui-redesign/design.md", "reason": "视觉规格与契约不变的核对依据"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "图标按钮/emoji 禁用规范核对"}
+{"file": ".trellis/spec/frontend/hook-guidelines.md", "reason": "ref 与 useImperativeHandle 模式核对(fillInput 契约)"}
