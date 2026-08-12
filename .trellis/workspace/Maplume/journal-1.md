@@ -435,3 +435,24 @@ Added shadcn dialog/select/input/label components via npx shadcn@latest add. Mig
 ### Status
 
 [OK] **Completed**
+
+
+## Session 21: 子任务A：聊天面板消息交互增强
+
+**Date**: 2026-08-12
+**Task**: 子任务A：聊天面板消息交互增强
+**Branch**: `main`
+
+### Summary
+
+实现中止后重试（恢复输入框+ring高亮）、AI回复复制（CopyButton）、用户消息编辑（Pencil按钮填入输入框重发）。仅改 ChatPanel.tsx，测试与构建通过。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9fde500` | (see git log) |
+
+### Status
+
+[OK] **Completed**
