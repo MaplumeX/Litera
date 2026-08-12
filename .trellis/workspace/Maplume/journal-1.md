@@ -477,3 +477,24 @@ Added shadcn dialog/select/input/label components via npx shadcn@latest add. Mig
 ### Status
 
 [OK] **Completed**
+
+
+## Session 23: 子任务C：主题与设置入口统一化
+
+**Date**: 2026-08-12
+**Task**: 子任务C：主题与设置入口统一化
+**Branch**: `main`
+
+### Summary
+
+主题从按书保存改为全局偏好(preferences.json)，应用到<html>使Portal Dialog也能继承CSS变量。新增sepia外壳配色、SettingsDialog统一入口(阅读偏好+AI配置)，书库页/阅读器页/ChatPanel三处入口统一。删除ReaderControls.tsx。新增Rust preferences.rs(8测试)。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `13fb954` | (see git log) |
+
+### Status
+
+[OK] **Completed**
