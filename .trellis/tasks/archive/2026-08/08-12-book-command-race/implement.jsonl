@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/frontend/hook-guidelines.md", "reason": "useAgentBridge 订阅/ref-stable callback/单 listener 模式的权威约束,改动 bridge 必须遵循"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "book_changed reducer 行为、乐观 session_created 语义、agent 事件状态门控规则"}
+{"file": ".trellis/spec/backend/tauri-commands.md", "reason": "Sidecar 命令契约:open_book_bytes 时序、book_ready 启用输入、correlation 不匹配不 mutate、Good/Base/Bad 场景"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "前端 catch / invoke 错误展示与 sidecar sendError 约定"}
