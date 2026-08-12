@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 16
+- **Total Sessions**: 17
 - **Last Active**: 2026-08-12
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~348 | Active |
+| `journal-1.md` | ~369 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 17 | 2026-08-12 | Fix new session not appearing in list | `02d36ec` | `main` |
 | 16 | 2026-08-12 | Fix prompt context injection polluting user messages | `04bcc0e` | `main` |
 | 15 | 2026-08-12 | 支持自定义 OpenAI 兼容供应商 | `bdff16d` | `main` |
 | 14 | 2026-08-12 | 现代化阅读器 UI 重构:lucide 图标化 + 进度条集成 | `6297588` | `main` |

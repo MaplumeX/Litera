@@ -346,3 +346,24 @@ Replaced buildPromptWithContext (which concatenated context into user text, poll
 ### Status
 
 [OK] **Completed**
+
+
+## Session 17: Fix new session not appearing in list
+
+**Date**: 2026-08-12
+**Task**: Fix new session not appearing in list
+**Branch**: `main`
+
+### Summary
+
+Fixed new session not appearing in the session list after clicking 'New Session'. The root cause was that session_created triggered a listSessions() call that returned a disk list missing the not-yet-persisted session, which then overwrote the optimistic entry. Fix: (1) added upsertSession helper to agent-reducer that optimistically inserts the new session on session_created, (2) removed the listSessions() call on session_created in use-agent-bridge so the optimistic entry survives until the next real list refresh (prompt_end). Added tests for optimistic insert, dedupe, and book mismatch.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `02d36ec` | (see git log) |
+
+### Status
+
+[OK] **Completed**
