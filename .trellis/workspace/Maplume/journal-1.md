@@ -325,3 +325,24 @@ Added LLM provider config UI (AgentConfigDialog) and Rust agent_config module (g
 ### Status
 
 [OK] **Completed**
+
+
+## Session 16: Fix prompt context injection polluting user messages
+
+**Date**: 2026-08-12
+**Task**: Fix prompt context injection polluting user messages
+**Branch**: `main`
+
+### Summary
+
+Replaced buildPromptWithContext (which concatenated context into user text, polluting session history) with sendCustomMessage nextTurn aside injection. User messages now store only raw input; chapter index/selection context is delivered to the model as an aside. Deleted buildPromptWithContext and orphaned PromptContext import. Added spec convention to quality-guidelines.md.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `04bcc0e` | (see git log) |
+
+### Status
+
+[OK] **Completed**
