@@ -548,3 +548,26 @@ Planned (PRD/design/implement), implemented, and checked the reading-assistant c
 ### Status
 
 [OK] **Completed**
+
+
+## Session 26: Separate chat and library settings
+
+**Date**: 2026-08-13
+**Task**: Separate chat and library settings
+**Branch**: `main`
+
+### Summary
+
+Chat panel gear now opens only AgentConfigDialog (LLM settings). Library gear and reader Aa still open SettingsDialog. Removed ChatPanel onOpenSettings and the void ?? fallback that opened both dialogs. Spec records settings entry ownership.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9d77cb1` | (see git log) |
+| `abe063b` | (see git log) |
+| `5453976` | (see git log) |
+
+### Status
+
+[OK] **Completed**
