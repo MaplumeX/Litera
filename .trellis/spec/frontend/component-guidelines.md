@@ -101,3 +101,40 @@ import { convertFileSrc } from "@tauri-apps/api/core"
 ```
 
 Requires `assetProtocol.enable = true` + `scope` in `tauri.conf.json`, and `img-src` CSP must include `asset:` and `http://asset.localhost`.
+
+### Inject font/theme CSS via view.renderer.setStyles
+
+**Problem**: Need to apply font family, font size, and theme colors to the EPUB content rendered inside foliate.js iframes, persisting across section changes.
+
+**Solution**: `view.renderer.setStyles(css)` is a foliate.js Paginator built-in method. It stores the CSS string and automatically reapplies it on every section load (`#onLoad` calls `this.setStyles(this.#styles)`). No need to manually listen to `load` events.
+
+```typescript
+// view.renderer is a public field (not #private) on the View class
+const css = `html, body {
+  font-family: ${fontFamily};
+  font-size: ${fontSize}px !important;
+  ${themeColors}
+}`
+// Apply once — Paginator re-applies on every section change automatically
+;(viewRef.current as any).renderer.setStyles(css)
+```
+
+Combine font + theme into one CSS string per call. Each style change replaces the full stylesheet (not additive).
+
+**Caveat**: `view.renderer` is a non-official public field (not documented in foliate.js README). Submodule commit lock mitigates upgrade risk. Fixed-layout epub (foliate-fxl) may not support `setStyles` — MVP targets reflowable only.
+
+### Pattern: ref-stable callbacks to avoid effect re-runs
+
+**Problem**: A component receives callback props (e.g. `onBookReady`, `onRelocate`) that change identity on every parent render. If these are used in a `useEffect` dependency array (e.g. the file-open effect), the effect re-runs on every parent render — causing the book to re-open repeatedly.
+
+**Solution**: Store the latest callback in a ref updated on every render, and call it from a stable event handler. The effect dependency array stays empty (or only `fileData`).
+
+```typescript
+const onBookReadyRef = useRef(onBookReady)
+onBookReadyRef.current = onBookReady  // update every render
+
+useEffect(() => {
+  // ... open book ...
+  onBookReadyRef.current?.(toc)  // call latest without re-triggering effect
+}, [fileData])  // not [fileData, onBookReady]
+```
