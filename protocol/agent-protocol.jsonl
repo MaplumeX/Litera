@@ -4,6 +4,7 @@
 {"direction":"command","message":{"protocolVersion":1,"type":"prompt","requestId":"req-prompt-1","promptId":"prompt-1","bookId":"book-a","text":"What is this chapter about?","context":{"selection":"selected text","chapterIndex":3}}}
 {"direction":"command","message":{"protocolVersion":1,"type":"abort","requestId":"req-abort-1","promptId":"prompt-1"}}
 {"direction":"command","message":{"protocolVersion":1,"type":"switch_session","requestId":"req-switch-1","bookId":"book-a","sessionId":"session-1"}}
+{"direction":"command","message":{"protocolVersion":1,"type":"rename_session","requestId":"rename-1","bookId":"book-1","sessionId":"session-1","title":"My Reading Notes"}}
 {"direction":"event","message":{"protocolVersion":1,"seq":1,"type":"ready"}}
 {"direction":"event","message":{"protocolVersion":1,"seq":2,"type":"book_ready","requestId":"req-open-1","bookId":"book-a"}}
 {"direction":"event","message":{"protocolVersion":1,"seq":3,"type":"prompt_started","requestId":"req-prompt-1","bookId":"book-a","sessionId":"session-1","promptId":"prompt-1"}}
@@ -13,3 +14,4 @@
 {"direction":"event","message":{"protocolVersion":1,"seq":7,"type":"prompt_end","bookId":"book-a","sessionId":"session-1","promptId":"prompt-1"}}
 {"direction":"event","message":{"protocolVersion":1,"seq":8,"type":"sessions_list","requestId":"req-list-1","bookId":"book-a","sessions":[{"id":"session-1","title":"Question","createdAt":"2026-08-12T00:00:00.000Z","updatedAt":"2026-08-12T00:01:00.000Z"}]}}
 {"direction":"event","message":{"protocolVersion":1,"seq":9,"type":"error","requestId":"req-list-2","bookId":"book-b","scope":"list_sessions","message":"Unable to list sessions","recoverable":true}}
+{"direction":"event","message":{"protocolVersion":1,"seq":10,"type":"session_renamed","requestId":"rename-1","bookId":"book-1","sessionId":"session-1","title":"My Reading Notes"}}

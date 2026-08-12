@@ -91,6 +91,7 @@ pub fn run() {
             sidecar::new_session,
             sidecar::switch_session,
             sidecar::delete_session,
+            sidecar::rename_session,
             sidecar::close_book,
             sidecar::restart_sidecar,
             agent_config::get_agent_config,

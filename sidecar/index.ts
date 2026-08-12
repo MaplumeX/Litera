@@ -24,6 +24,7 @@ import {
   encodeEvent,
   parseCommandLine,
   ProtocolDecodeError,
+  MAX_SESSION_TITLE_LENGTH,
   type SerializedMessage,
   type SerializedToolCall,
   type SidecarCommand,
@@ -530,6 +531,22 @@ async function handleDeleteSession(command: Extract<SidecarCommand, { type: "del
   });
 }
 
+async function handleRenameSession(command: Extract<SidecarCommand, { type: "rename_session" }>): Promise<void> {
+  requireCurrentBook(command.bookId);
+  let managed = sessions.get(command.sessionId);
+  if (managed && managed.bookId !== command.bookId) managed = undefined;
+  managed ??= await loadSessionFromDisk(command.sessionId, command.bookId) ?? undefined;
+  if (!managed) throw new Error("Session not found for the current book");
+  managed.session.sessionManager.appendSessionInfo(command.title);
+  sendEvent({
+    type: "session_renamed",
+    requestId: command.requestId,
+    bookId: command.bookId,
+    sessionId: command.sessionId,
+    title: command.title,
+  });
+}
+
 async function removeSessionFile(path: string): Promise<void> {
   try {
     await unlink(path);
@@ -639,6 +656,9 @@ async function handleStateCommand(command: SidecarCommand): Promise<void> {
       break;
     case "delete_session":
       await handleDeleteSession(command);
+      break;
+    case "rename_session":
+      await handleRenameSession(command);
       break;
     case "ping":
     case "abort":

@@ -968,6 +968,17 @@ fn command_correlation(command: &SidecarCommand) -> CommandCorrelation {
             session_id: Some(session_id.clone()),
             prompt_id: None,
         },
+        SidecarCommand::RenameSession {
+            request_id,
+            book_id,
+            session_id,
+            ..
+        } => CommandCorrelation {
+            request_id: request_id.clone(),
+            book_id: Some(book_id.clone()),
+            session_id: Some(session_id.clone()),
+            prompt_id: None,
+        },
     }
 }
 
@@ -1101,6 +1112,27 @@ pub fn delete_session(
         request_id: request_id.clone(),
         book_id,
         session_id,
+    })?;
+    Ok(CommandReceipt {
+        request_id,
+        prompt_id: None,
+    })
+}
+
+#[tauri::command]
+pub fn rename_session(
+    book_id: String,
+    session_id: String,
+    title: String,
+    request_id: Option<String>,
+    supervisor: tauri::State<'_, SidecarSupervisor>,
+) -> Result<CommandReceipt, String> {
+    let request_id = normalize_request_id(request_id, "rename-session");
+    supervisor.send(SidecarCommand::RenameSession {
+        request_id: request_id.clone(),
+        book_id,
+        session_id,
+        title,
     })?;
     Ok(CommandReceipt {
         request_id,

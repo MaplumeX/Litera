@@ -79,6 +79,7 @@ export type AgentEvent = EventEnvelope & (
   | ({ type: "session_created" } & BookCorrelation & { sessionId: string } & RequestCorrelation)
   | ({ type: "session_switched"; messages: AgentMessage[] } & BookCorrelation & { sessionId: string } & RequestCorrelation)
   | ({ type: "session_deleted" } & BookCorrelation & { sessionId: string } & RequestCorrelation)
+  | ({ type: "session_renamed"; title: string } & BookCorrelation & { sessionId: string } & RequestCorrelation)
   | ({ type: "sessions_list"; sessions: AgentSessionSummary[] } & BookCorrelation & RequestCorrelation)
   | ({ type: "error" } & AgentError)
   | { type: "supervisor_status"; status: AgentStatus; message?: string }

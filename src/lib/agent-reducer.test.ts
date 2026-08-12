@@ -245,4 +245,52 @@ describe("agentReducer", () => {
     expect(state.sessions).toEqual([]);
     expect(state.sessionId).toBeNull();
   });
+
+  it("updates title and preserves createdAt on session_renamed", () => {
+    let state = createAgentState("book-a");
+    state = agentReducer(state, { type: "session_list_requested", requestId: "list-1" });
+    state = reduce(state, {
+      version: 1,
+      seq: 1,
+      type: "sessions_list",
+      requestId: "list-1",
+      bookId: "book-a",
+      sessions: [{ id: "session-1", title: "Old Title", createdAt: "2024-01-01T00:00:00.000Z", updatedAt: "2024-01-01T00:01:00.000Z" }],
+    });
+    state = reduce(state, {
+      version: 2,
+      seq: 2,
+      type: "session_renamed",
+      requestId: "rename-1",
+      bookId: "book-a",
+      sessionId: "session-1",
+      title: "New Title",
+    });
+    expect(state.sessions).toEqual([
+      { id: "session-1", title: "New Title", createdAt: "2024-01-01T00:00:00.000Z", updatedAt: expect.any(String) },
+    ]);
+  });
+
+  it("ignores session_renamed from another book", () => {
+    let state = createAgentState("book-a");
+    state = agentReducer(state, { type: "session_list_requested", requestId: "list-1" });
+    state = reduce(state, {
+      version: 1,
+      seq: 1,
+      type: "sessions_list",
+      requestId: "list-1",
+      bookId: "book-a",
+      sessions: [{ id: "session-1", title: "Old Title", createdAt: "2024-01-01T00:00:00.000Z", updatedAt: "2024-01-01T00:01:00.000Z" }],
+    });
+    state = reduce(state, {
+      version: 2,
+      seq: 2,
+      type: "session_renamed",
+      requestId: "rename-1",
+      bookId: "book-b",
+      sessionId: "session-1",
+      title: "New Title",
+    });
+    expect(state.sessions[0].title).toBe("Old Title");
+  });
 });

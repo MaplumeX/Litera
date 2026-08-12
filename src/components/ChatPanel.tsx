@@ -78,6 +78,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       deleteSession,
       newSession,
       prompt,
+      renameSession,
       restart,
       switchSession,
     } = bridge;
@@ -91,6 +92,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     const [submitting, setSubmitting] = useState(false);
     const [invokeError, setInvokeError] = useState<string | null>(null);
     const [retryHighlight, setRetryHighlight] = useState(false);
+    const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+    const [editingTitle, setEditingTitle] = useState("");
     const { snapshot: configSnapshot, load: loadConfig } = useAgentConfig();
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -208,6 +211,21 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       inputRef.current?.focus();
     }, [currentChapterIndex]);
 
+    const handleRenameSave = useCallback(async (sessionId: string) => {
+      const title = editingTitle.trim();
+      if (!title) {
+        setEditingSessionId(null);
+        return;
+      }
+      setInvokeError(null);
+      try {
+        await renameSession(sessionId, title);
+        setEditingSessionId(null);
+      } catch (error) {
+        setInvokeError(String(error));
+      }
+    }, [editingTitle, renameSession]);
+
     const fillInput = useCallback((text: string, chapterIndex: number) => {
       setPendingSelection({ text, chapterIndex });
       setInput("");
@@ -298,30 +316,74 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                     state.sessionId === session.id && "bg-muted",
                   )}
                 >
-                  <button
-                    className="flex-1 truncate text-left disabled:opacity-50"
-                    onClick={() => {
-                      setInvokeError(null);
-                      void switchSession(session.id).catch((error) => setInvokeError(String(error)));
-                    }}
-                    title={session.title}
-                    disabled={isStreaming}
-                  >
-                    <div className="truncate font-medium">{session.title}</div>
-                    <div className="text-xs text-muted-foreground">
-                      {new Date(session.updatedAt).toLocaleString()}
-                    </div>
-                  </button>
-                  <button
-                    className="px-1 text-xs text-destructive opacity-0 hover:underline disabled:opacity-30 group-hover:opacity-100"
-                    onClick={() => {
-                      setInvokeError(null);
-                      void deleteSession(session.id).catch((error) => setInvokeError(String(error)));
-                    }}
-                    disabled={isStreaming}
-                  >
-                    删除
-                  </button>
+                  {editingSessionId === session.id ? (
+                    <>
+                      <input
+                        className="flex-1 rounded border bg-background px-1 py-0.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                        value={editingTitle}
+                        onChange={(event) => setEditingTitle(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            void handleRenameSave(session.id);
+                          } else if (event.key === "Escape") {
+                            setEditingSessionId(null);
+                          }
+                        }}
+                        autoFocus
+                      />
+                      <button
+                        className="px-1 text-xs text-primary hover:underline"
+                        onClick={() => void handleRenameSave(session.id)}
+                      >
+                        保存
+                      </button>
+                      <button
+                        className="px-1 text-xs text-muted-foreground hover:underline"
+                        onClick={() => setEditingSessionId(null)}
+                      >
+                        取消
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        className="flex-1 truncate text-left disabled:opacity-50"
+                        onClick={() => {
+                          setInvokeError(null);
+                          void switchSession(session.id).catch((error) => setInvokeError(String(error)));
+                        }}
+                        title={session.title}
+                        disabled={isStreaming}
+                      >
+                        <div className="truncate font-medium">{session.title}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {new Date(session.updatedAt).toLocaleString()}
+                        </div>
+                      </button>
+                      <button
+                        className="px-1 text-muted-foreground opacity-0 hover:text-primary disabled:opacity-30 group-hover:opacity-100"
+                        onClick={() => {
+                          setEditingSessionId(session.id);
+                          setEditingTitle(session.title);
+                        }}
+                        disabled={isStreaming}
+                        aria-label="重命名"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        className="px-1 text-xs text-destructive opacity-0 hover:underline disabled:opacity-30 group-hover:opacity-100"
+                        onClick={() => {
+                          setInvokeError(null);
+                          void deleteSession(session.id).catch((error) => setInvokeError(String(error)));
+                        }}
+                        disabled={isStreaming}
+                      >
+                        删除
+                      </button>
+                    </>
+                  )}
                 </div>
               ))}
             </div>

@@ -8,6 +8,7 @@ pub const MAX_PROMPT_LENGTH: usize = 64 * 1024;
 pub const MAX_SELECTION_LENGTH: usize = 64 * 1024;
 const MAX_MESSAGE_CONTENT_LENGTH: usize = MAX_PROMPT_LENGTH * 4;
 const MAX_SESSION_TITLE_LENGTH: usize = 1024;
+const MAX_RENAME_TITLE_LENGTH: usize = 128;
 const MAX_TIMESTAMP_LENGTH: usize = 128;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -90,6 +91,15 @@ pub enum SidecarCommand {
         book_id: String,
         #[serde(rename = "sessionId")]
         session_id: String,
+    },
+    RenameSession {
+        #[serde(rename = "requestId")]
+        request_id: String,
+        #[serde(rename = "bookId")]
+        book_id: String,
+        #[serde(rename = "sessionId")]
+        session_id: String,
+        title: String,
     },
 }
 
@@ -224,6 +234,15 @@ pub enum SidecarEvent {
         book_id: String,
         #[serde(rename = "sessionId")]
         session_id: String,
+    },
+    SessionRenamed {
+        #[serde(rename = "requestId", skip_serializing_if = "Option::is_none")]
+        request_id: Option<String>,
+        #[serde(rename = "bookId")]
+        book_id: String,
+        #[serde(rename = "sessionId")]
+        session_id: String,
+        title: String,
     },
     SessionsList {
         #[serde(rename = "requestId", skip_serializing_if = "Option::is_none")]
@@ -444,6 +463,17 @@ impl CommandEnvelope {
                 validate_id("bookId", book_id)?;
                 validate_id("sessionId", session_id)
             }
+            SidecarCommand::RenameSession {
+                request_id,
+                book_id,
+                session_id,
+                title,
+            } => {
+                validate_id("requestId", request_id)?;
+                validate_id("bookId", book_id)?;
+                validate_id("sessionId", session_id)?;
+                validate_text("title", title, MAX_RENAME_TITLE_LENGTH)
+            }
         }
     }
 }
@@ -549,6 +579,17 @@ impl EventEnvelope {
                 validate_optional_id("requestId", request_id)?;
                 validate_id("bookId", book_id)?;
                 validate_id("sessionId", session_id)
+            }
+            SidecarEvent::SessionRenamed {
+                request_id,
+                book_id,
+                session_id,
+                title,
+            } => {
+                validate_optional_id("requestId", request_id)?;
+                validate_id("bookId", book_id)?;
+                validate_id("sessionId", session_id)?;
+                validate_text("title", title, MAX_RENAME_TITLE_LENGTH)
             }
             SidecarEvent::SessionSwitched {
                 request_id,

@@ -197,6 +197,20 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
         messages: base.sessionId === event.sessionId ? [] : base.messages,
         sessions: base.sessions.filter((session) => session.id !== event.sessionId),
       };
+    case "session_renamed":
+      if (!matchesBook(base, event.bookId)) return base;
+      return {
+        ...base,
+        sessions: upsertSession(base.sessions, {
+          ...base.sessions.find((session) => session.id === event.sessionId) ?? {
+            id: event.sessionId,
+            title: event.title,
+            createdAt: new Date().toISOString(),
+          },
+          title: event.title,
+          updatedAt: new Date().toISOString(),
+        }),
+      };
     case "sessions_list":
       if (!matchesBook(base, event.bookId) || event.requestId !== base.sessionListRequestId) return base;
       return { ...base, sessions: event.sessions, sessionListRequestId: null };

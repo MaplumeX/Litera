@@ -3,6 +3,7 @@ export const MAX_JSONL_BYTES = 1024 * 1024;
 export const MAX_ID_LENGTH = 128;
 export const MAX_PROMPT_LENGTH = 64 * 1024;
 export const MAX_SELECTION_LENGTH = 64 * 1024;
+export const MAX_SESSION_TITLE_LENGTH = 128;
 
 export interface PromptContext {
   selection?: string;
@@ -19,7 +20,8 @@ export type SidecarCommand =
   | { protocolVersion: 1; type: "list_sessions"; requestId: string; bookId: string }
   | { protocolVersion: 1; type: "new_session"; requestId: string; bookId: string }
   | { protocolVersion: 1; type: "switch_session"; requestId: string; bookId: string; sessionId: string }
-  | { protocolVersion: 1; type: "delete_session"; requestId: string; bookId: string; sessionId: string };
+  | { protocolVersion: 1; type: "delete_session"; requestId: string; bookId: string; sessionId: string }
+  | { protocolVersion: 1; type: "rename_session"; requestId: string; bookId: string; sessionId: string; title: string };
 
 export interface SessionSummary {
   id: string;
@@ -62,6 +64,7 @@ export type SidecarEvent = EventBase & (
   | ({ type: "session_created" } & BookCorrelation & { sessionId: string } & RequestCorrelation)
   | ({ type: "session_switched"; messages: SerializedMessage[] } & BookCorrelation & { sessionId: string } & RequestCorrelation)
   | ({ type: "session_deleted" } & BookCorrelation & { sessionId: string } & RequestCorrelation)
+  | ({ type: "session_renamed"; title: string } & BookCorrelation & { sessionId: string } & RequestCorrelation)
   | ({ type: "sessions_list"; sessions: SessionSummary[] } & BookCorrelation & RequestCorrelation)
   | ({
       type: "error";
@@ -177,6 +180,15 @@ export function decodeCommand(value: unknown): SidecarCommand {
         bookId: requiredString(input.bookId, "bookId"),
         sessionId: requiredString(input.sessionId, "sessionId"),
       };
+    case "rename_session":
+      return {
+        protocolVersion,
+        type,
+        requestId,
+        bookId: requiredString(input.bookId, "bookId"),
+        sessionId: requiredString(input.sessionId, "sessionId"),
+        title: requiredString(input.title, "title", MAX_SESSION_TITLE_LENGTH),
+      };
     default:
       throw new ProtocolDecodeError(`Unknown command type: ${type}`);
   }
@@ -277,6 +289,16 @@ export function decodeEvent(value: unknown): SidecarEvent {
     case "session_created":
     case "session_deleted":
       return { protocolVersion, seq, type, requestId, bookId: bookId(), sessionId: sessionId() };
+    case "session_renamed":
+      return {
+        protocolVersion,
+        seq,
+        type,
+        requestId,
+        bookId: bookId(),
+        sessionId: sessionId(),
+        title: requiredString(input.title, "title", MAX_SESSION_TITLE_LENGTH),
+      };
     case "session_switched":
       return {
         protocolVersion,

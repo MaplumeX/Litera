@@ -134,6 +134,17 @@ export function useAgentBridge(bookId: string) {
     });
   }, []);
 
+  const renameSession = useCallback(async (sessionId: string, title: string) => {
+    const currentBookId = bookIdRef.current;
+    if (!currentBookId) return;
+    await invoke<CommandReceipt>("rename_session", {
+      bookId: currentBookId,
+      sessionId,
+      title,
+      requestId: id("rename-session"),
+    });
+  }, []);
+
   const restart = useCallback(async () => {
     await invoke("restart_sidecar");
   }, []);
@@ -146,6 +157,7 @@ export function useAgentBridge(bookId: string) {
     newSession,
     switchSession,
     deleteSession,
+    renameSession,
     restart,
   };
 }

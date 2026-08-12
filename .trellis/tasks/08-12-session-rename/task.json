@@ -3,7 +3,7 @@
   "name": "session-rename",
   "title": "会话重命名",
   "description": "13 会话重命名：sidecar 协议扩展 + 前端 UI",
-  "status": "planning",
+  "status": "in_progress",
   "dev_type": null,
   "scope": null,
   "package": null,
