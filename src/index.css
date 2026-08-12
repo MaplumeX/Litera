@@ -156,3 +156,20 @@
     @apply bg-background text-foreground;
   }
 }
+
+@keyframes chat-typing {
+  0%,
+  60%,
+  100% {
+    opacity: 0.25;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+}
+
+.chat-typing-dot {
+  animation: chat-typing 1.2s ease-in-out infinite;
+}

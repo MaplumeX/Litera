@@ -4,6 +4,7 @@ import remarkGfm from "remark-gfm";
 import { Bot, Check, Copy } from "lucide-react";
 import type { AgentMessage } from "@/types/agent";
 import { ToolCallCard } from "./ToolCallCard";
+import { TypingIndicator } from "./TypingIndicator";
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
@@ -34,17 +35,26 @@ export function BotAvatar() {
   );
 }
 
-export function AssistantMessage({ message }: { message: AgentMessage }) {
+interface AssistantMessageProps {
+  message: AgentMessage;
+  streaming?: boolean;
+}
+
+export function AssistantMessage({ message, streaming = false }: AssistantMessageProps) {
   return (
     <div className="flex gap-2">
       <BotAvatar />
       <div className="min-w-0 max-w-[90%] space-y-1">
+        {streaming && <TypingIndicator />}
         {message.toolCalls?.map((call) => <ToolCallCard key={call.toolCallId} call={call} />)}
         {message.content && (
           <div className="group relative">
             <CopyButton text={message.content} />
             <div className="prose prose-sm max-w-none dark:prose-invert">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
+              {streaming && (
+                <span className="ml-0.5 inline-block h-4 w-2 animate-pulse bg-primary/70" />
+              )}
             </div>
           </div>
         )}

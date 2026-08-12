@@ -13,10 +13,11 @@ import { useAgentConfig } from "@/lib/use-agent-config";
 import { AgentConfigDialog } from "@/components/AgentConfigDialog";
 import type { AgentMessage } from "@/types/agent";
 import { MessageBubble } from "./MessageBubble";
-import { AssistantMessage } from "./AssistantMessage";
+import { AssistantMessage, BotAvatar } from "./AssistantMessage";
 import { ChatInput } from "./ChatInput";
 import { EmptyState } from "./EmptyState";
 import { SessionList } from "./SessionList";
+import { TypingIndicator } from "./TypingIndicator";
 
 export interface ChatPanelHandle {
   fillInput: (text: string, chapterIndex: number) => void;
@@ -63,6 +64,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     const isStreaming = submitting || state.status === "prompting";
     const bookReady = state.status === "bookReady" || state.status === "prompting";
     const error = invokeError ?? state.error?.message ?? null;
+    const lastMessage = state.messages[state.messages.length - 1];
 
     useEffect(() => {
       void loadConfig();
@@ -299,10 +301,19 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                 <MessageBubble message={message} onEdit={handleEdit} />
               )}
               {message.role === "assistant" && (
-                <AssistantMessage message={message} />
+                <AssistantMessage
+                  message={message}
+                  streaming={isStreaming && index === state.messages.length - 1}
+                />
               )}
             </div>
           ))}
+          {isStreaming && (!lastMessage || lastMessage.role === "user") && (
+            <div className="flex gap-2">
+              <BotAvatar />
+              <TypingIndicator />
+            </div>
+          )}
           {error && (
             <div className="rounded border border-destructive/50 bg-destructive/10 px-2 py-1 text-xs text-destructive">
               ⚠ {error}
