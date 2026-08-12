@@ -1,0 +1,30 @@
+{
+  "id": "fix-tauri-runtime-integrity",
+  "name": "fix-tauri-runtime-integrity",
+  "title": "修复 Tauri 并发、持久化与 Sidecar 问题",
+  "description": "修复 Tauri 书库数据安全、sidecar 并发状态、事件生命周期、可移植发布和大型 EPUB IPC 问题。",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "Maplume",
+  "assignee": "Maplume",
+  "createdAt": "2026-08-12",
+  "completedAt": "2026-08-12",
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "08-12-fix-library-persistence-safety",
+    "08-12-fix-sidecar-state-protocol",
+    "08-12-fix-sidecar-packaging-ipc"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

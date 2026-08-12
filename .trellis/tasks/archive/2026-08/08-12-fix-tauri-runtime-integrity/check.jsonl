@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "最终集成审查需要验证所有跨层字段和数据流。"}
+{"file": ".trellis/spec/backend/tauri-commands.md", "reason": "核对最终 Tauri IPC 命令与存储契约。"}
+{"file": ".trellis/spec/frontend/hook-guidelines.md", "reason": "核对事件监听与 debounce 生命周期。"}
