@@ -571,3 +571,25 @@ Chat panel gear now opens only AgentConfigDialog (LLM settings). Library gear an
 ### Status
 
 [OK] **Completed**
+
+
+## Session 27: Inject book snapshot aside
+
+**Date**: 2026-08-13
+**Task**: Inject book snapshot aside
+**Branch**: `main`
+
+### Summary
+
+New sessions receive a hidden first-turn bookSnapshot aside (metadata + truncated TOC) so the agent no longer needs get_book_metadata/get_toc before answering. Tools remain as fallbacks; spec records the nextTurn convention.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b89dbbd` | (see git log) |
+| `3176a32` | (see git log) |
+
+### Status
+
+[OK] **Completed**
