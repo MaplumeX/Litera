@@ -64,6 +64,39 @@ import { ChevronLeft, List, Settings } from "lucide-react"
 - Group related icon buttons in a `<div className="flex items-center gap-1">` container.
 - Active/pressed states use `variant="secondary"` (background highlight); inactive uses `variant="ghost"`.
 
+### Convention: Settings entry ownership
+
+**What**: General settings and LLM settings are different dialogs with different owners.
+
+| Entry | Owner / state | Dialog |
+|---|---|---|
+| Library gear | `App` `settingsOpen` via `LibraryView.onOpenSettings` | `SettingsDialog` (reading prefs + "打开 AI 配置") |
+| Reader toolbar Aa (`aria-label="字体与主题"`) | `App` `settingsOpen` | `SettingsDialog` |
+| Chat panel gear / "打开设置" banner | `ChatPanel` local `showConfig` | `AgentConfigDialog` only |
+
+**Why**: Passing `onOpenSettings={() => setSettingsOpen(true)}` into `ChatPanel` made the chat gear open the general dialog. Combined with `onOpenSettings?.() ?? setShowConfig(true)`, both dialogs opened on one click.
+
+**Rule**: Do not add an `onOpenSettings` callback to `ChatPanel`. Chat settings stay local.
+
+### Don't: `callback?.() ?? fallback()` for optional handlers
+
+**Problem**:
+```tsx
+onClick={() => onOpenSettings?.() ?? setShowConfig(true)}
+```
+
+**Why it's bad**: `setSettingsOpen(true)` returns `undefined`. `??` then still runs `setShowConfig(true)`, so both dialogs open.
+
+**Instead**:
+```tsx
+onClick={() => setShowConfig(true)}
+// or, if a fallback is truly needed:
+onClick={() => {
+  if (onOpen) onOpen();
+  else setShowConfig(true);
+}}
+```
+
 ## Patterns
 
 ### Mount foliate-view web component in React

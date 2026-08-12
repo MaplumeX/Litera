@@ -12,7 +12,7 @@ Reference files:
 - `src/App.tsx` — root state: view mode, file data, progress, style state, refs to child components
 - `src/lib/agent-reducer.ts` — pure Agent state projection and correlation filtering
 - `src/lib/use-agent-bridge.ts` — Tauri commands, listener, snapshot hydration
-- `src/components/ChatPanel.tsx` — transient input/overlay state plus reducer-rendered Agent state
+- `src/components/chat/ChatPanel.tsx` — transient input/overlay state plus reducer-rendered Agent state
 - `src/components/ReaderView.tsx` — local selection state, ref-stable callbacks
 
 ---
@@ -39,9 +39,11 @@ These are the closest thing to "global state". They're passed down as props:
 ### 2. Local component state
 
 Each component owns its own UI state:
-- `ChatPanel`: transient `input`, `pendingSelection`, `submitting`, `invokeError`, and `showSessionList`; Agent messages/sessions/status live in `AgentState`
+- `ChatPanel`: transient `input`, `pendingSelection`, `submitting`, `invokeError`, `showSessionList`, and `showConfig` (LLM settings dialog only); Agent messages/sessions/status live in `AgentState`
 - `LibraryView`: `books`, `search`, `importing`
 - `ReaderView`: `selectionPos` (transient selection button position)
+
+`App.settingsOpen` owns `SettingsDialog` (library gear + reader Aa). Do not lift ChatPanel LLM settings into that flag.
 
 ### 3. Ref state (non-rendering)
 
