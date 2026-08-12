@@ -23,6 +23,7 @@ export interface ChatPanelHandle {
 interface ChatPanelProps {
   currentChapterIndex: number;
   bookId: string;
+  onOpenSettings?: () => void;
 }
 
 function ToolCallCard({ call }: { call: AgentToolCall }) {
@@ -70,7 +71,7 @@ function CopyButton({ text }: { text: string }) {
 }
 
 export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
-  function ChatPanel({ currentChapterIndex, bookId }, ref) {
+  function ChatPanel({ currentChapterIndex, bookId, onOpenSettings }, ref) {
     const bridge = useAgentBridge(bookId);
     const { state } = bridge;
     const {
@@ -259,7 +260,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
               <Button
                 size="icon-xs"
                 variant="ghost"
-                onClick={() => setShowConfig(true)}
+                onClick={() => onOpenSettings?.() ?? setShowConfig(true)}
                 aria-label="设置"
               >
                 <Settings />
@@ -273,7 +274,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
               <Button
                 size="icon-xs"
                 variant="ghost"
-                onClick={() => setShowConfig(true)}
+                onClick={() => onOpenSettings?.() ?? setShowConfig(true)}
                 aria-label="设置"
               >
                 <Settings />

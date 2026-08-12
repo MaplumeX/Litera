@@ -25,7 +25,9 @@ export function normalizeSettings(
   return {
     fontSize: settings?.fontSize ?? DEFAULT_FONT_SIZE,
     fontFamily: settings?.fontFamily ?? DEFAULT_FONT_FAMILY,
-    theme: settings?.theme ?? DEFAULT_THEME,
+    // theme is now a global preference, not per-book — use default here.
+    // App.tsx overrides this with the global theme after calling normalizeSettings.
+    theme: DEFAULT_THEME,
   };
 }
 

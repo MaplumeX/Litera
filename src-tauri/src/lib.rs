@@ -3,10 +3,12 @@ use tauri::Manager;
 mod agent_config;
 mod error;
 mod library;
+mod preferences;
 mod sidecar;
 mod sidecar_protocol;
 
 use library::LibraryStore;
+use preferences::PreferencesStore;
 use sidecar::SidecarSupervisor;
 
 pub(crate) fn notify_sidecar_book_opened(
@@ -28,23 +30,36 @@ pub fn run() {
             let root_result = app.path().app_data_dir().map_err(|error| {
                 error::AppError::storage_io(format!("Failed to resolve app data dir: {error}"))
             });
-            let (library_store, library_ready) = match root_result {
+            let (library_store, library_ready, preferences_store) = match root_result {
                 Ok(root) => {
-                    match tauri::async_runtime::block_on(tauri::async_runtime::spawn_blocking({
-                        let root = root.clone();
-                        move || LibraryStore::initialize(root)
-                    }))
+                    let library_result = tauri::async_runtime::block_on(
+                        tauri::async_runtime::spawn_blocking({
+                            let root = root.clone();
+                            move || LibraryStore::initialize(root)
+                        })
+                    )
                     .map_err(|error| {
                         error::AppError::storage_io(format!(
                             "Library initialization worker failed: {error}"
                         ))
                     })
-                    .and_then(|result| result)
-                    {
-                        Ok(store) => (store, true),
+                    .and_then(|result| result);
+                    let preferences_result = PreferencesStore::initialize(root.clone());
+                    match library_result {
+                        Ok(store) => (store, true, preferences_result.unwrap_or_else(|error| {
+                            eprintln!("[preferences] Initialization failed: {error}");
+                            PreferencesStore::unavailable()
+                        })),
                         Err(error) => {
                             eprintln!("[library] Initialization failed: {error}");
-                            (LibraryStore::unavailable(root, error), false)
+                            (
+                                LibraryStore::unavailable(root, error),
+                                false,
+                                preferences_result.unwrap_or_else(|error| {
+                                    eprintln!("[preferences] Initialization failed: {error}");
+                                    PreferencesStore::unavailable()
+                                }),
+                            )
                         }
                     }
                 }
@@ -53,10 +68,12 @@ pub fn run() {
                     (
                         LibraryStore::unavailable(std::path::PathBuf::new(), error),
                         false,
+                        PreferencesStore::unavailable(),
                     )
                 }
             };
             app.manage(library_store);
+            app.manage(preferences_store);
 
             let supervisor = if library_ready {
                 SidecarSupervisor::start(app.handle().clone())
@@ -100,6 +117,8 @@ pub fn run() {
             agent_config::update_custom_provider,
             agent_config::delete_custom_provider,
             agent_config::switch_provider,
+            preferences::get_preferences,
+            preferences::save_preferences,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -13,12 +13,13 @@ import {
 import { ChatPanel, type ChatPanelHandle } from "@/components/ChatPanel";
 import { LibraryView } from "@/components/LibraryView";
 import { TocSidebar } from "@/components/TocSidebar";
-import { ReaderControls } from "@/components/ReaderControls";
+import { SettingsDialog } from "@/components/SettingsDialog";
 import {
   generateStylesCss,
   normalizeSettings,
   type ReaderStyleState,
 } from "@/lib/reader-styles";
+import { usePreferences, themeToClassName, syncStyleTheme } from "@/lib/preferences";
 import type { BookOpenContext, BookRecord } from "@/types/library";
 import { useDebouncedCallback } from "@/lib/use-debounced-callback";
 import { invokeErrorMessage } from "@/lib/app-error";
@@ -86,7 +87,7 @@ function App() {
   const [chatCollapsed, setChatCollapsed] = useState(false);
   const [tocVisible, setTocVisible] = useState(false);
   const [toc, setToc] = useState<TocItem[]>([]);
-  const [controlsOpen, setControlsOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [persistenceError, setPersistenceError] = useState<string | null>(null);
   const [openingBookId, setOpeningBookId] = useState<string | null>(null);
   const [styleState, setStyleState] = useState<ReaderStyleState>({
@@ -94,6 +95,7 @@ function App() {
     fontFamily: "serif",
     theme: "light",
   });
+  const { theme: globalTheme, setTheme: setGlobalTheme, flush: flushPreferences } = usePreferences();
   const readerRef = useRef<ReaderViewHandle>(null);
   const chatRef = useRef<ChatPanelHandle>(null);
   const closingRef = useRef(false);
@@ -116,7 +118,7 @@ function App() {
     reportPersistenceError,
   );
 
-  // Persist reading settings (debounced).
+  // Persist reading settings (debounced) — only fontSize/fontFamily per book.
   const persistSettings = useDebouncedCallback(
     async (bookId: string, state: ReaderStyleState) => {
       await invoke("update_reading_state", {
@@ -124,7 +126,6 @@ function App() {
         settings: {
           fontSize: state.fontSize,
           fontFamily: state.fontFamily,
-          theme: state.theme,
         },
       });
     },
@@ -135,13 +136,13 @@ function App() {
   const flushReadingState = useCallback(
     async () => {
       try {
-        await Promise.all([persistFraction.flush(), persistSettings.flush()]);
+        await Promise.all([persistFraction.flush(), persistSettings.flush(), flushPreferences()]);
       } catch (error) {
         reportPersistenceError(error);
         throw error;
       }
     },
-    [persistFraction, persistSettings, reportPersistenceError],
+    [persistFraction, persistSettings, reportPersistenceError, flushPreferences],
   );
 
   useEffect(() => {
@@ -187,6 +188,19 @@ function App() {
       unlisten?.();
     };
   }, [flushReadingState, reportPersistenceError]);
+
+  // Sync styleState.theme with globalTheme whenever globalTheme changes.
+  useEffect(() => {
+    setStyleState((prev) => syncStyleTheme(prev, globalTheme));
+  }, [globalTheme]);
+
+  // Apply theme class to <html> so CSS variables cascade to portaled dialogs.
+  useEffect(() => {
+    const root = document.documentElement;
+    root.classList.remove("dark", "sepia");
+    const cls = themeToClassName(globalTheme);
+    if (cls) root.classList.add(cls);
+  }, [globalTheme]);
 
   // Apply styles + persist whenever style state changes.
   useEffect(() => {
@@ -254,8 +268,11 @@ function App() {
         settings: context.settings,
       });
 
-      // Initialize style state from saved settings.
-      setStyleState(normalizeSettings(context.settings));
+      // Initialize style state from saved settings (theme comes from global preferences).
+      setStyleState({
+        ...normalizeSettings(context.settings),
+        theme: globalTheme,
+      });
 
       setView("reader");
     } catch (err) {
@@ -264,7 +281,7 @@ function App() {
     } finally {
       if (request.isLatest()) setOpeningBookId(null);
     }
-  }, [flushReadingState]);
+  }, [flushReadingState, globalTheme]);
 
   const handleBackToLibrary = useCallback(async () => {
     try {
@@ -290,7 +307,7 @@ function App() {
     setCurrentBook(null);
     setToc([]);
     setTocVisible(false);
-    setControlsOpen(false);
+    setSettingsOpen(false);
   }, [fileData?.bookId, flushReadingState]);
 
   const handleRelocate = useCallback(
@@ -316,12 +333,25 @@ function App() {
 
   const handleStyleChange = useCallback(
     (state: ReaderStyleState) => {
+      // Theme is global — route through setGlobalTheme instead of per-book persist.
+      if (state.theme !== globalTheme) {
+        setGlobalTheme(state.theme);
+      }
+      const fontSizeChanged = state.fontSize !== styleStateRef.current.fontSize;
+      const fontFamilyChanged = state.fontFamily !== styleStateRef.current.fontFamily;
       setStyleState(state);
-      if (fileData?.bookId) {
+      if (fileData?.bookId && (fontSizeChanged || fontFamilyChanged)) {
         persistSettings.schedule(fileData.bookId, state);
       }
     },
-    [fileData?.bookId, persistSettings],
+    [fileData?.bookId, persistSettings, globalTheme, setGlobalTheme],
+  );
+
+  const handleGlobalThemeChange = useCallback(
+    (newTheme: string) => {
+      setGlobalTheme(newTheme);
+    },
+    [setGlobalTheme],
   );
 
   const handleTocGoTo = useCallback((href: string) => {
@@ -338,7 +368,20 @@ function App() {
           message={persistenceError}
           onDismiss={() => setPersistenceError(null)}
         />
-        <LibraryView onOpenBook={handleOpenBook} openingBookId={openingBookId} />
+        <LibraryView
+          onOpenBook={handleOpenBook}
+          openingBookId={openingBookId}
+          onOpenSettings={() => setSettingsOpen(true)}
+        />
+        <SettingsDialog
+          open={settingsOpen}
+          onClose={() => setSettingsOpen(false)}
+          styleState={styleState}
+          onStyleChange={handleStyleChange}
+          globalTheme={globalTheme}
+          onThemeChange={handleGlobalThemeChange}
+          hasBook={false}
+        />
       </main>
     );
   }
@@ -375,24 +418,15 @@ function App() {
           >
             <List />
           </Button>
-          {/* Font + theme controls (dropdown panel) */}
-          <div className="relative">
-            <Button
-              size="icon-sm"
-              variant={controlsOpen ? "secondary" : "ghost"}
-              onClick={() => setControlsOpen((v) => !v)}
-              aria-label="字体与主题"
-            >
-              <Type />
-            </Button>
-            <ReaderControls
-              open={controlsOpen}
-              state={styleState}
-              onChange={(s) => {
-                handleStyleChange(s);
-              }}
-            />
-          </div>
+          {/* Font + theme controls (opens settings dialog) */}
+          <Button
+            size="icon-sm"
+            variant={settingsOpen ? "secondary" : "ghost"}
+            onClick={() => setSettingsOpen(true)}
+            aria-label="字体与主题"
+          >
+            <Type />
+          </Button>
           {/* Chat toggle */}
           <Button
             size="icon-sm"
@@ -445,12 +479,21 @@ function App() {
             </Panel>
             <Separator className="w-px bg-border hover:bg-primary/30 transition-colors cursor-col-resize" />
             <Panel defaultSize={35} minSize={20}>
-              <ChatPanel ref={chatRef} currentChapterIndex={progress.index} bookId={fileData?.bookId ?? ""} />
+              <ChatPanel ref={chatRef} currentChapterIndex={progress.index} bookId={fileData?.bookId ?? ""} onOpenSettings={() => setSettingsOpen(true)} />
             </Panel>
           </Group>
         )}
       </div>
 
+      <SettingsDialog
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        styleState={styleState}
+        onStyleChange={handleStyleChange}
+        globalTheme={globalTheme}
+        onThemeChange={handleGlobalThemeChange}
+        hasBook={true}
+      />
     </main>
   );
 }
