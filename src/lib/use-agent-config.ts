@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { AgentConfigSnapshot } from "@/types/agent-config";
+import type { AgentConfigSnapshot, CustomProviderEntry } from "@/types/agent-config";
 import { invokeErrorMessage } from "@/lib/app-error";
 
 export function useAgentConfig() {
@@ -37,5 +37,73 @@ export function useAgentConfig() {
     }
   }, [load]);
 
-  return { snapshot, load, save, loading, saving, error };
+  const addCustomProvider = useCallback(
+    async (name: string, baseUrl: string, apiKey: string, model: string) => {
+      setSaving(true);
+      setError(null);
+      try {
+        const entry = await invoke<CustomProviderEntry>("add_custom_provider", {
+          name,
+          baseUrl,
+          apiKey,
+          model,
+        });
+        await load();
+        return entry;
+      } catch (err) {
+        setError(invokeErrorMessage(err));
+        throw err;
+      } finally {
+        setSaving(false);
+      }
+    },
+    [load],
+  );
+
+  const deleteCustomProvider = useCallback(
+    async (id: string) => {
+      setSaving(true);
+      setError(null);
+      try {
+        await invoke("delete_custom_provider", { providerId: id });
+        await load();
+      } catch (err) {
+        setError(invokeErrorMessage(err));
+        throw err;
+      } finally {
+        setSaving(false);
+      }
+    },
+    [load],
+  );
+
+  const switchProvider = useCallback(
+    async (providerId: string, model: string) => {
+      setSaving(true);
+      setError(null);
+      try {
+        await invoke("switch_provider", { providerId, model });
+        await invoke("restart_sidecar");
+        await load();
+      } catch (err) {
+        setError(invokeErrorMessage(err));
+        throw err;
+      } finally {
+        setSaving(false);
+      }
+    },
+    [load],
+  );
+
+  return {
+    snapshot,
+    load,
+    save,
+    addCustomProvider,
+    deleteCustomProvider,
+    switchProvider,
+    loading,
+    saving,
+    error,
+  };
 }

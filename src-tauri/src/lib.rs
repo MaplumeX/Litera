@@ -95,6 +95,9 @@ pub fn run() {
             sidecar::restart_sidecar,
             agent_config::get_agent_config,
             agent_config::save_agent_config,
+            agent_config::add_custom_provider,
+            agent_config::delete_custom_provider,
+            agent_config::switch_provider,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

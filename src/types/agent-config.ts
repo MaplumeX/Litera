@@ -1,9 +1,24 @@
+/** A custom OpenAI-compatible provider entry listed in the settings dialog. */
+export interface CustomProviderEntry {
+  id: string;
+  name: string;
+  baseUrl: string;
+  model: string;
+  hasApiKey: boolean;
+}
+
 /** Snapshot of the agent configuration returned by `get_agent_config`. */
 export interface AgentConfigSnapshot {
   configured: boolean;
   provider: string | null;
   model: string | null;
   hasApiKey: boolean;
+  customProviders: CustomProviderEntry[];
+}
+
+/** Returns true when `id` is a custom provider (prefixes `custom-`). */
+export function isCustomProviderId(id: string): boolean {
+  return id.startsWith("custom-");
 }
 
 /** A built-in provider entry shown in the settings dropdown. */
