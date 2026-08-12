@@ -24,7 +24,6 @@ import {
   encodeEvent,
   parseCommandLine,
   ProtocolDecodeError,
-  type PromptContext,
   type SerializedMessage,
   type SerializedToolCall,
   type SidecarCommand,
@@ -446,8 +445,19 @@ async function handlePrompt(command: Extract<SidecarCommand, { type: "prompt" }>
   };
   activePrompt = prompt;
   sendEvent({ type: "prompt_started", ...prompt });
-  const fullPrompt = buildPromptWithContext(command.text, command.context);
-  void managed.session.prompt(fullPrompt).then(
+  const context = command.context;
+  if (context) {
+    const asideParts: string[] = [];
+    if (context.selection) asideParts.push(`用户选中的文本：\n"${context.selection}"`);
+    else if (context.chapterIndex !== undefined) asideParts.push(`（当前在第 ${context.chapterIndex} 章）`);
+    if (asideParts.length) {
+      await managed.session.sendCustomMessage(
+        { customType: "readingContext", content: asideParts.join("\n"), display: false, details: undefined },
+        { triggerTurn: false, deliverAs: "nextTurn" },
+      );
+    }
+  }
+  void managed.session.prompt(command.text).then(
     () => {
       if (activePrompt !== prompt) return;
       activePrompt = null;
@@ -468,17 +478,6 @@ async function handlePrompt(command: Extract<SidecarCommand, { type: "prompt" }>
       );
     },
   );
-}
-
-function buildPromptWithContext(text: string, context?: PromptContext): string {
-  if (!context) return text;
-  const parts: string[] = [];
-  if (context.selection) parts.push(`用户选中的文本：\n"${context.selection}"`);
-  if (context.chapterIndex !== undefined && !context.selection) {
-    parts.push(`（当前在第 ${context.chapterIndex} 章）`);
-  }
-  parts.push(`用户问题：${text}`);
-  return parts.join("\n\n");
 }
 
 async function handleNewSession(command: Extract<SidecarCommand, { type: "new_session" }>): Promise<void> {

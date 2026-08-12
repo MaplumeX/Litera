@@ -112,6 +112,39 @@ tauri::async_runtime::spawn(async move {
 - Recovery replays only the last controlled book descriptor and persisted active session. It never replays an interrupted prompt, and replay is enabled only after a process failure/manual restart, not on the first start.
 - EPUB/FTS work lives in `BookWorker`. Its RPC requests are serialized, bounded, and carry `bookId` plus book generation; tools capture that pair when their session is created so an aborted old prompt cannot read a newer book. Each `open_book` replaces the worker before starting its load, and `close_book` detaches it; superseded workers terminate asynchronously so a slow A load cannot delay B or close.
 
+### Convention: inject reading context as a nextTurn aside, never mutate the user message
+
+**What**: When a prompt carries reading context (`selection`, `chapterIndex`), the sidecar MUST deliver that context to the model via `session.sendCustomMessage(..., { triggerTurn: false, deliverAs: "nextTurn" })` before calling `session.prompt(text)`. The user message passed to `prompt()` is always the raw user input.
+
+**Why**: `session.prompt()` stores its argument verbatim as a `user` role message in session history. `serializeMessages` → `extractUserText` returns that stored text to the frontend for display. Concatenating context wrappers (`（当前在第 N 章）`, `用户选中的文本：`, `用户问题：`) into the prompt string pollutes the persisted user message, so the chat panel shows LM-facing metadata as if the user typed it.
+
+**Correct**:
+```typescript
+// sidecar/index.ts handlePrompt
+const context = command.context;
+if (context) {
+  const asideParts: string[] = [];
+  if (context.selection) asideParts.push(`用户选中的文本：\n"${context.selection}"`);
+  else if (context.chapterIndex !== undefined) asideParts.push(`（当前在第 ${context.chapterIndex} 章）`);
+  if (asideParts.length) {
+    await managed.session.sendCustomMessage(
+      { customType: "readingContext", content: asideParts.join("\n"), display: false, details: undefined },
+      { triggerTurn: false, deliverAs: "nextTurn" },
+    );
+  }
+}
+void managed.session.prompt(command.text).then(/* ... */);
+```
+
+**Wrong**:
+```typescript
+// NEVER concatenate context into the user text
+const fullPrompt = `（当前在第 ${ctx.chapterIndex} 章）\n\n用户问题：${text}`;
+session.prompt(fullPrompt);  // pollutes stored user message
+```
+
+**Rule**: Context asides must not include a `用户问题：` label — the user text is delivered separately by `prompt()`. The aside contains only the context (selected text or chapter index).
+
 ### Don't: block the main thread on sidecar I/O
 
 **Problem**: Reading sidecar stdout synchronously in a command handler.
