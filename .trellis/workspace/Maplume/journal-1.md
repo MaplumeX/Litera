@@ -217,3 +217,27 @@ Filled the 5 remaining template spec files with real codebase patterns: database
 ### Status
 
 [OK] **Completed**
+
+
+## Session 11: 修复 Tauri 运行时完整性
+
+**Date**: 2026-08-12
+**Task**: 修复 Tauri 运行时完整性
+**Branch**: `main`
+
+### Summary
+
+完成书库可恢复事务与路径安全、Raw IPC 和自包含 sidecar、有关联的有界 supervisor/Agent 状态机、React 生命周期与快速开书串行化；全量 Rust/前端/sidecar/Clippy/空 PATH smoke/Tauri release 门禁通过。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `321f21b` | (see git log) |
+| `a14cf08` | (see git log) |
+| `3c7b449` | (see git log) |
+| `950fb46` | (see git log) |
+
+### Status
+
+[OK] **Completed**
