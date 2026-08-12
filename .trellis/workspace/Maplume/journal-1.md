@@ -520,3 +520,31 @@ Fixed intermittent 'Command does not match the current book' in the AI chat pane
 ### Status
 
 [OK] **Completed**
+
+
+## Session 25: Redesign ChatPanel UI (ChatGPT style)
+
+**Date**: 2026-08-13
+**Task**: Redesign ChatPanel UI (ChatGPT style)
+**Branch**: `main`
+
+### Summary
+
+Planned (PRD/design/implement), implemented, and checked the reading-assistant chat panel UI redesign: ChatGPT-style right-aligned user bubbles with quote cards, left-aligned assistant messages with Bot avatar, rounded auto-grow input with inline send/stop, welcome empty state with contextual suggestions, typing indicator + streaming cursor, lucide icon cleanup (no emoji), ResizeObserver fix for panel-resize height. 7 work commits + spec updates. Build and all 27 tests green. Manual three-theme visual inspection left for the user.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `20570ea` | (see git log) |
+| `ed0d259` | (see git log) |
+| `0f8f787` | (see git log) |
+| `0166061` | (see git log) |
+| `dab2515` | (see git log) |
+| `1a2e6b0` | (see git log) |
+| `ceae8b1` | (see git log) |
+| `67fb429` | (see git log) |
+
+### Status
+
+[OK] **Completed**
