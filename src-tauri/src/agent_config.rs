@@ -52,9 +52,9 @@ pub async fn save_agent_config(
 ) -> AppResult<()> {
     let provider = provider.trim().to_string();
     let model = model.trim().to_string();
-    if provider.is_empty() || model.is_empty() || api_key.is_empty() {
+    if provider.is_empty() || model.is_empty() {
         return Err(AppError::invalid_input(
-            "provider, api_key, and model are all required",
+            "provider and model are both required",
         ));
     }
 
@@ -106,6 +106,39 @@ pub async fn delete_custom_provider(
     let agent_dir = resolve_agent_dir(&app)?;
     tauri::async_runtime::spawn_blocking(move || {
         delete_custom_provider_impl(&agent_dir, &provider_id)
+    })
+    .await
+    .map_err(|error| AppError::storage_io(format!("Agent config write worker failed: {error}")))?
+}
+
+#[tauri::command]
+pub async fn update_custom_provider(
+    app: tauri::AppHandle,
+    provider_id: String,
+    name: String,
+    base_url: String,
+    api_key: String,
+    model: String,
+) -> AppResult<CustomProviderEntry> {
+    let provider_id = provider_id.trim().to_string();
+    let name = name.trim().to_string();
+    let base_url = base_url.trim().to_string();
+    let api_key = api_key.trim().to_string();
+    let model = model.trim().to_string();
+    if !provider_id.starts_with("custom-") {
+        return Err(AppError::invalid_input(
+            "provider_id must start with 'custom-'",
+        ));
+    }
+    if name.is_empty() || base_url.is_empty() || model.is_empty() {
+        return Err(AppError::invalid_input(
+            "name, base_url, and model are all required",
+        ));
+    }
+
+    let agent_dir = resolve_agent_dir(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        update_custom_provider_impl(&agent_dir, &provider_id, &name, &base_url, &api_key, &model)
     })
     .await
     .map_err(|error| AppError::storage_io(format!("Agent config write worker failed: {error}")))?
@@ -275,13 +308,31 @@ fn save_config(agent_dir: &Path, provider: &str, api_key: &str, model: &str) -> 
     let auth_object = auth.as_object_mut().ok_or_else(|| {
         AppError::storage_corrupt("auth.json root is not a JSON object".to_string())
     })?;
-    auth_object.insert(
-        provider.to_string(),
-        serde_json::json!({ "type": "api_key", "key": api_key }),
-    );
-    let auth_bytes = serde_json::to_vec_pretty(&auth)
-        .map_err(|error| AppError::storage_io(format!("Failed to serialize auth.json: {error}")))?;
-    library::atomic_write(&auth_path, &auth_bytes, "auth.json")?;
+
+    if api_key.is_empty() {
+        // Empty key: keep the existing key when present; error when the
+        // provider has no key at all.
+        let has_key = auth_object
+            .get(provider)
+            .and_then(|entry| entry.get("key"))
+            .and_then(|value| value.as_str())
+            .map(|key| !key.is_empty())
+            .unwrap_or(false);
+        if !has_key {
+            return Err(AppError::invalid_input(format!(
+                "API key required for provider {provider}"
+            )));
+        }
+    } else {
+        auth_object.insert(
+            provider.to_string(),
+            serde_json::json!({ "type": "api_key", "key": api_key }),
+        );
+        let auth_bytes = serde_json::to_vec_pretty(&auth).map_err(|error| {
+            AppError::storage_io(format!("Failed to serialize auth.json: {error}"))
+        })?;
+        library::atomic_write(&auth_path, &auth_bytes, "auth.json")?;
+    }
 
     let mut settings = read_json_or_empty(&settings_path, "settings.json")?;
     if settings.is_null() {
@@ -429,6 +480,115 @@ fn delete_custom_provider_impl(agent_dir: &Path, provider_id: &str) -> AppResult
     Ok(())
 }
 
+fn update_custom_provider_impl(
+    agent_dir: &Path,
+    provider_id: &str,
+    name: &str,
+    base_url: &str,
+    api_key: &str,
+    model: &str,
+) -> AppResult<CustomProviderEntry> {
+    // Update models.json provider entry.
+    let models_path = agent_dir.join("models.json");
+    let mut models = read_json_or_empty(&models_path, "models.json")?;
+    if models.is_null() {
+        return Err(AppError::invalid_input(
+            "Custom provider not found".to_string(),
+        ));
+    }
+    let providers = models
+        .get_mut("providers")
+        .and_then(|value| value.as_object_mut())
+        .ok_or_else(|| {
+            AppError::storage_corrupt("models.json is missing 'providers' object".to_string())
+        })?;
+    let existing = providers
+        .get_mut(provider_id)
+        .ok_or_else(|| AppError::invalid_input("Custom provider not found".to_string()))?;
+    // Preserve the existing `api` field value if present.
+    let api = existing
+        .get("api")
+        .and_then(|value| value.as_str())
+        .unwrap_or("openai-completions")
+        .to_string();
+    *existing = serde_json::json!({
+        "name": name,
+        "baseUrl": base_url,
+        "api": api,
+        "models": [{ "id": model }]
+    });
+    let models_bytes = serde_json::to_vec_pretty(&models).map_err(|error| {
+        AppError::storage_io(format!("Failed to serialize models.json: {error}"))
+    })?;
+    library::atomic_write(&models_path, &models_bytes, "models.json")?;
+
+    // Upsert auth.json key entry when a new key was provided.
+    if !api_key.is_empty() {
+        let auth_path = agent_dir.join("auth.json");
+        let mut auth = read_json_or_empty(&auth_path, "auth.json")?;
+        if auth.is_null() {
+            auth = serde_json::Value::Object(serde_json::Map::new());
+        }
+        let auth_object = auth.as_object_mut().ok_or_else(|| {
+            AppError::storage_corrupt("auth.json root is not a JSON object".to_string())
+        })?;
+        auth_object.insert(
+            provider_id.to_string(),
+            serde_json::json!({ "type": "api_key", "key": api_key }),
+        );
+        let auth_bytes = serde_json::to_vec_pretty(&auth).map_err(|error| {
+            AppError::storage_io(format!("Failed to serialize auth.json: {error}"))
+        })?;
+        library::atomic_write(&auth_path, &auth_bytes, "auth.json")?;
+    }
+
+    // Update settings.json defaultModel when this provider is active.
+    let settings_path = agent_dir.join("settings.json");
+    let mut settings = read_json_or_empty(&settings_path, "settings.json")?;
+    if !settings.is_null() {
+        let is_active = settings
+            .get("defaultProvider")
+            .and_then(|value| value.as_str())
+            .map(|value| value == provider_id)
+            .unwrap_or(false);
+        if is_active {
+            if let Some(settings_object) = settings.as_object_mut() {
+                settings_object.insert(
+                    "defaultModel".to_string(),
+                    serde_json::Value::String(model.to_string()),
+                );
+            }
+            let settings_bytes = serde_json::to_vec_pretty(&settings).map_err(|error| {
+                AppError::storage_io(format!("Failed to serialize settings.json: {error}"))
+            })?;
+            library::atomic_write(&settings_path, &settings_bytes, "settings.json")?;
+        }
+    }
+
+    // Compute has_api_key from auth.json after the update.
+    let auth = read_json_or_empty(&agent_dir.join("auth.json"), "auth.json")?;
+    let has_api_key = auth
+        .get(provider_id)
+        .and_then(|entry| entry.get("type"))
+        .and_then(|value| value.as_str())
+        .map(|entry_type| entry_type == "api_key")
+        .unwrap_or(false)
+        && auth
+            .get(provider_id)
+            .and_then(|entry| entry.get("key"))
+            .and_then(|value| value.as_str())
+            .map(|key| !key.is_empty())
+            .unwrap_or(false);
+
+    Ok(CustomProviderEntry {
+        id: provider_id.to_string(),
+        name: name.to_string(),
+        base_url: base_url.to_string(),
+        model: model.to_string(),
+        has_api_key,
+    })
+}
+
 fn switch_provider_impl(
     agent_dir: &Path,
     provider_id: &str,
@@ -465,6 +625,7 @@ fn switch_provider_impl(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::error::AppErrorCode;
 
     fn temp_agent_dir() -> tempfile::TempDir {
         tempfile::tempdir().expect("temporary directory")
@@ -836,5 +997,218 @@ mod tests {
                 .expect("parse settings");
         assert_eq!(settings["theme"], "dark");
         assert_eq!(settings["defaultProvider"], entry.id);
+    }
+
+    // --- Empty-key save behavior ---
+
+    #[test]
+    fn save_config_empty_key_keeps_existing_key() {
+        let dir = temp_agent_dir();
+        let auth_path = dir.path().join("auth.json");
+        fs::write(
+            &auth_path,
+            br#"{"anthropic":{"type":"api_key","key":"existing-key"}}"#,
+        )
+        .expect("seed auth");
+
+        save_config(dir.path(), "anthropic", "", "claude-opus-4-5").expect("save config");
+
+        // auth.json untouched for this provider.
+        let auth: serde_json::Value =
+            serde_json::from_slice(&fs::read(&auth_path).expect("read auth")).expect("parse auth");
+        assert_eq!(auth["anthropic"]["key"], "existing-key");
+        assert_eq!(auth["anthropic"]["type"], "api_key");
+
+        // settings.json still updated.
+        let settings: serde_json::Value = serde_json::from_slice(
+            &fs::read(dir.path().join("settings.json")).expect("read settings"),
+        )
+        .expect("parse settings");
+        assert_eq!(settings["defaultProvider"], "anthropic");
+        assert_eq!(settings["defaultModel"], "claude-opus-4-5");
+    }
+
+    #[test]
+    fn save_config_empty_key_errors_when_no_key() {
+        let dir = temp_agent_dir();
+        let result = save_config(dir.path(), "anthropic", "", "claude-opus-4-5");
+        assert!(result.is_err());
+        let error = result.expect_err("save should fail");
+        assert_eq!(error.code, AppErrorCode::InvalidInput);
+        assert!(error.message.contains("API key required"));
+    }
+
+    #[test]
+    fn save_config_empty_key_errors_when_key_is_blank() {
+        let dir = temp_agent_dir();
+        fs::write(
+            dir.path().join("auth.json"),
+            br#"{"anthropic":{"type":"api_key","key":""}}"#,
+        )
+        .expect("seed auth");
+
+        let result = save_config(dir.path(), "anthropic", "", "claude-opus-4-5");
+        assert!(result.is_err());
+        let error = result.expect_err("save should fail");
+        assert_eq!(error.code, AppErrorCode::InvalidInput);
+    }
+
+    // --- update_custom_provider tests ---
+
+    #[test]
+    fn update_custom_provider_updates_fields_and_preserves_key() {
+        let dir = temp_agent_dir();
+        let entry = add_custom_provider_impl(
+            dir.path(),
+            "Ollama",
+            "http://localhost:11434/v1",
+            "ollama-key",
+            "llama-3.1",
+        )
+        .expect("add custom provider");
+
+        let updated = update_custom_provider_impl(
+            dir.path(),
+            &entry.id,
+            "本地 Ollama 2",
+            "http://localhost:11434/v2",
+            "",
+            "llama-3.2",
+        )
+        .expect("update custom provider");
+
+        assert_eq!(updated.id, entry.id);
+        assert_eq!(updated.name, "本地 Ollama 2");
+        assert_eq!(updated.base_url, "http://localhost:11434/v2");
+        assert_eq!(updated.model, "llama-3.2");
+        assert!(updated.has_api_key, "existing key preserved");
+
+        // models.json reflects the new fields.
+        let models: serde_json::Value =
+            serde_json::from_slice(&fs::read(dir.path().join("models.json")).expect("read models"))
+                .expect("parse models");
+        let provider = &models["providers"][&entry.id];
+        assert_eq!(provider["name"], "本地 Ollama 2");
+        assert_eq!(provider["baseUrl"], "http://localhost:11434/v2");
+        assert_eq!(provider["api"], "openai-completions");
+        assert_eq!(provider["models"][0]["id"], "llama-3.2");
+
+        // auth.json key unchanged.
+        let auth: serde_json::Value =
+            serde_json::from_slice(&fs::read(dir.path().join("auth.json")).expect("read auth"))
+                .expect("parse auth");
+        assert_eq!(auth[&entry.id]["key"], "ollama-key");
+    }
+
+    #[test]
+    fn update_custom_provider_with_new_key_replaces_key() {
+        let dir = temp_agent_dir();
+        let entry = add_custom_provider_impl(
+            dir.path(),
+            "Ollama",
+            "http://localhost:11434/v1",
+            "old-key",
+            "llama-3.1",
+        )
+        .expect("add custom provider");
+
+        let updated = update_custom_provider_impl(
+            dir.path(),
+            &entry.id,
+            "Ollama",
+            "http://localhost:11434/v1",
+            "new-key",
+            "llama-3.1",
+        )
+        .expect("update custom provider");
+        assert!(updated.has_api_key);
+
+        let auth: serde_json::Value =
+            serde_json::from_slice(&fs::read(dir.path().join("auth.json")).expect("read auth"))
+                .expect("parse auth");
+        assert_eq!(auth[&entry.id]["key"], "new-key");
+    }
+
+    #[test]
+    fn update_custom_provider_on_missing_id_errors() {
+        let dir = temp_agent_dir();
+        let result = update_custom_provider_impl(
+            dir.path(),
+            "custom-deadbeef",
+            "Ghost",
+            "http://localhost:9999/v1",
+            "",
+            "model",
+        );
+        assert!(result.is_err());
+        let error = result.expect_err("update should fail");
+        assert_eq!(error.code, AppErrorCode::InvalidInput);
+        assert!(error.message.contains("Custom provider not found"));
+    }
+
+    #[test]
+    fn update_custom_provider_active_updates_default_model() {
+        let dir = temp_agent_dir();
+        let entry = add_custom_provider_impl(
+            dir.path(),
+            "Ollama",
+            "http://localhost:11434/v1",
+            "key",
+            "llama-3.1",
+        )
+        .expect("add custom provider");
+
+        switch_provider_impl(dir.path(), &entry.id, "llama-3.1").expect("switch provider");
+
+        update_custom_provider_impl(
+            dir.path(),
+            &entry.id,
+            "Ollama",
+            "http://localhost:11434/v1",
+            "",
+            "llama-3.2",
+        )
+        .expect("update active provider");
+
+        let settings: serde_json::Value = serde_json::from_slice(
+            &fs::read(dir.path().join("settings.json")).expect("read settings"),
+        )
+        .expect("parse settings");
+        assert_eq!(settings["defaultProvider"], entry.id);
+        assert_eq!(settings["defaultModel"], "llama-3.2");
+    }
+
+    #[test]
+    fn update_custom_provider_inactive_keeps_settings() {
+        let dir = temp_agent_dir();
+        let entry = add_custom_provider_impl(
+            dir.path(),
+            "Ollama",
+            "http://localhost:11434/v1",
+            "key",
+            "llama-3.1",
+        )
+        .expect("add custom provider");
+
+        // Active provider is a built-in one.
+        save_config(dir.path(), "anthropic", "anthropic-key", "claude-opus-4-5")
+            .expect("save built-in config");
+
+        update_custom_provider_impl(
+            dir.path(),
+            &entry.id,
+            "Ollama",
+            "http://localhost:11434/v1",
+            "",
+            "llama-3.2",
+        )
+        .expect("update inactive provider");
+
+        let settings: serde_json::Value = serde_json::from_slice(
+            &fs::read(dir.path().join("settings.json")).expect("read settings"),
+        )
+        .expect("parse settings");
+        assert_eq!(settings["defaultProvider"], "anthropic");
+        assert_eq!(settings["defaultModel"], "claude-opus-4-5");
     }
 }

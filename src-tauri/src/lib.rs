@@ -96,6 +96,7 @@ pub fn run() {
             agent_config::get_agent_config,
             agent_config::save_agent_config,
             agent_config::add_custom_provider,
+            agent_config::update_custom_provider,
             agent_config::delete_custom_provider,
             agent_config::switch_provider,
         ])
