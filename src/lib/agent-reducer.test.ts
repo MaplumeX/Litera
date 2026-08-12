@@ -191,4 +191,58 @@ describe("agentReducer", () => {
     expect(state.sessionId).toBe("session-b");
     expect(state.messages).toEqual([{ role: "user", content: "first question" }]);
   });
+
+  it("optimistically inserts a new session on session_created and dedupes on later list", () => {
+    let state = createAgentState("book-a");
+    state = reduce(state, {
+      version: 1,
+      seq: 1,
+      type: "session_created",
+      requestId: "new-session",
+      bookId: "book-a",
+      sessionId: "session-new",
+    });
+    // New session appears immediately and is current
+    expect(state.sessionId).toBe("session-new");
+    expect(state.sessions.map((s) => s.id)).toEqual(["session-new"]);
+    expect(state.sessions[0].title).toBe("New Session");
+
+    // Duplicate session_created for same id does not create a second entry
+    state = reduce(state, {
+      version: 2,
+      seq: 2,
+      type: "session_created",
+      requestId: "new-session-2",
+      bookId: "book-a",
+      sessionId: "session-new",
+    });
+    expect(state.sessions.map((s) => s.id)).toEqual(["session-new"]);
+
+    // When listSessions returns the persisted session, it replaces the optimistic entry (no duplicate)
+    state = agentReducer(state, { type: "session_list_requested", requestId: "list-1" });
+    state = reduce(state, {
+      version: 3,
+      seq: 3,
+      type: "sessions_list",
+      requestId: "list-1",
+      bookId: "book-a",
+      sessions: [{ id: "session-new", title: "Real Title", createdAt: "2024-01-01T00:00:00.000Z", updatedAt: "2024-01-01T00:00:00.000Z" }],
+    });
+    expect(state.sessions.map((s) => s.id)).toEqual(["session-new"]);
+    expect(state.sessions[0].title).toBe("Real Title");
+  });
+
+  it("ignores session_created from another book", () => {
+    let state = createAgentState("book-a");
+    state = reduce(state, {
+      version: 1,
+      seq: 1,
+      type: "session_created",
+      requestId: "new-session",
+      bookId: "book-b",
+      sessionId: "session-other",
+    });
+    expect(state.sessions).toEqual([]);
+    expect(state.sessionId).toBeNull();
+  });
 });

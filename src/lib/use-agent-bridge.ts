@@ -52,9 +52,10 @@ export function useAgentBridge(bookId: string) {
           void listSessions().catch((error) => console.error("refresh sessions error:", error));
         } else if (event.type === "book_ready") {
           void listSessions().catch((error) => console.error("book ready sessions error:", error));
-        } else if (event.type === "session_created") {
-          void listSessions().catch((error) => console.error("created session refresh error:", error));
         }
+        // session_created: the reducer optimistically inserts the new session into the list;
+        // calling listSessions() here would return a disk list missing the new (not-yet-persisted)
+        // session and overwrite the optimistic entry via sessions_list.
       },
       onRegistered: () => setSubscribed(true),
       onSnapshot: (snapshot) => {

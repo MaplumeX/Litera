@@ -49,6 +49,17 @@ function matchesBook(state: AgentState, bookId?: string): boolean {
   return !bookId || (!!state.activeBookId && state.activeBookId === bookId);
 }
 
+function upsertSession(
+  sessions: AgentSessionSummary[],
+  summary: AgentSessionSummary,
+): AgentSessionSummary[] {
+  const index = sessions.findIndex((session) => session.id === summary.id);
+  if (index === -1) return [summary, ...sessions];
+  const next = sessions.slice();
+  next[index] = summary;
+  return next;
+}
+
 function matchesPrompt(
   state: AgentState,
   event: { bookId: string; sessionId: string; promptId: string },
@@ -166,6 +177,12 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
             sessionId: event.sessionId,
             messages: base.promptId ? base.messages : [],
             error: null,
+            sessions: upsertSession(base.sessions, {
+              id: event.sessionId,
+              title: "New Session",
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            }),
           }
         : base;
     case "session_switched":
