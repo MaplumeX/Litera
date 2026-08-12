@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 14
+- **Total Sessions**: 15
 - **Last Active**: 2026-08-12
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~306 | Active |
+| `journal-1.md` | ~327 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 15 | 2026-08-12 | 支持自定义 OpenAI 兼容供应商 | `bdff16d` | `main` |
 | 14 | 2026-08-12 | 现代化阅读器 UI 重构:lucide 图标化 + 进度条集成 | `6297588` | `main` |
 | 13 | 2026-08-12 | Decouple sidecar from host pi: child 2 (config UI) + parent complete | `158a274` | `main` |
 | 12 | 2026-08-12 | Decouple sidecar from host pi: child 1 (agent dir protocol) | `add98b1` | `main` |

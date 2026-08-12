@@ -304,3 +304,24 @@ Added LLM provider config UI (AgentConfigDialog) and Rust agent_config module (g
 ### Status
 
 [OK] **Completed**
+
+
+## Session 15: 支持自定义 OpenAI 兼容供应商
+
+**Date**: 2026-08-12
+**Task**: 支持自定义 OpenAI 兼容供应商
+**Branch**: `main`
+
+### Summary
+
+实现多个自定义 OpenAI 兼容端点配置（Ollama/vLLM/第三方中转）。Rust 新增 models.json 原子读写 + add/delete/switch_provider 命令（custom- 前缀 guard，apiKey 走 auth.json）；前端 AgentConfigDialog 重构为内置/自定义两段式下拉 + 添加子表单 + 只读信息+删除+切换。sidecar 零改动（pi 自动读 models.json）。全量验证通过：cargo test 54 passed、tsc、vite build 全绿。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `bdff16d` | (see git log) |
+
+### Status
+
+[OK] **Completed**
