@@ -177,3 +177,22 @@ Implemented the reader-enhancement child task: TocSidebar (nested chapter tree f
 ### Status
 
 [OK] **Completed**
+
+
+## Session 9: Library & Reader UX Overhaul: parent integration verification
+
+**Date**: 2026-08-12
+**Task**: Library & Reader UX Overhaul: parent integration verification
+**Branch**: `main`
+
+### Summary
+
+Parent task 08-12-library-reader-ux integration verification. Both child tasks completed and archived: library-management (book library + persistence) and reader-enhancement (TOC sidebar + font/theme + position restore). Verified npm run build + cargo build pass. End-to-end flow confirmed by code review: startup→library→import→read(TOC/font/theme)→back-to-library→reopen(restore). ChatPanel unchanged.
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**
