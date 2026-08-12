@@ -1,0 +1,4 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/backend/tauri-commands.md", "reason": "Tauri command conventions (validation, AppResult, error handling) for the new update_custom_provider command and save_config change"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Error handling patterns for backend commands"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "Frontend state patterns for the config dialog changes"}
