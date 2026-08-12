@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 7
+- **Total Sessions**: 8
 - **Last Active**: 2026-08-12
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~157 | Active |
+| `journal-1.md` | ~179 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 8 | 2026-08-12 | Reader Enhancement: TOC sidebar, font/theme controls, position restore | `307f23f`, `2c6bef1` | `main` |
 | 7 | 2026-08-12 | Library Management: book library with import/delete/search/persistence | `64e363e`, `6c44ac1`, `120396f` | `main` |
 | 6 | 2026-08-12 | 修复 open_file 主线程死锁 | `32781c7` | `main` |
 | 5 | 2026-08-12 | Child 5: multi-session management + list UI | `25b4350` | `main` |

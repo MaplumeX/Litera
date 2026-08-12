@@ -155,3 +155,25 @@ Implemented the library-management child task: Rust book persistence commands (i
 ### Status
 
 [OK] **Completed**
+
+
+## Session 8: Reader Enhancement: TOC sidebar, font/theme controls, position restore
+
+**Date**: 2026-08-12
+**Task**: Reader Enhancement: TOC sidebar, font/theme controls, position restore
+**Branch**: `main`
+
+### Summary
+
+Implemented the reader-enhancement child task: TocSidebar (nested chapter tree from book.toc, click goToTocItem), ReaderControls (font size S/M/L/XL + font family serif/sans-serif/monospace + theme light/dark/sepia dropdown panel), ReaderView extended with goToFraction/goToTocItem/setStyles/getToc + onBookReady callback, App.tsx integration with TOC toggle, settings persistence (debounced update_reading_state), position restore. Fixed mono font family value bug. Updated specs (setStyles pattern, ref-stable callback pattern).
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `307f23f` | (see git log) |
+| `2c6bef1` | (see git log) |
+
+### Status
+
+[OK] **Completed**
