@@ -26,11 +26,10 @@ export interface ChatPanelHandle {
 interface ChatPanelProps {
   currentChapterIndex: number;
   bookId: string;
-  onOpenSettings?: () => void;
 }
 
 export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
-  function ChatPanel({ currentChapterIndex, bookId, onOpenSettings }, ref) {
+  function ChatPanel({ currentChapterIndex, bookId }, ref) {
     const bridge = useAgentBridge(bookId);
     const { state } = bridge;
     const {
@@ -218,7 +217,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
               <Button
                 size="icon-xs"
                 variant="ghost"
-                onClick={() => onOpenSettings?.() ?? setShowConfig(true)}
+                onClick={() => setShowConfig(true)}
                 aria-label="设置"
               >
                 <Settings />
@@ -232,7 +231,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
               <Button
                 size="icon-xs"
                 variant="ghost"
-                onClick={() => onOpenSettings?.() ?? setShowConfig(true)}
+                onClick={() => setShowConfig(true)}
                 aria-label="设置"
               >
                 <Settings />

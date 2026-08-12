@@ -479,7 +479,7 @@ function App() {
             </Panel>
             <Separator className="w-px bg-border hover:bg-primary/30 transition-colors cursor-col-resize" />
             <Panel defaultSize={35} minSize={20}>
-              <ChatPanel ref={chatRef} currentChapterIndex={progress.index} bookId={fileData?.bookId ?? ""} onOpenSettings={() => setSettingsOpen(true)} />
+              <ChatPanel ref={chatRef} currentChapterIndex={progress.index} bookId={fileData?.bookId ?? ""} />
             </Panel>
           </Group>
         )}
