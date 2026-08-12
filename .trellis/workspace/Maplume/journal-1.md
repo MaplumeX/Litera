@@ -262,3 +262,24 @@ Added the configure command to the sidecar protocol so Rust injects a Litera-own
 ### Status
 
 [OK] **Completed**
+
+
+## Session 13: Decouple sidecar from host pi: child 2 (config UI) + parent complete
+
+**Date**: 2026-08-12
+**Task**: Decouple sidecar from host pi: child 2 (config UI) + parent complete
+**Branch**: `main`
+
+### Summary
+
+Added LLM provider config UI (AgentConfigDialog) and Rust agent_config module (get_agent_config / save_agent_config) that merge-write auth.json + settings.json in the Litera-owned agent dir. Frontend hardcodes 10 common api_key providers; model is free-text. After saving, restart_sidecar is called so config takes effect. ChatPanel shows an unconfigured notice when no provider is set. Both children of the decouple-agent-config parent are now done; parent archived. Rust 44 tests pass, tsc + vite build pass.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `158a274` | (see git log) |
+
+### Status
+
+[OK] **Completed**
