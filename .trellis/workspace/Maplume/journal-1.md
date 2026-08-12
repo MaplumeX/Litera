@@ -456,3 +456,24 @@ Added shadcn dialog/select/input/label components via npx shadcn@latest add. Mig
 ### Status
 
 [OK] **Completed**
+
+
+## Session 22: 子任务B：会话重命名
+
+**Date**: 2026-08-12
+**Task**: 子任务B：会话重命名
+**Branch**: `main`
+
+### Summary
+
+跨四层实现会话重命名：sidecar协议扩展(rename_session/session_renamed)、Rust镜像+Tauri command、前端reducer+ChatPanel行内编辑UI。新增reducer测试，全部测试通过。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `fa13140` | (see git log) |
+
+### Status
+
+[OK] **Completed**
