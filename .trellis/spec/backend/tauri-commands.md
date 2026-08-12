@@ -133,6 +133,9 @@ async fn save_agent_config(app: AppHandle, provider: String, api_key: String, mo
 async fn add_custom_provider(app: AppHandle, name: String, base_url: String, api_key: String, model: String) -> AppResult<CustomProviderEntry>
 
 #[tauri::command]
+async fn update_custom_provider(app: AppHandle, provider_id: String, name: String, base_url: String, api_key: String, model: String) -> AppResult<CustomProviderEntry>
+
+#[tauri::command]
 async fn delete_custom_provider(app: AppHandle, provider_id: String) -> AppResult<()>
 
 #[tauri::command]
@@ -159,13 +162,14 @@ interface CustomProviderEntry {
 
 **Contracts**:
 - `get_agent_config` reads `<app_data>/agent/auth.json` + `settings.json` + `models.json` and returns a masked snapshot (no plaintext key).
-- `save_agent_config` merge-writes: preserves other provider entries in `auth.json` and other fields in `settings.json`. Uses the shared `atomic_write` pattern (temp file + persist + sync_parent_dir). Reserved for **built-in** providers (frontend-hardcoded list); the `api_key` is required.
+- `save_agent_config` merge-writes: preserves other provider entries in `auth.json` and other fields in `settings.json`. Uses the shared `atomic_write` pattern (temp file + persist + sync_parent_dir). Reserved for **built-in** providers (frontend-hardcoded list). `api_key` may be empty **only when `auth.json` already has a key for that provider** — the existing key is kept and auth.json is untouched; otherwise `InvalidInput`.
 - Frontend calls `restart_sidecar` after `save_agent_config` / `switch_provider` so the sidecar re-reads config on next `configure` + session creation.
 - The API key MUST NOT appear in logs, journal, or non-`auth.json` files.
 - Provider/model selection for built-in providers is a frontend-hardcoded list of common api_key providers (`src/types/agent-config.ts`); model id is free-text. This avoids coupling the UI to the pi-ai built-in catalog (which only exists inside the sidecar Node process).
 
-**Custom OpenAI-compatible providers** (`add_custom_provider` / `delete_custom_provider` / `switch_provider`):
+**Custom OpenAI-compatible providers** (`add_custom_provider` / `update_custom_provider` / `delete_custom_provider` / `switch_provider`):
 - `add_custom_provider` generates a `custom-<8hex>` id, writes a provider entry to `<app_data>/agent/models.json` (`{ name, baseUrl, api: "openai-completions", models: [{ id: model }] }`, **no apiKey** in models.json), and writes the key to `auth.json[<customId>]`. Returns the masked entry so the frontend can update its list without a re-fetch.
+- `update_custom_provider` edits an existing custom provider: updates name/baseUrl/model in models.json (preserving the `api` field), upserts `auth.json[<customId>]` **only when `api_key` is non-empty** (empty keeps the existing key), and updates `settings.json` `defaultModel` when the edited provider is the active one. Returns the updated masked entry. Rejects ids not starting with `custom-` and unknown ids (`InvalidInput`).
 - `delete_custom_provider` rejects any `provider_id` not starting with `custom-` (guards built-in provider credentials from accidental erasure), removes the models.json + auth.json entries, and clears `defaultProvider`/`defaultModel` in settings.json when the deleted provider was active.
 - `switch_provider` merge-writes only `settings.json` (`defaultProvider` + `defaultModel` + `defaultThinkingLevel: "medium"`); it never touches `auth.json`. Used for both built-in and custom providers when only the active selection changes (no key update).
 - `api` is fixed to `"openai-completions"` and never exposed in the UI.
