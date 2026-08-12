@@ -1,0 +1,28 @@
+{
+  "id": "chat-message-edit-ux",
+  "name": "chat-message-edit-ux",
+  "title": "Fix chat message edit UX and action buttons",
+  "description": "",
+  "status": "in_progress",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "maplume",
+  "assignee": "maplume",
+  "createdAt": "2026-08-13",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "description": "Inline-edit user messages and reserve space for edit/copy action buttons"
+  }
+}

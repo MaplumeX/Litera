@@ -1,0 +1,7 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Protocol envelope, aside injection, and sidecar command rules"}
+{"file": ".trellis/spec/backend/tauri-commands.md", "reason": "Tauri command mirroring and correlation for new agent_edit_prompt"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Icon buttons, aria-label, no emoji"}
+{"file": ".trellis/spec/frontend/hook-guidelines.md", "reason": "useAgentBridge invoke and reducer-backed UI"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "New command/event must stay aligned across four layers"}
+{"file": ".trellis/tasks/08-13-chat-message-edit-ux/research/pi-session-branch.md", "reason": "navigateTree vs branch() and readingContext parent rule"}
