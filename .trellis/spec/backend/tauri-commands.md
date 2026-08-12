@@ -355,7 +355,7 @@ Sidecar event: `{ type: "session_rewound", requestId?, bookId, sessionId, prompt
 
 ### 3. Contracts
 
-- `messageIndex` is the index in the **visible** user+assistant list (`serializeMessages` / current `getBranch()`), not `getEntries()` and not `getUserMessagesForForking()`.
+- `messageIndex` is the index in the **visible** user+assistant list (`serializeMessages` / current `getBranch()`), not `getEntries()` and not `getUserMessagesForForking()`. `getBranch()` is already chronological (root → leaf); do not reverse before indexing.
 - `session_rewound.messages` is the truncated visible list **before** the new user message. Frontend reducer replaces `messages` without clearing this turn's `promptId`; `use-agent-bridge` then dispatches `user_message`.
 - Rewind uses `AgentSession.navigateTree(targetId)`, which syncs `agent.state.messages`. Bare `sessionManager.branch()` does not.
 - If the target user entry's parent is `customType: "readingContext"`, navigate that parent so the old aside leaves the path. Keep `bookSnapshot`.

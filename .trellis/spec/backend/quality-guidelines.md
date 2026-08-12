@@ -165,6 +165,8 @@ session.prompt(fullPrompt);  // pollutes stored user message
 
 **Why**: `SessionManager.branch()` only moves `leafId`. `AgentSession.messages` is `agent.state.messages`; they desync unless `navigateTree` rebuilds context. `getUserMessagesForForking()` walks the whole JSONL, including abandoned branches, so it cannot map the visible chat list.
 
+**Rule**: `getBranch()` already returns root → leaf (oldest first), matching `serializeMessages` / frontend `messageIndex`. Do not reverse it. Reversing makes index `0` the newest entry (usually assistant) and `edit_prompt` throws `Edit target must be a user message on the current branch`.
+
 **Related**: `tauri-commands.md` scenario `agent_edit_prompt`.
 
 ### Don't: block the main thread on sidecar I/O

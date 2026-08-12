@@ -16,6 +16,7 @@ import {
   formatBookSnapshot,
   sessionHasBookSnapshot,
 } from "./book-snapshot.js";
+import { visibleMessageEntries } from "./visible-branch.js";
 import { BookWorker, isBookWorkerThread, runBookWorker } from "./book-worker.js";
 import {
   BookLoadGate,
@@ -427,12 +428,8 @@ function requireCurrentBook(bookId: string, ready = true): CurrentBook {
 }
 
 function visibleBranchEntries(managed: ManagedSession) {
-  const chronological = [...managed.session.sessionManager.getBranch()].reverse();
-  return chronological.filter((entry) => {
-    if (entry.type !== "message") return false;
-    const role = entry.message.role;
-    return role === "user" || role === "assistant";
-  });
+  // getBranch() already returns root → leaf (oldest first). Do not reverse.
+  return visibleMessageEntries(managed.session.sessionManager.getBranch());
 }
 
 function isReadingContextParent(managed: ManagedSession, parentId: string | null): boolean {
