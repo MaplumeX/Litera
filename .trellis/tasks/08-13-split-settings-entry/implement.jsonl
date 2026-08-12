@@ -1,0 +1,4 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/tasks/08-13-split-settings-entry/prd.md", "reason": "任务需求与验收标准"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "设置弹层须用现有 shadcn Dialog，不手写第二套遮罩"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "ChatPanel 本地 UI 状态与 App 下传 props 的边界"}
