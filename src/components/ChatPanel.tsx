@@ -9,6 +9,7 @@ import {
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Button } from "@/components/ui/button";
+import { MessagesSquare, Settings, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAgentBridge } from "@/lib/use-agent-bridge";
 import { useAgentConfig } from "@/lib/use-agent-config";
@@ -170,13 +171,13 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         <div className="flex items-center justify-between border-b px-3 py-2">
           <div className="flex items-center gap-2">
             <Button
-              size="sm"
+              size="icon-xs"
               variant="ghost"
-              className="h-7 px-2 text-xs"
               onClick={() => setShowSessionList((value) => !value)}
               disabled={!bookId}
+              aria-label="会话列表"
             >
-              ☰ 会话
+              <MessagesSquare />
             </Button>
             <h2 className="text-sm font-semibold">阅读助手</h2>
           </div>
@@ -184,29 +185,30 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
             <span className="text-xs text-amber-600">正在恢复…</span>
           ) : state.status === "unavailable" ? (
             <div className="flex items-center gap-2">
-              <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => void handleRestart()}>
-                重启助手
+              <Button size="icon-xs" variant="outline" onClick={() => void handleRestart()} aria-label="重启助手">
+                <RefreshCw />
               </Button>
               <Button
-                size="sm"
+                size="icon-xs"
                 variant="ghost"
-                className="h-7 px-2 text-xs"
                 onClick={() => setShowConfig(true)}
+                aria-label="设置"
               >
-                ⚙ 设置
+                <Settings />
               </Button>
             </div>
           ) : (
             <div className="flex items-center gap-2">
-              {bookReady && <span className="text-xs text-muted-foreground">📖 已就绪</span>}
-              {!bookReady && <span className="text-xs text-muted-foreground">等待书籍…</span>}
+              <span className="text-[10px] text-muted-foreground">
+                {bookReady ? "已就绪" : "等待书籍…"}
+              </span>
               <Button
-                size="sm"
+                size="icon-xs"
                 variant="ghost"
-                className="h-7 px-2 text-xs"
                 onClick={() => setShowConfig(true)}
+                aria-label="设置"
               >
-                ⚙ 设置
+                <Settings />
               </Button>
             </div>
           )}

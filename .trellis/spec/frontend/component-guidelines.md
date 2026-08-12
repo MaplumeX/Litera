@@ -21,6 +21,34 @@ npx shadcn@latest add <component-name>
 |---------|---------|
 | `react-resizable-panels` | Draggable split-pane layout (shadcn/ui Resizable component base) |
 | `react-markdown` + `remark-gfm` | Agent response Markdown rendering (lists, code blocks, tables) |
+| `lucide-react` | Icon library for all toolbar/action buttons |
+
+### Icon Buttons (lucide-react)
+
+**Decision**: All toolbar and action buttons use lucide-react icons via the `Button` `icon` / `icon-sm` / `icon-xs` size variants, not text labels.
+
+**Why**: Modern reader UIs (Apple Books, Readwise Reader, 微信读书) use icon buttons with logical grouping to keep toolbars compact and immersive. Text-label buttons create visual noise and break the minimal aesthetic.
+
+**How**:
+```tsx
+import { ChevronLeft, List, Settings } from "lucide-react"
+
+// Good — icon button with aria-label for accessibility
+<Button size="icon-sm" variant="ghost" aria-label="返回书库">
+  <ChevronLeft />
+</Button>
+
+// Active state via variant, not text change
+<Button size="icon-sm" variant={active ? "secondary" : "ghost"}>
+  <List />
+</Button>
+```
+
+**Rules**:
+- Never use emoji characters (☰, ⚙, 📖) as button content — use lucide icons.
+- Every icon-only button MUST have an `aria-label` for accessibility.
+- Group related icon buttons in a `<div className="flex items-center gap-1">` container.
+- Active/pressed states use `variant="secondary"` (background highlight); inactive uses `variant="ghost"`.
 
 ## Patterns
 

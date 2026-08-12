@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Group, Panel, Separator } from "react-resizable-panels";
 import { Button } from "@/components/ui/button";
+import { ChevronLeft, List, Type, MessageSquare, MessageSquareOff } from "lucide-react";
 import {
   ReaderView,
   type ReaderViewHandle,
@@ -28,6 +29,29 @@ interface FileData {
   bytes: Uint8Array<ArrayBuffer>;
   name: string;
   bookId: string;
+}
+
+function ReaderProgressBar({
+  fraction,
+  chapterLabel,
+}: {
+  fraction: number;
+  chapterLabel: string;
+}) {
+  const pct = Math.round(fraction * 100);
+  return (
+    <div className="flex items-center gap-2">
+      <div className="h-1 w-24 rounded bg-muted">
+        <div
+          className="h-full rounded bg-primary transition-all"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">
+        {chapterLabel} · {pct}%
+      </span>
+    </div>
+  );
 }
 
 function PersistenceErrorBanner({
@@ -170,6 +194,29 @@ function App() {
     readerRef.current?.setStyles(css);
   }, [styleState]);
 
+  // Keyboard page navigation (reader view only).
+  useEffect(() => {
+    if (view !== "reader" || !fileData) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      if (
+        target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.isContentEditable
+      )
+        return;
+      if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        void readerRef.current?.prev();
+      } else if (e.key === "ArrowRight") {
+        e.preventDefault();
+        void readerRef.current?.next();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [view, fileData]);
+
   const handleOpenBook = useCallback(async (bookId: string) => {
     // `open_book_bytes` also switches the sidecar, so it is intentionally
     // serialized. A later click supersedes the older UI result without letting
@@ -281,7 +328,6 @@ function App() {
     readerRef.current?.goToTocItem(href);
   }, []);
 
-  const fractionPct = Math.round(progress.fraction * 100);
   const chapterLabel = progress.label ?? `Chapter ${progress.index + 1}`;
   const bookTitle = currentBook?.title || fileData?.name || "";
 
@@ -305,30 +351,39 @@ function App() {
       />
       {/* Top toolbar */}
       <header className="flex items-center gap-3 border-b px-4 py-2">
-        <Button size="sm" variant="outline" onClick={() => void handleBackToLibrary()}>
-          ← 书库
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          onClick={() => void handleBackToLibrary()}
+          aria-label="返回书库"
+        >
+          <ChevronLeft />
         </Button>
         <h1 className="text-lg font-bold">Litera</h1>
         {bookTitle && (
           <span className="truncate text-sm text-muted-foreground">{bookTitle}</span>
         )}
         <div className="ml-auto flex items-center gap-2">
+          {/* Progress bar */}
+          <ReaderProgressBar fraction={progress.fraction} chapterLabel={chapterLabel} />
           {/* TOC toggle */}
           <Button
-            size="sm"
-            variant={tocVisible ? "default" : "outline"}
+            size="icon-sm"
+            variant={tocVisible ? "secondary" : "ghost"}
             onClick={() => setTocVisible((v) => !v)}
+            aria-label="目录"
           >
-            ☰ 目录
+            <List />
           </Button>
           {/* Font + theme controls (dropdown panel) */}
           <div className="relative">
             <Button
-              size="sm"
-              variant={controlsOpen ? "default" : "outline"}
+              size="icon-sm"
+              variant={controlsOpen ? "secondary" : "ghost"}
               onClick={() => setControlsOpen((v) => !v)}
+              aria-label="字体与主题"
             >
-              Aa
+              <Type />
             </Button>
             <ReaderControls
               open={controlsOpen}
@@ -340,11 +395,12 @@ function App() {
           </div>
           {/* Chat toggle */}
           <Button
-            size="sm"
-            variant="outline"
+            size="icon-sm"
+            variant={chatCollapsed ? "outline" : "ghost"}
             onClick={() => setChatCollapsed((v) => !v)}
+            aria-label={chatCollapsed ? "显示对话" : "隐藏对话"}
           >
-            {chatCollapsed ? "显示对话" : "隐藏对话"}
+            {chatCollapsed ? <MessageSquare /> : <MessageSquareOff />}
           </Button>
         </div>
       </header>
@@ -395,28 +451,6 @@ function App() {
         )}
       </div>
 
-      {/* Bottom navigation bar */}
-      {fileData && (
-        <footer className="flex items-center justify-between border-t px-4 py-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => readerRef.current?.prev()}
-          >
-            上一页
-          </Button>
-          <span className="text-sm text-muted-foreground">
-            {chapterLabel} · {fractionPct}%
-          </span>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => readerRef.current?.next()}
-          >
-            下一页
-          </Button>
-        </footer>
-      )}
     </main>
   );
 }

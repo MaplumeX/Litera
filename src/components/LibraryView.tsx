@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { BookRecord, ImportBookResult } from "@/types/library";
 import { extractEpubMetadata } from "@/lib/book-utils";
 import { Button } from "@/components/ui/button";
+import { Plus } from "lucide-react";
 import { BookCard } from "@/components/BookCard";
 import {
   invokeErrorMessage,
@@ -116,7 +117,8 @@ export function LibraryView({ onOpenBook, openingBookId = null }: LibraryViewPro
             onClick={() => void handleImport()}
             disabled={importing || openingBookId !== null}
           >
-            {importing ? "导入中…" : "导入"}
+            <Plus className="size-4" />
+            <span>{importing ? "导入中…" : "导入"}</span>
           </Button>
         </div>
       </header>
@@ -137,7 +139,8 @@ export function LibraryView({ onOpenBook, openingBookId = null }: LibraryViewPro
                 onClick={() => void handleImport()}
                 disabled={importing || openingBookId !== null}
               >
-                {importing ? "导入中…" : "导入 EPUB"}
+                <Plus className="size-4" />
+                <span>{importing ? "导入中…" : "导入 EPUB"}</span>
               </Button>
             </div>
           </div>
