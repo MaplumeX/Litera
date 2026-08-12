@@ -82,6 +82,12 @@ await listen<AgentEvent>("agent_event", (event) => {
 
 `agentReducer` accepts only increasing global versions and non-regressing generations. Book, session, prompt, session-list request, and tool-call changes require their matching correlation. An irrelevant old event may advance the global version cursor, but it cannot modify current operation content.
 
+#### Optimistic session creation (session_created)
+
+The sidecar's `SessionManager` does **not** persist an empty session to disk — it only writes the file once an assistant message exists (pi design to avoid empty-file buildup). This means `listSessions()` called right after `session_created` returns a list that **excludes** the just-created session.
+
+Therefore the reducer's `session_created` case must **optimistically insert** a `AgentSessionSummary` (id from event, title `"New Session"`, current timestamps) into `state.sessions` via a dedupe-by-id `upsertSession` helper. The `useAgentBridge` listener must **not** call `listSessions()` on `session_created` — that would overwrite the optimistic entry with a disk list that lacks it. The first real message persists the session; the subsequent `prompt_end` → `listSessions()` refresh replaces the optimistic entry with real disk data (same id, no duplicate).
+
 ---
 
 ## When to Use Global State
