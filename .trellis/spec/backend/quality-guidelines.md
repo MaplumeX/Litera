@@ -95,6 +95,13 @@ tauri::async_runtime::spawn(async move {
 - Decode `unknown` JSON exactly once in `sidecar/protocol.ts` and `src-tauri/src/sidecar_protocol.rs`. Consumers must not read raw JSON fields independently.
 - JSONL commands/events, identifiers, prompt text, selection text, and stdout framing have explicit size limits. Validation happens before a Tauri command returns a receipt.
 
+### Convention: sidecar agent config is injected, never host-borrowed
+
+- The sidecar MUST NOT read `~/.pi/agent` or `process.env.HOME` to locate LLM provider/auth/models config. The Rust supervisor owns a Litera-specific agent config directory (`<app_data_dir>/agent/`) and injects it via the `configure` command after every `ready` event, before any `open_book`.
+- Rust resolves and `create_dir_all`s the agent dir once at supervisor startup and stores it on `SupervisorActor.agent_dir`; it re-sends `configure` on every `ready` (including restarts) so a freshly spawned sidecar always receives it before replay.
+- The sidecar stores the injected path in a module-level `agentDir` variable. `handleOpenBook` rejects if `agentDir` is unset. `makeResourceLoader` and every `createAgentSession` call MUST pass `agentDir` explicitly — the pi SDK's `createAgentSession` falls back to `getDefaultAgentDir()` (~/.pi/agent) when `agentDir` is omitted even if a `resourceLoader` is supplied, so omitting it silently re-couples Litera to the host pi install.
+- `configure` is fire-and-forget (no confirmation event); delivery ordering is guaranteed because Rust writes `configure` and any subsequent `open_book` to the same stdin writer synchronously.
+
 ### Convention: supervisor queues and recovery are bounded
 
 - Tauri commands use a bounded supervisor queue; the supervisor uses a bounded child-writer queue. Full queues fail immediately with an operation-correlated error. `open_book_bytes` additionally waits on a one-shot actor completion from a blocking worker and returns EPUB bytes only after the child-writer queue accepts `open_book`. Process kill uses a separate capacity-one channel, and the child owner checks it before every normal write, so shutdown/restart never waits behind a full writer queue.

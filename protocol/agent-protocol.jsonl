@@ -1,4 +1,5 @@
 {"direction":"command","message":{"protocolVersion":1,"type":"ping","requestId":"req-ping-1"}}
+{"direction":"command","message":{"protocolVersion":1,"type":"configure","requestId":"req-configure-1","agentDir":"/controlled/agent"}}
 {"direction":"command","message":{"protocolVersion":1,"type":"open_book","requestId":"req-open-1","bookId":"book-a","path":"/controlled/books/book-a/book.epub","sessionsDir":"/controlled/sessions"}}
 {"direction":"command","message":{"protocolVersion":1,"type":"prompt","requestId":"req-prompt-1","promptId":"prompt-1","bookId":"book-a","text":"What is this chapter about?","context":{"selection":"selected text","chapterIndex":3}}}
 {"direction":"command","message":{"protocolVersion":1,"type":"abort","requestId":"req-abort-1","promptId":"prompt-1"}}

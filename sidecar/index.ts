@@ -82,6 +82,7 @@ const sessions = new Map<string, ManagedSession>();
 const cancelledPromptIds = new BoundedCancellationSet();
 let currentBook: CurrentBook | null = null;
 let currentSessionId: string | null = null;
+let agentDir: string | null = null;
 let activePrompt: ActivePrompt | null = null;
 let ftsReady = false;
 const protocolOutput = new BoundedOutputQueue(process.stdout, () => {
@@ -218,9 +219,10 @@ function createBookTools(bookId: string, generation: number): ToolDefinition[] {
 }
 
 function makeResourceLoader() {
+  if (!agentDir) throw new Error("Agent directory not configured");
   return new DefaultResourceLoader({
     cwd: process.cwd(),
-    agentDir: process.env.HOME ? `${process.env.HOME}/.pi/agent` : "/tmp/.pi/agent",
+    agentDir: agentDir,
     noExtensions: true,
     noSkills: true,
     noPromptTemplates: true,
@@ -278,7 +280,9 @@ async function createSession(bookId: string): Promise<{ id: string; managed: Man
   const resourceLoader = makeResourceLoader();
   await resourceLoader.reload();
   const customTools = createBookTools(bookId, book.generation);
-  const { session } = await createAgentSession({ sessionManager: manager, customTools, resourceLoader });
+  const dir = agentDir;
+  if (!dir) throw new Error("Agent directory not configured");
+  const { session } = await createAgentSession({ sessionManager: manager, customTools, resourceLoader, agentDir: dir });
   const managed = { session, unsubscribe: subscribeSession(id, session), bookId, filePath, generation: book.generation };
   sessions.set(id, managed);
   return { id, managed };
@@ -295,7 +299,9 @@ async function loadSessionFromDisk(sessionId: string, bookId: string): Promise<M
   const resourceLoader = makeResourceLoader();
   await resourceLoader.reload();
   const customTools = createBookTools(bookId, book.generation);
-  const { session } = await createAgentSession({ sessionManager: manager, customTools, resourceLoader });
+  const dir = agentDir;
+  if (!dir) throw new Error("Agent directory not configured");
+  const { session } = await createAgentSession({ sessionManager: manager, customTools, resourceLoader, agentDir: dir });
   const managed = {
     session,
     unsubscribe: subscribeSession(sessionId, session),
@@ -361,6 +367,7 @@ function consumeCancelledPrompt(promptId: string): boolean {
 }
 
 async function handleOpenBook(command: Extract<SidecarCommand, { type: "open_book" }>): Promise<void> {
+  if (!agentDir) throw new Error("Agent directory not configured");
   const generation = bookLoadGate.begin(command.bookId);
   await abortActive(command.requestId);
   disposeSessions();
@@ -604,8 +611,15 @@ function extractUserText(content: unknown): string {
     .join("");
 }
 
+async function handleConfigure(command: Extract<SidecarCommand, { type: "configure" }>): Promise<void> {
+  agentDir = command.agentDir;
+}
+
 async function handleStateCommand(command: SidecarCommand): Promise<void> {
   switch (command.type) {
+    case "configure":
+      await handleConfigure(command);
+      break;
     case "open_book":
       await handleOpenBook(command);
       break;

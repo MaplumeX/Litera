@@ -383,6 +383,7 @@ struct SupervisorActor {
     recovering: bool,
     process_ready: bool,
     last_seq: u64,
+    agent_dir: String,
 }
 
 fn run_supervisor(
@@ -391,6 +392,13 @@ fn run_supervisor(
     control: SyncSender<SupervisorMessage>,
     snapshot: Arc<RwLock<AgentSnapshot>>,
 ) {
+    let agent_dir = app
+        .path()
+        .app_data_dir()
+        .map(|dir| dir.join("agent"))
+        .map(|dir| dir.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let _ = std::fs::create_dir_all(&agent_dir);
     let mut actor = SupervisorActor {
         app,
         control,
@@ -405,6 +413,7 @@ fn run_supervisor(
         recovering: false,
         process_ready: false,
         last_seq: 0,
+        agent_dir,
     };
     actor.start_process();
     while let Ok(message) = receiver.recv() {
@@ -550,6 +559,18 @@ impl SupervisorActor {
         match &event.event {
             SidecarEvent::Ready => {
                 self.process_ready = true;
+                if !self.agent_dir.is_empty() {
+                    let configure = CommandEnvelope {
+                        protocol_version: AGENT_PROTOCOL_VERSION,
+                        command: SidecarCommand::Configure {
+                            request_id: new_id("configure"),
+                            agent_dir: self.agent_dir.clone(),
+                        },
+                    };
+                    if let Err(error) = self.write_command(&configure) {
+                        self.emit_command_error("configure", &error, true, &configure);
+                    }
+                }
                 if self.recovering {
                     self.recovering = false;
                 } else {
@@ -889,6 +910,7 @@ fn restart_delay(attempts_used: usize) -> Option<u64> {
 fn command_correlation(command: &SidecarCommand) -> CommandCorrelation {
     match command {
         SidecarCommand::Ping { request_id }
+        | SidecarCommand::Configure { request_id, .. }
         | SidecarCommand::CloseBook { request_id, .. }
         | SidecarCommand::Abort { request_id, .. } => CommandCorrelation {
             request_id: request_id.clone(),

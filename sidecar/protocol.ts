@@ -11,6 +11,7 @@ export interface PromptContext {
 
 export type SidecarCommand =
   | { protocolVersion: 1; type: "ping"; requestId: string }
+  | { protocolVersion: 1; type: "configure"; requestId: string; agentDir: string }
   | { protocolVersion: 1; type: "open_book"; requestId: string; bookId: string; path: string; sessionsDir: string }
   | { protocolVersion: 1; type: "close_book"; requestId: string; bookId?: string }
   | { protocolVersion: 1; type: "prompt"; requestId: string; promptId: string; bookId: string; text: string; context?: PromptContext }
@@ -134,6 +135,13 @@ export function decodeCommand(value: unknown): SidecarCommand {
   switch (type) {
     case "ping":
       return { protocolVersion, type, requestId };
+    case "configure":
+      return {
+        protocolVersion,
+        type,
+        requestId,
+        agentDir: requiredString(input.agentDir, "agentDir", 4096),
+      };
     case "open_book":
       return {
         protocolVersion,

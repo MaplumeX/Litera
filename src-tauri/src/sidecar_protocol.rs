@@ -25,6 +25,12 @@ pub enum SidecarCommand {
         #[serde(rename = "requestId")]
         request_id: String,
     },
+    Configure {
+        #[serde(rename = "requestId")]
+        request_id: String,
+        #[serde(rename = "agentDir")]
+        agent_dir: String,
+    },
     OpenBook {
         #[serde(rename = "requestId")]
         request_id: String,
@@ -364,6 +370,13 @@ impl CommandEnvelope {
         validate_version(self.protocol_version)?;
         match &self.command {
             SidecarCommand::Ping { request_id } => validate_id("requestId", request_id),
+            SidecarCommand::Configure {
+                request_id,
+                agent_dir,
+            } => {
+                validate_id("requestId", request_id)?;
+                validate_text("agentDir", agent_dir, 4096)
+            }
             SidecarCommand::OpenBook {
                 request_id,
                 book_id,

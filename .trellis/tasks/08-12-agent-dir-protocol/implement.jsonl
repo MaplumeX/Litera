@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend overview: Tauri + sidecar architecture context"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Sidecar stdio JSON lines protocol conventions — must follow for new configure command"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Sidecar error protocol messages — for configure/open_book error paths"}
+{"file": ".trellis/spec/backend/tauri-commands.md", "reason": "IPC command contracts — context for Rust sidecar supervisor"}

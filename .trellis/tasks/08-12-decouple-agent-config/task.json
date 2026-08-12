@@ -1,0 +1,29 @@
+{
+  "id": "decouple-agent-config",
+  "name": "decouple-agent-config",
+  "title": "Decouple sidecar from host pi agent config",
+  "description": "Sidecar should use a Litera-owned config directory instead of reusing ~/.pi/agent for provider/auth/models.",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "Maplume",
+  "assignee": "Maplume",
+  "createdAt": "2026-08-12",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "08-12-agent-dir-protocol",
+    "08-12-agent-config-ui"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}
