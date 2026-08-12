@@ -1,3 +1,5 @@
+import { useEffect } from "react";
+import { Quote, Send, Square, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -38,38 +40,63 @@ export function ChatInput({
     }
   };
 
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+  }, [value, textareaRef]);
+
   return (
-    <>
+    <div className="px-2 pb-2 pt-1">
       {pendingSelection && (
-        <div className="border-t bg-muted/30 px-3 py-1 text-xs text-muted-foreground">
-          引用选段：&ldquo;{pendingSelection.text.slice(0, 60)}{pendingSelection.text.length > 60 ? "…" : ""}&rdquo;
-          <button onClick={onClearSelection} className="ml-2 text-destructive hover:underline">✕</button>
+        <div className="mb-1.5 flex items-start gap-1.5 rounded-lg bg-muted/50 px-3 py-1.5 text-xs text-muted-foreground">
+          <Quote className="mt-0.5 h-3 w-3 shrink-0" />
+          <span className="min-w-0 flex-1">
+            引用选段：&ldquo;{pendingSelection.text.slice(0, 60)}{pendingSelection.text.length > 60 ? "…" : ""}&rdquo;
+          </span>
+          <button
+            onClick={onClearSelection}
+            className="text-muted-foreground transition-colors hover:text-foreground"
+            aria-label="清除引用"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
         </div>
       )}
-      <div className="border-t p-2">
+      <div className="rounded-2xl border bg-background shadow-sm focus-within:ring-1 focus-within:ring-ring">
         <textarea
           ref={textareaRef}
           className={cn(
-            "w-full resize-none rounded border bg-background px-2 py-1 text-sm",
-            "focus:outline-none focus:ring-1 focus:ring-ring",
+            "w-full resize-none border-0 bg-transparent px-3 py-2 text-sm",
+            "placeholder:text-muted-foreground outline-none ring-0 focus:outline-none focus:ring-0",
             retryHighlight && "ring-2 ring-primary",
           )}
-          rows={2}
+          rows={1}
           placeholder="输入问题…"
           value={value}
           onChange={(event) => onChange(event.target.value)}
           onKeyDown={handleKeyDown}
           disabled={isStreaming || !bookReady}
         />
-        <div className="mt-1 flex justify-end gap-2">
-          {isStreaming && (
-            <Button size="sm" variant="outline" onClick={onAbort}>停止</Button>
+        <div className="flex items-center justify-between px-2 pb-1.5 pt-0.5">
+          <span className="text-[10px] text-muted-foreground">Enter 发送 · Shift+Enter 换行</span>
+          {isStreaming ? (
+            <Button size="icon-sm" onClick={onAbort} aria-label="停止生成">
+              <Square />
+            </Button>
+          ) : (
+            <Button
+              size="icon-sm"
+              onClick={onSend}
+              disabled={!value.trim() || isStreaming || !bookReady}
+              aria-label="发送"
+            >
+              <Send />
+            </Button>
           )}
-          <Button size="sm" onClick={onSend} disabled={!value.trim() || isStreaming || !bookReady}>
-            发送
-          </Button>
         </div>
       </div>
-    </>
+    </div>
   );
 }
