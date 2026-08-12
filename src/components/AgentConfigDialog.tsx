@@ -7,6 +7,7 @@ import {
   AGENT_PROVIDERS,
   findProviderExample,
   isCustomProviderId,
+  type CustomProviderEntry,
 } from "@/types/agent-config";
 
 const ADD_CUSTOM_VALUE = "__add_custom__";
@@ -23,6 +24,7 @@ export function AgentConfigDialog({ open, onClose }: AgentConfigDialogProps) {
     load,
     save,
     addCustomProvider,
+    updateCustomProvider,
     deleteCustomProvider,
     switchProvider,
     loading,
@@ -35,6 +37,7 @@ export function AgentConfigDialog({ open, onClose }: AgentConfigDialogProps) {
   const [model, setModel] = useState("");
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
+  const [editingCustom, setEditingCustom] = useState(false);
 
   // Add-form fields
   const [newName, setNewName] = useState("");
@@ -42,11 +45,18 @@ export function AgentConfigDialog({ open, onClose }: AgentConfigDialogProps) {
   const [newApiKey, setNewApiKey] = useState("");
   const [newModel, setNewModel] = useState("");
 
+  // Edit-form fields
+  const [editName, setEditName] = useState("");
+  const [editBaseUrl, setEditBaseUrl] = useState("");
+  const [editApiKey, setEditApiKey] = useState("");
+  const [editModel, setEditModel] = useState("");
+
   // Load current config whenever the dialog opens.
   useEffect(() => {
     if (!open) return;
     setSuccessMessage(null);
     setShowAddForm(false);
+    setEditingCustom(false);
     setNewName("");
     setNewBaseUrl("");
     setNewApiKey("");
@@ -85,17 +95,23 @@ export function AgentConfigDialog({ open, onClose }: AgentConfigDialogProps) {
       return;
     }
     setShowAddForm(false);
+    setEditingCustom(false);
     setProvider(value);
     if (isCustomProviderId(value)) {
       const cp = snapshot?.customProviders.find((p) => p.id === value);
-      if (cp) setModel(cp.model);
+      if (cp) {
+        setModel(cp.model);
+        // R1: selecting a custom provider switches immediately.
+        void handleSwitchTo(cp);
+      }
     } else {
       setModel(snapshot?.model && snapshot.provider === value ? snapshot.model : "");
     }
   };
 
   const handleSave = async () => {
-    if (!provider || !model || !apiKey) return;
+    if (!provider || !model) return;
+    if (!apiKey && !hasExistingKey) return;
     setSuccessMessage(null);
     try {
       await save(provider, apiKey, model);
@@ -106,12 +122,40 @@ export function AgentConfigDialog({ open, onClose }: AgentConfigDialogProps) {
     }
   };
 
-  const handleSwitch = async () => {
-    if (!selectedCustom || !selectedCustom.model) return;
+  const handleSwitchTo = async (cp: CustomProviderEntry) => {
     setSuccessMessage(null);
     try {
-      await switchProvider(selectedCustom.id, selectedCustom.model);
+      await switchProvider(cp.id, cp.model);
       setSuccessMessage("已切换，重启 sidecar 生效");
+      setTimeout(() => setSuccessMessage(null), 2000);
+    } catch {
+      // error state is surfaced from the hook
+    }
+  };
+
+  const startEdit = () => {
+    if (!selectedCustom) return;
+    setEditName(selectedCustom.name);
+    setEditBaseUrl(selectedCustom.baseUrl);
+    setEditApiKey("");
+    setEditModel(selectedCustom.model);
+    setEditingCustom(true);
+  };
+
+  const handleEditSave = async () => {
+    if (!selectedCustom || !editName || !editBaseUrl || !editModel) return;
+    setSuccessMessage(null);
+    try {
+      const entry = await updateCustomProvider(
+        selectedCustom.id,
+        editName,
+        editBaseUrl,
+        editApiKey,
+        editModel,
+      );
+      setEditingCustom(false);
+      setModel(entry.model);
+      setSuccessMessage("已保存，重启 sidecar 生效");
       setTimeout(() => setSuccessMessage(null), 2000);
     } catch {
       // error state is surfaced from the hook
@@ -125,6 +169,7 @@ export function AgentConfigDialog({ open, onClose }: AgentConfigDialogProps) {
       await deleteCustomProvider(selectedCustom.id);
       setProvider(AGENT_PROVIDERS[0].id);
       setModel("");
+      setEditingCustom(false);
       setSuccessMessage("已删除自定义供应商");
       setTimeout(() => setSuccessMessage(null), 2000);
     } catch {
@@ -147,7 +192,9 @@ export function AgentConfigDialog({ open, onClose }: AgentConfigDialogProps) {
       setNewModel("");
       setProvider(entry.id);
       setModel(entry.model);
-      setSuccessMessage("已添加，点击「使用此供应商」切换");
+      // The new provider is now selected — switch to it immediately.
+      await switchProvider(entry.id, entry.model);
+      setSuccessMessage("已添加并切换，重启 sidecar 生效");
       setTimeout(() => setSuccessMessage(null), 3000);
     } catch {
       // error state is surfaced from the hook
@@ -186,9 +233,11 @@ export function AgentConfigDialog({ open, onClose }: AgentConfigDialogProps) {
             <select
               value={showAddForm ? ADD_CUSTOM_VALUE : provider}
               onChange={(e) => handleProviderChange(e.target.value)}
+              disabled={saving}
               className={cn(
                 "w-full rounded border bg-background px-2 py-1.5 text-sm",
                 "focus:outline-none focus:ring-1 focus:ring-ring",
+                saving && "opacity-60",
               )}
             >
               {AGENT_PROVIDERS.map((p) => (
@@ -275,7 +324,7 @@ export function AgentConfigDialog({ open, onClose }: AgentConfigDialogProps) {
           )}
 
           {/* Custom provider: read-only info + actions */}
-          {isCustom && !showAddForm && selectedCustom && (
+          {isCustom && !showAddForm && !editingCustom && selectedCustom && (
             <div className="space-y-3">
               <div className="rounded border border-border bg-muted/30 p-3 space-y-1.5">
                 <div className="text-sm font-medium">{selectedCustom.name}</div>
@@ -292,10 +341,11 @@ export function AgentConfigDialog({ open, onClose }: AgentConfigDialogProps) {
               <div className="flex gap-2">
                 <Button
                   size="sm"
-                  onClick={() => void handleSwitch()}
+                  variant="outline"
+                  onClick={startEdit}
                   disabled={saving}
                 >
-                  {saving ? "切换中…" : "使用此供应商"}
+                  编辑
                 </Button>
                 <Button
                   size="sm"
@@ -306,6 +356,76 @@ export function AgentConfigDialog({ open, onClose }: AgentConfigDialogProps) {
                 >
                   <Trash2 className="h-4 w-4 mr-1" />
                   删除
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Custom provider: edit form */}
+          {isCustom && !showAddForm && editingCustom && selectedCustom && (
+            <div className="space-y-3 rounded border border-border bg-muted/30 p-3">
+              <p className="text-xs font-medium text-muted-foreground">编辑自定义供应商</p>
+              <div>
+                <label className="mb-1 block text-xs text-muted-foreground">名称</label>
+                <input
+                  type="text"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  placeholder="如：本地 Ollama"
+                  className="w-full rounded border bg-background px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs text-muted-foreground">Base URL</label>
+                <input
+                  type="text"
+                  value={editBaseUrl}
+                  onChange={(e) => setEditBaseUrl(e.target.value)}
+                  placeholder="如：http://localhost:11434/v1"
+                  className="w-full rounded border bg-background px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs text-muted-foreground">API Key</label>
+                <input
+                  type="password"
+                  value={editApiKey}
+                  onChange={(e) => setEditApiKey(e.target.value)}
+                  placeholder={
+                    selectedCustom.hasApiKey
+                      ? "已配置，留空保持不变"
+                      : isLocalBaseUrl(editBaseUrl)
+                        ? "本地服务填任意占位值"
+                        : "输入 API Key"
+                  }
+                  className="w-full rounded border bg-background px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs text-muted-foreground">Model</label>
+                <input
+                  type="text"
+                  value={editModel}
+                  onChange={(e) => setEditModel(e.target.value)}
+                  placeholder="如：llama-3.1"
+                  className="w-full rounded border bg-background px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                />
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setEditingCustom(false)}
+                  disabled={saving}
+                >
+                  取消
+                </Button>
+                <Button
+                  size="sm"
+                  onClick={() => void handleEditSave()}
+                  disabled={saving || !editName || !editBaseUrl || !editModel}
+                >
+                  {saving ? "保存中…" : "保存"}
                 </Button>
               </div>
             </div>
@@ -374,7 +494,7 @@ export function AgentConfigDialog({ open, onClose }: AgentConfigDialogProps) {
             <Button
               size="sm"
               onClick={() => void handleSave()}
-              disabled={saving || !provider || !model || !apiKey}
+              disabled={saving || !provider || !model || (!apiKey && !hasExistingKey)}
             >
               {saving ? "保存中…" : "保存"}
             </Button>
@@ -382,7 +502,7 @@ export function AgentConfigDialog({ open, onClose }: AgentConfigDialogProps) {
         )}
 
         {/* For custom provider view, only show close button */}
-        {isCustom && !showAddForm && (
+        {isCustom && !showAddForm && !editingCustom && (
           <div className="mt-5 flex justify-end gap-2">
             <Button size="sm" variant="outline" onClick={onClose} disabled={saving}>
               关闭

@@ -77,6 +77,31 @@ export function useAgentConfig() {
     [load],
   );
 
+  const updateCustomProvider = useCallback(
+    async (id: string, name: string, baseUrl: string, apiKey: string, model: string) => {
+      setSaving(true);
+      setError(null);
+      try {
+        const entry = await invoke<CustomProviderEntry>("update_custom_provider", {
+          providerId: id,
+          name,
+          baseUrl,
+          apiKey,
+          model,
+        });
+        await invoke("restart_sidecar");
+        await load();
+        return entry;
+      } catch (err) {
+        setError(invokeErrorMessage(err));
+        throw err;
+      } finally {
+        setSaving(false);
+      }
+    },
+    [load],
+  );
+
   const switchProvider = useCallback(
     async (providerId: string, model: string) => {
       setSaving(true);
@@ -100,6 +125,7 @@ export function useAgentConfig() {
     load,
     save,
     addCustomProvider,
+    updateCustomProvider,
     deleteCustomProvider,
     switchProvider,
     loading,
