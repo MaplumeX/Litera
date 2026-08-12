@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { agentReducer, createAgentState } from "@/lib/agent-reducer";
@@ -16,9 +16,11 @@ function id(prefix: string): string {
 
 export function useAgentBridge(bookId: string) {
   const [state, dispatch] = useReducer(agentReducer, bookId || null, createAgentState);
-  const [subscribed, setSubscribed] = useState(false);
   const bookIdRef = useRef(bookId);
   bookIdRef.current = bookId;
+  const statusRef = useRef(state.status);
+  statusRef.current = state.status;
+  const pendingRestoreSessionIdRef = useRef<string | null>(null);
 
   const switchSession = useCallback(async (sessionId: string) => {
     const currentBookId = bookIdRef.current;
@@ -52,17 +54,24 @@ export function useAgentBridge(bookId: string) {
           void listSessions().catch((error) => console.error("refresh sessions error:", error));
         } else if (event.type === "book_ready") {
           void listSessions().catch((error) => console.error("book ready sessions error:", error));
+          const pendingSessionId = pendingRestoreSessionIdRef.current;
+          if (pendingSessionId) {
+            pendingRestoreSessionIdRef.current = null;
+            void switchSession(pendingSessionId).catch((error) => console.error("restore pending session error:", error));
+          }
         }
         // session_created: the reducer optimistically inserts the new session into the list;
         // calling listSessions() here would return a disk list missing the new (not-yet-persisted)
         // session and overwrite the optimistic entry via sessions_list.
       },
-      onRegistered: () => setSubscribed(true),
       onSnapshot: (snapshot) => {
         dispatch({ type: "hydrate", snapshot });
         const currentBookId = bookIdRef.current;
-        if (currentBookId && snapshot.bookId === currentBookId && snapshot.sessionId && snapshot.status === "bookReady") {
+        if (!currentBookId || snapshot.bookId !== currentBookId || !snapshot.sessionId) return;
+        if (snapshot.status === "bookReady") {
           void switchSession(snapshot.sessionId).catch((error) => console.error("hydrate session error:", error));
+        } else {
+          pendingRestoreSessionIdRef.current = snapshot.sessionId;
         }
       },
       onError: (error) => console.error("agent subscription error:", error),
@@ -72,13 +81,8 @@ export function useAgentBridge(bookId: string) {
 
   useEffect(() => {
     dispatch({ type: "book_changed", bookId: bookId || null });
-    if (subscribed && bookId) {
-      void invoke<AgentSnapshot>("get_agent_snapshot")
-        .then((snapshot) => dispatch({ type: "hydrate", snapshot }))
-        .catch((error) => console.error("book snapshot hydration error:", error));
-      void listSessions().catch((error) => console.error("list_sessions error:", error));
-    }
-  }, [bookId, listSessions, subscribed]);
+    pendingRestoreSessionIdRef.current = null;
+  }, [bookId]);
 
   const prompt = useCallback(async (
     text: string,
@@ -87,6 +91,7 @@ export function useAgentBridge(bookId: string) {
   ) => {
     const currentBookId = bookIdRef.current;
     if (!currentBookId) throw new Error("No book is open");
+    if (statusRef.current !== "bookReady") throw new Error("Book is not ready");
     const requestId = id("prompt-request");
     const promptId = id("prompt");
     dispatch({ type: "prompt_queued", bookId: currentBookId, promptId });
