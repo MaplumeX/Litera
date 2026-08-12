@@ -24,9 +24,19 @@ export interface SelectionCapture {
   chapterIndex: number;
 }
 
+export interface TocItem {
+  label: string;
+  href: string;
+  subitems?: TocItem[];
+}
+
 export interface ReaderViewHandle {
   prev: () => void;
   next: () => void;
+  goToFraction: (frac: number) => void;
+  goToTocItem: (href: string) => void;
+  setStyles: (css: string) => void;
+  getToc: () => TocItem[];
 }
 
 interface ReaderViewProps {
@@ -38,13 +48,21 @@ interface ReaderViewProps {
   onSelectionCapture?: (capture: SelectionCapture) => void;
   /** Last reading fraction to restore (0-1), from library persistence. */
   initialFraction?: number;
+  /** Called after the book is opened and toc is available. */
+  onBookReady?: (toc: TocItem[]) => void;
 }
 
 export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
-  function ReaderView({ fileData, onRelocate, onSelectionCapture, initialFraction }, ref) {
+  function ReaderView({ fileData, onRelocate, onSelectionCapture, initialFraction, onBookReady }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
     const viewRef = useRef<HTMLElement | null>(null);
     const currentChapterRef = useRef(0);
+    // Keep latest callbacks in refs so the open-file effect doesn't re-run
+    // when parent recreates them (e.g. onBookReady changing with styleState).
+    const onRelocateRef = useRef(onRelocate);
+    const onBookReadyRef = useRef(onBookReady);
+    onRelocateRef.current = onRelocate;
+    onBookReadyRef.current = onBookReady;
     const [selectionPos, setSelectionPos] = useState<{
       x: number;
       y: number;
@@ -67,7 +85,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         currentChapterRef.current = index;
         const fraction = detail.fraction ?? 0;
         const label = detail.tocItem?.label;
-        onRelocate?.(index, fraction, label);
+        onRelocateRef.current?.(index, fraction, label);
       };
       el.addEventListener("relocate", handleRelocate as EventListener);
 
@@ -104,8 +122,12 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
               console.error("foliate goToFraction error:", err),
             );
           }
+          // Notify App that the book is ready and toc is available.
+          const book = (view as unknown as { book?: { toc?: TocItem[] } }).book;
+          onBookReadyRef.current?.(book?.toc ?? []);
         })
         .catch((err: unknown) => console.error("foliate open error:", err));
+      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [fileData, initialFraction]);
 
     // Selection capture: listen for selectionchange inside the foliate-view.
@@ -155,8 +177,30 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
     const next = useCallback(async () => {
       await (viewRef.current as unknown as { next?: () => Promise<void> })?.next?.();
     }, []);
+    const goToFraction = useCallback(async (frac: number) => {
+      await (viewRef.current as unknown as { goToFraction?: (f: number) => Promise<void> })
+        ?.goToFraction?.(frac)
+        .catch((err: unknown) => console.error("goToFraction error:", err));
+    }, []);
+    const goToTocItem = useCallback(async (href: string) => {
+      await (viewRef.current as unknown as { goTo?: (h: string) => Promise<void> })
+        ?.goTo?.(href)
+        .catch((err: unknown) => console.error("goTo error:", err));
+    }, []);
+    const setStyles = useCallback((css: string) => {
+      const view = viewRef.current as unknown as { renderer?: { setStyles?: (c: string) => void } };
+      view?.renderer?.setStyles?.(css);
+    }, []);
+    const getToc = useCallback((): TocItem[] => {
+      const view = viewRef.current as unknown as { book?: { toc?: TocItem[] } };
+      return view?.book?.toc ?? [];
+    }, []);
 
-    useImperativeHandle(ref, () => ({ prev, next }), [prev, next]);
+    useImperativeHandle(
+      ref,
+      () => ({ prev, next, goToFraction, goToTocItem, setStyles, getToc }),
+      [prev, next, goToFraction, goToTocItem, setStyles, getToc],
+    );
 
     return (
       <div className="relative h-full w-full">
