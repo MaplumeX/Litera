@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 27
+- **Total Sessions**: 28
 - **Last Active**: 2026-08-13
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~595 | Active |
+| `journal-1.md` | ~618 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 28 | 2026-08-13 | Inline-edit chat user messages | `36b8bc7`, `8efae8a`, `bd65c3b` | `main` |
 | 27 | 2026-08-13 | Inject book snapshot aside | `b89dbbd`, `3176a32` | `main` |
 | 26 | 2026-08-13 | Separate chat and library settings | `9d77cb1`, `abe063b`, `5453976` | `main` |
 | 25 | 2026-08-13 | Redesign ChatPanel UI (ChatGPT style) | `20570ea`, `ed0d259`, `0f8f787`, `0166061`, `dab2515`, `1a2e6b0`, `ceae8b1`, `67fb429` | `main` |

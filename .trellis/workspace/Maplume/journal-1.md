@@ -593,3 +593,26 @@ New sessions receive a hidden first-turn bookSnapshot aside (metadata + truncate
 ### Status
 
 [OK] **Completed**
+
+
+## Session 28: Inline-edit chat user messages
+
+**Date**: 2026-08-13
+**Task**: Inline-edit chat user messages
+**Branch**: `main`
+
+### Summary
+
+Planned and implemented ChatGPT-style inline edit: edit_prompt/session_rewound across sidecar, Rust, and frontend; navigateTree rewind without a branch switcher; moved edit/copy buttons to reserved rows below bubbles. Specs updated. Tests and build green; live UI not clicked.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `36b8bc7` | (see git log) |
+| `8efae8a` | (see git log) |
+| `bd65c3b` | (see git log) |
+
+### Status
+
+[OK] **Completed**
