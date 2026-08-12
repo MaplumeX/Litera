@@ -5,11 +5,19 @@ import { cn } from "@/lib/utils";
 
 interface BookCardProps {
   book: BookRecord;
-  onOpen: (bookId: string) => void;
+  onOpen: (bookId: string) => void | Promise<void>;
   onDelete: (bookId: string) => void;
+  opening?: boolean;
+  deleteDisabled?: boolean;
 }
 
-export function BookCard({ book, onOpen, onDelete }: BookCardProps) {
+export function BookCard({
+  book,
+  onOpen,
+  onDelete,
+  opening = false,
+  deleteDisabled = false,
+}: BookCardProps) {
   const [imgError, setImgError] = useState(false);
 
   const coverSrc = book.coverPath ? convertFileSrc(book.coverPath) : null;
@@ -21,7 +29,8 @@ export function BookCard({ book, onOpen, onDelete }: BookCardProps) {
       {/* Cover */}
       <button
         className="relative aspect-[2/3] w-full overflow-hidden rounded-lg border bg-muted shadow-sm transition-shadow hover:shadow-md"
-        onClick={() => onOpen(book.id)}
+        onClick={() => void onOpen(book.id)}
+        disabled={opening}
         title={book.title}
       >
         {showCover ? (
@@ -38,6 +47,11 @@ export function BookCard({ book, onOpen, onDelete }: BookCardProps) {
             </span>
           </div>
         )}
+        {opening && (
+          <span className="absolute inset-x-0 bottom-0 bg-background/90 px-2 py-1 text-xs font-medium">
+            正在打开…
+          </span>
+        )}
       </button>
 
       {/* Delete button (visible on hover) */}
@@ -49,6 +63,7 @@ export function BookCard({ book, onOpen, onDelete }: BookCardProps) {
             onDelete(book.id);
           }
         }}
+        disabled={deleteDisabled}
         title="删除"
       >
         ✕

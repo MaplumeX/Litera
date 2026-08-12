@@ -22,6 +22,7 @@ import type { BookOpenContext, BookRecord } from "@/types/library";
 import { useDebouncedCallback } from "@/lib/use-debounced-callback";
 import { invokeErrorMessage } from "@/lib/app-error";
 import { epubBytesFromIpc } from "@/lib/ipc-bytes";
+import { createLatestSerializedTaskController } from "@/lib/latest-serialized-task";
 
 interface FileData {
   bytes: Uint8Array<ArrayBuffer>;
@@ -63,6 +64,7 @@ function App() {
   const [toc, setToc] = useState<TocItem[]>([]);
   const [controlsOpen, setControlsOpen] = useState(false);
   const [persistenceError, setPersistenceError] = useState<string | null>(null);
+  const [openingBookId, setOpeningBookId] = useState<string | null>(null);
   const [styleState, setStyleState] = useState<ReaderStyleState>({
     fontSize: 16,
     fontFamily: "serif",
@@ -71,6 +73,7 @@ function App() {
   const readerRef = useRef<ReaderViewHandle>(null);
   const chatRef = useRef<ChatPanelHandle>(null);
   const closingRef = useRef(false);
+  const openBookControllerRef = useRef(createLatestSerializedTaskController());
   // Track latest style state so handleBookReady can apply it after renderer mounts.
   const styleStateRef = useRef(styleState);
   styleStateRef.current = styleState;
@@ -168,13 +171,23 @@ function App() {
   }, [styleState]);
 
   const handleOpenBook = useCallback(async (bookId: string) => {
-    try {
+    // `open_book_bytes` also switches the sidecar, so it is intentionally
+    // serialized. A later click supersedes the older UI result without letting
+    // two side-effecting opens complete out of order.
+    const request = openBookControllerRef.current.run(async () => {
       await flushReadingState();
       const context = await invoke<BookOpenContext>("get_book_open_context", { bookId });
       const buffer = await invoke<ArrayBuffer>("open_book_bytes", {
         bookId,
         contentVersion: context.contentVersion,
       });
+      return { context, buffer };
+    });
+    setOpeningBookId(bookId);
+    try {
+      const result = await request.promise;
+      if (result.status === "stale") return;
+      const { context, buffer } = result.value;
       setFileData({
         bytes: epubBytesFromIpc(buffer),
         name: context.name,
@@ -201,6 +214,8 @@ function App() {
     } catch (err) {
       console.error("open_book_bytes error:", err);
       alert(`打开书籍失败: ${invokeErrorMessage(err)}`);
+    } finally {
+      if (request.isLatest()) setOpeningBookId(null);
     }
   }, [flushReadingState]);
 
@@ -277,7 +292,7 @@ function App() {
           message={persistenceError}
           onDismiss={() => setPersistenceError(null)}
         />
-        <LibraryView onOpenBook={handleOpenBook} />
+        <LibraryView onOpenBook={handleOpenBook} openingBookId={openingBookId} />
       </main>
     );
   }

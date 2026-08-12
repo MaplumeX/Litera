@@ -104,7 +104,7 @@ interface BookOpenContext {
 │   └── .transactions/   # crash-recovery journals (temporary)
 ├── books/.trash/        # recoverable staged deletions
 ├── backup/legacy-*/     # legacy reset backups; never silently discarded
-└── sessions/<bookId>/    # sidecar-managed, not touched by library commands
+└── sessions/<bookId>/   # sidecar-managed content under a LibraryStore-validated root
 ```
 
 **bookId generation**: `DefaultHasher` hash of the **source file path** (not the app data copy path). Same source file maps to the same record. Each import also receives an unpredictable UUID `importId` that binds frontend-extracted metadata and staged Raw IPC access to the exact bytes.
@@ -142,7 +142,7 @@ interface BookOpenContext {
 - **Concurrent partial updates**: race fraction and settings updates, then assert the final record contains both values.
 - **Import commit boundary**: stage changed bytes for an existing book, fail metadata/library commit, and assert EPUB, metadata, and cover all remain on the previous version.
 - **Crash recovery**: leave a prepared import journal and a staged deletion on disk, reinitialize `LibraryStore`, and assert the uncommitted import is rolled back while the referenced deleted directory is restored.
-- **Path safety**: reject traversal-like IDs, forged stored paths, duplicate IDs, symlink book directories, and non-regular EPUB/cover files before mutation.
+- **Path safety**: reject traversal-like IDs, forged stored paths, duplicate IDs, symlink book/session directories, and non-regular EPUB/cover files before mutation. Replace `.trash` with a symlink after initialization and assert delete fails while the canonical book and outside directory remain unchanged.
 - **Frontend lifecycle**: assert debounce keeps the latest call, `flush()` waits and propagates failures, and repeated `cancel()` is safe under StrictMode cleanup.
 
 ### Storage and path rules
@@ -150,8 +150,8 @@ interface BookOpenContext {
 - Every `library.json` read/modify/write and every related file transition is inside the shared `LibraryStore` gate.
 - `library.json` writes use a same-directory temporary file, flush + `sync_all`, atomic persist, and parent-directory sync. Post-persist failures restore the prior complete bytes.
 - Stored `filePath` must equal `<appData>/books/<bookId>/book.epub`; non-empty `coverPath` must equal `<appData>/books/<bookId>/cover.png`. Commands derive operational paths again from the trusted root and never follow stored paths.
-- `books`, `.trash`, book directories, `.imports`, and `.transactions` must be real directories, not symlinks. EPUB/cover/transaction files must be regular files.
-- Delete renames the book directory into `.trash` before committing metadata. A write failure renames it back; startup also restores an interrupted pre-commit staged deletion. Committed trash is retained for an explicit future retention policy.
+- `books`, `.trash`, `sessions`, book directories, `.imports`, and `.transactions` must be real directories, not symlinks. EPUB/cover/transaction files must be regular files. Fresh initialization and legacy reset both create the real `sessions` root before the sidecar starts.
+- Delete revalidates `.trash` immediately before renaming the book directory into it, then commits metadata. A write failure renames it back; startup also restores an interrupted pre-commit staged deletion. Committed trash is retained for an explicit future retention policy.
 - Startup moves an unregistered real book directory (for example, a crash during first import before `library.json` commit) into `.trash/orphan-*`; it rejects unregistered files and symlinks instead of following them.
 - All synchronous dialog and filesystem work runs inside `spawn_blocking`; library commands are async.
 

@@ -162,6 +162,10 @@ impl LibraryStore {
         self.books_root().join(".trash")
     }
 
+    fn sessions_root(&self) -> PathBuf {
+        self.root.join("sessions")
+    }
+
     fn book_dir(&self, book_id: &str) -> AppResult<PathBuf> {
         validate_book_id(book_id)?;
         let books_root = self.books_root();
@@ -183,6 +187,9 @@ impl LibraryStore {
     }
 
     fn read_library(&self) -> AppResult<LibraryData> {
+        require_real_directory(&self.books_root(), "books")?;
+        require_real_directory(&self.trash_root(), "library trash")?;
+        require_real_directory(&self.sessions_root(), "sessions")?;
         read_library_file(&self.root, &self.library_path())
     }
 
@@ -494,9 +501,11 @@ impl LibraryStore {
             .ok_or_else(|| AppError::book_not_found(book_id))?;
         let book_dir = self.book_dir(book_id)?;
 
-        fs::create_dir_all(self.trash_root()).map_err(|error| {
-            AppError::storage_io(format!("Failed to create library trash: {error}"))
-        })?;
+        // Revalidate immediately before the rename. Initialization validation is
+        // not enough because a local process could replace `.trash` while Litera
+        // is running; following such a symlink would move book data outside the
+        // controlled app-data root.
+        ensure_real_directory(&self.trash_root(), "library trash")?;
         let trash_path = self
             .trash_root()
             .join(format!("{}-{}", book_id, operation_id()));
@@ -622,7 +631,8 @@ fn initialize_root(root: &Path) -> AppResult<()> {
 fn ensure_storage_directories(root: &Path) -> AppResult<()> {
     let books_root = root.join("books");
     ensure_real_directory(&books_root, "books")?;
-    ensure_real_directory(&books_root.join(".trash"), "library trash")
+    ensure_real_directory(&books_root.join(".trash"), "library trash")?;
+    ensure_real_directory(&root.join("sessions"), "sessions")
 }
 
 fn ensure_real_directory(path: &Path, label: &str) -> AppResult<()> {
@@ -889,6 +899,10 @@ fn reset_legacy_storage(root: &Path) -> AppResult<()> {
         let new_library = root.join("library.json");
         if new_library.exists() {
             let _ = fs::remove_file(&new_library);
+        }
+        let new_sessions = root.join("sessions");
+        if new_sessions.exists() {
+            let _ = fs::remove_dir_all(&new_sessions);
         }
         rollback_moves(&moved).map_err(|rollback_error| {
             AppError::rollback_failed(format!(
@@ -1546,6 +1560,37 @@ mod tests {
         assert!(backups[0].path().join("library.json").exists());
         assert!(backups[0].path().join("books").exists());
         assert!(backups[0].path().join("sessions").exists());
+        assert!(directory.path().join("sessions").is_dir());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn v1_sessions_symlink_is_rejected_before_sidecar_use() {
+        use std::os::unix::fs::symlink;
+
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let outside = tempfile::tempdir().expect("outside directory");
+        fs::write(
+            directory.path().join("library.json"),
+            br#"{"schemaVersion":1,"books":[]}"#,
+        )
+        .expect("v1 library");
+        fs::create_dir(directory.path().join("books")).expect("books");
+        fs::create_dir(directory.path().join("books").join(".trash")).expect("trash");
+        symlink(outside.path(), directory.path().join("sessions")).expect("sessions symlink");
+
+        let error = match LibraryStore::initialize(directory.path().to_path_buf()) {
+            Ok(_) => panic!("sessions symlink unexpectedly initialized"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.code, AppErrorCode::StorageCorrupt);
+        assert!(outside
+            .path()
+            .read_dir()
+            .expect("outside remains readable")
+            .next()
+            .is_none());
     }
 
     #[test]
@@ -1650,6 +1695,31 @@ mod tests {
         assert_eq!(error.code, AppErrorCode::StorageIo);
         assert!(book_dir.join("book.epub").exists());
         assert_eq!(store.list_books().expect("list").len(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn runtime_trash_symlink_cannot_move_a_book_outside_the_library() {
+        use std::os::unix::fs::symlink;
+
+        let (directory, store) = test_store();
+        let id = import_test_book(&store, Path::new("/source/runtime-trash-symlink.epub"));
+        let book_dir = directory.path().join("books").join(&id);
+        let trash = directory.path().join("books").join(".trash");
+        let outside = tempfile::tempdir().expect("outside directory");
+        fs::remove_dir(&trash).expect("remove empty trash");
+        symlink(outside.path(), &trash).expect("trash symlink");
+
+        let error = store.delete_book(&id).expect_err("symlink trash must fail");
+
+        assert_eq!(error.code, AppErrorCode::StorageCorrupt);
+        assert!(book_dir.join("book.epub").is_file());
+        assert!(outside
+            .path()
+            .read_dir()
+            .expect("outside remains readable")
+            .next()
+            .is_none());
     }
 
     #[test]

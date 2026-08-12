@@ -11,10 +11,11 @@ import {
 import { epubBytesFromIpc } from "@/lib/ipc-bytes";
 
 interface LibraryViewProps {
-  onOpenBook: (bookId: string) => void;
+  onOpenBook: (bookId: string) => void | Promise<void>;
+  openingBookId?: string | null;
 }
 
-export function LibraryView({ onOpenBook }: LibraryViewProps) {
+export function LibraryView({ onOpenBook, openingBookId = null }: LibraryViewProps) {
   const [books, setBooks] = useState<BookRecord[]>([]);
   const [search, setSearch] = useState("");
   const [importing, setImporting] = useState(false);
@@ -110,7 +111,11 @@ export function LibraryView({ onOpenBook }: LibraryViewProps) {
             onChange={(e) => setSearch(e.target.value)}
             className="w-56 rounded-md border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
           />
-          <Button size="sm" onClick={() => void handleImport()} disabled={importing}>
+          <Button
+            size="sm"
+            onClick={() => void handleImport()}
+            disabled={importing || openingBookId !== null}
+          >
             {importing ? "导入中…" : "导入"}
           </Button>
         </div>
@@ -128,7 +133,10 @@ export function LibraryView({ onOpenBook }: LibraryViewProps) {
           <div className="flex h-full items-center justify-center">
             <div className="text-center space-y-3">
               <p className="text-muted-foreground">还没有书籍</p>
-              <Button onClick={() => void handleImport()} disabled={importing}>
+              <Button
+                onClick={() => void handleImport()}
+                disabled={importing || openingBookId !== null}
+              >
                 {importing ? "导入中…" : "导入 EPUB"}
               </Button>
             </div>
@@ -145,6 +153,8 @@ export function LibraryView({ onOpenBook }: LibraryViewProps) {
                 book={book}
                 onOpen={onOpenBook}
                 onDelete={handleDelete}
+                opening={openingBookId === book.id}
+                deleteDisabled={openingBookId !== null}
               />
             ))}
           </div>

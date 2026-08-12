@@ -10,6 +10,7 @@ Litera's frontend uses React 19 hooks directly. Hook patterns are minimal and pu
 
 Reference files:
 - `src/lib/debounced-callback.ts`, `src/lib/use-debounced-callback.ts` — controller and React lifecycle wrapper
+- `src/lib/latest-serialized-task.ts` — latest-request-wins serialization for side-effecting async flows
 - `src/components/ReaderView.tsx` — ref-stable callbacks, `useImperativeHandle`
 - `src/lib/use-agent-bridge.ts`, `src/lib/agent-subscription.ts` — single Agent subscription, snapshot hydration
 - `src/components/ChatPanel.tsx` — reducer-backed Agent UI, auto-scroll
@@ -40,6 +41,33 @@ controller.pending;
 - `cancel()` discards only pending work and is idempotent, including React StrictMode's setup/cleanup replay.
 - Calls are serialized so a later invocation cannot race an earlier backend write.
 - Callback/error refs update every render while the controller identity changes only with `delay`.
+
+### Pattern: serialize latest-wins operations that have backend side effects
+
+`open_book_bytes` both returns EPUB bytes and switches the sidecar's active
+book. Therefore rapid A/B opens must not run as independent promises whose UI
+results are merely filtered afterward. Use `createLatestSerializedTaskController`
+to serialize the complete side-effecting operation and apply only the latest
+request result:
+
+```typescript
+const request = controller.run(() => openBookBytes(bookId));
+const result = await request.promise;
+if (result.status === "completed") applyOpenedBook(result.value);
+```
+
+**Key details**:
+
+- A running older request may finish, but the newer request runs immediately
+  after it and becomes the final Reader and sidecar book.
+- A queued request that is already stale is skipped before starting.
+- Stale results and stale failures do not overwrite the latest UI state.
+- Do not issue a compensating uncorrelated `close_book` for stale results; it
+  could close the newer book. Serialization provides the ordering guarantee.
+
+**Tests required**: hold A with a deferred promise, enqueue B, and assert B does
+not start until A settles; A becomes stale, only B is applied, and an A failure
+cannot replace B's visible result or error state.
 
 ### Pattern: ref-stable callbacks to avoid effect re-runs
 
