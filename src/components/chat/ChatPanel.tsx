@@ -7,7 +7,7 @@ import {
   useState,
 } from "react";
 import { Button } from "@/components/ui/button";
-import { MessagesSquare, Settings, RefreshCw } from "lucide-react";
+import { MessagesSquare, Settings, RefreshCw, AlertCircle } from "lucide-react";
 import { useAgentBridge } from "@/lib/use-agent-bridge";
 import { useAgentConfig } from "@/lib/use-agent-config";
 import { AgentConfigDialog } from "@/components/AgentConfigDialog";
@@ -150,6 +150,11 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       }
     }, [restart]);
 
+    const handleSuggestion = useCallback((text: string) => {
+      setInput(text);
+      inputRef.current?.focus();
+    }, []);
+
     const handleEdit = useCallback((message: AgentMessage) => {
       setInput(message.content);
       if (message.selection) {
@@ -266,19 +271,28 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 
         <div className="flex-1 space-y-4 overflow-y-auto p-3">
           {configSnapshot && !configSnapshot.configured && (
-            <div className="rounded border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-400">
-              未配置 LLM provider，请先打开设置。
-              <Button
-                size="sm"
-                variant="outline"
-                className="ml-2 h-6 text-xs"
-                onClick={() => setShowConfig(true)}
-              >
-                打开设置
-              </Button>
+            <div className="flex items-start gap-2 rounded border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-400">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              <div className="flex-1">
+                未配置 LLM provider，请先打开设置。
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="ml-2 h-6 text-xs"
+                  onClick={() => setShowConfig(true)}
+                >
+                  打开设置
+                </Button>
+              </div>
             </div>
           )}
-          {state.messages.length === 0 && !error && <EmptyState />}
+          {state.messages.length === 0 && !error && (
+            <EmptyState
+              hasSelection={pendingSelection != null}
+              bookReady={bookReady}
+              onSuggestion={handleSuggestion}
+            />
+          )}
           {state.messages.map((message, index) => (
             <div key={index}>
               {message.role === "user" && (
