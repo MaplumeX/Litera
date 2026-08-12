@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 23
+- **Total Sessions**: 24
 - **Last Active**: 2026-08-12
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~500 | Active |
+| `journal-1.md` | ~522 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 24 | 2026-08-12 | Fix Command does not match the current book race | `6f9a26c`, `397dbc3` | `main` |
 | 23 | 2026-08-12 | 子任务C：主题与设置入口统一化 | `13fb954` | `main` |
 | 22 | 2026-08-12 | 子任务B：会话重命名 | `fa13140` | `main` |
 | 21 | 2026-08-12 | 子任务A：聊天面板消息交互增强 | `9fde500` | `main` |

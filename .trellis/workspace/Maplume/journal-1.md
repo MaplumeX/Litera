@@ -498,3 +498,25 @@ Added shadcn dialog/select/input/label components via npx shadcn@latest add. Mig
 ### Status
 
 [OK] **Completed**
+
+
+## Session 24: Fix Command does not match the current book race
+
+**Date**: 2026-08-12
+**Task**: Fix Command does not match the current book race
+**Branch**: `main`
+
+### Summary
+
+Fixed intermittent 'Command does not match the current book' in the AI chat panel. Root cause: useAgentBridge's book_changed effect fired list_sessions/get_agent_snapshot as soon as bookId changed, but open_book_bytes only confirms the OpenBook command entered the sidecar writer queue — the sidecar SerialDispatcher may still have currentBook=null or the previous book, so requireCurrentBook rejected the early command. Fix: drive session-list refresh, pending-session restore, and the first prompt from the book_ready event instead; add pendingRestoreSessionIdRef for restart/replay hydration; gate prompt() with a statusRef backstop. Added 5 use-agent-bridge behavior tests (T1-T5); all 27 tests green. Updated hook-guidelines spec with the book_changed command-gating convention and a Common Mistake entry.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6f9a26c` | (see git log) |
+| `397dbc3` | (see git log) |
+
+### Status
+
+[OK] **Completed**
