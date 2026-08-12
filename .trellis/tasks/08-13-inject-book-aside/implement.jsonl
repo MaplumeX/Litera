@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend layer entry: sidecar vs Rust ownership"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "nextTurn aside convention, stdout protocol, book worker generation"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "sidecar module layout and test script location"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "sidecar errors must not leak to stdout; snapshot fetch is non-fatal"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "stderr vs protocol for diagnostics"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "reuse sendCustomMessage reading-context path; do not invent a second injection style"}
+{"file": ".trellis/tasks/08-13-inject-book-aside/research/pi-custom-message-aside.md", "reason": "SDK nextTurn persistence, reload, and title behavior"}

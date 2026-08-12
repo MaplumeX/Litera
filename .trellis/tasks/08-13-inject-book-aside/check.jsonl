@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend layer entry for sidecar-only scope"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "aside must not mutate user text; stdout stays JSONL"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "snapshot failure must not fail the prompt"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "confirm no protocol/frontend contract drift"}
+{"file": ".trellis/tasks/08-13-inject-book-aside/research/pi-custom-message-aside.md", "reason": "verify idempotency and custom-message reload assumptions"}
