@@ -11,7 +11,6 @@ import { MessagesSquare, Settings, RefreshCw, AlertCircle } from "lucide-react";
 import { useAgentBridge } from "@/lib/use-agent-bridge";
 import { useAgentConfig } from "@/lib/use-agent-config";
 import { AgentConfigDialog } from "@/components/AgentConfigDialog";
-import type { AgentMessage } from "@/types/agent";
 import { MessageBubble } from "./MessageBubble";
 import { AssistantMessage, BotAvatar } from "./AssistantMessage";
 import { ChatInput } from "./ChatInput";
@@ -37,6 +36,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       deleteSession,
       newSession,
       prompt,
+      editPrompt,
       renameSession,
       restart,
       switchSession,
@@ -53,6 +53,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     const [retryHighlight, setRetryHighlight] = useState(false);
     const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
     const [editingTitle, setEditingTitle] = useState("");
+    const [editingIndex, setEditingIndex] = useState<number | null>(null);
+    const [editDraft, setEditDraft] = useState("");
     const { snapshot: configSnapshot, load: loadConfig } = useAgentConfig();
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -77,8 +79,15 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       setShowSessionList(false);
       setInvokeError(null);
       setSubmitting(false);
+      setEditingIndex(null);
+      setEditDraft("");
       autoSwitchRef.current = null;
     }, [bookId]);
+
+    useEffect(() => {
+      setEditingIndex(null);
+      setEditDraft("");
+    }, [state.sessionId]);
 
     useEffect(() => {
       if (state.promptId || state.error) setSubmitting(false);
@@ -113,6 +122,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     const handleSend = useCallback(async () => {
       const text = input.trim();
       if (!text || isStreaming || !bookId) return;
+      setEditingIndex(null);
+      setEditDraft("");
       const selection = pendingSelection?.text;
       const chapterIndex = pendingSelection?.chapterIndex ?? currentChapterIndex;
       lastSentRef.current = { text, selection, chapterIndex };
@@ -156,18 +167,50 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       inputRef.current?.focus();
     }, []);
 
-    const handleEdit = useCallback((message: AgentMessage) => {
-      setInput(message.content);
-      if (message.selection) {
-        setPendingSelection({
-          text: message.selection,
-          chapterIndex: message.chapterIndex ?? currentChapterIndex,
-        });
-      } else {
-        setPendingSelection(null);
+    const handleStartEdit = useCallback((index: number) => {
+      if (isStreaming) return;
+      const message = state.messages[index];
+      if (!message || message.role !== "user") return;
+      setEditingIndex(index);
+      setEditDraft(message.content);
+    }, [isStreaming, state.messages]);
+
+    const handleCancelEdit = useCallback(() => {
+      setEditingIndex(null);
+      setEditDraft("");
+    }, []);
+
+    const handleSaveEdit = useCallback(async () => {
+      if (editingIndex === null) return;
+      const text = editDraft.trim();
+      if (!text || isStreaming || !bookId) return;
+      const original = state.messages[editingIndex];
+      if (!original || original.role !== "user") return;
+      const selection = original.selection;
+      const chapterIndex = original.chapterIndex;
+      lastSentRef.current = {
+        text,
+        selection,
+        chapterIndex: chapterIndex ?? currentChapterIndex,
+      };
+      const index = editingIndex;
+      setEditingIndex(null);
+      setInvokeError(null);
+      setSubmitting(true);
+      try {
+        await editPrompt(
+          index,
+          text,
+          { selection, chapterIndex },
+          { role: "user", content: text, selection, chapterIndex },
+        );
+        setEditDraft("");
+      } catch (error) {
+        setInvokeError(String(error));
+        setSubmitting(false);
+        setEditingIndex(index);
       }
-      inputRef.current?.focus();
-    }, [currentChapterIndex]);
+    }, [bookId, currentChapterIndex, editDraft, editPrompt, editingIndex, isStreaming, state.messages]);
 
     const handleRenameSave = useCallback(async (sessionId: string) => {
       const title = editingTitle.trim();
@@ -297,7 +340,16 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
           {state.messages.map((message, index) => (
             <div key={index}>
               {message.role === "user" && (
-                <MessageBubble message={message} onEdit={handleEdit} />
+                <MessageBubble
+                  message={message}
+                  editing={editingIndex === index}
+                  draft={editingIndex === index ? editDraft : message.content}
+                  onDraftChange={setEditDraft}
+                  onStartEdit={() => handleStartEdit(index)}
+                  onSave={() => void handleSaveEdit()}
+                  onCancel={handleCancelEdit}
+                  editDisabled={isStreaming}
+                />
               )}
               {message.role === "assistant" && (
                 <AssistantMessage

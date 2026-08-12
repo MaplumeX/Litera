@@ -78,6 +78,7 @@ export type AgentEvent = EventEnvelope & (
   | ({ type: "prompt_aborted" } & PromptCorrelation & RequestCorrelation)
   | ({ type: "session_created" } & BookCorrelation & { sessionId: string } & RequestCorrelation)
   | ({ type: "session_switched"; messages: AgentMessage[] } & BookCorrelation & { sessionId: string } & RequestCorrelation)
+  | ({ type: "session_rewound"; messages: AgentMessage[] } & PromptCorrelation & RequestCorrelation)
   | ({ type: "session_deleted" } & BookCorrelation & { sessionId: string } & RequestCorrelation)
   | ({ type: "session_renamed"; title: string } & BookCorrelation & { sessionId: string } & RequestCorrelation)
   | ({ type: "sessions_list"; sessions: AgentSessionSummary[] } & BookCorrelation & RequestCorrelation)

@@ -1,12 +1,37 @@
-import { Pencil, Quote } from "lucide-react";
+import type { KeyboardEvent } from "react";
+import { Check, Pencil, Quote, X } from "lucide-react";
 import type { AgentMessage } from "@/types/agent";
 
 interface MessageBubbleProps {
   message: AgentMessage;
-  onEdit: (message: AgentMessage) => void;
+  editing: boolean;
+  draft: string;
+  onDraftChange: (value: string) => void;
+  onStartEdit: () => void;
+  onSave: () => void;
+  onCancel: () => void;
+  editDisabled: boolean;
 }
 
-export function MessageBubble({ message, onEdit }: MessageBubbleProps) {
+export function MessageBubble({
+  message,
+  editing,
+  draft,
+  onDraftChange,
+  onStartEdit,
+  onSave,
+  onCancel,
+  editDisabled,
+}: MessageBubbleProps) {
+  const canSave = draft.trim().length > 0;
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      if (canSave) onSave();
+    }
+  };
+
   return (
     <div className="flex flex-col items-end gap-1">
       {message.selection && (
@@ -15,15 +40,52 @@ export function MessageBubble({ message, onEdit }: MessageBubbleProps) {
           <span>&ldquo;{message.selection}&rdquo;</span>
         </div>
       )}
-      <div className="group relative max-w-[85%] rounded-2xl bg-primary px-3 py-2 text-sm text-primary-foreground">
-        {message.content}
-        <button
-          onClick={() => onEdit(message)}
-          className="absolute right-1 top-1 opacity-0 transition-opacity group-hover:opacity-100"
-          aria-label="编辑"
-        >
-          <Pencil className="h-3.5 w-3.5 text-primary-foreground/70 hover:text-primary-foreground" />
-        </button>
+      {editing ? (
+        <textarea
+          value={draft}
+          onChange={(event) => onDraftChange(event.target.value)}
+          onKeyDown={handleKeyDown}
+          className="max-w-[85%] min-w-[12rem] resize-none rounded-2xl bg-primary px-3 py-2 text-sm text-primary-foreground outline-none ring-0 placeholder:text-primary-foreground/50"
+          rows={Math.min(8, Math.max(2, draft.split("\n").length))}
+          autoFocus
+        />
+      ) : (
+        <div className="max-w-[85%] rounded-2xl bg-primary px-3 py-2 text-sm text-primary-foreground">
+          {message.content}
+        </div>
+      )}
+      <div className="flex h-6 items-center justify-end gap-1">
+        {editing ? (
+          <>
+            <button
+              type="button"
+              onClick={onCancel}
+              className="text-muted-foreground/50 transition-colors hover:text-muted-foreground"
+              aria-label="取消"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={onSave}
+              disabled={!canSave}
+              className="text-muted-foreground/50 transition-colors hover:text-muted-foreground disabled:pointer-events-none disabled:opacity-30"
+              aria-label="保存"
+            >
+              <Check className="h-3.5 w-3.5" />
+            </button>
+          </>
+        ) : (
+          <button
+            type="button"
+            onClick={onStartEdit}
+            disabled={editDisabled}
+            className="text-muted-foreground/50 transition-colors hover:text-muted-foreground disabled:pointer-events-none disabled:opacity-30"
+            aria-label="编辑"
+          >
+            <Pencil className="h-3.5 w-3.5" />
+          </button>
+        )}
       </div>
     </div>
   );

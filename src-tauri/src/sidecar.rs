@@ -947,6 +947,12 @@ fn command_correlation(command: &SidecarCommand) -> CommandCorrelation {
             book_id,
             prompt_id,
             ..
+        }
+        | SidecarCommand::EditPrompt {
+            request_id,
+            book_id,
+            prompt_id,
+            ..
         } => CommandCorrelation {
             request_id: request_id.clone(),
             book_id: Some(book_id.clone()),
@@ -1021,6 +1027,41 @@ pub fn agent_prompt(
         request_id: request_id.clone(),
         prompt_id: prompt_id.clone(),
         book_id,
+        text: prompt,
+        context,
+    })?;
+    Ok(CommandReceipt {
+        request_id,
+        prompt_id: Some(prompt_id),
+    })
+}
+
+#[tauri::command]
+pub fn agent_edit_prompt(
+    message_index: u32,
+    prompt: String,
+    selection: Option<String>,
+    chapter_index: Option<u32>,
+    book_id: String,
+    request_id: Option<String>,
+    prompt_id: Option<String>,
+    supervisor: tauri::State<'_, SidecarSupervisor>,
+) -> Result<CommandReceipt, String> {
+    let request_id = normalize_request_id(request_id, "edit-prompt-request");
+    let prompt_id = prompt_id.unwrap_or_else(|| new_id("prompt"));
+    let context = if selection.is_some() || chapter_index.is_some() {
+        Some(PromptContext {
+            selection,
+            chapter_index,
+        })
+    } else {
+        None
+    };
+    supervisor.send(SidecarCommand::EditPrompt {
+        request_id: request_id.clone(),
+        prompt_id: prompt_id.clone(),
+        book_id,
+        message_index,
         text: prompt,
         context,
     })?;

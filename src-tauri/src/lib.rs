@@ -103,6 +103,7 @@ pub fn run() {
             library::update_reading_state,
             sidecar::get_agent_snapshot,
             sidecar::agent_prompt,
+            sidecar::agent_edit_prompt,
             sidecar::agent_abort,
             sidecar::list_sessions,
             sidecar::new_session,

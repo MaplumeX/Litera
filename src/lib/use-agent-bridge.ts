@@ -21,6 +21,7 @@ export function useAgentBridge(bookId: string) {
   const statusRef = useRef(state.status);
   statusRef.current = state.status;
   const pendingRestoreSessionIdRef = useRef<string | null>(null);
+  const pendingEditRef = useRef<{ promptId: string; message: AgentMessage } | null>(null);
 
   const switchSession = useCallback(async (sessionId: string) => {
     const currentBookId = bookIdRef.current;
@@ -48,6 +49,16 @@ export function useAgentBridge(bookId: string) {
       onEvent: (event) => {
         dispatch({ type: "event", event });
         const currentBookId = bookIdRef.current;
+        if (event.type === "session_rewound" && event.bookId === currentBookId) {
+          const pending = pendingEditRef.current;
+          if (pending && pending.promptId === event.promptId) {
+            pendingEditRef.current = null;
+            dispatch({ type: "user_message", message: pending.message });
+          }
+        }
+        if (event.type === "error" && pendingEditRef.current && event.promptId === pendingEditRef.current.promptId) {
+          pendingEditRef.current = null;
+        }
         if (!currentBookId || !("bookId" in event) || event.bookId !== currentBookId) return;
         if (event.type === "prompt_end" || event.type === "prompt_aborted") {
           void switchSession(event.sessionId).catch((error) => console.error("restore session history error:", error));
@@ -82,6 +93,7 @@ export function useAgentBridge(bookId: string) {
   useEffect(() => {
     dispatch({ type: "book_changed", bookId: bookId || null });
     pendingRestoreSessionIdRef.current = null;
+    pendingEditRef.current = null;
   }, [bookId]);
 
   const prompt = useCallback(async (
@@ -106,6 +118,37 @@ export function useAgentBridge(bookId: string) {
         promptId,
       });
     } catch (error) {
+      dispatch({ type: "prompt_queue_failed", promptId, message: String(error) });
+      throw error;
+    }
+    return { requestId, promptId };
+  }, []);
+
+  const editPrompt = useCallback(async (
+    messageIndex: number,
+    text: string,
+    context: { selection?: string; chapterIndex?: number },
+    message: AgentMessage,
+  ) => {
+    const currentBookId = bookIdRef.current;
+    if (!currentBookId) throw new Error("No book is open");
+    if (statusRef.current !== "bookReady") throw new Error("Book is not ready");
+    const requestId = id("edit-prompt-request");
+    const promptId = id("prompt");
+    dispatch({ type: "prompt_queued", bookId: currentBookId, promptId });
+    pendingEditRef.current = { promptId, message };
+    try {
+      await invoke<CommandReceipt>("agent_edit_prompt", {
+        messageIndex,
+        prompt: text,
+        selection: context.selection ?? null,
+        chapterIndex: context.chapterIndex ?? null,
+        bookId: currentBookId,
+        requestId,
+        promptId,
+      });
+    } catch (error) {
+      pendingEditRef.current = null;
       dispatch({ type: "prompt_queue_failed", promptId, message: String(error) });
       throw error;
     }
@@ -157,6 +200,7 @@ export function useAgentBridge(bookId: string) {
   return {
     state,
     prompt,
+    editPrompt,
     abort,
     listSessions,
     newSession,

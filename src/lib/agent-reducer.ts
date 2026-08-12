@@ -189,6 +189,10 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
       return matchesBook(base, event.bookId)
         ? { ...base, sessionId: event.sessionId, promptId: null, messages: event.messages, status: "bookReady", error: null }
         : base;
+    case "session_rewound":
+      return matchesBook(base, event.bookId)
+        ? { ...base, sessionId: event.sessionId, messages: event.messages, error: null }
+        : base;
     case "session_deleted":
       if (!matchesBook(base, event.bookId)) return base;
       return {

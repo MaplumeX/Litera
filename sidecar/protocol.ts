@@ -16,6 +16,7 @@ export type SidecarCommand =
   | { protocolVersion: 1; type: "open_book"; requestId: string; bookId: string; path: string; sessionsDir: string }
   | { protocolVersion: 1; type: "close_book"; requestId: string; bookId?: string }
   | { protocolVersion: 1; type: "prompt"; requestId: string; promptId: string; bookId: string; text: string; context?: PromptContext }
+  | { protocolVersion: 1; type: "edit_prompt"; requestId: string; promptId: string; bookId: string; messageIndex: number; text: string; context?: PromptContext }
   | { protocolVersion: 1; type: "abort"; requestId: string; promptId?: string }
   | { protocolVersion: 1; type: "list_sessions"; requestId: string; bookId: string }
   | { protocolVersion: 1; type: "new_session"; requestId: string; bookId: string }
@@ -63,6 +64,7 @@ export type SidecarEvent = EventBase & (
   | ({ type: "prompt_aborted" } & PromptCorrelation & RequestCorrelation)
   | ({ type: "session_created" } & BookCorrelation & { sessionId: string } & RequestCorrelation)
   | ({ type: "session_switched"; messages: SerializedMessage[] } & BookCorrelation & { sessionId: string } & RequestCorrelation)
+  | ({ type: "session_rewound"; messages: SerializedMessage[] } & PromptCorrelation & RequestCorrelation)
   | ({ type: "session_deleted" } & BookCorrelation & { sessionId: string } & RequestCorrelation)
   | ({ type: "session_renamed"; title: string } & BookCorrelation & { sessionId: string } & RequestCorrelation)
   | ({ type: "sessions_list"; sessions: SessionSummary[] } & BookCorrelation & RequestCorrelation)
@@ -163,6 +165,17 @@ export function decodeCommand(value: unknown): SidecarCommand {
         requestId,
         promptId: requiredString(input.promptId, "promptId"),
         bookId: requiredString(input.bookId, "bookId"),
+        text: requiredString(input.text, "text", MAX_PROMPT_LENGTH),
+        context: decodeContext(input.context),
+      };
+    case "edit_prompt":
+      return {
+        protocolVersion,
+        type,
+        requestId,
+        promptId: requiredString(input.promptId, "promptId"),
+        bookId: requiredString(input.bookId, "bookId"),
+        messageIndex: finiteInteger(input.messageIndex, "messageIndex"),
         text: requiredString(input.text, "text", MAX_PROMPT_LENGTH),
         context: decodeContext(input.context),
       };
@@ -307,6 +320,15 @@ export function decodeEvent(value: unknown): SidecarEvent {
         requestId,
         bookId: bookId(),
         sessionId: sessionId(),
+        messages: decodeMessages(input.messages),
+      };
+    case "session_rewound":
+      return {
+        protocolVersion,
+        seq,
+        type,
+        requestId,
+        ...correlation(),
         messages: decodeMessages(input.messages),
       };
     case "sessions_list":

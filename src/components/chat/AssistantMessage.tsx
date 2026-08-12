@@ -10,16 +10,17 @@ function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   return (
     <button
+      type="button"
       onClick={() => {
         void navigator.clipboard.writeText(text).then(() => {
           setCopied(true);
           setTimeout(() => setCopied(false), 1500);
         });
       }}
-      className="absolute right-1 top-1 opacity-0 transition-opacity group-hover:opacity-100"
+      className="text-muted-foreground/50 transition-colors hover:text-muted-foreground"
       aria-label="复制"
     >
-      {copied ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5 text-muted-foreground" />}
+      {copied ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
     </button>
   );
 }
@@ -48,13 +49,15 @@ export function AssistantMessage({ message, streaming = false }: AssistantMessag
         {streaming && <TypingIndicator />}
         {message.toolCalls?.map((call) => <ToolCallCard key={call.toolCallId} call={call} />)}
         {message.content && (
-          <div className="group relative">
-            <CopyButton text={message.content} />
+          <div>
             <div className="prose prose-sm max-w-none dark:prose-invert">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
               {streaming && (
                 <span className="ml-0.5 inline-block h-4 w-2 animate-pulse bg-primary/70" />
               )}
+            </div>
+            <div className="flex h-6 items-center">
+              <CopyButton text={message.content} />
             </div>
           </div>
         )}

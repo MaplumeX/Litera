@@ -271,6 +271,75 @@ describe("agentReducer", () => {
     ]);
   });
 
+  it("replaces messages on session_rewound for the same book without clearing promptId", () => {
+    let state = createAgentState("book-a");
+    state = reduce(state, {
+      version: 1,
+      seq: 1,
+      type: "book_ready",
+      bookId: "book-a",
+    });
+    state = agentReducer(state, { type: "prompt_queued", bookId: "book-a", promptId: "prompt-edit" });
+    state = {
+      ...state,
+      sessionId: "session-a",
+      messages: [
+        { role: "user", content: "q1" },
+        { role: "assistant", content: "a1" },
+        { role: "user", content: "q2" },
+        { role: "assistant", content: "a2" },
+      ],
+    };
+    state = reduce(state, {
+      version: 2,
+      seq: 2,
+      type: "session_rewound",
+      requestId: "edit-request",
+      bookId: "book-a",
+      sessionId: "session-a",
+      promptId: "prompt-edit",
+      messages: [
+        { role: "user", content: "q1" },
+        { role: "assistant", content: "a1" },
+      ],
+    });
+    expect(state.messages).toEqual([
+      { role: "user", content: "q1" },
+      { role: "assistant", content: "a1" },
+    ]);
+    expect(state.promptId).toBe("prompt-edit");
+    expect(state.status).toBe("prompting");
+    expect(state.sessionId).toBe("session-a");
+  });
+
+  it("ignores session_rewound from another book", () => {
+    const original = [
+      { role: "user" as const, content: "keep me" },
+      { role: "assistant" as const, content: "and me" },
+    ];
+    let state = createAgentState("book-a");
+    state = reduce(state, {
+      version: 1,
+      seq: 1,
+      type: "book_ready",
+      bookId: "book-a",
+    });
+    state = agentReducer(state, { type: "prompt_queued", bookId: "book-a", promptId: "prompt-edit" });
+    state = { ...state, sessionId: "session-a", messages: original };
+    state = reduce(state, {
+      version: 2,
+      seq: 2,
+      type: "session_rewound",
+      requestId: "edit-request",
+      bookId: "book-b",
+      sessionId: "session-b",
+      promptId: "prompt-other",
+      messages: [],
+    });
+    expect(state.messages).toEqual(original);
+    expect(state.promptId).toBe("prompt-edit");
+  });
+
   it("ignores session_renamed from another book", () => {
     let state = createAgentState("book-a");
     state = agentReducer(state, { type: "session_list_requested", requestId: "list-1" });

@@ -30,6 +30,7 @@ import {
   parseCommandLine,
   ProtocolDecodeError,
   MAX_SESSION_TITLE_LENGTH,
+  type PromptContext,
   type SerializedMessage,
   type SerializedToolCall,
   type SidecarCommand,
@@ -425,6 +426,80 @@ function requireCurrentBook(bookId: string, ready = true): CurrentBook {
   return currentBook;
 }
 
+function visibleBranchEntries(managed: ManagedSession) {
+  const chronological = [...managed.session.sessionManager.getBranch()].reverse();
+  return chronological.filter((entry) => {
+    if (entry.type !== "message") return false;
+    const role = entry.message.role;
+    return role === "user" || role === "assistant";
+  });
+}
+
+function isReadingContextParent(managed: ManagedSession, parentId: string | null): boolean {
+  if (!parentId) return false;
+  const parent = managed.session.sessionManager.getEntry(parentId);
+  if (!parent) return false;
+  return (parent.type === "custom_message" || parent.type === "custom")
+    && parent.customType === "readingContext";
+}
+
+async function startPrompt(
+  managed: ManagedSession,
+  prompt: ActivePrompt,
+  text: string,
+  context: PromptContext | undefined,
+): Promise<void> {
+  activePrompt = prompt;
+  sendEvent({ type: "prompt_started", ...prompt });
+  if (!sessionHasBookSnapshot(managed.session.messages)) {
+    try {
+      const worker = requireBookWorker();
+      const [meta, toc] = await Promise.all([
+        worker.metadata(managed.bookId, managed.generation),
+        worker.toc(managed.bookId, managed.generation),
+      ]);
+      await managed.session.sendCustomMessage(
+        { customType: BOOK_SNAPSHOT_CUSTOM_TYPE, content: formatBookSnapshot(meta, toc), display: false, details: undefined },
+        { triggerTurn: false, deliverAs: "nextTurn" },
+      );
+    } catch (error) {
+      process.stderr.write(`[book-snapshot] failed to queue aside: ${error instanceof Error ? error.message : String(error)}\n`);
+    }
+  }
+  if (context) {
+    const asideParts: string[] = [];
+    if (context.selection) asideParts.push(`用户选中的文本：\n"${context.selection}"`);
+    else if (context.chapterIndex !== undefined) asideParts.push(`（当前在第 ${context.chapterIndex} 章）`);
+    if (asideParts.length) {
+      await managed.session.sendCustomMessage(
+        { customType: "readingContext", content: asideParts.join("\n"), display: false, details: undefined },
+        { triggerTurn: false, deliverAs: "nextTurn" },
+      );
+    }
+  }
+  void managed.session.prompt(text).then(
+    () => {
+      if (activePrompt !== prompt) return;
+      activePrompt = null;
+      sendEvent({
+        type: "prompt_end",
+        bookId: prompt.bookId,
+        sessionId: prompt.sessionId,
+        promptId: prompt.promptId,
+      });
+    },
+    (error: unknown) => {
+      if (activePrompt !== prompt) return;
+      activePrompt = null;
+      sendError(
+        "prompt",
+        error instanceof Error ? error.message : String(error),
+        prompt,
+      );
+    },
+  );
+}
+
 async function handlePrompt(command: Extract<SidecarCommand, { type: "prompt" }>): Promise<void> {
   requireCurrentBook(command.bookId);
   if (consumeCancelledPrompt(command.promptId)) {
@@ -445,61 +520,62 @@ async function handlePrompt(command: Extract<SidecarCommand, { type: "prompt" }>
     sendError("prompt", "Prompt was cancelled before it started", commandCorrelation(command));
     return;
   }
-  const prompt: ActivePrompt = {
+  await startPrompt(
+    managed,
+    {
+      requestId: command.requestId,
+      promptId: command.promptId,
+      bookId: command.bookId,
+      sessionId,
+    },
+    command.text,
+    command.context,
+  );
+}
+
+async function handleEditPrompt(command: Extract<SidecarCommand, { type: "edit_prompt" }>): Promise<void> {
+  requireCurrentBook(command.bookId);
+  if (consumeCancelledPrompt(command.promptId)) {
+    sendError("edit_prompt", "Prompt was cancelled before it started", commandCorrelation(command));
+    return;
+  }
+  if (activePrompt) throw new Error("Another prompt is already active");
+  const sessionId = currentSessionId;
+  const managed = sessionId ? sessions.get(sessionId) : undefined;
+  if (!sessionId || !managed || managed.bookId !== command.bookId || managed.generation !== currentBook?.generation) {
+    throw new Error("No active session for the current book");
+  }
+  const target = visibleBranchEntries(managed)[command.messageIndex];
+  if (!target || target.type !== "message" || target.message.role !== "user") {
+    throw new Error("Edit target must be a user message on the current branch");
+  }
+  const navigateId = isReadingContextParent(managed, target.parentId) && target.parentId
+    ? target.parentId
+    : target.id;
+  const navigation = await managed.session.navigateTree(navigateId);
+  if (navigation.cancelled) throw new Error("Session rewind was cancelled");
+  sendEvent({
+    type: "session_rewound",
     requestId: command.requestId,
-    promptId: command.promptId,
     bookId: command.bookId,
     sessionId,
-  };
-  activePrompt = prompt;
-  sendEvent({ type: "prompt_started", ...prompt });
-  if (!sessionHasBookSnapshot(managed.session.messages)) {
-    try {
-      const worker = requireBookWorker();
-      const [meta, toc] = await Promise.all([
-        worker.metadata(managed.bookId, managed.generation),
-        worker.toc(managed.bookId, managed.generation),
-      ]);
-      await managed.session.sendCustomMessage(
-        { customType: BOOK_SNAPSHOT_CUSTOM_TYPE, content: formatBookSnapshot(meta, toc), display: false, details: undefined },
-        { triggerTurn: false, deliverAs: "nextTurn" },
-      );
-    } catch (error) {
-      process.stderr.write(`[book-snapshot] failed to queue aside: ${error instanceof Error ? error.message : String(error)}\n`);
-    }
+    promptId: command.promptId,
+    messages: serializeMessages(managed.session.messages),
+  });
+  if (consumeCancelledPrompt(command.promptId)) {
+    sendError("edit_prompt", "Prompt was cancelled before it started", commandCorrelation(command));
+    return;
   }
-  const context = command.context;
-  if (context) {
-    const asideParts: string[] = [];
-    if (context.selection) asideParts.push(`用户选中的文本：\n"${context.selection}"`);
-    else if (context.chapterIndex !== undefined) asideParts.push(`（当前在第 ${context.chapterIndex} 章）`);
-    if (asideParts.length) {
-      await managed.session.sendCustomMessage(
-        { customType: "readingContext", content: asideParts.join("\n"), display: false, details: undefined },
-        { triggerTurn: false, deliverAs: "nextTurn" },
-      );
-    }
-  }
-  void managed.session.prompt(command.text).then(
-    () => {
-      if (activePrompt !== prompt) return;
-      activePrompt = null;
-      sendEvent({
-        type: "prompt_end",
-        bookId: prompt.bookId,
-        sessionId: prompt.sessionId,
-        promptId: prompt.promptId,
-      });
+  await startPrompt(
+    managed,
+    {
+      requestId: command.requestId,
+      promptId: command.promptId,
+      bookId: command.bookId,
+      sessionId,
     },
-    (error: unknown) => {
-      if (activePrompt !== prompt) return;
-      activePrompt = null;
-      sendError(
-        "prompt",
-        error instanceof Error ? error.message : String(error),
-        prompt,
-      );
-    },
+    command.text,
+    command.context,
   );
 }
 
@@ -666,6 +742,9 @@ async function handleStateCommand(command: SidecarCommand): Promise<void> {
       break;
     case "prompt":
       await handlePrompt(command);
+      break;
+    case "edit_prompt":
+      await handleEditPrompt(command);
       break;
     case "list_sessions":
       await handleListSessions(command);

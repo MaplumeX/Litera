@@ -58,6 +58,19 @@ pub enum SidecarCommand {
         #[serde(skip_serializing_if = "Option::is_none")]
         context: Option<PromptContext>,
     },
+    EditPrompt {
+        #[serde(rename = "requestId")]
+        request_id: String,
+        #[serde(rename = "promptId")]
+        prompt_id: String,
+        #[serde(rename = "bookId")]
+        book_id: String,
+        #[serde(rename = "messageIndex")]
+        message_index: u32,
+        text: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        context: Option<PromptContext>,
+    },
     Abort {
         #[serde(rename = "requestId")]
         request_id: String,
@@ -225,6 +238,17 @@ pub enum SidecarEvent {
         book_id: String,
         #[serde(rename = "sessionId")]
         session_id: String,
+        messages: Vec<SerializedMessage>,
+    },
+    SessionRewound {
+        #[serde(rename = "requestId", skip_serializing_if = "Option::is_none")]
+        request_id: Option<String>,
+        #[serde(rename = "bookId")]
+        book_id: String,
+        #[serde(rename = "sessionId")]
+        session_id: String,
+        #[serde(rename = "promptId")]
+        prompt_id: String,
         messages: Vec<SerializedMessage>,
     },
     SessionDeleted {
@@ -420,6 +444,14 @@ impl CommandEnvelope {
                 book_id,
                 text,
                 context,
+            }
+            | SidecarCommand::EditPrompt {
+                request_id,
+                prompt_id,
+                book_id,
+                text,
+                context,
+                ..
             } => {
                 validate_id("requestId", request_id)?;
                 validate_id("promptId", prompt_id)?;
@@ -600,6 +632,17 @@ impl EventEnvelope {
                 validate_optional_id("requestId", request_id)?;
                 validate_id("bookId", book_id)?;
                 validate_id("sessionId", session_id)?;
+                validate_messages(messages)
+            }
+            SidecarEvent::SessionRewound {
+                request_id,
+                book_id,
+                session_id,
+                prompt_id,
+                messages,
+            } => {
+                validate_optional_id("requestId", request_id)?;
+                validate_prompt_correlation(book_id, session_id, prompt_id)?;
                 validate_messages(messages)
             }
             SidecarEvent::SessionsList {

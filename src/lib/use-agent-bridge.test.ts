@@ -207,6 +207,78 @@ describe("useAgentBridge", () => {
     harness.unlisten();
   });
 
+  it("T6: editPrompt rejects and agent_edit_prompt is NOT invoked when status !== bookReady", async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "get_agent_snapshot") {
+        return Promise.resolve(
+          makeSnapshot({ status: "loadingBook", bookId: "book-a" }),
+        );
+      }
+      return Promise.resolve({ requestId: `${cmd}-receipt` } as CommandReceipt);
+    });
+    const { result, harness } = await renderBridge("book-a");
+
+    expect(result.current.state.status).not.toBe("bookReady");
+
+    invokeMock.mockClear();
+    await expect(
+      result.current.editPrompt(0, "hello", {}, { role: "user", content: "hello" }),
+    ).rejects.toThrow("Book is not ready");
+
+    const editCalls = invokeMock.mock.calls.filter((c) => c[0] === "agent_edit_prompt");
+    expect(editCalls).toHaveLength(0);
+    harness.unlisten();
+  });
+
+  it("T7: session_rewound replaces messages then appends the pending edited user message", async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "get_agent_snapshot") {
+        return Promise.resolve(
+          makeSnapshot({ status: "bookReady", bookId: "book-a", sessionId: "session-1" }),
+        );
+      }
+      return Promise.resolve({ requestId: `${cmd}-receipt` } as CommandReceipt);
+    });
+    const { result, harness } = await renderBridge("book-a");
+
+    await act(async () => {
+      await result.current.editPrompt(
+        2,
+        "rewritten",
+        { selection: "quoted", chapterIndex: 1 },
+        { role: "user", content: "rewritten", selection: "quoted", chapterIndex: 1 },
+      );
+    });
+
+    const editCall = invokeMock.mock.calls.find((c) => c[0] === "agent_edit_prompt");
+    expect(editCall).toBeDefined();
+    const promptId = (editCall?.[1] as { promptId: string }).promptId;
+
+    harness.emit(
+      makeEvent({
+        type: "session_rewound",
+        bookId: "book-a",
+        sessionId: "session-1",
+        promptId,
+        requestId: "edit-request",
+        messages: [
+          { role: "user", content: "q1" },
+          { role: "assistant", content: "a1" },
+        ],
+        version: 2,
+        seq: 2,
+      }),
+    );
+
+    expect(result.current.state.messages).toEqual([
+      { role: "user", content: "q1" },
+      { role: "assistant", content: "a1" },
+      { role: "user", content: "rewritten", selection: "quoted", chapterIndex: 1 },
+    ]);
+    expect(result.current.state.promptId).toBe(promptId);
+    harness.unlisten();
+  });
+
   it("T5: session_created event does not trigger list_sessions", async () => {
     // Set up a bookReady state first.
     invokeMock.mockImplementation((cmd: string) => {
