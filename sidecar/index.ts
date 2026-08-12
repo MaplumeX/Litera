@@ -11,6 +11,11 @@ import {
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
+import {
+  BOOK_SNAPSHOT_CUSTOM_TYPE,
+  formatBookSnapshot,
+  sessionHasBookSnapshot,
+} from "./book-snapshot.js";
 import { BookWorker, isBookWorkerThread, runBookWorker } from "./book-worker.js";
 import {
   BookLoadGate,
@@ -35,11 +40,13 @@ const ABORT_TIMEOUT_MS = 2_000;
 
 const READING_ASSISTANT_PROMPT = `You are Litera, a reading assistant for EPUB books. You help readers understand the content of the book they are reading.
 
+Each session receives a book snapshot aside with the current book's title, author, language, chapter count, and a compact table of contents. Do not call get_book_metadata or get_toc unless that snapshot is missing, the TOC is truncated, or you need chapter hrefs.
+
 You have access to the following tools:
-- get_book_metadata: Get the book's title, author, language, and total chapter count.
-- get_toc: Get the table of contents (chapter index, label, and href).
 - read_chapter: Read the full text of a chapter by its index (0-based).
 - search_in_book: Search the entire book for a query string, returning matching excerpts with chapter indices.
+- get_book_metadata: Fallback — get the book's title, author, language, and total chapter count if the snapshot is missing.
+- get_toc: Fallback — get the full table of contents (chapter index, label, and href) if the snapshot TOC is truncated or you need hrefs.
 
 Always answer in the same language as the user's question. Be concise but thorough.`;
 
@@ -446,6 +453,21 @@ async function handlePrompt(command: Extract<SidecarCommand, { type: "prompt" }>
   };
   activePrompt = prompt;
   sendEvent({ type: "prompt_started", ...prompt });
+  if (!sessionHasBookSnapshot(managed.session.messages)) {
+    try {
+      const worker = requireBookWorker();
+      const [meta, toc] = await Promise.all([
+        worker.metadata(managed.bookId, managed.generation),
+        worker.toc(managed.bookId, managed.generation),
+      ]);
+      await managed.session.sendCustomMessage(
+        { customType: BOOK_SNAPSHOT_CUSTOM_TYPE, content: formatBookSnapshot(meta, toc), display: false, details: undefined },
+        { triggerTurn: false, deliverAs: "nextTurn" },
+      );
+    } catch (error) {
+      process.stderr.write(`[book-snapshot] failed to queue aside: ${error instanceof Error ? error.message : String(error)}\n`);
+    }
+  }
   const context = command.context;
   if (context) {
     const asideParts: string[] = [];

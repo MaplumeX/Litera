@@ -114,13 +114,27 @@ tauri::async_runtime::spawn(async move {
 
 ### Convention: inject reading context as a nextTurn aside, never mutate the user message
 
-**What**: When a prompt carries reading context (`selection`, `chapterIndex`), the sidecar MUST deliver that context to the model via `session.sendCustomMessage(..., { triggerTurn: false, deliverAs: "nextTurn" })` before calling `session.prompt(text)`. The user message passed to `prompt()` is always the raw user input.
+**What**: When a prompt carries reading context (`selection`, `chapterIndex`), the sidecar MUST deliver that context to the model via `session.sendCustomMessage(..., { triggerTurn: false, deliverAs: "nextTurn" })` before calling `session.prompt(text)`. If `session.messages` does not already contain a `bookSnapshot` custom message, `handlePrompt` MUST also queue a one-time book snapshot aside (`customType: "bookSnapshot"`, same `nextTurn` options) before the reading-context aside and before `session.prompt(text)`. The user message passed to `prompt()` is always the raw user input.
 
-**Why**: `session.prompt()` stores its argument verbatim as a `user` role message in session history. `serializeMessages` → `extractUserText` returns that stored text to the frontend for display. Concatenating context wrappers (`（当前在第 N 章）`, `用户选中的文本：`, `用户问题：`) into the prompt string pollutes the persisted user message, so the chat panel shows LM-facing metadata as if the user typed it.
+**Why**: `session.prompt()` stores its argument verbatim as a `user` role message in session history. `serializeMessages` → `extractUserText` returns that stored text to the frontend for display. Concatenating context wrappers (`（当前在第 N 章）`, `用户选中的文本：`, `用户问题：`) or book metadata/TOC into the prompt string pollutes the persisted user message, so the chat panel shows LM-facing metadata as if the user typed it. The snapshot persists as a custom message so later turns and reloaded sessions do not enqueue a second copy.
 
 **Correct**:
 ```typescript
 // sidecar/index.ts handlePrompt
+if (!sessionHasBookSnapshot(managed.session.messages)) {
+  try {
+    const [meta, toc] = await Promise.all([
+      worker.metadata(managed.bookId, managed.generation),
+      worker.toc(managed.bookId, managed.generation),
+    ]);
+    await managed.session.sendCustomMessage(
+      { customType: "bookSnapshot", content: formatBookSnapshot(meta, toc), display: false, details: undefined },
+      { triggerTurn: false, deliverAs: "nextTurn" },
+    );
+  } catch (error) {
+    process.stderr.write(`[book-snapshot] failed to queue aside: ${error instanceof Error ? error.message : String(error)}\n`);
+  }
+}
 const context = command.context;
 if (context) {
   const asideParts: string[] = [];
@@ -138,12 +152,12 @@ void managed.session.prompt(command.text).then(/* ... */);
 
 **Wrong**:
 ```typescript
-// NEVER concatenate context into the user text
+// NEVER concatenate context or the book snapshot into the user text
 const fullPrompt = `（当前在第 ${ctx.chapterIndex} 章）\n\n用户问题：${text}`;
 session.prompt(fullPrompt);  // pollutes stored user message
 ```
 
-**Rule**: Context asides must not include a `用户问题：` label — the user text is delivered separately by `prompt()`. The aside contains only the context (selected text or chapter index).
+**Rule**: Context asides must not include a `用户问题：` label — the user text is delivered separately by `prompt()`. The reading-context aside contains only the context (selected text or chapter index). The book snapshot aside is idempotent (skip when any message has `role === "custom"` and `customType === "bookSnapshot"`), includes a compact TOC truncated at 200 entries or 4000 formatted characters, and must not block `prompt()` on fetch or enqueue failure (one-line `process.stderr.write` only; stdout stays JSONL).
 
 ### Don't: block the main thread on sidecar I/O
 
