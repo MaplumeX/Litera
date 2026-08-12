@@ -259,6 +259,7 @@ Apply this contract whenever an Agent command, sidecar protocol field, superviso
 ```rust
 fn get_agent_snapshot(State<SidecarSupervisor>) -> Result<AgentSnapshot, String>
 fn agent_prompt(prompt, selection?, chapter_index?, book_id, request_id?, prompt_id?, State<SidecarSupervisor>) -> Result<CommandReceipt, String>
+fn agent_edit_prompt(message_index, prompt, selection?, chapter_index?, book_id, request_id?, prompt_id?, State<SidecarSupervisor>) -> Result<CommandReceipt, String>
 fn agent_abort(prompt_id?, request_id?, State<SidecarSupervisor>) -> Result<CommandReceipt, String>
 fn list_sessions(book_id, request_id?, State<SidecarSupervisor>) -> Result<CommandReceipt, String>
 fn new_session(book_id, request_id?, State<SidecarSupervisor>) -> Result<CommandReceipt, String>
@@ -303,7 +304,7 @@ fn restart_sidecar(State<SidecarSupervisor>) -> Result<(), String>
 - Rust protocol fixture round-trip plus invalid version/seq/nested ID/frame-size rejection.
 - Supervisor tests for command correlation, confirmed open writer result, full writer kill preemption, invalid stdout termination, restart budget, and stale snapshot errors.
 - Node tests for bounded dispatcher/output backpressure, abort tombstones, superseding workers, and real A/B EPUB generation isolation.
-- React reducer tests for reverse list responses, stale book/prompt errors, prompt/session correlation, toolCallId matching, first-prompt session creation, and listen/snapshot cleanup order.
+- React reducer tests for reverse list responses, stale book/prompt errors, prompt/session correlation, toolCallId matching, first-prompt session creation, `session_rewound` same-book replace / cross-book ignore, and listen/snapshot cleanup order.
 - Empty-PATH sidecar smoke and `tauri build --no-bundle` remain release gates.
 
 ### 7. Wrong vs Correct
@@ -326,4 +327,79 @@ Ok(raw_response(bytes_b))
 ```rust
 run_blocking(move || supervisor.send_confirmed(open_book_b)).await?;
 Ok(raw_response(bytes_b))
+```
+
+## Scenario: edit a visible user message (`agent_edit_prompt`)
+
+### 1. Scope / Trigger
+
+Editing a chat user message must rewind the **current session file** and resend. Do not add an optional index to `prompt`. Do not `fork()` a new session file. Do not create a session from this command.
+
+### 2. Signatures
+
+```rust
+fn agent_edit_prompt(
+    message_index: u32,
+    prompt: String,
+    selection: Option<String>,
+    chapter_index: Option<u32>,
+    book_id: String,
+    request_id: Option<String>,
+    prompt_id: Option<String>,
+    supervisor: State<SidecarSupervisor>,
+) -> Result<CommandReceipt, String>
+```
+
+Sidecar command: `{ type: "edit_prompt", requestId, promptId, bookId, messageIndex, text, context? }`.
+Sidecar event: `{ type: "session_rewound", requestId?, bookId, sessionId, promptId, messages }`.
+
+### 3. Contracts
+
+- `messageIndex` is the index in the **visible** user+assistant list (`serializeMessages` / current `getBranch()`), not `getEntries()` and not `getUserMessagesForForking()`.
+- `session_rewound.messages` is the truncated visible list **before** the new user message. Frontend reducer replaces `messages` without clearing this turn's `promptId`; `use-agent-bridge` then dispatches `user_message`.
+- Rewind uses `AgentSession.navigateTree(targetId)`, which syncs `agent.state.messages`. Bare `sessionManager.branch()` does not.
+- If the target user entry's parent is `customType: "readingContext"`, navigate that parent so the old aside leaves the path. Keep `bookSnapshot`.
+- After rewind, reuse `startPrompt` (snapshot aside if missing, then reading-context aside, then `session.prompt(text)`). Never concatenate context into `text`.
+- Requires an existing current session for this book. Rejects when another prompt is active.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+|-----------|-----------------|
+| No current session / session not this book | Invoke/sidecar error; no rewind |
+| `messageIndex` missing, not user, or off the current branch | Error; history unchanged |
+| Another prompt is active / sidecar `isStreaming` | Error; do not `navigateTree` |
+| Empty or oversized `text` / selection | Reject in protocol decode before a receipt |
+| `navigateTree` returns `cancelled` | Error; do not emit `session_rewound` |
+
+### 5. Good/Base/Bad Cases
+
+- **Good**: edit user message 0 of `[user, assistant, user, assistant]` → leaf moves to before that user (and its readingContext) → UI shows `[]` then the new user → stream.
+- **Base**: edit the last user message → later assistant disappears; new prompt starts.
+- **Bad**: `sessionManager.branch(userId)` only → JSONL leaf moves but `session.messages` still has the old tail; next `prompt()` desyncs file and model context.
+
+### 6. Tests Required
+
+- Shared `protocol/agent-protocol.jsonl` fixtures for `edit_prompt` and `session_rewound`.
+- Reducer: same-book `session_rewound` replaces messages and keeps `promptId`; other book ignored.
+- Bridge: `editPrompt` does not invoke when status !== `bookReady`; `session_rewound` then appends the pending user message.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```typescript
+managed.session.sessionManager.branch(userEntry.id);
+await managed.session.prompt(text); // agent.state.messages still has the old tail
+```
+
+#### Correct
+
+```typescript
+const navigateId = isReadingContextParent(managed, target.parentId) && target.parentId
+  ? target.parentId
+  : target.id;
+await managed.session.navigateTree(navigateId);
+sendEvent({ type: "session_rewound", messages: serializeMessages(managed.session.messages), ... });
+await startPrompt(managed, prompt, text, context);
 ```

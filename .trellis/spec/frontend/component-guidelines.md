@@ -64,6 +64,30 @@ import { ChevronLeft, List, Settings } from "lucide-react"
 - Group related icon buttons in a `<div className="flex items-center gap-1">` container.
 - Active/pressed states use `variant="secondary"` (background highlight); inactive uses `variant="ghost"`.
 
+### Convention: chat message action rows reserve height
+
+**What**: User-message edit and assistant-message copy live in a fixed-height row **below** the bubble / markdown (`h-6`). Hover may change icon contrast. Editing replaces that row with save/cancel; the bubble becomes a textarea.
+
+**Why**: `absolute right-1 top-1` overlay buttons sit on the last characters of short user bubbles and on the first line of assistant markdown.
+
+**Wrong**:
+```tsx
+<div className="group relative">
+  <button className="absolute right-1 top-1 opacity-0 group-hover:opacity-100" />
+  {message.content}
+</div>
+```
+
+**Correct**:
+```tsx
+<div className="rounded-2xl bg-primary px-3 py-2">{message.content}</div>
+<div className="flex h-6 items-center justify-end">
+  <button type="button" aria-label="编辑" className="text-muted-foreground/50 hover:text-muted-foreground">
+    <Pencil className="h-3.5 w-3.5" />
+  </button>
+</div>
+```
+
 ### Convention: Settings entry ownership
 
 **What**: General settings and LLM settings are different dialogs with different owners.

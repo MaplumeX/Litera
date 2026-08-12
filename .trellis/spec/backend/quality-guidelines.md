@@ -159,6 +159,14 @@ session.prompt(fullPrompt);  // pollutes stored user message
 
 **Rule**: Context asides must not include a `用户问题：` label — the user text is delivered separately by `prompt()`. The reading-context aside contains only the context (selected text or chapter index). The book snapshot aside is idempotent (skip when any message has `role === "custom"` and `customType === "bookSnapshot"`), includes a compact TOC truncated at 200 entries or 4000 formatted characters, and must not block `prompt()` on fetch or enqueue failure (one-line `process.stderr.write` only; stdout stays JSONL).
 
+### Convention: rewind a user turn with `navigateTree`, never `branch()` alone
+
+**What**: Chat edit-and-resend is `edit_prompt`, not an optional field on `prompt`. After locating the visible user entry on `getBranch()`, call `session.navigateTree(id)` (parent `readingContext` custom message if present). Then emit `session_rewound` and reuse `startPrompt`.
+
+**Why**: `SessionManager.branch()` only moves `leafId`. `AgentSession.messages` is `agent.state.messages`; they desync unless `navigateTree` rebuilds context. `getUserMessagesForForking()` walks the whole JSONL, including abandoned branches, so it cannot map the visible chat list.
+
+**Related**: `tauri-commands.md` scenario `agent_edit_prompt`.
+
 ### Don't: block the main thread on sidecar I/O
 
 **Problem**: Reading sidecar stdout synchronously in a command handler.
