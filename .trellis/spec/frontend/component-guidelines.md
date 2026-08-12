@@ -23,6 +23,20 @@ npx shadcn@latest add <component-name>
 | `react-markdown` + `remark-gfm` | Agent response Markdown rendering (lists, code blocks, tables) |
 | `lucide-react` | Icon library for all toolbar/action buttons |
 
+### Installed shadcn components
+
+`src/components/ui/` holds the shadcn components copied into the project. Current set:
+
+- `button.tsx` — all toolbar/action buttons (icon variants via lucide)
+- `dialog.tsx` — modal overlays (used by `AgentConfigDialog`)
+- `select.tsx` — dropdown selectors (used by `AgentConfigDialog` provider picker)
+- `input.tsx` — text/password inputs
+- `label.tsx` — form labels
+
+**Rule**: New modals and form fields must use these shadcn components, not native `<select>`/`<input>`/`<label>`/hand-written overlay divs. Add more via `npx shadcn@latest add <name>` when needed; do not hand-roll equivalents.
+
+**Select grouping**: use `SelectGroup` + `SelectLabel` + `SelectSeparator` for grouped options; do not emulate separators with disabled `<option>` values. Special pseudo-options (e.g. "add new…") are regular `SelectItem`s with sentinel string values handled in `onValueChange`.
+
 ### Icon Buttons (lucide-react)
 
 **Decision**: All toolbar and action buttons use lucide-react icons via the `Button` `icon` / `icon-sm` / `icon-xs` size variants, not text labels.
