@@ -193,8 +193,80 @@ The legacy `open_file` command is removed. `import_book` is the only file-dialog
 
 ## Sidecar Communication Commands
 
-Existing commands (`agent_prompt`, `agent_abort`, `list_sessions`, `new_session`, `switch_session`, `delete_session`) are unchanged. They forward JSON lines to the sidecar stdin via `write_to_sidecar()`.
+### 1. Scope / Trigger
+
+Apply this contract whenever an Agent command, sidecar protocol field, supervisor state, or reader/Agent book transition changes. It prevents a Tauri invoke receipt, Node state, and React UI from describing different active operations.
+
+### 2. Signatures
+
+```rust
+fn get_agent_snapshot(State<SidecarSupervisor>) -> Result<AgentSnapshot, String>
+fn agent_prompt(prompt, selection?, chapter_index?, book_id, request_id?, prompt_id?, State<SidecarSupervisor>) -> Result<CommandReceipt, String>
+fn agent_abort(prompt_id?, request_id?, State<SidecarSupervisor>) -> Result<CommandReceipt, String>
+fn list_sessions(book_id, request_id?, State<SidecarSupervisor>) -> Result<CommandReceipt, String>
+fn new_session(book_id, request_id?, State<SidecarSupervisor>) -> Result<CommandReceipt, String>
+fn switch_session(book_id, session_id, request_id?, State<SidecarSupervisor>) -> Result<CommandReceipt, String>
+fn delete_session(book_id, session_id, request_id?, State<SidecarSupervisor>) -> Result<CommandReceipt, String>
+fn close_book(book_id?, request_id?, State<SidecarSupervisor>) -> Result<CommandReceipt, String>
+fn restart_sidecar(State<SidecarSupervisor>) -> Result<(), String>
+```
+
+### 3. Contracts
+
+- Agent commands enqueue a validated `protocolVersion: 1` discriminated union. They never write or flush child stdin on the Tauri command thread.
+- `CommandReceipt` is `{ requestId, promptId? }`. A receipt for normal Agent commands means the bounded supervisor queue accepted the command; correlated `agent_event` success/error completes the operation.
+- `get_agent_snapshot` is an immediate clone of `{ version, generation, status, bookId?, sessionId?, promptId?, error? }`. React registers the single `agent_event` listener before reading it.
+- `open_book_bytes` is stricter: after the version-bound Raw EPUB read, a blocking worker waits for the supervisor actor to accept `open_book` into the child-writer queue. Only then may EPUB bytes return.
+- Replay state is committed only after writer-queue acceptance. A book-specific `close_book` clears replay state only when its ID matches the replay book.
 
 ### Convention: sidecar book_opened notification
 
-`open_book_bytes` notifies the sidecar via `notify_sidecar_book_opened()` with the controlled EPUB path + bookId + sessionsDir only after the version-bound read succeeds. Runtime callers never supply a filesystem path.
+`open_book_bytes` notifies the supervisor with the controlled EPUB path + bookId + sessionsDir only after the version-bound read succeeds. Runtime callers never supply a filesystem path. Resolving the sessions directory, supervisor enqueue, actor processing, or child-writer enqueue failure returns a visible `AppError`; EPUB bytes are not returned, so Reader and Agent cannot half-switch. The WebView can only close a current book; it cannot submit arbitrary paths.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+|-----------|-----------------|
+| Unsupported protocol version, empty/oversized ID, prompt, selection, path, or JSONL frame | Reject before returning a receipt |
+| Supervisor or child-writer queue full/disconnected | Return an invoke error or emit the command-correlated transport error; never block the Tauri command thread |
+| `open_book` child-writer enqueue fails | `open_book_bytes` returns `StorageIo`; Reader does not switch |
+| Invalid/unknown sidecar stdout event | Terminate that generation and enter bounded recovery |
+| Duplicate/regressing `seq` or old process generation | Drop before snapshot/UI mutation |
+| Prompt/book correlation does not match current state | Advance the global event version but do not mutate operation state |
+| Sidecar restarts during a prompt | Emit interruption, recover book/session only, never replay the prompt |
+
+### 5. Good/Base/Bad Cases
+
+- **Good**: open B while A is active → B writer enqueue is confirmed, A generation is invalidated, B worker loads, and only `book_ready(B)` enables input.
+- **Base**: enqueue a prompt → invoke returns its IDs; `prompt_started` establishes session correlation and deltas/end update only that prompt.
+- **Bad**: update replay book before writer enqueue, return EPUB bytes, then discover the writer queue was full; Reader would show B while Agent still serves A.
+
+### 6. Tests Required
+
+- Rust protocol fixture round-trip plus invalid version/seq/nested ID/frame-size rejection.
+- Supervisor tests for command correlation, confirmed open writer result, full writer kill preemption, invalid stdout termination, restart budget, and stale snapshot errors.
+- Node tests for bounded dispatcher/output backpressure, abort tombstones, superseding workers, and real A/B EPUB generation isolation.
+- React reducer tests for reverse list responses, stale book/prompt errors, prompt/session correlation, toolCallId matching, first-prompt session creation, and listen/snapshot cleanup order.
+- Empty-PATH sidecar smoke and `tauri build --no-bundle` remain release gates.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```rust
+supervisor.send(open_book_b)?;
+Ok(raw_response(bytes_b))
+```
+
+### Capability Boundary
+
+- The WebView capability contains only `core:default`; it cannot invoke shell spawn/execute, native dialog, or opener commands.
+- Rust owns both privileged integrations: the fixed external sidecar is resolved internally, and `import_book` opens the native EPUB picker through the Rust dialog plugin.
+- Do not add `shell:*`, `dialog:*`, or `opener:*` WebView permissions unless a reviewed frontend feature actually invokes them and narrows their scope.
+
+#### Correct
+
+```rust
+run_blocking(move || supervisor.send_confirmed(open_book_b)).await?;
+Ok(raw_response(bytes_b))
+```

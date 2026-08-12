@@ -11,5 +11,5 @@
     "declaration": false,
     "noEmitOnError": false
   },
-  "include": ["index.ts", "book.ts"]
+  "include": ["index.ts", "book.ts", "book-worker.ts", "dispatcher.ts", "protocol.ts"]
 }

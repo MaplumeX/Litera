@@ -76,7 +76,7 @@ try {
         if (pongCount === 1) {
           // Verify the executable remains a long-running stdio server after
           // bootstrap rather than only surviving until its first response.
-          setTimeout(() => child.stdin.write('{"type":"ping"}\n'), 50);
+          setTimeout(() => child.stdin.write('{"protocolVersion":1,"type":"ping","requestId":"smoke-ping-2"}\n'), 50);
         } else if (sawReady) {
           completed = true;
           clearTimeout(timeout);
@@ -90,7 +90,7 @@ try {
     // Rust also sends this bootstrap ping immediately after spawning. Writing
     // before ready removes a pkg stdin startup race while JSONL ordering still
     // requires both ready and two successful pong responses.
-    child.stdin.write('{"type":"ping"}\n');
+    child.stdin.write('{"protocolVersion":1,"type":"ping","requestId":"smoke-ping-1"}\n');
   });
 
   try {

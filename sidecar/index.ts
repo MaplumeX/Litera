@@ -1,63 +1,37 @@
-/**
- * Litera pi agent sidecar
- *
- * stdio JSON lines protocol:
- *   stdin  → { type: "book_opened", path, bookId, sessionsDir }
- *          | { type: "prompt", text, context? }
- *          | { type: "abort" }
- *          | { type: "new_session", bookId }
- *          | { type: "switch_session", sessionId }
- *          | { type: "delete_session", sessionId }
- *          | { type: "list_sessions", bookId }
- *   stdout → { type: "ready" }
- *          | { type: "book_ready" }
- *          | { type: "text_delta", delta }
- *          | { type: "tool_start", tool, params }
- *          | { type: "tool_end", result }
- *          | { type: "agent_end" }
- *          | { type: "error", message }
- *          | { type: "session_created", sessionId }
- *          | { type: "session_switched", sessionId, messages }
- *          | { type: "session_deleted", sessionId }
- *          | { type: "sessions_list", sessions }
- */
-
 import * as readline from "node:readline";
 import { randomUUID } from "node:crypto";
-import { join } from "node:path";
 import { unlink } from "node:fs/promises";
+import { join } from "node:path";
 import {
   createAgentSession,
-  SessionManager,
   DefaultResourceLoader,
   defineTool,
+  SessionManager,
   type AgentSession,
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
+import { BookWorker, isBookWorkerThread, runBookWorker } from "./book-worker.js";
 import {
-  loadBook,
-  isBookLoaded,
-  getBookMetadata,
-  getToc,
-  readChapter,
-  searchInBook,
-  runFtsSmoke,
-  type BookMetadata,
-} from "./book.js";
+  BookLoadGate,
+  BoundedCancellationSet,
+  BoundedOutputQueue,
+  SerialDispatcher,
+  SupersedingResource,
+} from "./dispatcher.js";
+import {
+  AGENT_PROTOCOL_VERSION,
+  encodeEvent,
+  parseCommandLine,
+  ProtocolDecodeError,
+  type PromptContext,
+  type SerializedMessage,
+  type SerializedToolCall,
+  type SidecarCommand,
+  type SidecarEvent,
+} from "./protocol.js";
 
-// --- stdio helpers -----------------------------------------------------------
-
-/** Write a JSON line to stdout (protocol output only — never use console.log). */
-function sendMessage(msg: Record<string, unknown>): void {
-  process.stdout.write(JSON.stringify(msg) + "\n");
-}
-
-function sendError(message: string): void {
-  sendMessage({ type: "error", message });
-}
-
-// --- Custom tools -----------------------------------------------------------
+const ABORT_TIMEOUT_MS = 2_000;
 
 const READING_ASSISTANT_PROMPT = `You are Litera, a reading assistant for EPUB books. You help readers understand the content of the book they are reading.
 
@@ -67,14 +41,97 @@ You have access to the following tools:
 - read_chapter: Read the full text of a chapter by its index (0-based).
 - search_in_book: Search the entire book for a query string, returning matching excerpts with chapter indices.
 
-When to use tools:
-- If the user asks about the overall book, call get_book_metadata or get_toc first.
-- If the user asks about a specific chapter or topic, call read_chapter with the chapter index, or search_in_book to find relevant passages.
-- If the user selected text and asks a question about it, the selected text is included in the prompt. You may still call read_chapter to get more context from the surrounding chapter.
-
 Always answer in the same language as the user's question. Be concise but thorough.`;
 
-/** Wrap an error message into a tool result (for tool execute catch blocks). */
+type SidecarEventPayload = SidecarEvent extends infer Event
+  ? Event extends { protocolVersion: 1; seq: number }
+    ? Omit<Event, "protocolVersion" | "seq">
+    : never
+  : never;
+
+interface ManagedSession {
+  session: AgentSession;
+  unsubscribe: () => void;
+  bookId: string;
+  filePath: string;
+  generation: number;
+}
+
+interface CurrentBook {
+  id: string;
+  path: string;
+  sessionsDir: string;
+  generation: number;
+  phase: "loading" | "ready";
+}
+
+interface ActivePrompt {
+  requestId: string;
+  promptId: string;
+  bookId: string;
+  sessionId: string;
+}
+
+let nextSeq = 1;
+const bookWorkers = new SupersedingResource(
+  () => new BookWorker(),
+  (error) => process.stderr.write(`[book-worker] terminate failed: ${error instanceof Error ? error.message : String(error)}\n`),
+);
+const bookLoadGate = new BookLoadGate();
+const sessions = new Map<string, ManagedSession>();
+const cancelledPromptIds = new BoundedCancellationSet();
+let currentBook: CurrentBook | null = null;
+let currentSessionId: string | null = null;
+let activePrompt: ActivePrompt | null = null;
+let ftsReady = false;
+const protocolOutput = new BoundedOutputQueue(process.stdout, () => {
+  process.stderr.write("[protocol] stdout backpressure queue overflowed; terminating for supervisor recovery\n");
+  process.exit(1);
+});
+
+function sendEvent(payload: SidecarEventPayload): void {
+  const event = {
+    protocolVersion: AGENT_PROTOCOL_VERSION,
+    seq: nextSeq++,
+    ...payload,
+  } as SidecarEvent;
+  protocolOutput.write(encodeEvent(event));
+}
+
+function sendError(
+  scope: string,
+  message: string,
+  correlation: {
+    requestId?: string;
+    bookId?: string;
+    sessionId?: string;
+    promptId?: string;
+  } = {},
+  recoverable = true,
+): void {
+  sendEvent({ type: "error", scope, message, recoverable, ...correlation });
+}
+
+function commandCorrelation(command: SidecarCommand): {
+  requestId: string;
+  bookId?: string;
+  sessionId?: string;
+  promptId?: string;
+} {
+  return {
+    requestId: command.requestId,
+    bookId: "bookId" in command ? command.bookId : undefined,
+    sessionId: "sessionId" in command ? command.sessionId : undefined,
+    promptId: "promptId" in command ? command.promptId : undefined,
+  };
+}
+
+function requireBookWorker(): BookWorker {
+  const worker = bookWorkers.current();
+  if (!worker) throw new Error("Book worker is unavailable");
+  return worker;
+}
+
 function errorResult(message: string) {
   return {
     content: [{ type: "text" as const, text: `Error: ${message}` }],
@@ -89,100 +146,76 @@ function okResult(text: string) {
   };
 }
 
-const getBookMetadataTool = defineTool({
-  name: "get_book_metadata",
-  label: "Get Book Metadata",
-  description: "Get the book's title, author, language, and total chapter count.",
-  promptSnippet: "get_book_metadata: get book title, author, language, chapter count",
-  parameters: Type.Object({}),
-  execute: async () => {
-    if (!isBookLoaded()) return errorResult("No book loaded. Open a book first.");
-    const meta: BookMetadata = getBookMetadata();
-    return okResult(
-      `Title: ${meta.title}\nAuthor: ${meta.author}\nLanguage: ${meta.language}\nTotal chapters: ${meta.totalChapters}`,
-    );
-  },
-});
-
-const getTocTool = defineTool({
-  name: "get_toc",
-  label: "Get Table of Contents",
-  description: "Get the table of contents: list of chapters with index, label, and href.",
-  promptSnippet: "get_toc: list all chapters with index and label",
-  parameters: Type.Object({}),
-  execute: async () => {
-    if (!isBookLoaded()) return errorResult("No book loaded. Open a book first.");
-    const toc = getToc();
-    const lines = toc.map((e) => `${e.index}: ${e.label} (${e.href})`);
-    return okResult(`Table of Contents (${toc.length} entries):\n${lines.join("\n")}`);
-  },
-});
-
-const readChapterTool = defineTool({
-  name: "read_chapter",
-  label: "Read Chapter",
-  description: "Read the full text of a chapter by its index (0-based, from the TOC).",
-  promptSnippet: "read_chapter(index): read full text of chapter by index",
-  parameters: Type.Object({ index: Type.Number({ description: "0-based chapter index" }) }),
-  execute: async (_, { index }) => {
-    if (!isBookLoaded()) return errorResult("No book loaded. Open a book first.");
-    try {
-      const text = readChapter(index);
-      return okResult(text);
-    } catch (err) {
-      return errorResult(err instanceof Error ? err.message : String(err));
+function createBookTools(bookId: string, generation: number): ToolDefinition[] {
+  const worker = (): BookWorker => {
+    if (!bookLoadGate.accepts(generation, bookId)) {
+      throw new Error("Book context changed before tool execution");
     }
-  },
-});
-
-const searchInBookTool = defineTool({
-  name: "search_in_book",
-  label: "Search in Book",
-  description: "Search the entire book for a query string. Returns matching excerpts with chapter indices. Uses trigram tokenization, so queries of 3+ characters work best.",
-  promptSnippet: "search_in_book(query): full-text search returning excerpts with chapter indices",
-  parameters: Type.Object({ query: Type.String({ description: "Search query (3+ characters for best results)" }) }),
-  execute: async (_, { query }) => {
-    if (!isBookLoaded()) return errorResult("No book loaded. Open a book first.");
-    try {
-      const results = searchInBook(query);
-      if (results.length === 0) {
-        return okResult(`No matches found for "${query}".`);
-      }
-      const lines = results.map(
-        (r) => `[Chapter ${r.chapterIndex}] ${r.excerpt}`,
-      );
-      return okResult(`Found ${results.length} matches for "${query}":\n\n${lines.join("\n\n")}`);
-    } catch (err) {
-      return errorResult(err instanceof Error ? err.message : String(err));
-    }
-  },
-});
-
-const customTools: ToolDefinition[] = [
-  getBookMetadataTool,
-  getTocTool,
-  readChapterTool,
-  searchInBookTool,
-];
-
-// --- Multi-session management -----------------------------------------------
-
-/** A managed agent session with its unsubscribe handle and bookId. */
-interface ManagedSession {
-  session: AgentSession;
-  unsubscribe: () => void;
-  bookId: string;
-  /** File path of the session jsonl (for deletion). */
-  filePath: string;
+    return requireBookWorker();
+  };
+  return [
+    defineTool({
+      name: "get_book_metadata",
+      label: "Get Book Metadata",
+      description: "Get the book's title, author, language, and total chapter count.",
+      promptSnippet: "get_book_metadata: get book title, author, language, chapter count",
+      parameters: Type.Object({}),
+      execute: async () => {
+        try {
+          const meta = await worker().metadata(bookId, generation);
+          return okResult(`Title: ${meta.title}\nAuthor: ${meta.author}\nLanguage: ${meta.language}\nTotal chapters: ${meta.totalChapters}`);
+        } catch (error) {
+          return errorResult(error instanceof Error ? error.message : String(error));
+        }
+      },
+    }),
+    defineTool({
+      name: "get_toc",
+      label: "Get Table of Contents",
+      description: "Get the table of contents: list of chapters with index, label, and href.",
+      promptSnippet: "get_toc: list all chapters with index and label",
+      parameters: Type.Object({}),
+      execute: async () => {
+        try {
+          const toc = await worker().toc(bookId, generation);
+          return okResult(`Table of Contents (${toc.length} entries):\n${toc.map((entry) => `${entry.index}: ${entry.label} (${entry.href})`).join("\n")}`);
+        } catch (error) {
+          return errorResult(error instanceof Error ? error.message : String(error));
+        }
+      },
+    }),
+    defineTool({
+      name: "read_chapter",
+      label: "Read Chapter",
+      description: "Read the full text of a chapter by its index (0-based, from the TOC).",
+      promptSnippet: "read_chapter(index): read full text of chapter by index",
+      parameters: Type.Object({ index: Type.Number({ description: "0-based chapter index" }) }),
+      execute: async (_, { index }) => {
+        try {
+          return okResult(await worker().readChapter(bookId, generation, index));
+        } catch (error) {
+          return errorResult(error instanceof Error ? error.message : String(error));
+        }
+      },
+    }),
+    defineTool({
+      name: "search_in_book",
+      label: "Search in Book",
+      description: "Search the entire book for a query string and return matching excerpts.",
+      promptSnippet: "search_in_book(query): full-text search returning excerpts with chapter indices",
+      parameters: Type.Object({ query: Type.String({ description: "Search query" }) }),
+      execute: async (_, { query }) => {
+        try {
+          const results = await worker().search(bookId, generation, query);
+          if (results.length === 0) return okResult(`No matches found for "${query}".`);
+          return okResult(`Found ${results.length} matches:\n\n${results.map((result) => `[Chapter ${result.chapterIndex}] ${result.excerpt}`).join("\n\n")}`);
+        } catch (error) {
+          return errorResult(error instanceof Error ? error.message : String(error));
+        }
+      },
+    }),
+  ];
 }
-
-/** All active sessions keyed by sessionId. */
-const sessions = new Map<string, ManagedSession>();
-let currentSessionId: string | null = null;
-
-/** Sessions directory passed by Rust (Tauri app data dir + "/sessions"). */
-let sessionsDir: string | null = null;
-let currentBookId: string | null = null;
 
 function makeResourceLoader() {
   return new DefaultResourceLoader({
@@ -197,300 +230,243 @@ function makeResourceLoader() {
   });
 }
 
-/**
- * Load a session from disk into memory (e.g. after sidecar restart).
- * Returns the ManagedSession or null if not found on disk.
- */
-async function loadSessionFromDisk(sessionId: string, bookId: string): Promise<ManagedSession | null> {
-  if (!sessionsDir) return null;
-  const sessionDir = join(sessionsDir, bookId);
-  try {
-    const infos = await SessionManager.list(process.cwd(), sessionDir);
-    const info = infos.find((i) => i.id === sessionId);
-    if (!info) return null;
-
-    const sessionManager = SessionManager.open(info.path, sessionDir);
-    const resourceLoader = makeResourceLoader();
-    await resourceLoader.reload();
-
-    const { session: s } = await createAgentSession({
-      sessionManager,
-      customTools,
-      resourceLoader,
-    });
-
-    const unsubscribe = subscribeSession(sessionId, s);
-    const managed: ManagedSession = { session: s, unsubscribe, bookId, filePath: info.path };
-    sessions.set(sessionId, managed);
-    return managed;
-  } catch {
-    return null;
-  }
-}
-
-/** Subscribe to a session's events, forwarding to stdout only when it is active. */
-function subscribeSession(id: string, s: AgentSession): () => void {
-  return s.subscribe((event) => {
-    // Only forward events for the currently active session.
-    if (currentSessionId !== id) return;
+function subscribeSession(id: string, session: AgentSession): () => void {
+  return session.subscribe((event) => {
+    const prompt = activePrompt;
+    if (!prompt || prompt.sessionId !== id || currentBook?.id !== prompt.bookId) return;
+    const correlation = {
+      bookId: prompt.bookId,
+      sessionId: prompt.sessionId,
+      promptId: prompt.promptId,
+    };
     switch (event.type) {
       case "message_update":
         if (event.assistantMessageEvent.type === "text_delta") {
-          sendMessage({ type: "text_delta", delta: event.assistantMessageEvent.delta });
+          sendEvent({ type: "text_delta", ...correlation, delta: event.assistantMessageEvent.delta });
         }
         break;
-
       case "tool_execution_start":
-        sendMessage({
+        sendEvent({
           type: "tool_start",
+          ...correlation,
+          toolCallId: event.toolCallId,
           tool: event.toolName,
           params: event.args,
         });
         break;
-
       case "tool_execution_end":
-        sendMessage({
+        sendEvent({
           type: "tool_end",
+          ...correlation,
+          toolCallId: event.toolCallId,
           result: event.result,
+          isError: event.isError,
         });
         break;
-
-      case "agent_end":
-        sendMessage({ type: "agent_end" });
-        break;
     }
   });
 }
 
-async function handleNewSession(bookId: string): Promise<void> {
-  if (!sessionsDir) {
-    sendError("Cannot create session: no sessionsDir set (book not opened)");
-    return;
-  }
-  const sessionId = randomUUID();
-  const sessionDir = join(sessionsDir, bookId);
-  const sessionManager = SessionManager.create(process.cwd(), sessionDir, { id: sessionId });
-  const filePath = sessionManager.getSessionFile();
-  if (!filePath) {
-    sendError("Failed to determine session file path");
-    return;
-  }
-
+async function createSession(bookId: string): Promise<{ id: string; managed: ManagedSession }> {
+  const book = currentBook;
+  if (!book || book.id !== bookId) throw new Error("Book context changed before session creation");
+  const id = randomUUID();
+  const sessionDir = join(book.sessionsDir, bookId);
+  const manager = SessionManager.create(process.cwd(), sessionDir, { id });
+  const filePath = manager.getSessionFile();
+  if (!filePath) throw new Error("Failed to determine session file path");
   const resourceLoader = makeResourceLoader();
   await resourceLoader.reload();
-
-  const { session: s } = await createAgentSession({
-    sessionManager,
-    customTools,
-    resourceLoader,
-  });
-
-  const unsubscribe = subscribeSession(sessionId, s);
-  sessions.set(sessionId, { session: s, unsubscribe, bookId, filePath });
-  currentSessionId = sessionId;
-  currentBookId = bookId;
-  sendMessage({ type: "session_created", sessionId });
+  const customTools = createBookTools(bookId, book.generation);
+  const { session } = await createAgentSession({ sessionManager: manager, customTools, resourceLoader });
+  const managed = { session, unsubscribe: subscribeSession(id, session), bookId, filePath, generation: book.generation };
+  sessions.set(id, managed);
+  return { id, managed };
 }
 
-async function handleSwitchSession(sessionId: string): Promise<void> {
-  // If the session is already in memory, switch directly.
-  let managed = sessions.get(sessionId);
-  if (!managed) {
-    // Session not in memory — try loading from disk (e.g. after sidecar restart).
-    if (!sessionsDir || !currentBookId) {
-      sendError(`Session not found: ${sessionId}`);
-      return;
-    }
-    const loaded = await loadSessionFromDisk(sessionId, currentBookId);
-    if (!loaded) {
-      sendError(`Session not found: ${sessionId}`);
-      return;
-    }
-    managed = loaded;
-  }
-  currentSessionId = sessionId;
-  currentBookId = managed.bookId;
-  sendMessage({
-    type: "session_switched",
-    sessionId,
-    messages: serializeMessages(managed.session.messages),
-  });
+async function loadSessionFromDisk(sessionId: string, bookId: string): Promise<ManagedSession | null> {
+  const book = currentBook;
+  if (!book || book.id !== bookId) return null;
+  const sessionDir = join(book.sessionsDir, bookId);
+  const infos = await SessionManager.list(process.cwd(), sessionDir);
+  const info = infos.find((candidate) => candidate.id === sessionId);
+  if (!info) return null;
+  const manager = SessionManager.open(info.path, sessionDir);
+  const resourceLoader = makeResourceLoader();
+  await resourceLoader.reload();
+  const customTools = createBookTools(bookId, book.generation);
+  const { session } = await createAgentSession({ sessionManager: manager, customTools, resourceLoader });
+  const managed = {
+    session,
+    unsubscribe: subscribeSession(sessionId, session),
+    bookId,
+    filePath: info.path,
+    generation: book.generation,
+  };
+  sessions.set(sessionId, managed);
+  return managed;
 }
 
-async function handleDeleteSession(sessionId: string): Promise<void> {
-  const managed = sessions.get(sessionId);
-  if (managed) {
-    // Session is in memory — release resources and delete file.
+function disposeSessions(): void {
+  for (const managed of sessions.values()) {
     managed.unsubscribe();
     managed.session.dispose();
-    sessions.delete(sessionId);
-    try {
-      await unlink(managed.filePath);
-    } catch {
-      // File may already be gone — best effort.
-    }
-  } else {
-    // Session not in memory — try deleting the file from disk directly.
-    if (!sessionsDir || !currentBookId) {
-      sendError(`Session not found: ${sessionId}`);
-      return;
-    }
-    const sessionDir = join(sessionsDir, currentBookId);
-    try {
-      const infos = await SessionManager.list(process.cwd(), sessionDir);
-      const target = infos.find((info) => info.id === sessionId);
-      if (!target) {
-        sendError(`Session not found: ${sessionId}`);
-        return;
-      }
-      await unlink(target.path);
-    } catch (err) {
-      sendError(`Failed to delete session: ${err instanceof Error ? err.message : String(err)}`);
-      return;
-    }
   }
-  if (currentSessionId === sessionId) currentSessionId = null;
-  sendMessage({ type: "session_deleted", sessionId });
+  sessions.clear();
+  currentSessionId = null;
 }
 
-async function handleListSessions(bookId: string): Promise<void> {
-  if (!sessionsDir) {
-    sendError("Cannot list sessions: no sessionsDir set (book not opened)");
+async function boundedAbort(session: AgentSession): Promise<void> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      session.abort().catch((error: unknown) => {
+        process.stderr.write(`[session] abort failed: ${error instanceof Error ? error.message : String(error)}\n`);
+      }),
+      new Promise<void>((resolve) => { timeout = setTimeout(resolve, ABORT_TIMEOUT_MS); }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
+async function abortActive(requestId?: string, requestedPromptId?: string): Promise<void> {
+  const prompt = activePrompt;
+  if (!prompt) {
+    if (requestedPromptId) rememberCancelledPrompt(requestedPromptId);
     return;
   }
-  const sessionDir = join(sessionsDir, bookId);
-  try {
-    const infos = await SessionManager.list(process.cwd(), sessionDir);
-    const summaries = infos.map((info) => ({
-      id: info.id,
-      title: deriveTitle(info.firstMessage, info.name),
-      createdAt: info.created.toISOString(),
-      updatedAt: info.modified.toISOString(),
-    }));
-    sendMessage({ type: "sessions_list", sessions: summaries });
-  } catch (err) {
-    sendError(`Failed to list sessions: ${err instanceof Error ? err.message : String(err)}`);
-  }
-}
-
-/** Derive a display title: explicit name, else first user message truncated to 30 chars, else "New Session". */
-function deriveTitle(firstMessage: string, name?: string): string {
-  if (name && name.trim()) return name;
-  if (firstMessage && firstMessage !== "(no messages)") {
-    return firstMessage.slice(0, 30);
-  }
-  return "New Session";
-}
-
-// --- Message serialization (for session_switched history) -------------------
-
-interface SerializedMessage {
-  role: "user" | "assistant";
-  content: string;
-  toolCalls?: { tool: string; params: unknown; result?: unknown; done: boolean }[];
-}
-
-/** Convert session messages to a simple array the frontend can render. */
-function serializeMessages(messages: readonly unknown[]): SerializedMessage[] {
-  // Build a lookup from toolCallId → tool result for matching tool calls to results.
-  const toolResults = new Map<string, unknown>();
-  for (const msg of messages) {
-    const m = msg as { role?: string };
-    if (typeof msg === "object" && msg !== null && m.role === "toolResult") {
-      const tr = msg as { toolCallId: string; content: { type: string; text: string }[] };
-      const text = tr.content
-        .filter((c) => c.type === "text")
-        .map((c) => c.text)
-        .join("");
-      toolResults.set(tr.toolCallId, text);
-    }
-  }
-
-  const result: SerializedMessage[] = [];
-  for (const msg of messages) {
-    if (typeof msg !== "object" || msg === null) continue;
-    const role = (msg as { role?: string }).role;
-    if (role === "user") {
-      const content = extractUserText((msg as { content: string | { type: string; text: string }[] }).content);
-      result.push({ role: "user", content });
-    } else if (role === "assistant") {
-      const am = msg as {
-        content: { type: string; text?: string; id?: string; name?: string; arguments?: Record<string, unknown> }[];
-      };
-      const textParts: string[] = [];
-      const toolCalls: SerializedMessage["toolCalls"] = [];
-      for (const block of am.content) {
-        if (block.type === "text" && block.text) {
-          textParts.push(block.text);
-        } else if (block.type === "toolCall" && block.id && block.name) {
-          toolCalls.push({
-            tool: block.name,
-            params: block.arguments ?? {},
-            result: toolResults.get(block.id),
-            done: toolResults.has(block.id),
-          });
-        }
-      }
-      result.push({ role: "assistant", content: textParts.join(""), toolCalls: toolCalls.length ? toolCalls : undefined });
-    }
-  }
-  return result;
-}
-
-/** Extract plain text from a user message content field. */
-function extractUserText(content: string | { type: string; text: string }[]): string {
-  if (typeof content === "string") return content;
-  return content.filter((c) => c.type === "text").map((c) => c.text).join("");
-}
-
-// --- Book handling -----------------------------------------------------------
-
-async function handleBookOpened(path: string, bookId: string, dir: string): Promise<void> {
-  // Set session metadata first so list_sessions arriving before book load
-  // completes can be served without racing loadBook's async work.
-  sessionsDir = dir;
-  currentBookId = bookId;
-  try {
-    await loadBook(path);
-    sendMessage({ type: "book_ready" });
-  } catch (err) {
-    sendError(`Failed to load book: ${err instanceof Error ? err.message : String(err)}`);
-  }
-}
-
-// --- Prompt handling ---------------------------------------------------------
-
-interface PromptContext {
-  selection?: string;
-  chapterIndex?: number;
-}
-
-async function handlePrompt(text: string, context?: PromptContext): Promise<void> {
-  if (!currentSessionId) {
-    sendError("No active session. Create or switch to a session first.");
+  if (requestedPromptId && requestedPromptId !== prompt.promptId) {
+    rememberCancelledPrompt(requestedPromptId);
     return;
   }
-  const managed = sessions.get(currentSessionId);
-  if (!managed) {
-    sendError("Active session not found");
-    return;
-  }
-  try {
-    const fullPrompt = buildPromptWithContext(text, context);
-    await managed.session.prompt(fullPrompt);
-  } catch (err) {
-    sendError(err instanceof Error ? err.message : String(err));
-  }
+  activePrompt = null;
+  const managed = sessions.get(prompt.sessionId);
+  if (managed) await boundedAbort(managed.session);
+  sendEvent({
+    type: "prompt_aborted",
+    requestId,
+    bookId: prompt.bookId,
+    sessionId: prompt.sessionId,
+    promptId: prompt.promptId,
+  });
 }
 
-/** Construct the full prompt with optional selection/chapter context. */
+function rememberCancelledPrompt(promptId: string): void {
+  cancelledPromptIds.add(promptId);
+}
+
+function consumeCancelledPrompt(promptId: string): boolean {
+  return cancelledPromptIds.consume(promptId);
+}
+
+async function handleOpenBook(command: Extract<SidecarCommand, { type: "open_book" }>): Promise<void> {
+  const generation = bookLoadGate.begin(command.bookId);
+  await abortActive(command.requestId);
+  disposeSessions();
+  const worker = bookWorkers.replace();
+  currentBook = {
+    id: command.bookId,
+    path: command.path,
+    sessionsDir: command.sessionsDir,
+    generation,
+    phase: "loading",
+  };
+  sendEvent({ type: "book_loading", requestId: command.requestId, bookId: command.bookId });
+  void worker.load(command.path, command.bookId, generation).then(
+    (result) => {
+      if (!bookLoadGate.accepts(result.generation, command.bookId)) return;
+      if (!currentBook || currentBook.generation !== result.generation) return;
+      currentBook.phase = "ready";
+      sendEvent({ type: "book_ready", requestId: command.requestId, bookId: command.bookId });
+    },
+    (error: unknown) => {
+      if (!bookLoadGate.accepts(generation, command.bookId)) return;
+      currentBook = null;
+      sendError(
+        "open_book",
+        `Failed to load book: ${error instanceof Error ? error.message : String(error)}`,
+        { requestId: command.requestId, bookId: command.bookId },
+      );
+    },
+  );
+}
+
+async function handleCloseBook(command: Extract<SidecarCommand, { type: "close_book" }>): Promise<void> {
+  if (command.bookId && currentBook?.id !== command.bookId) {
+    throw new Error("Close command does not match the current book");
+  }
+  const closedBookId = currentBook?.id;
+  bookLoadGate.clear();
+  await abortActive(command.requestId);
+  disposeSessions();
+  currentBook = null;
+  bookWorkers.clear();
+  sendEvent({ type: "book_closed", requestId: command.requestId, bookId: closedBookId });
+}
+
+function requireCurrentBook(bookId: string, ready = true): CurrentBook {
+  if (!currentBook || currentBook.id !== bookId) throw new Error("Command does not match the current book");
+  if (ready && currentBook.phase !== "ready") throw new Error("Book is still loading");
+  return currentBook;
+}
+
+async function handlePrompt(command: Extract<SidecarCommand, { type: "prompt" }>): Promise<void> {
+  requireCurrentBook(command.bookId);
+  if (consumeCancelledPrompt(command.promptId)) {
+    sendError("prompt", "Prompt was cancelled before it started", commandCorrelation(command));
+    return;
+  }
+  if (activePrompt) throw new Error("Another prompt is already active");
+  let sessionId = currentSessionId;
+  let managed = sessionId ? sessions.get(sessionId) : undefined;
+  if (!managed || managed.bookId !== command.bookId || managed.generation !== currentBook?.generation) {
+    const created = await createSession(command.bookId);
+    sessionId = created.id;
+    managed = created.managed;
+    currentSessionId = sessionId;
+  }
+  if (!sessionId || !managed) throw new Error("Failed to establish an active session");
+  if (consumeCancelledPrompt(command.promptId)) {
+    sendError("prompt", "Prompt was cancelled before it started", commandCorrelation(command));
+    return;
+  }
+  const prompt: ActivePrompt = {
+    requestId: command.requestId,
+    promptId: command.promptId,
+    bookId: command.bookId,
+    sessionId,
+  };
+  activePrompt = prompt;
+  sendEvent({ type: "prompt_started", ...prompt });
+  const fullPrompt = buildPromptWithContext(command.text, command.context);
+  void managed.session.prompt(fullPrompt).then(
+    () => {
+      if (activePrompt !== prompt) return;
+      activePrompt = null;
+      sendEvent({
+        type: "prompt_end",
+        bookId: prompt.bookId,
+        sessionId: prompt.sessionId,
+        promptId: prompt.promptId,
+      });
+    },
+    (error: unknown) => {
+      if (activePrompt !== prompt) return;
+      activePrompt = null;
+      sendError(
+        "prompt",
+        error instanceof Error ? error.message : String(error),
+        prompt,
+      );
+    },
+  );
+}
+
 function buildPromptWithContext(text: string, context?: PromptContext): string {
   if (!context) return text;
-
   const parts: string[] = [];
-  if (context.selection) {
-    parts.push(`用户选中的文本：\n"${context.selection}"`);
-  }
+  if (context.selection) parts.push(`用户选中的文本：\n"${context.selection}"`);
   if (context.chapterIndex !== undefined && !context.selection) {
     parts.push(`（当前在第 ${context.chapterIndex} 章）`);
   }
@@ -498,143 +474,232 @@ function buildPromptWithContext(text: string, context?: PromptContext): string {
   return parts.join("\n\n");
 }
 
-async function handleAbort(): Promise<void> {
-  if (!currentSessionId) return;
-  const managed = sessions.get(currentSessionId);
-  if (!managed) return;
+async function handleNewSession(command: Extract<SidecarCommand, { type: "new_session" }>): Promise<void> {
+  requireCurrentBook(command.bookId);
+  await abortActive(command.requestId);
+  const { id } = await createSession(command.bookId);
+  currentSessionId = id;
+  sendEvent({ type: "session_created", requestId: command.requestId, bookId: command.bookId, sessionId: id });
+}
+
+async function handleSwitchSession(command: Extract<SidecarCommand, { type: "switch_session" }>): Promise<void> {
+  requireCurrentBook(command.bookId);
+  await abortActive(command.requestId);
+  let managed = sessions.get(command.sessionId);
+  if (managed && managed.bookId !== command.bookId) managed = undefined;
+  managed ??= await loadSessionFromDisk(command.sessionId, command.bookId) ?? undefined;
+  if (!managed) throw new Error("Session not found for the current book");
+  currentSessionId = command.sessionId;
+  sendEvent({
+    type: "session_switched",
+    requestId: command.requestId,
+    bookId: command.bookId,
+    sessionId: command.sessionId,
+    messages: serializeMessages(managed.session.messages),
+  });
+}
+
+async function handleDeleteSession(command: Extract<SidecarCommand, { type: "delete_session" }>): Promise<void> {
+  const book = requireCurrentBook(command.bookId);
+  if (currentSessionId === command.sessionId) await abortActive(command.requestId);
+  const managed = sessions.get(command.sessionId);
+  if (managed && managed.bookId !== command.bookId) throw new Error("Session belongs to another book");
+  if (managed) {
+    await removeSessionFile(managed.filePath);
+    managed.unsubscribe();
+    managed.session.dispose();
+    sessions.delete(command.sessionId);
+  } else {
+    const infos = await SessionManager.list(process.cwd(), join(book.sessionsDir, command.bookId));
+    const target = infos.find((info) => info.id === command.sessionId);
+    if (!target) throw new Error("Session not found for the current book");
+    await removeSessionFile(target.path);
+  }
+  if (currentSessionId === command.sessionId) currentSessionId = null;
+  sendEvent({
+    type: "session_deleted",
+    requestId: command.requestId,
+    bookId: command.bookId,
+    sessionId: command.sessionId,
+  });
+}
+
+async function removeSessionFile(path: string): Promise<void> {
   try {
-    await managed.session.abort();
-  } catch (err) {
-    sendError(err instanceof Error ? err.message : String(err));
+    await unlink(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
 }
 
-// --- main --------------------------------------------------------------------
-
-async function main(): Promise<void> {
-  const rl = readline.createInterface({
-    input: process.stdin,
-    output: undefined, // don't echo to stdout
-    terminal: false,
+async function handleListSessions(command: Extract<SidecarCommand, { type: "list_sessions" }>): Promise<void> {
+  const book = requireCurrentBook(command.bookId, false);
+  const infos = await SessionManager.list(process.cwd(), join(book.sessionsDir, command.bookId));
+  sendEvent({
+    type: "sessions_list",
+    requestId: command.requestId,
+    bookId: command.bookId,
+    sessions: infos.map((info) => ({
+      id: info.id,
+      title: deriveTitle(info.firstMessage, info.name),
+      createdAt: info.created.toISOString(),
+      updatedAt: info.modified.toISOString(),
+    })),
   });
-  // Keep stdin flowing and hold an explicit event-loop reference. In a pkg
-  // executable, a resumed pipe alone can still race process exit before the
-  // first command arrives.
-  process.stdin.resume();
-  const keepAlive = setInterval(() => undefined, 60_000);
-  rl.once("close", () => clearInterval(keepAlive));
-
-  rl.on("line", (line: string) => {
-    if (!line.trim()) return;
-    let msg: unknown;
-    try {
-      msg = JSON.parse(line);
-    } catch {
-      sendError(`Invalid JSON input: ${line}`);
-      return;
-    }
-
-    const typed = msg as Record<string, unknown>;
-    if (typeof typed.type !== "string") {
-      sendError("Missing 'type' field in input");
-      return;
-    }
-
-    switch (typed.type) {
-      case "ping":
-        void runFtsSmoke()
-          .then(() => sendMessage({ type: "pong", fts5: true }))
-          .catch((err) =>
-            sendError(`FTS5 smoke failed: ${err instanceof Error ? err.message : String(err)}`),
-          );
-        break;
-
-      case "book_opened": {
-        if (typeof typed.path !== "string" || typeof typed.bookId !== "string" || typeof typed.sessionsDir !== "string") {
-          sendError("book_opened requires 'path', 'bookId', and 'sessionsDir' string fields");
-          return;
-        }
-        void handleBookOpened(typed.path, typed.bookId, typed.sessionsDir);
-        break;
-      }
-
-      case "prompt": {
-        if (typeof typed.text !== "string") {
-          sendError("Prompt requires a 'text' string field");
-          return;
-        }
-        const context =
-          typed.context && typeof typed.context === "object"
-            ? (typed.context as PromptContext)
-            : undefined;
-        void handlePrompt(typed.text, context);
-        break;
-      }
-
-      case "abort":
-        void handleAbort();
-        break;
-
-      case "new_session": {
-        if (typeof typed.bookId !== "string") {
-          sendError("new_session requires a 'bookId' string field");
-          return;
-        }
-        void handleNewSession(typed.bookId).catch((err) =>
-          sendError(`Failed to create session: ${err instanceof Error ? err.message : String(err)}`),
-        );
-        break;
-      }
-
-      case "switch_session": {
-        if (typeof typed.sessionId !== "string") {
-          sendError("switch_session requires a 'sessionId' string field");
-          return;
-        }
-        void handleSwitchSession(typed.sessionId).catch((err) =>
-          sendError(`Failed to switch session: ${err instanceof Error ? err.message : String(err)}`),
-        );
-        break;
-      }
-
-      case "delete_session": {
-        if (typeof typed.sessionId !== "string") {
-          sendError("delete_session requires a 'sessionId' string field");
-          return;
-        }
-        void handleDeleteSession(typed.sessionId).catch((err) =>
-          sendError(`Failed to delete session: ${err instanceof Error ? err.message : String(err)}`),
-        );
-        break;
-      }
-
-      case "list_sessions": {
-        if (typeof typed.bookId !== "string") {
-          sendError("list_sessions requires a 'bookId' string field");
-          return;
-        }
-        void handleListSessions(typed.bookId).catch((err) =>
-          sendError(`Failed to list sessions: ${err instanceof Error ? err.message : String(err)}`),
-        );
-        break;
-      }
-
-      default:
-        sendError(`Unknown message type: ${typed.type}`);
-    }
-  });
-
-  rl.on("close", () => {
-    for (const managed of sessions.values()) {
-      managed.unsubscribe();
-      managed.session.dispose();
-    }
-    sessions.clear();
-    process.exit(0);
-  });
-
-  // Signal that sidecar is ready.
-  sendMessage({ type: "ready" });
 }
 
-void main();
+function deriveTitle(firstMessage: string, name?: string): string {
+  if (name?.trim()) return name;
+  if (firstMessage && firstMessage !== "(no messages)") return firstMessage.slice(0, 30);
+  return "New Session";
+}
+
+function serializeMessages(messages: readonly unknown[]): SerializedMessage[] {
+  const results = new Map<string, unknown>();
+  for (const message of messages) {
+    if (!message || typeof message !== "object" || (message as { role?: string }).role !== "toolResult") continue;
+    const result = message as { toolCallId?: string; content?: { type?: string; text?: string }[] };
+    if (!result.toolCallId || !Array.isArray(result.content)) continue;
+    results.set(result.toolCallId, result.content.filter((item) => item.type === "text").map((item) => item.text ?? "").join(""));
+  }
+  const serialized: SerializedMessage[] = [];
+  for (const message of messages) {
+    if (!message || typeof message !== "object") continue;
+    const role = (message as { role?: string }).role;
+    if (role === "user") {
+      const content = (message as { content?: unknown }).content;
+      serialized.push({ role: "user", content: extractUserText(content) });
+    } else if (role === "assistant") {
+      const blocks = (message as { content?: unknown }).content;
+      if (!Array.isArray(blocks)) continue;
+      const text: string[] = [];
+      const toolCalls: SerializedToolCall[] = [];
+      for (const block of blocks) {
+        if (!block || typeof block !== "object") continue;
+        const typed = block as { type?: string; text?: string; id?: string; name?: string; arguments?: unknown };
+        if (typed.type === "text" && typed.text) text.push(typed.text);
+        if (typed.type === "toolCall" && typed.id && typed.name) {
+          toolCalls.push({
+            toolCallId: typed.id,
+            tool: typed.name,
+            params: typed.arguments ?? {},
+            result: results.get(typed.id),
+            done: results.has(typed.id),
+          });
+        }
+      }
+      serialized.push({ role: "assistant", content: text.join(""), toolCalls: toolCalls.length ? toolCalls : undefined });
+    }
+  }
+  return serialized;
+}
+
+function extractUserText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .filter((item): item is { type: string; text: string } => !!item && typeof item === "object"
+      && (item as { type?: unknown }).type === "text" && typeof (item as { text?: unknown }).text === "string")
+    .map((item) => item.text)
+    .join("");
+}
+
+async function handleStateCommand(command: SidecarCommand): Promise<void> {
+  switch (command.type) {
+    case "open_book":
+      await handleOpenBook(command);
+      break;
+    case "close_book":
+      await handleCloseBook(command);
+      break;
+    case "prompt":
+      await handlePrompt(command);
+      break;
+    case "list_sessions":
+      await handleListSessions(command);
+      break;
+    case "new_session":
+      await handleNewSession(command);
+      break;
+    case "switch_session":
+      await handleSwitchSession(command);
+      break;
+    case "delete_session":
+      await handleDeleteSession(command);
+      break;
+    case "ping":
+    case "abort":
+      break;
+  }
+}
+
+async function shutdown(): Promise<void> {
+  bookLoadGate.clear();
+  await abortActive();
+  disposeSessions();
+  await bookWorkers.shutdown();
+}
+
+async function main(): Promise<void> {
+  const startupWorker = bookWorkers.replace();
+  await startupWorker.runFtsSmoke();
+  ftsReady = true;
+  const dispatcher = new SerialDispatcher((error) => {
+    sendError("dispatcher", error instanceof Error ? error.message : String(error));
+  });
+  const input = readline.createInterface({ input: process.stdin, terminal: false });
+  process.stdin.resume();
+  const keepAlive = setInterval(() => undefined, 60_000);
+
+  input.on("line", (line) => {
+    if (!line.trim()) return;
+    let command: SidecarCommand;
+    try {
+      command = parseCommandLine(line);
+    } catch (error) {
+      sendError("protocol", error instanceof ProtocolDecodeError ? error.message : "Invalid command");
+      return;
+    }
+    const run = async () => {
+      try {
+        await handleStateCommand(command);
+      } catch (error) {
+        sendError(
+          command.type,
+          error instanceof Error ? error.message : String(error),
+          commandCorrelation(command),
+        );
+      }
+    };
+    if (command.type === "ping") {
+      dispatcher.bypass(async () => {
+        sendEvent({ type: "pong", requestId: command.requestId, fts5: ftsReady });
+      });
+    } else if (command.type === "abort") {
+      dispatcher.bypass(async () => {
+        try {
+          await abortActive(command.requestId, command.promptId);
+        } catch (error) {
+          sendError("abort", error instanceof Error ? error.message : String(error), commandCorrelation(command));
+        }
+      });
+    } else if (!dispatcher.enqueue(run)) {
+      sendError(command.type, "Sidecar command queue is full", commandCorrelation(command));
+    }
+  });
+
+  input.once("close", () => {
+    clearInterval(keepAlive);
+    void dispatcher.idle().then(shutdown).finally(() => process.exit(0));
+  });
+  sendEvent({ type: "ready" });
+}
+
+if (isBookWorkerThread()) {
+  runBookWorker();
+} else {
+  void main().catch((error) => {
+    sendError("startup", error instanceof Error ? error.message : String(error), {}, false);
+    process.exitCode = 1;
+  });
+}

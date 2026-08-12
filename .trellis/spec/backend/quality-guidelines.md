@@ -68,7 +68,8 @@ tauri::async_runtime::spawn(async move {
         match event {
             CommandEvent::Stdout(chunk) => {
                 for line in stdout_framer.push(&chunk) {
-                    forward_sidecar_event(&app, &line);
+                    let event = EventEnvelope::decode_line(&line)?;
+                    event_bridge.try_send(event)?;
                 }
             }
             // stderr, Error, and Terminated are handled explicitly
@@ -82,10 +83,27 @@ tauri::async_runtime::spawn(async move {
 
 ### Convention: terminal events update transport status
 
-- stdin write failure, `CommandEvent::Error`, and unexpected `CommandEvent::Terminated` transition the shared status to `Stopped(reason)` and emit `agent_error`.
-- Later commands reject from the recorded status instead of successfully queueing into a dead transport.
-- Intentional window shutdown first transitions to `Stopping`, sends `Kill`, and suppresses the expected termination error event.
-- The receiver tells the writer to release its child handle after termination, so no writer/child lifetime is leaked.
+- stdin write failure, invalid stdout, bridge overflow, ready timeout, `CommandEvent::Error`, and unexpected `CommandEvent::Terminated` become `ProcessEnded` for exactly one process generation.
+- The supervisor first updates its snapshot and emits `prompt_interrupted`/`supervisor_status`, then performs bounded recovery. Exhaustion becomes `unavailable`; `restart_sidecar` starts a fresh recovery budget.
+- Intentional window shutdown marks the actor as stopping before sending the dedicated kill signal, so the expected termination cannot start another recovery loop.
+- Old-generation events remain harmless even if a terminated process reports late output; the actor rejects them before updating the snapshot.
+
+### Convention: use the versioned typed agent envelope
+
+- Every command contains `protocolVersion: 1`, `requestId`, and the relevant `bookId`, `sessionId`, or `promptId` correlation.
+- Every sidecar event contains `protocolVersion: 1` and a positive process-local `seq`. Rust rejects duplicate or regressing `seq` values, then adds the process `generation` and global monotonic `version` before emitting the single `agent_event` channel.
+- Decode `unknown` JSON exactly once in `sidecar/protocol.ts` and `src-tauri/src/sidecar_protocol.rs`. Consumers must not read raw JSON fields independently.
+- JSONL commands/events, identifiers, prompt text, selection text, and stdout framing have explicit size limits. Validation happens before a Tauri command returns a receipt.
+
+### Convention: supervisor queues and recovery are bounded
+
+- Tauri commands use a bounded supervisor queue; the supervisor uses a bounded child-writer queue. Full queues fail immediately with an operation-correlated error. `open_book_bytes` additionally waits on a one-shot actor completion from a blocking worker and returns EPUB bytes only after the child-writer queue accepts `open_book`. Process kill uses a separate capacity-one channel, and the child owner checks it before every normal write, so shutdown/restart never waits behind a full writer queue.
+- The async stdout reader never blocks a Tauri runtime worker on `SyncSender::send`: it uses a bounded event bridge serviced by a dedicated thread. Overflow is terminal and causes a deterministic restart.
+- Node respects stdout backpressure with its own frame/byte-bounded queue. If the Rust reader remains stalled and that queue fills, the sidecar terminates so the supervisor can recover instead of allowing Node's writable buffer to grow without bound.
+- Any malformed, unknown, or otherwise invalid stdout protocol line is terminal for that process generation: Rust emits `ProcessEnded`, kills the child, and enters bounded restart instead of logging and continuing with an untrustworthy stream.
+- Each process start receives a new generation and a ready watchdog aligned with the packaged smoke budget. Consecutive failures consume one bounded restart budget; receiving `ready` alone does not reset that budget.
+- Recovery replays only the last controlled book descriptor and persisted active session. It never replays an interrupted prompt, and replay is enabled only after a process failure/manual restart, not on the first start.
+- EPUB/FTS work lives in `BookWorker`. Its RPC requests are serialized, bounded, and carry `bookId` plus book generation; tools capture that pair when their session is created so an aborted old prompt cannot read a newer book. Each `open_book` replaces the worker before starting its load, and `close_book` detaches it; superseded workers terminate asynchronously so a slow A load cannot delay B or close.
 
 ### Don't: block the main thread on sidecar I/O
 

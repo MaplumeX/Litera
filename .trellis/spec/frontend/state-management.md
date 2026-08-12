@@ -10,7 +10,9 @@ Litera's frontend is small enough that local component state + props drilling is
 
 Reference files:
 - `src/App.tsx` — root state: view mode, file data, progress, style state, refs to child components
-- `src/components/ChatPanel.tsx` — local message/session state, Tauri event subscriptions
+- `src/lib/agent-reducer.ts` — pure Agent state projection and correlation filtering
+- `src/lib/use-agent-bridge.ts` — Tauri commands, listener, snapshot hydration
+- `src/components/ChatPanel.tsx` — transient input/overlay state plus reducer-rendered Agent state
 - `src/components/ReaderView.tsx` — local selection state, ref-stable callbacks
 
 ---
@@ -37,7 +39,7 @@ These are the closest thing to "global state". They're passed down as props:
 ### 2. Local component state
 
 Each component owns its own UI state:
-- `ChatPanel`: `messages`, `input`, `isStreaming`, `error`, `sessions`, `currentSessionId`, `showSessionList`
+- `ChatPanel`: transient `input`, `pendingSelection`, `submitting`, `invokeError`, and `showSessionList`; Agent messages/sessions/status live in `AgentState`
 - `LibraryView`: `books`, `search`, `importing`
 - `ReaderView`: `selectionPos` (transient selection button position)
 
@@ -70,14 +72,15 @@ const refreshBooks = useCallback(async () => {
 
 ### 5. Event-driven state (Tauri events)
 
-Streaming agent responses and session lifecycle flow through Tauri events, not props:
+Streaming Agent responses and session lifecycle flow through the single versioned event channel:
 
 ```typescript
-// src/components/ChatPanel.tsx
-await listen<{ delta: string }>("agent_text_delta", (event) => {
-  setMessages((prev) => { /* append delta to last assistant message */ });
+await listen<AgentEvent>("agent_event", (event) => {
+  dispatch({ type: "event", event: event.payload });
 });
 ```
+
+`agentReducer` accepts only increasing global versions and non-regressing generations. Book, session, prompt, session-list request, and tool-call changes require their matching correlation. An irrelevant old event may advance the global version cursor, but it cannot modify current operation content.
 
 ---
 
@@ -122,10 +125,12 @@ Navigation / close
   → await active backend transactions
   → change view / destroy window only after success (close has a bounded timeout)
 
-Tauri event (agent_text_delta, session_switched, etc.)
-  → ChatPanel listen() handler → local setState
+Tauri event (single agent_event union)
+  → useAgentBridge → pure reducer correlation/version gate
   → React re-render
 ```
+
+The Agent subsystem is the exception to the legacy multiple-event example: it uses a pure reducer plus `useAgentBridge`, listens only to `agent_event`, then reads `get_agent_snapshot`. The reducer accepts only increasing versions and checks book/session/prompt/request/toolCall correlation before changing UI state. Returning to the library invokes `close_book`, which aborts the active prompt and invalidates the book worker generation before the reader unmounts.
 
 ---
 
@@ -148,12 +153,11 @@ const fractionPct = Math.round(progress.fraction * 100);
 
 ### Re-subscribing to events when bookId changes
 
-**Wrong**: including `bookId` in the `listen()` effect dependency array.
+**Wrong**: including `bookId` in the Agent subscription effect or rebuilding multiple event listeners.
 
-**Correct**: subscribe once (`[]` deps), use `bookIdRef` inside listeners. Reset session state in a separate effect keyed on `bookId`:
+**Correct**: keep one listener, use `bookIdRef` inside callbacks, and reset book-scoped state through the reducer:
 ```typescript
 useEffect(() => {
-  setSessions([]); setCurrentSessionId(null); setMessages([]);
-  if (bookId) void invoke("list_sessions", { bookId }).catch(() => {});
+  dispatch({ type: "book_changed", bookId: bookId || null });
 }, [bookId]);
 ```

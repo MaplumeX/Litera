@@ -11,7 +11,8 @@ Litera's frontend uses React 19 hooks directly. Hook patterns are minimal and pu
 Reference files:
 - `src/lib/debounced-callback.ts`, `src/lib/use-debounced-callback.ts` — controller and React lifecycle wrapper
 - `src/components/ReaderView.tsx` — ref-stable callbacks, `useImperativeHandle`
-- `src/components/ChatPanel.tsx` — `listen()` event subscription, auto-scroll
+- `src/lib/use-agent-bridge.ts`, `src/lib/agent-subscription.ts` — single Agent subscription, snapshot hydration
+- `src/components/ChatPanel.tsx` — reducer-backed Agent UI, auto-scroll
 - `src/components/LibraryView.tsx` — data fetch on mount
 
 ---
@@ -92,25 +93,30 @@ readerRef.current?.goToTocItem(href);
 
 ### Pattern: Tauri event subscription with cleanup
 
-`ChatPanel` subscribes to multiple Tauri events in a single `useEffect`. All unlisten functions are collected and cleaned up on unmount.
+The Agent bridge owns one `agent_event` listener. Registration and snapshot hydration are separated into `registerAgentSubscription` so late `listen()` resolution is testable.
 
 ```typescript
-// src/components/ChatPanel.tsx
+// src/lib/use-agent-bridge.ts
 useEffect(() => {
-  const unlisteners: UnlistenFn[] = [];
-  (async () => {
-    unlisteners.push(await listen<{ delta: string }>("agent_text_delta", (event) => { ... }));
-    unlisteners.push(await listen("agent_end", () => { ... }));
-    // ... more listeners
-  })();
-  return () => { unlisteners.forEach((fn) => fn()); };
-}, []);
+  const subscription = registerAgentSubscription({
+    listen: async (handler) => listen<AgentEvent>("agent_event", (event) => handler(event.payload)),
+    getSnapshot: () => invoke<AgentSnapshot>("get_agent_snapshot"),
+    onEvent: (event) => dispatch({ type: "event", event }),
+    onSnapshot: (snapshot) => dispatch({ type: "hydrate", snapshot }),
+    onError: reportError,
+  });
+  return () => subscription.dispose();
+}, [stableCallbacks]);
 ```
 
 **Key details**:
-- Empty dependency array `[]` — subscribe once on mount, never re-subscribe.
-- `async` IIFE inside the effect because `listen()` is async.
-- `bookIdRef` (ref) used inside listeners to read the latest `bookId` without re-subscribing.
+1. Register the single `agent_event` listener.
+2. After registration resolves, call `get_agent_snapshot` and hydrate the reducer.
+3. Keep a disposed flag. If the listener promise resolves after cleanup, immediately call the returned unlisten function.
+4. Filter live events and snapshots by monotonic `version`, `generation`, and operation correlation in the pure reducer.
+5. Use `bookIdRef` for current-book reads inside stable callbacks; change visible book state in a separate reducer action.
+
+Book/session/prompt state must be recoverable from the snapshot and persisted session history. Do not rely on `agent_ready`/`book_ready` UI timing or add multiple per-event listeners again.
 
 ### Pattern: data fetch on mount
 
@@ -158,9 +164,9 @@ useEffect(() => {
 
 ### Re-subscribing to Tauri events on every render
 
-**Wrong**: putting `bookId` or callback props in the `listen()` effect's dependency array. This re-subscribes on every change, causing duplicate events.
+**Wrong**: adding per-event Agent listeners or putting `bookId` itself in the subscription effect dependencies. This causes duplicate listeners during book switches.
 
-**Correct**: use refs for values that change, keep the effect deps `[]`.
+**Correct**: use the single `registerAgentSubscription`, refs for changing values, and stable callback dependencies.
 
 ### Calling foliate.js methods before init() completes
 

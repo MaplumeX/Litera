@@ -82,6 +82,11 @@ let currentBook: {
   fts: Database | null;
 } | null = null;
 
+export function closeBook(): void {
+  currentBook?.fts?.close();
+  currentBook = null;
+}
+
 // --- EPUB parsing -----------------------------------------------------------
 
 /**
@@ -301,8 +306,7 @@ function attr(xml: string, name: string): string | undefined {
  */
 export async function loadBook(filePath: string): Promise<BookMetadata> {
   // Reset state.
-  if (currentBook?.fts) currentBook.fts.close();
-  currentBook = null;
+  closeBook();
 
   const parsed = parseEpub(filePath);
   const zip = new AdmZip(filePath);

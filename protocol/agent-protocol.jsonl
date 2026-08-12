@@ -1,0 +1,14 @@
+{"direction":"command","message":{"protocolVersion":1,"type":"ping","requestId":"req-ping-1"}}
+{"direction":"command","message":{"protocolVersion":1,"type":"open_book","requestId":"req-open-1","bookId":"book-a","path":"/controlled/books/book-a/book.epub","sessionsDir":"/controlled/sessions"}}
+{"direction":"command","message":{"protocolVersion":1,"type":"prompt","requestId":"req-prompt-1","promptId":"prompt-1","bookId":"book-a","text":"What is this chapter about?","context":{"selection":"selected text","chapterIndex":3}}}
+{"direction":"command","message":{"protocolVersion":1,"type":"abort","requestId":"req-abort-1","promptId":"prompt-1"}}
+{"direction":"command","message":{"protocolVersion":1,"type":"switch_session","requestId":"req-switch-1","bookId":"book-a","sessionId":"session-1"}}
+{"direction":"event","message":{"protocolVersion":1,"seq":1,"type":"ready"}}
+{"direction":"event","message":{"protocolVersion":1,"seq":2,"type":"book_ready","requestId":"req-open-1","bookId":"book-a"}}
+{"direction":"event","message":{"protocolVersion":1,"seq":3,"type":"prompt_started","requestId":"req-prompt-1","bookId":"book-a","sessionId":"session-1","promptId":"prompt-1"}}
+{"direction":"event","message":{"protocolVersion":1,"seq":4,"type":"tool_start","bookId":"book-a","sessionId":"session-1","promptId":"prompt-1","toolCallId":"tool-1","tool":"read_chapter","params":{"index":3}}}
+{"direction":"event","message":{"protocolVersion":1,"seq":5,"type":"tool_end","bookId":"book-a","sessionId":"session-1","promptId":"prompt-1","toolCallId":"tool-1","result":"chapter text","isError":false}}
+{"direction":"event","message":{"protocolVersion":1,"seq":6,"type":"text_delta","bookId":"book-a","sessionId":"session-1","promptId":"prompt-1","delta":"It explains..."}}
+{"direction":"event","message":{"protocolVersion":1,"seq":7,"type":"prompt_end","bookId":"book-a","sessionId":"session-1","promptId":"prompt-1"}}
+{"direction":"event","message":{"protocolVersion":1,"seq":8,"type":"sessions_list","requestId":"req-list-1","bookId":"book-a","sessions":[{"id":"session-1","title":"Question","createdAt":"2026-08-12T00:00:00.000Z","updatedAt":"2026-08-12T00:01:00.000Z"}]}}
+{"direction":"event","message":{"protocolVersion":1,"seq":9,"type":"error","requestId":"req-list-2","bookId":"book-b","scope":"list_sessions","message":"Unable to list sessions","recoverable":true}}

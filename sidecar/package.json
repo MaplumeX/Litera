@@ -9,7 +9,7 @@
     "smoke": "node scripts/smoke.mjs",
     "start": "node dist/litera-sidecar.cjs",
     "typecheck": "tsc --noEmit",
-    "test": "npm run typecheck && node --test scripts/*.node-test.mjs"
+    "test": "npm run typecheck && node --experimental-strip-types --test scripts/*.node-test.mjs scripts/*.node-test.ts"
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "^0.84.1",

@@ -1473,7 +1473,11 @@ pub async fn open_book_bytes(
     let notification_book_id = book_id.clone();
     let store = store.inner().clone();
     let content = run_blocking(move || store.read_book_content(&book_id, &content_version)).await?;
-    crate::notify_sidecar_book_opened(&app, &content.path.to_string_lossy(), &notification_book_id);
+    let notification_path = content.path.to_string_lossy().into_owned();
+    run_blocking(move || {
+        crate::notify_sidecar_book_opened(&app, &notification_path, &notification_book_id)
+    })
+    .await?;
     Ok(raw_response(content.bytes))
 }
 

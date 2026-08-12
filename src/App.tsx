@@ -210,13 +210,26 @@ function App() {
     } catch {
       return;
     }
+    const closingBookId = fileData?.bookId;
+    if (closingBookId) {
+      try {
+        await invoke("close_book", {
+          bookId: closingBookId,
+          requestId: `close-book-${crypto.randomUUID()}`,
+        });
+      } catch (error) {
+        console.error("close_book error:", error);
+        alert(`关闭阅读助手失败: ${invokeErrorMessage(error)}`);
+        return;
+      }
+    }
     setView("library");
     setFileData(null);
     setCurrentBook(null);
     setToc([]);
     setTocVisible(false);
     setControlsOpen(false);
-  }, [flushReadingState]);
+  }, [fileData?.bookId, flushReadingState]);
 
   const handleRelocate = useCallback(
     (index: number, fraction: number, label?: string) => {
