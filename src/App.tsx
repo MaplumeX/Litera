@@ -10,7 +10,7 @@ import {
   type SelectionCapture,
   type TocItem,
 } from "@/components/ReaderView";
-import { ChatPanel, type ChatPanelHandle } from "@/components/ChatPanel";
+import { ChatPanel, type ChatPanelHandle } from "@/components/chat/ChatPanel";
 import { LibraryView } from "@/components/LibraryView";
 import { TocSidebar } from "@/components/TocSidebar";
 import { SettingsDialog } from "@/components/SettingsDialog";
