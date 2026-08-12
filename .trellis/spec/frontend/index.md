@@ -1,39 +1,26 @@
 # Frontend Development Guidelines
 
-> Best practices for frontend development in this project.
+> Coding conventions for the Litera React frontend.
 
 ---
 
 ## Overview
 
-This directory contains guidelines for frontend development. Fill in each file with your project's specific conventions.
+Litera's frontend is a React 19 + TypeScript 5.8 single-page app running in the Tauri WebView. It uses Tailwind CSS v4, shadcn/ui components, and foliate.js (git submodule) for EPUB rendering. State is local `useState` + props; there is no global state library.
 
 ---
 
 ## Guidelines Index
 
-| Guide | Description | Status |
-|-------|-------------|--------|
-| [Directory Structure](./directory-structure.md) | Module organization and file layout | To fill |
-| [Component Guidelines](./component-guidelines.md) | Component patterns, props, composition | Filled (shadcn/ui, foliate.js) |
-| [Hook Guidelines](./hook-guidelines.md) | Custom hooks, data fetching patterns | To fill |
-| [State Management](./state-management.md) | Local state, global state, server state | To fill |
-| [Quality Guidelines](./quality-guidelines.md) | Code standards, forbidden patterns | To fill |
-| [Type Safety](./type-safety.md) | Type patterns, validation | To fill |
+| Guide | Description |
+|-------|-------------|
+| [Directory Structure](./directory-structure.md) | `src/` layout, path alias, foliate-js submodule |
+| [Component Guidelines](./component-guidelines.md) | shadcn/ui patterns, foliate-view web component, setStyles |
+| [Hook Guidelines](./hook-guidelines.md) | `useDebouncedCallback`, ref-stable callbacks, `useImperativeHandle`, Tauri `listen()` |
+| [State Management](./state-management.md) | Local state + props, Tauri events, persisted reading state |
+| [Type Safety](./type-safety.md) | Rust↔TS serde contract, foliate.js typing, no `any` |
+| [Quality Guidelines](./quality-guidelines.md) | CSP configuration, Tauri plugin registration |
 
 ---
 
-## How to Fill These Guidelines
-
-For each guideline file:
-
-1. Document your project's **actual conventions** (not ideals)
-2. Include **code examples** from your codebase
-3. List **forbidden patterns** and why
-4. Add **common mistakes** your team has made
-
-The goal is to help AI assistants and new team members understand how YOUR project works.
-
----
-
-**Language**: All documentation should be written in **English**.
+**Language**: All documentation is written in **English**.
