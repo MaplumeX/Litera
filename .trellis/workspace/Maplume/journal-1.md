@@ -241,3 +241,24 @@ Filled the 5 remaining template spec files with real codebase patterns: database
 ### Status
 
 [OK] **Completed**
+
+
+## Session 12: Decouple sidecar from host pi: child 1 (agent dir protocol)
+
+**Date**: 2026-08-12
+**Task**: Decouple sidecar from host pi: child 1 (agent dir protocol)
+**Branch**: `main`
+
+### Summary
+
+Added the configure command to the sidecar protocol so Rust injects a Litera-owned <app_data_dir>/agent/ directory after every ready event. Sidecar no longer reads ~/.pi/agent; createAgentSession now passes agentDir explicitly to prevent the pi SDK modelRuntime fallback. Protocol fixture, sidecar tests (15), and Rust tests (36) all pass. Child 2 (config UI) remains in planning.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `add98b1` | (see git log) |
+
+### Status
+
+[OK] **Completed**
