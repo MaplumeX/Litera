@@ -1,0 +1,30 @@
+{
+  "id": "reader-assistant-experience-improvements",
+  "name": "reader-assistant-experience-improvements",
+  "title": "阅读器与助手体验完善",
+  "description": "父任务：统一规划 5 项体验改进（12 停止后重试、13 会话重命名、15 消息复制/编辑、17 主题全局化、18 设置入口统一）",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "Maplume",
+  "assignee": "Maplume",
+  "createdAt": "2026-08-12",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "08-12-session-rename",
+    "08-12-chat-message-interaction",
+    "08-12-theme-settings-unification"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

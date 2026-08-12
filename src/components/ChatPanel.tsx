@@ -9,12 +9,12 @@ import {
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Button } from "@/components/ui/button";
-import { MessagesSquare, Settings, RefreshCw } from "lucide-react";
+import { MessagesSquare, Settings, RefreshCw, Copy, Check, Pencil } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAgentBridge } from "@/lib/use-agent-bridge";
 import { useAgentConfig } from "@/lib/use-agent-config";
 import { AgentConfigDialog } from "@/components/AgentConfigDialog";
-import type { AgentToolCall } from "@/types/agent";
+import type { AgentMessage, AgentToolCall } from "@/types/agent";
 
 export interface ChatPanelHandle {
   fillInput: (text: string, chapterIndex: number) => void;
@@ -51,6 +51,24 @@ function ToolCallCard({ call }: { call: AgentToolCall }) {
   );
 }
 
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      onClick={() => {
+        void navigator.clipboard.writeText(text).then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        });
+      }}
+      className="absolute right-1 top-1 opacity-0 transition-opacity group-hover:opacity-100"
+      aria-label="复制"
+    >
+      {copied ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5 text-muted-foreground" />}
+    </button>
+  );
+}
+
 export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
   function ChatPanel({ currentChapterIndex, bookId }, ref) {
     const bridge = useAgentBridge(bookId);
@@ -72,10 +90,13 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     const [showConfig, setShowConfig] = useState(false);
     const [submitting, setSubmitting] = useState(false);
     const [invokeError, setInvokeError] = useState<string | null>(null);
+    const [retryHighlight, setRetryHighlight] = useState(false);
     const { snapshot: configSnapshot, load: loadConfig } = useAgentConfig();
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const autoSwitchRef = useRef<string | null>(null);
+    const lastSentRef = useRef<{ text: string; selection?: string; chapterIndex: number } | null>(null);
+    const abortedRef = useRef(false);
 
     const isStreaming = submitting || state.status === "prompting";
     const bookReady = state.status === "bookReady" || state.status === "prompting";
@@ -112,11 +133,26 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       });
     }, [state.sessionId, state.sessions, state.status, switchSession]);
 
+    useEffect(() => {
+      if (!abortedRef.current || state.status !== "bookReady") return;
+      const last = lastSentRef.current;
+      if (!last) return;
+      abortedRef.current = false;
+      setInput(last.text);
+      if (last.selection) {
+        setPendingSelection({ text: last.selection, chapterIndex: last.chapterIndex });
+      }
+      setRetryHighlight(true);
+      const timer = setTimeout(() => setRetryHighlight(false), 2000);
+      return () => clearTimeout(timer);
+    }, [state.status]);
+
     const handleSend = useCallback(async () => {
       const text = input.trim();
       if (!text || isStreaming || !bookId) return;
       const selection = pendingSelection?.text;
       const chapterIndex = pendingSelection?.chapterIndex ?? currentChapterIndex;
+      lastSentRef.current = { text, selection, chapterIndex };
       setInput("");
       setPendingSelection(null);
       setInvokeError(null);
@@ -135,6 +171,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 
     const handleAbort = useCallback(async () => {
       setInvokeError(null);
+      abortedRef.current = true;
       try {
         await abort();
       } catch (error) {
@@ -157,6 +194,19 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         void handleSend();
       }
     }, [handleSend]);
+
+    const handleEdit = useCallback((message: AgentMessage) => {
+      setInput(message.content);
+      if (message.selection) {
+        setPendingSelection({
+          text: message.selection,
+          chapterIndex: message.chapterIndex ?? currentChapterIndex,
+        });
+      } else {
+        setPendingSelection(null);
+      }
+      inputRef.current?.focus();
+    }, [currentChapterIndex]);
 
     const fillInput = useCallback((text: string, chapterIndex: number) => {
       setPendingSelection({ text, chapterIndex });
@@ -300,21 +350,33 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
           {state.messages.map((message, index) => (
             <div key={index} className="space-y-1">
               {message.role === "user" && (
-                <div className="space-y-1">
+                <div className="group space-y-1">
                   {message.selection && (
                     <div className="border-l-4 border-primary/60 bg-muted px-3 py-1 text-sm italic text-muted-foreground">
                       &ldquo;{message.selection}&rdquo;
                     </div>
                   )}
-                  <div className="rounded-lg bg-primary/10 px-3 py-2 text-sm">{message.content}</div>
+                  <div className="relative rounded-lg bg-primary/10 px-3 py-2 text-sm">
+                    {message.content}
+                    <button
+                      onClick={() => handleEdit(message)}
+                      className="absolute right-1 top-1 opacity-0 transition-opacity group-hover:opacity-100"
+                      aria-label="编辑"
+                    >
+                      <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
+                    </button>
+                  </div>
                 </div>
               )}
               {message.role === "assistant" && (
                 <div className="space-y-1">
                   {message.toolCalls?.map((call) => <ToolCallCard key={call.toolCallId} call={call} />)}
                   {message.content && (
-                    <div className="prose prose-sm max-w-none dark:prose-invert">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
+                    <div className="group relative">
+                      <CopyButton text={message.content} />
+                      <div className="prose prose-sm max-w-none dark:prose-invert">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -342,6 +404,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
             className={cn(
               "w-full resize-none rounded border bg-background px-2 py-1 text-sm",
               "focus:outline-none focus:ring-1 focus:ring-ring",
+              retryHighlight && "ring-2 ring-primary",
             )}
             rows={2}
             placeholder="输入问题…"
