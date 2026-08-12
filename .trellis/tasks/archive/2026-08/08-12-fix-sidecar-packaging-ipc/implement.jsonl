@@ -1,0 +1,2 @@
+{"file": ".trellis/tasks/08-12-fix-sidecar-packaging-ipc/research/official-packaging.md", "reason": "实现 externalBin、自包含 Node sidecar 和 Raw IPC 的官方研究。"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "了解当前源码路径 sidecar 布局及需要替换的约定。"}

@@ -1,0 +1,2 @@
+{"file": ".trellis/tasks/08-12-fix-sidecar-packaging-ipc/research/official-packaging.md", "reason": "复核目标三元组命名、externalBin 和 Raw response。"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "核对 Rust Raw bytes 与 TypeScript ArrayBuffer 契约。"}

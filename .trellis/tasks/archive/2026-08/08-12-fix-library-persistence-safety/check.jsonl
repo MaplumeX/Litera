@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "验证存储、命令和前端状态 round-trip。"}
+{"file": ".trellis/spec/backend/tauri-commands.md", "reason": "核对书库错误矩阵、路径和命令签名。"}
