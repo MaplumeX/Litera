@@ -389,3 +389,26 @@ Root cause: sidecar's SessionManager doesn't persist empty sessions to disk (no 
 ### Status
 
 [OK] **Completed**
+
+
+## Session 19: Improve provider switching and editing
+
+**Date**: 2026-08-12
+**Task**: Improve provider switching and editing
+**Branch**: `main`
+
+### Summary
+
+Provider config UX: (1) selecting a custom provider in the dropdown now switches immediately (removed '使用此供应商' button); (2) custom providers are editable (name/baseUrl/apiKey/model) via new update_custom_provider Tauri command — empty key keeps existing; (3) built-in providers with a saved key can save model-only changes without re-entering the key (save_config keeps existing key when api_key empty, errors only when no key exists). 8 new Rust tests; cargo test 62 passed, vitest 20 passed, build green.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `759bcb1` | (see git log) |
+| `6af192f` | (see git log) |
+| `c81b780` | (see git log) |
+
+### Status
+
+[OK] **Completed**

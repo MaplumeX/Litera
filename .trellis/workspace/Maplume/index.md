@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 18
+- **Total Sessions**: 19
 - **Last Active**: 2026-08-12
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~391 | Active |
+| `journal-1.md` | ~414 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 19 | 2026-08-12 | Improve provider switching and editing | `759bcb1`, `6af192f`, `c81b780` | `main` |
 | 18 | 2026-08-12 | Fix new session not appearing in list | `02d36ec`, `d14b643` | `main` |
 | 17 | 2026-08-12 | Fix new session not appearing in list | `02d36ec` | `main` |
 | 16 | 2026-08-12 | Fix prompt context injection polluting user messages | `04bcc0e` | `main` |
