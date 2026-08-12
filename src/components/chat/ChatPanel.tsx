@@ -315,8 +315,9 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
             </div>
           )}
           {error && (
-            <div className="rounded border border-destructive/50 bg-destructive/10 px-2 py-1 text-xs text-destructive">
-              ⚠ {error}
+            <div className="flex items-center gap-2 rounded border border-destructive/50 bg-destructive/10 px-2 py-1 text-xs text-destructive">
+              <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+              <span>{error}</span>
             </div>
           )}
           <div ref={messagesEndRef} />

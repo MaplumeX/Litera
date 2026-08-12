@@ -1,4 +1,4 @@
-import { Pencil } from "lucide-react";
+import { Pencil, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { AgentSessionSummary } from "@/types/agent";
@@ -38,8 +38,14 @@ export function SessionList({
     <div className="absolute inset-x-0 top-[37px] bottom-0 z-10 flex flex-col bg-card">
       <div className="flex items-center justify-between border-b px-3 py-2">
         <span className="text-sm font-semibold">会话列表</span>
-        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={onClose}>
-          ✕
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-7 px-2 text-xs"
+          onClick={onClose}
+          aria-label="关闭"
+        >
+          <X />
         </Button>
       </div>
       <div className="flex-1 space-y-1 overflow-y-auto p-2">
@@ -50,7 +56,8 @@ export function SessionList({
           onClick={onNewSession}
           disabled={isStreaming}
         >
-          + 新建会话
+          <Plus />
+          新建会话
         </Button>
         {sessions.length === 0 && (
           <p className="px-2 py-4 text-center text-xs text-muted-foreground">

@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { ChevronRight, Wrench } from "lucide-react";
+import { cn } from "@/lib/utils";
 import type { AgentToolCall } from "@/types/agent";
 
 export function ToolCallCard({ call }: { call: AgentToolCall }) {
@@ -13,9 +15,16 @@ export function ToolCallCard({ call }: { call: AgentToolCall }) {
       <button
         onClick={() => setExpanded((value) => !value)}
         className="flex w-full items-center gap-1 px-2 py-1 text-left hover:bg-muted/70"
+        aria-expanded={expanded}
       >
-        <span className="text-muted-foreground">{expanded ? "▼" : "▶"}</span>
-        <span className="font-medium">🔧 {call.tool}</span>
+        <ChevronRight
+          className={cn(
+            "h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform",
+            expanded && "rotate-90",
+          )}
+        />
+        <Wrench className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        <span className="font-medium">{call.tool}</span>
         <span className="truncate text-muted-foreground">({paramsStr})</span>
       </button>
       {expanded && call.result != null && (
