@@ -367,3 +367,25 @@ Fixed new session not appearing in the session list after clicking 'New Session'
 ### Status
 
 [OK] **Completed**
+
+
+## Session 18: Fix new session not appearing in list
+
+**Date**: 2026-08-12
+**Task**: Fix new session not appearing in list
+**Branch**: `main`
+
+### Summary
+
+Root cause: sidecar's SessionManager doesn't persist empty sessions to disk (no assistant msg yet), so listSessions() right after session_created excluded the new session. Fix: optimistic insert in agent-reducer session_created case via upsertSession helper; removed the listSessions() call on session_created in use-agent-bridge; added 2 reducer tests. Updated frontend state-management spec with the optimistic session creation pattern.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `02d36ec` | (see git log) |
+| `d14b643` | (see git log) |
+
+### Status
+
+[OK] **Completed**
