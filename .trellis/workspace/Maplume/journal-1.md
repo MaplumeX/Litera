@@ -662,3 +662,26 @@ Aligned get_toc, read_chapter, and search_in_book with ReadAware contracts: chap
 ### Status
 
 [OK] **Completed**
+
+
+## Session 31: Restore desktop reader page turning
+
+**Date**: 2026-08-13
+**Task**: Restore desktop reader page turning
+**Branch**: `fix/fanye-wufafa`
+
+### Summary
+
+Restored desktop page turning after footer buttons were removed: left/right third click, arrow keys (including after focusing the chapter iframe), and trackpad/wheel one page per gesture. ReaderView owns all paging input; App no longer listens on window. Recorded the foliate iframe event model in frontend specs. Tests 56 passed, build green. Live UI not clicked.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1823894` | (see git log) |
+| `f545d8e` | (see git log) |
+| `bdf5614` | (see git log) |
+
+### Status
+
+[OK] **Completed**
