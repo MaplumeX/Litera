@@ -662,3 +662,26 @@ Aligned get_toc, read_chapter, and search_in_book with ReadAware contracts: chap
 ### Status
 
 [OK] **Completed**
+
+
+## Session 31: Optimize reading UI layout
+
+**Date**: 2026-08-13
+**Task**: Optimize reading UI layout
+**Branch**: `feat/reading-ui-layout-optimization`
+
+### Summary
+
+Planned and implemented reading-first layout: book title as header, full-width progress, overlay TOC drawer, chat default collapsed with process-only memory, 问 agent auto-opens then fillInput. Specs record chrome conventions. tsc/test/build green.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c3f4832` | (see git log) |
+| `e37c573` | (see git log) |
+| `0e5a6b1` | (see git log) |
+
+### Status
+
+[OK] **Completed**
