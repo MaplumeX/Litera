@@ -874,3 +874,25 @@ Shipped React UI i18n for zh-CN and English: in-house t()/useT catalogs, localSt
 ### Status
 
 [OK] **Completed**
+
+
+## Session 40: Settings as centered dialog
+
+**Date**: 2026-08-13
+**Task**: Settings as centered dialog
+**Branch**: `main`
+
+### Summary
+
+Replaced the full-screen settings root view with a centered SettingsDialog overlay. Library gear and reader Aa open the dialog without unmounting the current page; chat still owns AgentConfigDialog. Specs updated so view stays library|reader and settingsOpen owns general settings.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c3fd23b` | (see git log) |
+| `2441097` | (see git log) |
+
+### Status
+
+[OK] **Completed**
