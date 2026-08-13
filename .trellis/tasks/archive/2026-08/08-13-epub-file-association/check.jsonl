@@ -1,0 +1,9 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/backend/tauri-commands.md", "reason": "Verify OS-open still uses import_paths classification and version-bound open"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "No silent drop of invalid paths or storage errors"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Sidecar/open lifecycle must not regress"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "CSP/plugin/capability changes stay minimal"}
+{"file": ".trellis/spec/frontend/hook-guidelines.md", "reason": "Event subscription cleanup and serialized open"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "New command/event types match serde"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Queue drain vs emit must not double-import"}
+{"file": ".trellis/tasks/08-13-epub-file-association/research/tauri-file-association.md", "reason": "Opened is macOS-only; Win/Linux need argv + single-instance"}
