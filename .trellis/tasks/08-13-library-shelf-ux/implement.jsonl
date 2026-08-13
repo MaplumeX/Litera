@@ -1,0 +1,7 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/backend/tauri-commands.md", "reason": "Library IPC contracts: import/list/open/delete/update_reading_state and Raw byte boundary"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "library.json schema, bookId path hash, sessions/<bookId>/ layout, atomic writes"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "AppError codes; Cancelled vs storage failures must stay visible"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "shadcn Dialog/AlertDialog; no confirm()/alert(); icon buttons"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "LibraryView local state; list_books refresh; no global store"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "BookRecord/ImportBookResult/BookOpenContext must stay in sync across Rust and TS"}

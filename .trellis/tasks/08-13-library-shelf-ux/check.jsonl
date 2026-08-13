@@ -1,0 +1,7 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/backend/tauri-commands.md", "reason": "Verify new import statuses, import_paths, discard_import, title, lastOpenedAt against the command contract"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "Optional fields must not break schemaVersion 1; delete must clean sessions/<bookId>/"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Overwrite cancel and picker cancel are Cancelled; other failures stay visible"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Confirmations use shadcn, not window.confirm"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "Selection mode and sort stay in LibraryView/list_books, not a new store"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Check Rust/TS field names for lastOpenedAt, contentHash, import status"}
