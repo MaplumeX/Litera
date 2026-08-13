@@ -664,6 +664,7 @@ Aligned get_toc, read_chapter, and search_in_book with ReadAware contracts: chap
 [OK] **Completed**
 
 
+## Session 31: Restore desktop reader page turning
 ## Session 31: Associate Litera as an EPUB opener
 
 **Date**: 2026-08-13
@@ -718,6 +719,9 @@ Restored desktop page turning after footer buttons were removed: left/right thir
 
 | Hash | Message |
 |------|---------|
+| `1823894` | (see git log) |
+| `f545d8e` | (see git log) |
+| `bdf5614` | (see git log) |
 | `d3daa9e` | (see git log) |
 | `60802d5` | (see git log) |
 | `730eb3c` | (see git log) |
@@ -727,6 +731,15 @@ Restored desktop page turning after footer buttons were removed: left/right thir
 [OK] **Completed**
 
 
+## Session 32: Settings page and typography defaults
+
+**Date**: 2026-08-13
+**Task**: Settings page and typography defaults
+**Branch**: `feat/settings-ui-layout-and-configurable-items`
+
+### Summary
+
+Replaced the settings dialog with a dedicated page (typography / appearance / AI). Added line height, page margin, and text-align with global defaults plus per-book overrides. Chat gear still opens the LLM dialog. Specs and planning artifacts recorded. Tests and build were green; live Tauri UI was not clicked.
 ## Session 33: Optimize reading UI layout
 
 **Date**: 2026-08-13
@@ -741,6 +754,9 @@ Planned and implemented reading-first layout: book title as header, full-width p
 
 | Hash | Message |
 |------|---------|
+| `61a6851` | (see git log) |
+| `0d0f855` | (see git log) |
+| `38cb99a` | (see git log) |
 | `c3f4832` | (see git log) |
 | `e37c573` | (see git log) |
 | `0e5a6b1` | (see git log) |

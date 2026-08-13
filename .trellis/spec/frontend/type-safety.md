@@ -164,11 +164,17 @@ function extractFirstValue(raw: unknown): string | null { ... }
 
 ```typescript
 // src/lib/reader-styles.ts
-export function normalizeSettings(settings?: ReadingSettings): ReaderStyleState {
+export function normalizeSettings(
+  settings?: ReadingSettings,
+  preferences?: Partial<TypographyDefaults> & { theme?: string },
+): ReaderStyleState {
   return {
     fontSize: settings?.fontSize ?? DEFAULT_FONT_SIZE,
     fontFamily: settings?.fontFamily ?? DEFAULT_FONT_FAMILY,
-    theme: settings?.theme ?? DEFAULT_THEME,
+    theme: preferences?.theme ?? DEFAULT_THEME,
+    lineHeight: normalizeLineHeight(settings?.lineHeight ?? preferences?.lineHeight),
+    pageMargin: normalizePageMargin(settings?.pageMargin ?? preferences?.pageMargin),
+    textAlign: normalizeTextAlign(settings?.textAlign ?? preferences?.textAlign),
   };
 }
 ```

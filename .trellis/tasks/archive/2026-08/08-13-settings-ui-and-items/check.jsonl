@@ -1,0 +1,9 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend quality checklist"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Verify chat settings stay local and shadcn form patterns"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "Verify no new global store and settings state stays in App"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Frontend quality bar"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "No library schema bump; merge and atomic write"}
+{"file": ".trellis/spec/backend/tauri-commands.md", "reason": "Command signatures must match frontend invoke"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Cross-layer field contract for new settings keys"}
+{"file": ".trellis/tasks/08-13-settings-ui-and-items/research/persistence-constraints.md", "reason": "Must not wipe theme; must send full settings snapshot"}

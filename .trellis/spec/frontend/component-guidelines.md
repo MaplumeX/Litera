@@ -114,17 +114,17 @@ body:     [TOC overlay]  Reader  |  Chat (collapsed = 0 width, still mounted)
 
 ### Convention: Settings entry ownership
 
-**What**: General settings and LLM settings are different dialogs with different owners.
+**What**: General settings and LLM settings are different surfaces with different owners.
 
-| Entry | Owner / state | Dialog |
+| Entry | Owner / state | Surface |
 |---|---|---|
-| Library gear | `App` `settingsOpen` via `LibraryView.onOpenSettings` | `SettingsDialog` (reading prefs + "打开 AI 配置") |
-| Reader toolbar Aa (`aria-label="字体与主题"`) | `App` `settingsOpen` | `SettingsDialog` |
+| Library gear | `App` `view === "settings"` via `LibraryView.onOpenSettings` | `SettingsPage` (typography / appearance / AI) |
+| Reader toolbar Aa (`aria-label="字体与主题"`) | `App` `view === "settings"` (`settingsReturnTo = "reader"`) | `SettingsPage` |
 | Chat panel gear / "打开设置" banner | `ChatPanel` local `showConfig` | `AgentConfigDialog` only |
 
-**Why**: Passing `onOpenSettings={() => setSettingsOpen(true)}` into `ChatPanel` made the chat gear open the general dialog. Combined with `onOpenSettings?.() ?? setShowConfig(true)`, both dialogs opened on one click.
+**Why**: Passing `onOpenSettings={() => setSettingsOpen(true)}` into `ChatPanel` made the chat gear open the general settings. Combined with `onOpenSettings?.() ?? setShowConfig(true)`, both surfaces opened on one click.
 
-**Rule**: Do not add an `onOpenSettings` callback to `ChatPanel`. Chat settings stay local.
+**Rule**: Do not add an `onOpenSettings` callback to `ChatPanel`. Chat settings stay local. Do not mount `SettingsDialog` as the general-settings surface. Settings back uses `setView(settingsReturnTo)` and must not call `close_book` / `handleBackToLibrary`.
 
 ### Convention: library confirms and selection mode
 

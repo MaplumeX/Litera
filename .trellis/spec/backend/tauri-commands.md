@@ -90,7 +90,10 @@ interface BookRecord {
 interface ReadingSettings {
   fontSize?: number;
   fontFamily?: string;
-  theme?: string;  // "light" | "dark" | "sepia"
+  theme?: string;  // "light" | "dark" | "sepia" — accepted for old files, not written
+  lineHeight?: string;  // "compact" | "normal" | "relaxed"
+  pageMargin?: string;  // "narrow" | "normal" | "wide"
+  textAlign?: string;   // "start" | "justify"
 }
 
 type ImportStatus = "new" | "overwrite" | "duplicate";
@@ -240,6 +243,103 @@ const paths = await invoke("take_pending_open_paths");
 - `tauri.conf.json` → `app.security.assetProtocol.enable = true` + `scope = ["$APPDATA/books/**"]`
 - `tauri` Cargo dependency with `features = ["protocol-asset"]`
 - CSP `img-src` must include `asset:` and `http://asset.localhost`
+
+## Preferences Commands
+
+### 1. Scope / Trigger
+
+Global app preferences in `<app_data>/preferences.json`: theme plus typography defaults (`lineHeight`, `pageMargin`, `textAlign`). Cross-layer contract — extending this file without a read-modify-write wipe the user's theme.
+
+### 2. Signatures
+
+```rust
+#[tauri::command]
+async fn get_preferences(store: State<'_, PreferencesStore>) -> AppResult<PreferencesResponse>
+
+#[tauri::command]
+async fn save_preferences(
+    store: State<'_, PreferencesStore>,
+    theme: Option<String>,
+    line_height: Option<String>,
+    page_margin: Option<String>,
+    text_align: Option<String>,
+) -> AppResult<()>
+```
+
+### 3. Contracts
+
+```typescript
+interface PreferencesResponse {
+  theme: string;        // "light" | "dark" | "sepia"
+  lineHeight: string;   // "compact" | "normal" | "relaxed"
+  pageMargin: string;   // "narrow" | "normal" | "wide"
+  textAlign: string;    // "start" | "justify"
+}
+```
+
+`preferences.json` (schemaVersion stays 1):
+
+```json
+{
+  "schemaVersion": 1,
+  "theme": "light",
+  "lineHeight": "normal",
+  "pageMargin": "normal",
+  "textAlign": "start"
+}
+```
+
+- New keys use `#[serde(default = "...")]`. A theme-only v1 file still loads; missing typography keys become `normal` / `normal` / `start`.
+- `ensure_file` must **not** rewrite a valid theme-only file. Rewriting would add keys that older `deny_unknown_fields` builds then treat as corrupt and reset to `theme: light`.
+- `save_preferences` is a patch: read current file under the gate, merge only supplied fields, write. At least one field is required.
+- Frontend `invoke("save_preferences", { theme, lineHeight, pageMargin, textAlign })` uses camelCase. Do not send a theme-only rewrite that drops typography keys.
+
+Book-level overrides of the three typography keys live on `ReadingSettings` via `update_reading_state`, not in this file. Theme is global-only.
+
+### 4. Validation & Error Matrix
+
+- empty patch → `InvalidInput` ("At least one preference field is required")
+- `theme` not in `light|dark|sepia` → `InvalidInput` ("Unsupported theme")
+- `lineHeight` not in `compact|normal|relaxed` → `InvalidInput` ("Unsupported lineHeight")
+- `pageMargin` not in `narrow|normal|wide` → `InvalidInput` ("Unsupported pageMargin")
+- `textAlign` not in `start|justify` → `InvalidInput` ("Unsupported textAlign")
+- unreadable / unparseable file on read after init → `StorageIo` / `StorageCorrupt`
+- unsupported schema or invalid stored enum on init → overwrite with defaults (theme becomes `light`)
+
+### 5. Good / Base / Bad Cases
+
+- Good: existing `{"schemaVersion":1,"theme":"sepia"}` loads as sepia + typography defaults; file bytes unchanged.
+- Good: `save_preferences({ theme: "dark" })` keeps stored `lineHeight` / `pageMargin` / `textAlign`.
+- Base: missing file is created with light / normal / normal / start.
+- Bad: `save_preferences({})` or all-None → `InvalidInput`.
+- Bad: `lineHeight: "1.7"` → `InvalidInput`.
+
+### 6. Tests Required
+
+- theme-only file loads; theme preserved; file not rewritten
+- theme save does not drop typography keys
+- invalid enum rejected
+- unsupported schema overwritten with defaults
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```rust
+// Rewrites the whole file from theme only — wipes lineHeight/pageMargin/textAlign
+let data = PreferencesData { schema_version: 1, theme: theme.to_string(), ..Default::default() };
+atomic_write(path, &serde_json::to_vec_pretty(&data)?, "preferences.json")?;
+```
+
+#### Correct
+
+```rust
+let mut data = self.read_unlocked()?;
+if let Some(theme) = patch.theme { data.theme = theme; }
+if let Some(line_height) = patch.line_height { data.line_height = line_height; }
+// ...
+self.write_unlocked(&data)?;
+```
 
 ### Agent Config Commands
 

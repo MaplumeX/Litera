@@ -1,20 +1,65 @@
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useDebouncedCallback } from "@/lib/use-debounced-callback";
-import type { ReaderStyleState } from "@/lib/reader-styles";
+import {
+  DEFAULT_LINE_HEIGHT,
+  DEFAULT_PAGE_MARGIN,
+  DEFAULT_TEXT_ALIGN,
+  DEFAULT_THEME,
+  normalizeLineHeight,
+  normalizePageMargin,
+  normalizeTextAlign,
+  THEMES,
+  type LineHeightValue,
+  type PageMarginValue,
+  type ReaderStyleState,
+  type TextAlignValue,
+} from "@/lib/reader-styles";
+
+export interface AppPreferences {
+  theme: string;
+  lineHeight: LineHeightValue;
+  pageMargin: PageMarginValue;
+  textAlign: TextAlignValue;
+}
 
 interface PreferencesResponse {
-  theme: string;
+  theme?: string;
+  lineHeight?: string;
+  pageMargin?: string;
+  textAlign?: string;
+}
+
+export const DEFAULT_PREFERENCES: AppPreferences = {
+  theme: DEFAULT_THEME,
+  lineHeight: DEFAULT_LINE_HEIGHT,
+  pageMargin: DEFAULT_PAGE_MARGIN,
+  textAlign: DEFAULT_TEXT_ALIGN,
+};
+
+function normalizePreferences(response: PreferencesResponse | null | undefined): AppPreferences {
+  const theme = response?.theme;
+  return {
+    theme: theme && (THEMES as readonly string[]).includes(theme) ? theme : DEFAULT_THEME,
+    lineHeight: normalizeLineHeight(response?.lineHeight),
+    pageMargin: normalizePageMargin(response?.pageMargin),
+    textAlign: normalizeTextAlign(response?.textAlign),
+  };
 }
 
 export function usePreferences() {
-  const [theme, setThemeState] = useState<string>("light");
+  const [preferences, setPreferencesState] = useState<AppPreferences>(DEFAULT_PREFERENCES);
   const [loading, setLoading] = useState(true);
 
-  // Debounced save so rapid theme switches coalesce into one write.
+  // Debounced save so rapid switches coalesce into one write of the latest full record.
   const savePreferences = useDebouncedCallback(
-    async (newTheme: string) => {
-      await invoke("save_preferences", { theme: newTheme });
+    async (next: AppPreferences) => {
+      await invoke("save_preferences", {
+        theme: next.theme,
+        lineHeight: next.lineHeight,
+        pageMargin: next.pageMargin,
+        textAlign: next.textAlign,
+      });
     },
     300,
     (error) => console.error("Failed to save preferences:", error),
@@ -24,7 +69,7 @@ export function usePreferences() {
     let disposed = false;
     void invoke<PreferencesResponse>("get_preferences")
       .then((response) => {
-        if (!disposed) setThemeState(response.theme);
+        if (!disposed) setPreferencesState(normalizePreferences(response));
       })
       .catch((error) => {
         console.error("Failed to load preferences:", error);
@@ -37,15 +82,32 @@ export function usePreferences() {
     };
   }, []);
 
-  const setTheme = useCallback(
-    (newTheme: string) => {
-      setThemeState(newTheme);
-      savePreferences.schedule(newTheme);
+  const updatePreferences = useCallback(
+    (patch: Partial<AppPreferences>) => {
+      setPreferencesState((prev) => {
+        const next = { ...prev, ...patch };
+        savePreferences.schedule(next);
+        return next;
+      });
     },
     [savePreferences],
   );
 
-  return { theme, setTheme, loading, flush: savePreferences.flush };
+  const setTheme = useCallback(
+    (newTheme: string) => {
+      updatePreferences({ theme: newTheme });
+    },
+    [updatePreferences],
+  );
+
+  return {
+    theme: preferences.theme,
+    setTheme,
+    preferences,
+    updatePreferences,
+    loading,
+    flush: savePreferences.flush,
+  };
 }
 
 /**

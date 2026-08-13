@@ -1,0 +1,11 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend checklist and component/state rules for the settings page"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Settings entry ownership: chat gear must stay AgentConfigDialog-only"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "No global store; App owns view and settings state"}
+{"file": ".trellis/spec/frontend/directory-structure.md", "reason": "Multi-file feature components go in their own directory"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend checklist for preferences and library persistence"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "library.json optional fields; no schema bump; atomic write"}
+{"file": ".trellis/spec/backend/tauri-commands.md", "reason": "IPC contracts for update_reading_state and preferences"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Preferences and ReadingSettings must stay aligned across Rust and TS"}
+{"file": ".trellis/tasks/08-13-settings-ui-and-items/research/persistence-constraints.md", "reason": "Theme wipe risk and settings replace-not-merge"}
+{"file": ".trellis/tasks/08-13-settings-ui-and-items/research/settings-surface.md", "reason": "Third root view; style injection only via generateStylesCss"}

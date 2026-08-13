@@ -23,11 +23,12 @@ Reference files:
 
 ```typescript
 // src/App.tsx
-const [view, setView] = useState<"library" | "reader">("library");
+const [view, setView] = useState<"library" | "reader" | "settings">("library");
+const [settingsReturnTo, setSettingsReturnTo] = useState<"library" | "reader">("library");
 const [fileData, setFileData] = useState<FileData | null>(null);
 const [currentBook, setCurrentBook] = useState<BookRecord | null>(null);
 const [progress, setProgress] = useState<{ index: number; fraction: number; label?: string }>({ ... });
-const [styleState, setStyleState] = useState<ReaderStyleState>({ fontSize: 16, fontFamily: "serif", theme: "light" });
+const styleState = normalizeSettings(currentBook?.settings, preferences);
 const [toc, setToc] = useState<TocItem[]>([]);
 const [chatCollapsed, setChatCollapsed] = useState(true);
 const [tocVisible, setTocVisible] = useState(false);
@@ -46,7 +47,7 @@ Each component owns its own UI state:
 - OS-open notices / overwrite confirm live on `App`'s `useBookImport`, because `LibraryView` unmounts in the reader. Picker / drag-drop keep a second `useBookImport` on `LibraryView` and still do not auto-open.
 - `ReaderView`: `selectionPos` (transient selection button position)
 
-`App.settingsOpen` owns `SettingsDialog` (library gear + reader Aa). Do not lift ChatPanel LLM settings into that flag.
+`App` `view === "settings"` owns `SettingsPage` (library gear + reader Aa). Do not lift ChatPanel LLM settings into that view.
 
 Reader chrome flags (`tocVisible`, `chatCollapsed`) live only in `App` `useState`. They survive back-to-library and book switches in the same process. `handleBackToLibrary` must not reset them. Do not write them to `save_preferences`. Restart returns to TOC closed + chat collapsed. Clear `toc` data when leaving a book; only the open/closed flags persist in memory.
 

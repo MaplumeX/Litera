@@ -9,8 +9,9 @@
 Litera uses two distinct persistence mechanisms, neither of which is a relational database:
 
 1. **Library storage** — `library.json` in the Tauri app data directory. Rust reads/writes it directly via `serde_json`. No ORM, no migrations, no query builder.
-2. **Session storage** — JSONL session files managed by the sidecar's `SessionManager` (from `@earendil-works/pi-coding-agent`), under `<app_data>/sessions/<bookId>/`.
-3. **Full-text search** — In-memory SQLite FTS5 (WASM via `fts5-sql-bundle`), rebuilt on each book open. Not persisted to disk.
+2. **Preferences storage** — `preferences.json` next to `library.json`. Theme plus typography defaults. Same atomic write helper; separate `PreferencesStore` gate. See `tauri-commands.md` Preferences Commands.
+3. **Session storage** — JSONL session files managed by the sidecar's `SessionManager` (from `@earendil-works/pi-coding-agent`), under `<app_data>/sessions/<bookId>/`.
+4. **Full-text search** — In-memory SQLite FTS5 (WASM via `fts5-sql-bundle`), rebuilt on each book open. Not persisted to disk.
 
 Reference files:
 - `src-tauri/src/library.rs` — `LibraryStore`, strict reads, atomic writes, recovery transactions
@@ -32,7 +33,8 @@ fn update_reading_state(&self, book_id: &str, fraction: Option<f64>, settings: O
     let record = library.books.iter_mut()
         .find(|book| book.id == book_id)
         .ok_or_else(|| AppError::book_not_found(book_id))?;
-    // validate + merge only supplied fields
+    // last_fraction and settings are independent Options.
+    // settings, when present, REPLACES the whole object — it does not merge keys.
     self.write_library(&library)
 }
 ```
@@ -43,8 +45,10 @@ fn update_reading_state(&self, book_id: &str, fraction: Option<f64>, settings: O
 - **Strict reads**: missing files, malformed JSON, unknown/missing fields, duplicate IDs, invalid settings, unsafe stored paths, missing files, and symlinks are errors. Never use `unwrap_or(empty)`.
 - **Recoverable atomic write**: same-directory tempfile → write → flush → file `sync_all` → atomic persist → parent-directory sync. If failure occurs after persist, restore the prior complete bytes.
 - **All filesystem work is blocking work**: every Tauri library command is async and delegates store operations to `spawn_blocking`.
-- **Partial updates merge under the gate** so concurrent fraction/settings calls cannot overwrite one another.
+- **Partial updates merge under the gate** so concurrent fraction/settings calls cannot overwrite one another. `last_fraction` and `settings` are independent Options. When `settings` is `Some`, the **entire** `ReadingSettings` object is replaced. Frontend must send the full intended snapshot (fonts plus any typography overrides still in effect). Restore-default = omit that key from the snapshot. Sending `{ lineHeight }` alone drops `fontSize` / `fontFamily`.
 - **Optional shelf fields**: `lastOpenedAt` (RFC3339) and `contentHash` (64 lowercase hex SHA-256 of the committed EPUB). Both use `#[serde(default)]`. Missing is valid. Present-but-invalid is `StorageCorrupt`. Do not bump `schemaVersion` for these fields.
+- **Optional typography overrides** on `ReadingSettings`: `lineHeight`, `pageMargin`, `textAlign`. Same rule — optional, no `schemaVersion` bump. Effective value is book override ?? `preferences.json` ?? builtin. Theme stays global-only.
+- **`preferences.json` schemaVersion stays 1**. New keys must `serde(default)`. A valid theme-only file must load without rewrite. `save_preferences` is read-modify-write; never reconstruct the file from theme alone.
 
 ### Storage Layout
 
