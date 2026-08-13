@@ -639,3 +639,26 @@ Planned and implemented library shelf UX: reader title, card progress, lastOpene
 ### Status
 
 [OK] **Completed**
+
+
+## Session 30: Align book tools with ReadAware
+
+**Date**: 2026-08-13
+**Task**: Align book tools with ReadAware
+**Branch**: `main`
+
+### Summary
+
+Aligned get_toc, read_chapter, and search_in_book with ReadAware contracts: chapterNumber, 12k read windows, multi-query FTS merge. No spoiler fence. Recorded sidecar tool contracts in backend specs.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `62def2e` | (see git log) |
+| `4510111` | (see git log) |
+| `5268846` | (see git log) |
+
+### Status
+
+[OK] **Completed**

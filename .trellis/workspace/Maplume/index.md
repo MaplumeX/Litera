@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 29
+- **Total Sessions**: 30
 - **Last Active**: 2026-08-13
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~641 | Active |
+| `journal-1.md` | ~664 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 30 | 2026-08-13 | Align book tools with ReadAware | `62def2e`, `4510111`, `5268846` | `main` |
 | 29 | 2026-08-13 | Library shelf loop and import-delete UX | `2890f8c`, `bbbf5be`, `99b31ad` | `main` |
 | 28 | 2026-08-13 | Inline-edit chat user messages | `36b8bc7`, `8efae8a`, `bd65c3b` | `main` |
 | 27 | 2026-08-13 | Inject book snapshot aside | `b89dbbd`, `3176a32` | `main` |
