@@ -39,29 +39,6 @@ interface FileData {
   bookId: string;
 }
 
-function ReaderProgressBar({
-  fraction,
-  chapterLabel,
-}: {
-  fraction: number;
-  chapterLabel: string;
-}) {
-  const pct = Math.round(fraction * 100);
-  return (
-    <div className="flex h-5 items-center gap-3 border-b px-4">
-      <div className="h-1 min-w-0 flex-1 rounded bg-muted">
-        <div
-          className="h-full rounded bg-primary transition-all"
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-      <span className="shrink-0 text-xs text-muted-foreground tabular-nums whitespace-nowrap">
-        {chapterLabel} · {pct}%
-      </span>
-    </div>
-  );
-}
-
 function PersistenceErrorBanner({
   message,
   onDismiss,
@@ -453,7 +430,6 @@ function App() {
     setTocVisible(false);
   }, []);
 
-  const chapterLabel = progress.label ?? `Chapter ${progress.index + 1}`;
   const bookTitle = currentBook?.title || fileData?.name || "";
   const editingBook = settingsReturnTo === "reader" && Boolean(currentBook || fileData);
   const overriddenKeys: TypographyKey[] = [];
@@ -569,7 +545,6 @@ function App() {
           </Button>
         </div>
       </header>
-      <ReaderProgressBar fraction={progress.fraction} chapterLabel={chapterLabel} />
 
       {/* Reader + Chat panel split */}
       <div className="relative flex flex-1 overflow-hidden">

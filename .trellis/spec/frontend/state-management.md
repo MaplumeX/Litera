@@ -39,6 +39,8 @@ These are the closest thing to "global state". They're passed down as props:
 - `onRelocate`, `onSelectionCapture`, `onBookReady` → `ReaderView` (callbacks)
 - `currentChapterIndex`, `bookId` → `ChatPanel` (context for prompts)
 
+`progress` is relocate state, not reader chrome. Do not delete it when removing a progress bar: `progress.index` is `ChatPanel`'s `currentChapterIndex`, and `fraction` is persisted as `lastFraction`. Visible percent belongs on `BookCard`.
+
 ### 2. Local component state
 
 Each component owns its own UI state:
