@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 31
+- **Total Sessions**: 32
 - **Last Active**: 2026-08-13
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~687 | Active |
+| `journal-1.md` | ~710 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 32 | 2026-08-13 | Settings page and typography defaults | `61a6851`, `0d0f855`, `38cb99a` | `feat/settings-ui-layout-and-configurable-items` |
 | 31 | 2026-08-13 | Restore desktop reader page turning | `1823894`, `f545d8e`, `bdf5614` | `fix/fanye-wufafa` |
 | 30 | 2026-08-13 | Align book tools with ReadAware | `62def2e`, `4510111`, `5268846` | `main` |
 | 29 | 2026-08-13 | Library shelf loop and import-delete UX | `2890f8c`, `bbbf5be`, `99b31ad` | `main` |

@@ -685,3 +685,26 @@ Restored desktop page turning after footer buttons were removed: left/right thir
 ### Status
 
 [OK] **Completed**
+
+
+## Session 32: Settings page and typography defaults
+
+**Date**: 2026-08-13
+**Task**: Settings page and typography defaults
+**Branch**: `feat/settings-ui-layout-and-configurable-items`
+
+### Summary
+
+Replaced the settings dialog with a dedicated page (typography / appearance / AI). Added line height, page margin, and text-align with global defaults plus per-book overrides. Chat gear still opens the LLM dialog. Specs and planning artifacts recorded. Tests and build were green; live Tauri UI was not clicked.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `61a6851` | (see git log) |
+| `0d0f855` | (see git log) |
+| `38cb99a` | (see git log) |
+
+### Status
+
+[OK] **Completed**
