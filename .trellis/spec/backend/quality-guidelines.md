@@ -157,7 +157,33 @@ const fullPrompt = `（当前在第 ${ctx.chapterIndex} 章）\n\n用户问题�
 session.prompt(fullPrompt);  // pollutes stored user message
 ```
 
-**Rule**: Context asides must not include a `用户问题：` label — the user text is delivered separately by `prompt()`. The reading-context aside contains only the context (selected text or chapter index). The book snapshot aside is idempotent (skip when any message has `role === "custom"` and `customType === "bookSnapshot"`), includes a compact TOC truncated at 200 entries or 4000 formatted characters, and must not block `prompt()` on fetch or enqueue failure (one-line `process.stderr.write` only; stdout stays JSONL).
+**Rule**: Context asides must not include a `用户问题：` label — the user text is delivered separately by `prompt()`. The reading-context aside contains only the context (selected text or chapter index). The book snapshot aside is idempotent (skip when any message has `role === "custom"` and `customType === "bookSnapshot"`), includes a compact TOC truncated at 200 entries or 4000 formatted characters, and must not block `prompt()` on fetch or enqueue failure (one-line `process.stderr.write` only; stdout stays JSONL). TOC lines are `{chapterNumber} [index {chapterIndex}]: {title}` (`chapterNumber = index + 1`). Do not put hrefs in the snapshot or tell the model to call `get_toc` for hrefs.
+
+### Convention: book-reading tools are structured, windowed, and multi-query
+
+**What**: `get_toc`, `read_chapter`, and `search_in_book` follow the ReadAware book-text contracts, minus spoiler / `bookId` / shelf search. Results are JSON text via `okResult`. Failures are `errorResult`, never thrown from `execute`.
+
+**Why**: Spoken "chapter N" must not be mentally decremented; EPUB chapters can exceed one model window; a single FTS wording miss must not cost a full LLM round trip.
+
+**Contracts**:
+- `get_toc()` → `[{ chapterIndex, chapterNumber, title, chars }]`. Strip `href` at the tool layer. `chars` is stored text length (0 if missing).
+- `read_chapter({ chapterIndex, part? })` → `{ chapterIndex, chapterNumber, part, totalParts, text }`. Window size `CHAPTER_PART_CHARS` (12000). Default `part` 0; out-of-range clamps. Worker still returns full chapter text; `windowChapterText` slices in the tool.
+- `search_in_book({ queries })` → up to 16 hits `{ chapterIndex, chapterTitle?, part, match, snippet }`. Trim/dedupe/cap queries at 12 in execute (do not fail the schema). Exact hits first, then `partial`. `part = floor(offset / 12000)`. Worker RPC takes `queries: string[]` in one call.
+- No `confirmSpoiler`, `throughChapterIndex`, or tool-level `bookId`. Tools stay bound to the session's book generation.
+
+**Wrong**:
+```typescript
+return okResult(await worker().readChapter(bookId, generation, index)); // unbounded chapter
+searchInBook(query: string); // one wording, unbounded FTS snippet() hits
+```
+
+**Correct**:
+```typescript
+const text = await worker().readChapter(bookId, generation, chapterIndex);
+return okResult(JSON.stringify({ chapterIndex, chapterNumber: chapterIndex + 1, ...windowChapterText(text, part ?? 0) }));
+```
+
+**Related**: FTS candidate pipeline in `database-guidelines.md`. Pure helpers live in `sidecar/book-text.ts` so tests can import them without WASM.
 
 ### Convention: rewind a user turn with `navigateTree`, never `branch()` alone
 

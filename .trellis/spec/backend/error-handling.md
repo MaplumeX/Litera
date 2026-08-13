@@ -94,10 +94,9 @@ function errorResult(message: string) {
 }
 
 // Usage in tool execute:
-if (!isBookLoaded()) return errorResult("No book loaded. Open a book first.");
 try {
-  const text = readChapter(index);
-  return okResult(text);
+  const text = await worker().readChapter(bookId, generation, chapterIndex);
+  return okResult(JSON.stringify({ chapterIndex, chapterNumber: chapterIndex + 1, ...windowChapterText(text, part ?? 0) }));
 } catch (err) {
   return errorResult(err instanceof Error ? err.message : String(err));
 }
