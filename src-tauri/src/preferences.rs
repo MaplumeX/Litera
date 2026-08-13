@@ -4,37 +4,170 @@ use std::sync::{Arc, Mutex};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, AppResult};
-use crate::library::{atomic_write, sync_parent_directory};
+use crate::library::{
+    atomic_write, deserialize_optional_line_height, in_typography_range, split_page_margin,
+    sync_parent_directory,
+};
 
 const PREFERENCES_SCHEMA_VERSION: u32 = 1;
 const VALID_THEMES: [&str; 3] = ["light", "dark", "sepia"];
-const VALID_LINE_HEIGHTS: [&str; 3] = ["compact", "normal", "relaxed"];
-const VALID_PAGE_MARGINS: [&str; 3] = ["narrow", "normal", "wide"];
+const VALID_FONT_FAMILIES: [&str; 3] = ["serif", "sans-serif", "monospace"];
 const VALID_TEXT_ALIGNS: [&str; 2] = ["start", "justify"];
+const FONT_SIZE_RANGE: (f64, f64) = (12.0, 32.0);
+const LINE_HEIGHT_RANGE: (f64, f64) = (1.2, 2.4);
+const CONTENT_WIDTH_RANGE: (f64, f64) = (28.0, 60.0);
+const PAGE_PADDING_RANGE: (f64, f64) = (0.5, 4.0);
+const LETTER_SPACING_RANGE: (f64, f64) = (-0.05, 0.2);
+const PARAGRAPH_SPACING_RANGE: (f64, f64) = (0.0, 2.0);
+const FIRST_LINE_INDENT_RANGE: (f64, f64) = (0.0, 3.0);
 
-fn default_line_height() -> String {
-    "normal".to_string()
+fn default_font_size() -> f64 {
+    16.0
 }
 
-fn default_page_margin() -> String {
-    "normal".to_string()
+fn default_font_family() -> String {
+    "serif".to_string()
+}
+
+fn default_line_height() -> f64 {
+    1.7
+}
+
+fn default_content_width() -> f64 {
+    42.0
+}
+
+fn default_page_padding() -> f64 {
+    1.75
 }
 
 fn default_text_align() -> String {
     "start".to_string()
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+fn default_letter_spacing() -> f64 {
+    0.0
+}
+
+fn default_paragraph_spacing() -> f64 {
+    1.0
+}
+
+fn default_first_line_indent() -> f64 {
+    0.0
+}
+
+fn clamp_or_default(value: Option<f64>, min: f64, max: f64, default: f64) -> f64 {
+    match value {
+        Some(number) if number.is_finite() => number.clamp(min, max),
+        _ => default,
+    }
+}
+
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PreferencesDataRaw {
+    schema_version: u32,
+    theme: String,
+    #[serde(default)]
+    font_size: Option<f64>,
+    #[serde(default)]
+    font_family: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_line_height")]
+    line_height: Option<f64>,
+    #[serde(default)]
+    content_width: Option<f64>,
+    #[serde(default)]
+    page_padding: Option<f64>,
+    #[serde(default)]
+    text_align: Option<String>,
+    #[serde(default)]
+    letter_spacing: Option<f64>,
+    #[serde(default)]
+    paragraph_spacing: Option<f64>,
+    #[serde(default)]
+    first_line_indent: Option<f64>,
+    #[serde(default)]
+    page_margin: Option<String>,
+}
+
+#[derive(Debug, Serialize, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
 struct PreferencesData {
     schema_version: u32,
     theme: String,
-    #[serde(default = "default_line_height")]
-    line_height: String,
-    #[serde(default = "default_page_margin")]
-    page_margin: String,
-    #[serde(default = "default_text_align")]
+    font_size: f64,
+    font_family: String,
+    line_height: f64,
+    content_width: f64,
+    page_padding: f64,
     text_align: String,
+    letter_spacing: f64,
+    paragraph_spacing: f64,
+    first_line_indent: f64,
+}
+
+impl From<PreferencesDataRaw> for PreferencesData {
+    fn from(raw: PreferencesDataRaw) -> Self {
+        let split = raw.page_margin.as_deref().and_then(split_page_margin);
+        Self {
+            schema_version: raw.schema_version,
+            theme: raw.theme,
+            font_size: clamp_or_default(
+                raw.font_size,
+                FONT_SIZE_RANGE.0,
+                FONT_SIZE_RANGE.1,
+                default_font_size(),
+            ),
+            font_family: raw.font_family.unwrap_or_else(default_font_family),
+            line_height: clamp_or_default(
+                raw.line_height,
+                LINE_HEIGHT_RANGE.0,
+                LINE_HEIGHT_RANGE.1,
+                default_line_height(),
+            ),
+            content_width: clamp_or_default(
+                raw.content_width.or(split.map(|(width, _)| width)),
+                CONTENT_WIDTH_RANGE.0,
+                CONTENT_WIDTH_RANGE.1,
+                default_content_width(),
+            ),
+            page_padding: clamp_or_default(
+                raw.page_padding.or(split.map(|(_, padding)| padding)),
+                PAGE_PADDING_RANGE.0,
+                PAGE_PADDING_RANGE.1,
+                default_page_padding(),
+            ),
+            text_align: raw.text_align.unwrap_or_else(default_text_align),
+            letter_spacing: clamp_or_default(
+                raw.letter_spacing,
+                LETTER_SPACING_RANGE.0,
+                LETTER_SPACING_RANGE.1,
+                default_letter_spacing(),
+            ),
+            paragraph_spacing: clamp_or_default(
+                raw.paragraph_spacing,
+                PARAGRAPH_SPACING_RANGE.0,
+                PARAGRAPH_SPACING_RANGE.1,
+                default_paragraph_spacing(),
+            ),
+            first_line_indent: clamp_or_default(
+                raw.first_line_indent,
+                FIRST_LINE_INDENT_RANGE.0,
+                FIRST_LINE_INDENT_RANGE.1,
+                default_first_line_indent(),
+            ),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for PreferencesData {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        PreferencesDataRaw::deserialize(deserializer).map(Into::into)
+    }
 }
 
 impl Default for PreferencesData {
@@ -42,9 +175,15 @@ impl Default for PreferencesData {
         Self {
             schema_version: PREFERENCES_SCHEMA_VERSION,
             theme: "light".to_string(),
+            font_size: default_font_size(),
+            font_family: default_font_family(),
             line_height: default_line_height(),
-            page_margin: default_page_margin(),
+            content_width: default_content_width(),
+            page_padding: default_page_padding(),
             text_align: default_text_align(),
+            letter_spacing: default_letter_spacing(),
+            paragraph_spacing: default_paragraph_spacing(),
+            first_line_indent: default_first_line_indent(),
         }
     }
 }
@@ -53,28 +192,39 @@ impl PreferencesData {
     fn is_supported(&self) -> bool {
         self.schema_version == PREFERENCES_SCHEMA_VERSION
             && VALID_THEMES.contains(&self.theme.as_str())
-            && VALID_LINE_HEIGHTS.contains(&self.line_height.as_str())
-            && VALID_PAGE_MARGINS.contains(&self.page_margin.as_str())
+            && VALID_FONT_FAMILIES.contains(&self.font_family.as_str())
             && VALID_TEXT_ALIGNS.contains(&self.text_align.as_str())
     }
 }
 
-#[derive(Debug, Serialize, Clone, PartialEq, Eq)]
+#[derive(Debug, Serialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct PreferencesResponse {
     pub theme: String,
-    pub line_height: String,
-    pub page_margin: String,
+    pub font_size: f64,
+    pub font_family: String,
+    pub line_height: f64,
+    pub content_width: f64,
+    pub page_padding: f64,
     pub text_align: String,
+    pub letter_spacing: f64,
+    pub paragraph_spacing: f64,
+    pub first_line_indent: f64,
 }
 
 impl From<PreferencesData> for PreferencesResponse {
     fn from(data: PreferencesData) -> Self {
         Self {
             theme: data.theme,
+            font_size: data.font_size,
+            font_family: data.font_family,
             line_height: data.line_height,
-            page_margin: data.page_margin,
+            content_width: data.content_width,
+            page_padding: data.page_padding,
             text_align: data.text_align,
+            letter_spacing: data.letter_spacing,
+            paragraph_spacing: data.paragraph_spacing,
+            first_line_indent: data.first_line_indent,
         }
     }
 }
@@ -82,17 +232,29 @@ impl From<PreferencesData> for PreferencesResponse {
 #[derive(Debug, Default)]
 struct PreferencesPatch {
     theme: Option<String>,
-    line_height: Option<String>,
-    page_margin: Option<String>,
+    font_size: Option<f64>,
+    font_family: Option<String>,
+    line_height: Option<f64>,
+    content_width: Option<f64>,
+    page_padding: Option<f64>,
     text_align: Option<String>,
+    letter_spacing: Option<f64>,
+    paragraph_spacing: Option<f64>,
+    first_line_indent: Option<f64>,
 }
 
 impl PreferencesPatch {
     fn is_empty(&self) -> bool {
         self.theme.is_none()
+            && self.font_size.is_none()
+            && self.font_family.is_none()
             && self.line_height.is_none()
-            && self.page_margin.is_none()
+            && self.content_width.is_none()
+            && self.page_padding.is_none()
             && self.text_align.is_none()
+            && self.letter_spacing.is_none()
+            && self.paragraph_spacing.is_none()
+            && self.first_line_indent.is_none()
     }
 }
 
@@ -168,8 +330,9 @@ impl PreferencesStore {
     fn read_unlocked(&self) -> AppResult<PreferencesData> {
         let bytes = std::fs::read(&self.preferences_path())
             .map_err(|e| AppError::storage_io(format!("Failed to read preferences.json: {e}")))?;
-        serde_json::from_slice(&bytes)
-            .map_err(|e| AppError::storage_corrupt(format!("Failed to parse preferences.json: {e}")))
+        serde_json::from_slice(&bytes).map_err(|e| {
+            AppError::storage_corrupt(format!("Failed to parse preferences.json: {e}"))
+        })
     }
 
     fn write_unlocked(&self, data: &PreferencesData) -> AppResult<()> {
@@ -220,14 +383,32 @@ impl PreferencesStore {
         if let Some(theme) = patch.theme {
             data.theme = theme;
         }
+        if let Some(font_size) = patch.font_size {
+            data.font_size = font_size;
+        }
+        if let Some(font_family) = patch.font_family {
+            data.font_family = font_family;
+        }
         if let Some(line_height) = patch.line_height {
             data.line_height = line_height;
         }
-        if let Some(page_margin) = patch.page_margin {
-            data.page_margin = page_margin;
+        if let Some(content_width) = patch.content_width {
+            data.content_width = content_width;
+        }
+        if let Some(page_padding) = patch.page_padding {
+            data.page_padding = page_padding;
         }
         if let Some(text_align) = patch.text_align {
             data.text_align = text_align;
+        }
+        if let Some(letter_spacing) = patch.letter_spacing {
+            data.letter_spacing = letter_spacing;
+        }
+        if let Some(paragraph_spacing) = patch.paragraph_spacing {
+            data.paragraph_spacing = paragraph_spacing;
+        }
+        if let Some(first_line_indent) = patch.first_line_indent {
+            data.first_line_indent = first_line_indent;
         }
         self.write_unlocked(&data)
     }
@@ -244,19 +425,75 @@ fn validate_patch(patch: &PreferencesPatch) -> AppResult<()> {
             return Err(AppError::invalid_input("Unsupported theme"));
         }
     }
-    if let Some(line_height) = &patch.line_height {
-        if !VALID_LINE_HEIGHTS.contains(&line_height.as_str()) {
-            return Err(AppError::invalid_input("Unsupported lineHeight"));
+    if let Some(font_size) = patch.font_size {
+        if !in_typography_range(font_size, FONT_SIZE_RANGE.0, FONT_SIZE_RANGE.1) {
+            return Err(AppError::invalid_input(
+                "fontSize must be a finite number between 12 and 32",
+            ));
         }
     }
-    if let Some(page_margin) = &patch.page_margin {
-        if !VALID_PAGE_MARGINS.contains(&page_margin.as_str()) {
-            return Err(AppError::invalid_input("Unsupported pageMargin"));
+    if let Some(font_family) = &patch.font_family {
+        if !VALID_FONT_FAMILIES.contains(&font_family.as_str()) {
+            return Err(AppError::invalid_input("Unsupported fontFamily"));
+        }
+    }
+    if let Some(line_height) = patch.line_height {
+        if !in_typography_range(line_height, LINE_HEIGHT_RANGE.0, LINE_HEIGHT_RANGE.1) {
+            return Err(AppError::invalid_input(
+                "lineHeight must be a finite number between 1.2 and 2.4",
+            ));
+        }
+    }
+    if let Some(content_width) = patch.content_width {
+        if !in_typography_range(content_width, CONTENT_WIDTH_RANGE.0, CONTENT_WIDTH_RANGE.1) {
+            return Err(AppError::invalid_input(
+                "contentWidth must be a finite number between 28 and 60",
+            ));
+        }
+    }
+    if let Some(page_padding) = patch.page_padding {
+        if !in_typography_range(page_padding, PAGE_PADDING_RANGE.0, PAGE_PADDING_RANGE.1) {
+            return Err(AppError::invalid_input(
+                "pagePadding must be a finite number between 0.5 and 4",
+            ));
         }
     }
     if let Some(text_align) = &patch.text_align {
         if !VALID_TEXT_ALIGNS.contains(&text_align.as_str()) {
             return Err(AppError::invalid_input("Unsupported textAlign"));
+        }
+    }
+    if let Some(letter_spacing) = patch.letter_spacing {
+        if !in_typography_range(
+            letter_spacing,
+            LETTER_SPACING_RANGE.0,
+            LETTER_SPACING_RANGE.1,
+        ) {
+            return Err(AppError::invalid_input(
+                "letterSpacing must be a finite number between -0.05 and 0.2",
+            ));
+        }
+    }
+    if let Some(paragraph_spacing) = patch.paragraph_spacing {
+        if !in_typography_range(
+            paragraph_spacing,
+            PARAGRAPH_SPACING_RANGE.0,
+            PARAGRAPH_SPACING_RANGE.1,
+        ) {
+            return Err(AppError::invalid_input(
+                "paragraphSpacing must be a finite number between 0 and 2",
+            ));
+        }
+    }
+    if let Some(first_line_indent) = patch.first_line_indent {
+        if !in_typography_range(
+            first_line_indent,
+            FIRST_LINE_INDENT_RANGE.0,
+            FIRST_LINE_INDENT_RANGE.1,
+        ) {
+            return Err(AppError::invalid_input(
+                "firstLineIndent must be a finite number between 0 and 3",
+            ));
         }
     }
     Ok(())
@@ -276,17 +513,29 @@ pub async fn get_preferences(
 pub async fn save_preferences(
     store: tauri::State<'_, PreferencesStore>,
     theme: Option<String>,
-    line_height: Option<String>,
-    page_margin: Option<String>,
+    font_size: Option<f64>,
+    font_family: Option<String>,
+    line_height: Option<f64>,
+    content_width: Option<f64>,
+    page_padding: Option<f64>,
     text_align: Option<String>,
+    letter_spacing: Option<f64>,
+    paragraph_spacing: Option<f64>,
+    first_line_indent: Option<f64>,
 ) -> AppResult<()> {
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         store.save(PreferencesPatch {
             theme,
+            font_size,
+            font_family,
             line_height,
-            page_margin,
+            content_width,
+            page_padding,
             text_align,
+            letter_spacing,
+            paragraph_spacing,
+            first_line_indent,
         })
     })
     .await
@@ -313,9 +562,19 @@ mod tests {
             serde_json::from_slice(&std::fs::read(&path).expect("read")).expect("parse");
         assert_eq!(data.schema_version, PREFERENCES_SCHEMA_VERSION);
         assert_eq!(data.theme, "light");
-        assert_eq!(data.line_height, "normal");
-        assert_eq!(data.page_margin, "normal");
+        assert_eq!(data.font_size, 16.0);
+        assert_eq!(data.font_family, "serif");
+        assert_eq!(data.line_height, 1.7);
+        assert_eq!(data.content_width, 42.0);
+        assert_eq!(data.page_padding, 1.75);
         assert_eq!(data.text_align, "start");
+        assert_eq!(data.letter_spacing, 0.0);
+        assert_eq!(data.paragraph_spacing, 1.0);
+        assert_eq!(data.first_line_indent, 0.0);
+
+        let value: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).expect("read")).expect("parse raw");
+        assert!(value.get("pageMargin").is_none());
     }
 
     #[test]
@@ -412,9 +671,15 @@ mod tests {
             PreferencesStore::initialize(directory.path().to_path_buf()).expect("init old file");
         let prefs = store.get().expect("get");
         assert_eq!(prefs.theme, "sepia");
-        assert_eq!(prefs.line_height, "normal");
-        assert_eq!(prefs.page_margin, "normal");
+        assert_eq!(prefs.font_size, 16.0);
+        assert_eq!(prefs.font_family, "serif");
+        assert_eq!(prefs.line_height, 1.7);
+        assert_eq!(prefs.content_width, 42.0);
+        assert_eq!(prefs.page_padding, 1.75);
         assert_eq!(prefs.text_align, "start");
+        assert_eq!(prefs.letter_spacing, 0.0);
+        assert_eq!(prefs.paragraph_spacing, 1.0);
+        assert_eq!(prefs.first_line_indent, 0.0);
 
         let raw = std::fs::read_to_string(&path).expect("read");
         let value: serde_json::Value = serde_json::from_str(&raw).expect("parse");
@@ -422,7 +687,34 @@ mod tests {
         assert_eq!(value["theme"], "sepia");
         assert!(value.get("lineHeight").is_none());
         assert!(value.get("pageMargin").is_none());
+        assert!(value.get("contentWidth").is_none());
         assert!(value.get("textAlign").is_none());
+    }
+
+    #[test]
+    fn old_enum_file_migrates_on_read_without_rewrite() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join("preferences.json");
+        std::fs::write(
+            &path,
+            br#"{"schemaVersion":1,"theme":"sepia","lineHeight":"normal","pageMargin":"wide","textAlign":"justify"}"#,
+        )
+        .expect("write old enums");
+
+        let store =
+            PreferencesStore::initialize(directory.path().to_path_buf()).expect("init old file");
+        let prefs = store.get().expect("get");
+        assert_eq!(prefs.theme, "sepia");
+        assert_eq!(prefs.line_height, 1.7);
+        assert_eq!(prefs.content_width, 52.0);
+        assert_eq!(prefs.page_padding, 2.5);
+        assert_eq!(prefs.text_align, "justify");
+
+        let raw = std::fs::read_to_string(&path).expect("read");
+        let value: serde_json::Value = serde_json::from_str(&raw).expect("parse");
+        assert_eq!(value["lineHeight"], "normal");
+        assert_eq!(value["pageMargin"], "wide");
+        assert!(value.get("contentWidth").is_none());
     }
 
     #[test]
@@ -430,9 +722,15 @@ mod tests {
         let (_directory, store) = test_store();
         store
             .save(PreferencesPatch {
-                line_height: Some("compact".to_string()),
-                page_margin: Some("wide".to_string()),
+                font_size: Some(18.0),
+                font_family: Some("sans-serif".to_string()),
+                line_height: Some(1.4),
+                content_width: Some(52.0),
+                page_padding: Some(2.5),
                 text_align: Some("justify".to_string()),
+                letter_spacing: Some(0.05),
+                paragraph_spacing: Some(1.2),
+                first_line_indent: Some(2.0),
                 ..PreferencesPatch::default()
             })
             .expect("save typography");
@@ -440,9 +738,15 @@ mod tests {
 
         let prefs = store.get().expect("get");
         assert_eq!(prefs.theme, "dark");
-        assert_eq!(prefs.line_height, "compact");
-        assert_eq!(prefs.page_margin, "wide");
+        assert_eq!(prefs.font_size, 18.0);
+        assert_eq!(prefs.font_family, "sans-serif");
+        assert_eq!(prefs.line_height, 1.4);
+        assert_eq!(prefs.content_width, 52.0);
+        assert_eq!(prefs.page_padding, 2.5);
         assert_eq!(prefs.text_align, "justify");
+        assert_eq!(prefs.letter_spacing, 0.05);
+        assert_eq!(prefs.paragraph_spacing, 1.2);
+        assert_eq!(prefs.first_line_indent, 2.0);
     }
 
     #[test]
@@ -451,33 +755,94 @@ mod tests {
         store.save_theme("sepia").expect("save theme");
         store
             .save(PreferencesPatch {
-                line_height: Some("relaxed".to_string()),
+                line_height: Some(2.0),
                 ..PreferencesPatch::default()
             })
             .expect("save line height");
 
         let prefs = store.get().expect("get");
         assert_eq!(prefs.theme, "sepia");
-        assert_eq!(prefs.line_height, "relaxed");
-        assert_eq!(prefs.page_margin, "normal");
+        assert_eq!(prefs.line_height, 2.0);
+        assert_eq!(prefs.content_width, 42.0);
         assert_eq!(prefs.text_align, "start");
     }
 
     #[test]
-    fn save_rejects_invalid_typography_enum() {
+    fn save_numbers_persist_and_omit_page_margin() {
+        let (directory, store) = test_store();
+        store
+            .save(PreferencesPatch {
+                line_height: Some(1.85),
+                content_width: Some(48.0),
+                page_padding: Some(2.0),
+                letter_spacing: Some(-0.02),
+                ..PreferencesPatch::default()
+            })
+            .expect("save numbers");
+
+        let prefs = store.get().expect("get");
+        assert_eq!(prefs.line_height, 1.85);
+        assert_eq!(prefs.content_width, 48.0);
+        assert_eq!(prefs.page_padding, 2.0);
+        assert_eq!(prefs.letter_spacing, -0.02);
+
+        drop(store);
+        let recovered =
+            PreferencesStore::initialize(directory.path().to_path_buf()).expect("reinit");
+        let prefs = recovered.get().expect("get recovered");
+        assert_eq!(prefs.line_height, 1.85);
+        assert_eq!(prefs.content_width, 48.0);
+
+        let value: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(directory.path().join("preferences.json")).expect("read"),
+        )
+        .expect("parse");
+        assert!(value.get("pageMargin").is_none());
+    }
+
+    #[test]
+    fn save_theme_on_old_enum_file_writes_split_fields() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join("preferences.json");
+        std::fs::write(
+            &path,
+            br#"{"schemaVersion":1,"theme":"sepia","lineHeight":"compact","pageMargin":"wide","textAlign":"start"}"#,
+        )
+        .expect("write old enums");
+
+        let store =
+            PreferencesStore::initialize(directory.path().to_path_buf()).expect("init old file");
+        store.save_theme("dark").expect("save theme");
+
+        let prefs = store.get().expect("get");
+        assert_eq!(prefs.theme, "dark");
+        assert_eq!(prefs.line_height, 1.4);
+        assert_eq!(prefs.content_width, 52.0);
+        assert_eq!(prefs.page_padding, 2.5);
+
+        let value: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).expect("read")).expect("parse");
+        assert_eq!(value["lineHeight"], 1.4);
+        assert_eq!(value["contentWidth"], 52.0);
+        assert_eq!(value["pagePadding"], 2.5);
+        assert!(value.get("pageMargin").is_none());
+    }
+
+    #[test]
+    fn save_rejects_out_of_range_typography() {
         let (_directory, store) = test_store();
         store.save_theme("dark").expect("save theme");
         let error = store
             .save(PreferencesPatch {
-                line_height: Some("huge".to_string()),
+                line_height: Some(3.0),
                 ..PreferencesPatch::default()
             })
-            .expect_err("invalid lineHeight");
+            .expect_err("out of range lineHeight");
         assert_eq!(error.code, crate::error::AppErrorCode::InvalidInput);
 
         let prefs = store.get().expect("get");
         assert_eq!(prefs.theme, "dark");
-        assert_eq!(prefs.line_height, "normal");
+        assert_eq!(prefs.line_height, 1.7);
     }
 
     #[test]

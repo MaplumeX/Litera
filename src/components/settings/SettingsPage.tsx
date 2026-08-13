@@ -1,16 +1,16 @@
 import { useState, type CSSProperties, type ReactNode } from "react";
 import { ChevronLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Slider } from "@/components/ui/slider";
 import { AgentConfigForm } from "@/components/AgentConfigForm";
 import { cn } from "@/lib/utils";
 import {
   FONT_FAMILIES,
-  FONT_SIZE_LABELS,
-  FONT_SIZES,
-  LINE_HEIGHTS,
-  PAGE_MARGINS,
   TEXT_ALIGNS,
   THEMES,
+  TYPOGRAPHY_RANGES,
+  formatTypographyValue,
+  type ContinuousKey,
   type ReaderStyleState,
   type TypographyKey,
 } from "@/lib/reader-styles";
@@ -29,13 +29,22 @@ const THEME_LABELS: Record<string, string> = {
   sepia: "护眼",
 };
 
+const SLIDER_ROWS: { key: ContinuousKey; label: string }[] = [
+  { key: "fontSize", label: "字体大小" },
+  { key: "lineHeight", label: "行距" },
+  { key: "contentWidth", label: "版心宽度" },
+  { key: "pagePadding", label: "左右内边距" },
+  { key: "letterSpacing", label: "字间距" },
+  { key: "paragraphSpacing", label: "段距" },
+  { key: "firstLineIndent", label: "首行缩进" },
+];
+
 export interface SettingsPageProps {
   onBack: () => void;
   bookTitle: string | null;
   hasBook: boolean;
   styleState: ReaderStyleState;
-  onFontChange: (patch: { fontSize?: number; fontFamily?: string }) => void;
-  onTypographyChange: (key: TypographyKey, value: string) => void;
+  onTypographyChange: (key: TypographyKey, value: number | string) => void;
   onRestoreDefault: (key: TypographyKey) => void;
   overriddenKeys: TypographyKey[];
   theme: string;
@@ -66,6 +75,53 @@ function PresetRow({
         )}
       </div>
       <div className="flex gap-1">{children}</div>
+    </div>
+  );
+}
+
+function SliderRow({
+  label,
+  field,
+  value,
+  restore,
+  onChange,
+}: {
+  label: string;
+  field: ContinuousKey;
+  value: number;
+  restore?: { show: boolean; onClick: () => void };
+  onChange: (value: number) => void;
+}) {
+  const spec = TYPOGRAPHY_RANGES[field];
+  return (
+    <div>
+      <div className="mb-1.5 flex items-center justify-between gap-2">
+        <div className="text-xs font-medium text-muted-foreground">{label}</div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs tabular-nums text-foreground">
+            {formatTypographyValue(field, value)}
+          </span>
+          {restore?.show && (
+            <button
+              type="button"
+              onClick={restore.onClick}
+              className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+            >
+              恢复默认
+            </button>
+          )}
+        </div>
+      </div>
+      <Slider
+        aria-label={label}
+        value={[value]}
+        min={spec.min}
+        max={spec.max}
+        step={spec.step}
+        onValueChange={([next]) => {
+          if (typeof next === "number") onChange(next);
+        }}
+      />
     </div>
   );
 }
@@ -107,7 +163,6 @@ export function SettingsPage({
   bookTitle,
   hasBook,
   styleState,
-  onFontChange,
   onTypographyChange,
   onRestoreDefault,
   overriddenKeys,
@@ -157,71 +212,52 @@ export function SettingsPage({
 
           {section === "typography" && (
             <div className="max-w-md space-y-5">
-              <PresetRow label="字体大小">
-                {FONT_SIZES.map((size, i) => (
-                  <ChoiceButton
-                    key={size}
-                    active={styleState.fontSize === size}
-                    disabled={!hasBook}
-                    onClick={() => onFontChange({ fontSize: size })}
-                  >
-                    {FONT_SIZE_LABELS[i]}
-                  </ChoiceButton>
-                ))}
-              </PresetRow>
+              {SLIDER_ROWS.slice(0, 1).map((row) => (
+                <SliderRow
+                  key={row.key}
+                  label={row.label}
+                  field={row.key}
+                  value={styleState[row.key]}
+                  restore={{
+                    show: canRestore(row.key),
+                    onClick: () => onRestoreDefault(row.key),
+                  }}
+                  onChange={(value) => onTypographyChange(row.key, value)}
+                />
+              ))}
 
-              <PresetRow label="字体">
+              <PresetRow
+                label="字体"
+                restore={{
+                  show: canRestore("fontFamily"),
+                  onClick: () => onRestoreDefault("fontFamily"),
+                }}
+              >
                 {FONT_FAMILIES.map((fam) => (
                   <ChoiceButton
                     key={fam.value}
                     active={styleState.fontFamily === fam.value}
-                    disabled={!hasBook}
                     style={{ fontFamily: fam.css }}
-                    onClick={() => onFontChange({ fontFamily: fam.value })}
+                    onClick={() => onTypographyChange("fontFamily", fam.value)}
                   >
                     {fam.label}
                   </ChoiceButton>
                 ))}
               </PresetRow>
-              {!hasBook && (
-                <p className="-mt-3 text-xs text-muted-foreground">打开书籍后生效</p>
-              )}
 
-              <PresetRow
-                label="行距"
-                restore={{
-                  show: canRestore("lineHeight"),
-                  onClick: () => onRestoreDefault("lineHeight"),
-                }}
-              >
-                {LINE_HEIGHTS.map((item) => (
-                  <ChoiceButton
-                    key={item.value}
-                    active={styleState.lineHeight === item.value}
-                    onClick={() => onTypographyChange("lineHeight", item.value)}
-                  >
-                    {item.label}
-                  </ChoiceButton>
-                ))}
-              </PresetRow>
-
-              <PresetRow
-                label="页边距"
-                restore={{
-                  show: canRestore("pageMargin"),
-                  onClick: () => onRestoreDefault("pageMargin"),
-                }}
-              >
-                {PAGE_MARGINS.map((item) => (
-                  <ChoiceButton
-                    key={item.value}
-                    active={styleState.pageMargin === item.value}
-                    onClick={() => onTypographyChange("pageMargin", item.value)}
-                  >
-                    {item.label}
-                  </ChoiceButton>
-                ))}
-              </PresetRow>
+              {SLIDER_ROWS.slice(1).map((row) => (
+                <SliderRow
+                  key={row.key}
+                  label={row.label}
+                  field={row.key}
+                  value={styleState[row.key]}
+                  restore={{
+                    show: canRestore(row.key),
+                    onClick: () => onRestoreDefault(row.key),
+                  }}
+                  onChange={(value) => onTypographyChange(row.key, value)}
+                />
+              ))}
 
               <PresetRow
                 label="对齐"

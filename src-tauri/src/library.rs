@@ -18,10 +18,15 @@ const SCHEMA_VERSION: u32 = 1;
 const MAX_TITLE_BYTES: usize = 4 * 1024;
 const MAX_AUTHOR_BYTES: usize = 4 * 1024;
 const MAX_COVER_BYTES: usize = 20 * 1024 * 1024;
-const VALID_FONT_SIZES: [f64; 4] = [14.0, 16.0, 18.0, 20.0];
+const FONT_SIZE_RANGE: (f64, f64) = (12.0, 32.0);
+const LINE_HEIGHT_RANGE: (f64, f64) = (1.2, 2.4);
+const CONTENT_WIDTH_RANGE: (f64, f64) = (28.0, 60.0);
+const PAGE_PADDING_RANGE: (f64, f64) = (0.5, 4.0);
+const LETTER_SPACING_RANGE: (f64, f64) = (-0.05, 0.2);
+const PARAGRAPH_SPACING_RANGE: (f64, f64) = (0.0, 2.0);
+const FIRST_LINE_INDENT_RANGE: (f64, f64) = (0.0, 3.0);
 const VALID_FONT_FAMILIES: [&str; 3] = ["serif", "sans-serif", "monospace"];
 const VALID_THEMES: [&str; 3] = ["light", "dark", "sepia"];
-const VALID_LINE_HEIGHTS: [&str; 3] = ["compact", "normal", "relaxed"];
 const VALID_PAGE_MARGINS: [&str; 3] = ["narrow", "normal", "wide"];
 const VALID_TEXT_ALIGNS: [&str; 2] = ["start", "justify"];
 static OPERATION_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -35,12 +40,84 @@ pub struct ReadingSettings {
     pub font_family: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub theme: Option<String>,
-    #[serde(rename = "lineHeight", skip_serializing_if = "Option::is_none")]
-    pub line_height: Option<String>,
+    #[serde(
+        rename = "lineHeight",
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_optional_line_height"
+    )]
+    pub line_height: Option<f64>,
     #[serde(rename = "pageMargin", skip_serializing_if = "Option::is_none")]
     pub page_margin: Option<String>,
+    #[serde(rename = "contentWidth", skip_serializing_if = "Option::is_none")]
+    pub content_width: Option<f64>,
+    #[serde(rename = "pagePadding", skip_serializing_if = "Option::is_none")]
+    pub page_padding: Option<f64>,
     #[serde(rename = "textAlign", skip_serializing_if = "Option::is_none")]
     pub text_align: Option<String>,
+    #[serde(rename = "letterSpacing", skip_serializing_if = "Option::is_none")]
+    pub letter_spacing: Option<f64>,
+    #[serde(rename = "paragraphSpacing", skip_serializing_if = "Option::is_none")]
+    pub paragraph_spacing: Option<f64>,
+    #[serde(rename = "firstLineIndent", skip_serializing_if = "Option::is_none")]
+    pub first_line_indent: Option<f64>,
+}
+
+impl ReadingSettings {
+    fn is_empty(&self) -> bool {
+        self.font_size.is_none()
+            && self.font_family.is_none()
+            && self.theme.is_none()
+            && self.line_height.is_none()
+            && self.page_margin.is_none()
+            && self.content_width.is_none()
+            && self.page_padding.is_none()
+            && self.text_align.is_none()
+            && self.letter_spacing.is_none()
+            && self.paragraph_spacing.is_none()
+            && self.first_line_indent.is_none()
+    }
+}
+
+pub(crate) fn parse_line_height(value: &serde_json::Value) -> Option<f64> {
+    match value {
+        serde_json::Value::Number(number) => number.as_f64().filter(|item| item.is_finite()),
+        serde_json::Value::String(text) => match text.as_str() {
+            "compact" => Some(1.4),
+            "normal" => Some(1.7),
+            "relaxed" => Some(2.0),
+            other => other.parse::<f64>().ok().filter(|item| item.is_finite()),
+        },
+        _ => None,
+    }
+}
+
+pub(crate) fn deserialize_optional_line_height<'de, D>(
+    deserializer: D,
+) -> Result<Option<f64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<serde_json::Value>::deserialize(deserializer)?;
+    match value {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(raw) => parse_line_height(&raw)
+            .map(Some)
+            .ok_or_else(|| serde::de::Error::custom("invalid lineHeight")),
+    }
+}
+
+pub(crate) fn split_page_margin(value: &str) -> Option<(f64, f64)> {
+    match value {
+        "narrow" => Some((36.0, 1.25)),
+        "normal" => Some((42.0, 1.75)),
+        "wide" => Some((52.0, 2.5)),
+        _ => None,
+    }
+}
+
+pub(crate) fn in_typography_range(value: f64, min: f64, max: f64) -> bool {
+    value.is_finite() && value >= min && value <= max
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -743,7 +820,11 @@ impl LibraryStore {
             record.last_fraction = Some(fraction);
         }
         if let Some(settings) = settings {
-            record.settings = Some(settings);
+            record.settings = if settings.is_empty() {
+                None
+            } else {
+                Some(settings)
+            };
         }
         self.write_library(&library)
     }
@@ -1306,21 +1387,10 @@ fn validate_text(name: &str, value: &str, max_bytes: usize, allow_empty: bool) -
 }
 
 fn validate_settings(settings: &ReadingSettings) -> AppResult<()> {
-    if settings.font_size.is_none()
-        && settings.font_family.is_none()
-        && settings.theme.is_none()
-        && settings.line_height.is_none()
-        && settings.page_margin.is_none()
-        && settings.text_align.is_none()
-    {
-        return Err(AppError::invalid_input(
-            "settings must contain at least one field",
-        ));
-    }
     if let Some(font_size) = settings.font_size {
-        if !font_size.is_finite() || !VALID_FONT_SIZES.contains(&font_size) {
+        if !in_typography_range(font_size, FONT_SIZE_RANGE.0, FONT_SIZE_RANGE.1) {
             return Err(AppError::invalid_input(
-                "fontSize must be one of 14, 16, 18, or 20",
+                "fontSize must be a finite number between 12 and 32",
             ));
         }
     }
@@ -1334,9 +1404,11 @@ fn validate_settings(settings: &ReadingSettings) -> AppResult<()> {
             return Err(AppError::invalid_input("Unsupported theme"));
         }
     }
-    if let Some(line_height) = &settings.line_height {
-        if !VALID_LINE_HEIGHTS.contains(&line_height.as_str()) {
-            return Err(AppError::invalid_input("Unsupported lineHeight"));
+    if let Some(line_height) = settings.line_height {
+        if !in_typography_range(line_height, LINE_HEIGHT_RANGE.0, LINE_HEIGHT_RANGE.1) {
+            return Err(AppError::invalid_input(
+                "lineHeight must be a finite number between 1.2 and 2.4",
+            ));
         }
     }
     if let Some(page_margin) = &settings.page_margin {
@@ -1344,9 +1416,56 @@ fn validate_settings(settings: &ReadingSettings) -> AppResult<()> {
             return Err(AppError::invalid_input("Unsupported pageMargin"));
         }
     }
+    if let Some(content_width) = settings.content_width {
+        if !in_typography_range(content_width, CONTENT_WIDTH_RANGE.0, CONTENT_WIDTH_RANGE.1) {
+            return Err(AppError::invalid_input(
+                "contentWidth must be a finite number between 28 and 60",
+            ));
+        }
+    }
+    if let Some(page_padding) = settings.page_padding {
+        if !in_typography_range(page_padding, PAGE_PADDING_RANGE.0, PAGE_PADDING_RANGE.1) {
+            return Err(AppError::invalid_input(
+                "pagePadding must be a finite number between 0.5 and 4",
+            ));
+        }
+    }
     if let Some(text_align) = &settings.text_align {
         if !VALID_TEXT_ALIGNS.contains(&text_align.as_str()) {
             return Err(AppError::invalid_input("Unsupported textAlign"));
+        }
+    }
+    if let Some(letter_spacing) = settings.letter_spacing {
+        if !in_typography_range(
+            letter_spacing,
+            LETTER_SPACING_RANGE.0,
+            LETTER_SPACING_RANGE.1,
+        ) {
+            return Err(AppError::invalid_input(
+                "letterSpacing must be a finite number between -0.05 and 0.2",
+            ));
+        }
+    }
+    if let Some(paragraph_spacing) = settings.paragraph_spacing {
+        if !in_typography_range(
+            paragraph_spacing,
+            PARAGRAPH_SPACING_RANGE.0,
+            PARAGRAPH_SPACING_RANGE.1,
+        ) {
+            return Err(AppError::invalid_input(
+                "paragraphSpacing must be a finite number between 0 and 2",
+            ));
+        }
+    }
+    if let Some(first_line_indent) = settings.first_line_indent {
+        if !in_typography_range(
+            first_line_indent,
+            FIRST_LINE_INDENT_RANGE.0,
+            FIRST_LINE_INDENT_RANGE.1,
+        ) {
+            return Err(AppError::invalid_input(
+                "firstLineIndent must be a finite number between 0 and 3",
+            ));
         }
     }
     Ok(())
@@ -1363,7 +1482,10 @@ fn sha256_hex(bytes: &[u8]) -> String {
 }
 
 fn validate_content_hash(hash: &str) -> AppResult<()> {
-    if hash.len() != 64 || !hash.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    if hash.len() != 64
+        || !hash
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
     {
         return Err(AppError::invalid_input(
             "contentHash must be 64 lowercase hex characters",
@@ -2313,7 +2435,7 @@ mod tests {
                 &id,
                 None,
                 Some(ReadingSettings {
-                    font_size: Some(17.0),
+                    font_size: Some(11.0),
                     font_family: Some("Comic Sans".to_string()),
                     theme: Some("neon".to_string()),
                     ..ReadingSettings::default()
@@ -2332,11 +2454,15 @@ mod tests {
                 &id,
                 None,
                 Some(ReadingSettings {
-                    font_size: Some(16.0),
+                    font_size: Some(18.0),
                     font_family: Some("serif".to_string()),
-                    line_height: Some("relaxed".to_string()),
-                    page_margin: Some("wide".to_string()),
+                    line_height: Some(2.0),
+                    content_width: Some(52.0),
+                    page_padding: Some(2.5),
                     text_align: Some("justify".to_string()),
+                    letter_spacing: Some(0.02),
+                    paragraph_spacing: Some(1.1),
+                    first_line_indent: Some(2.0),
                     ..ReadingSettings::default()
                 }),
             )
@@ -2348,11 +2474,16 @@ mod tests {
             .remove(0)
             .settings
             .expect("settings");
-        assert_eq!(settings.font_size, Some(16.0));
+        assert_eq!(settings.font_size, Some(18.0));
         assert_eq!(settings.font_family.as_deref(), Some("serif"));
-        assert_eq!(settings.line_height.as_deref(), Some("relaxed"));
-        assert_eq!(settings.page_margin.as_deref(), Some("wide"));
+        assert_eq!(settings.line_height, Some(2.0));
+        assert_eq!(settings.content_width, Some(52.0));
+        assert_eq!(settings.page_padding, Some(2.5));
+        assert!(settings.page_margin.is_none());
         assert_eq!(settings.text_align.as_deref(), Some("justify"));
+        assert_eq!(settings.letter_spacing, Some(0.02));
+        assert_eq!(settings.paragraph_spacing, Some(1.1));
+        assert_eq!(settings.first_line_indent, Some(2.0));
     }
 
     #[test]
@@ -2366,8 +2497,9 @@ mod tests {
                 Some(ReadingSettings {
                     font_size: Some(18.0),
                     font_family: Some("sans-serif".to_string()),
-                    line_height: Some("compact".to_string()),
-                    page_margin: Some("narrow".to_string()),
+                    line_height: Some(1.4),
+                    content_width: Some(36.0),
+                    page_padding: Some(1.25),
                     ..ReadingSettings::default()
                 }),
             )
@@ -2379,7 +2511,8 @@ mod tests {
                 Some(ReadingSettings {
                     font_size: Some(18.0),
                     font_family: Some("sans-serif".to_string()),
-                    page_margin: Some("narrow".to_string()),
+                    content_width: Some(36.0),
+                    page_padding: Some(1.25),
                     ..ReadingSettings::default()
                 }),
             )
@@ -2394,11 +2527,36 @@ mod tests {
         assert_eq!(settings.font_size, Some(18.0));
         assert_eq!(settings.font_family.as_deref(), Some("sans-serif"));
         assert!(settings.line_height.is_none());
-        assert_eq!(settings.page_margin.as_deref(), Some("narrow"));
+        assert_eq!(settings.content_width, Some(36.0));
+        assert_eq!(settings.page_padding, Some(1.25));
     }
 
     #[test]
-    fn reading_settings_rejects_unknown_typography_enum() {
+    fn reading_settings_old_enum_book_loads() {
+        let settings: ReadingSettings =
+            serde_json::from_str(r#"{"lineHeight":"compact","pageMargin":"wide"}"#)
+                .expect("old enum settings");
+        validate_settings(&settings).expect("old enums valid");
+        assert_eq!(settings.line_height, Some(1.4));
+        assert_eq!(settings.page_margin.as_deref(), Some("wide"));
+
+        let (_directory, store) = test_store();
+        let id = import_test_book(&store, Path::new("/source/old-enum-settings.epub"));
+        store
+            .update_reading_state(&id, None, Some(settings.clone()))
+            .expect("persist old enums");
+        let stored = store
+            .list_books()
+            .expect("list")
+            .remove(0)
+            .settings
+            .expect("settings");
+        assert_eq!(stored.line_height, Some(1.4));
+        assert_eq!(stored.page_margin.as_deref(), Some("wide"));
+    }
+
+    #[test]
+    fn reading_settings_rejects_out_of_range() {
         let (_directory, store) = test_store();
         let id = import_test_book(&store, Path::new("/source/typography-invalid.epub"));
         let error = store
@@ -2407,12 +2565,37 @@ mod tests {
                 None,
                 Some(ReadingSettings {
                     font_size: Some(16.0),
-                    line_height: Some("huge".to_string()),
+                    line_height: Some(3.0),
                     ..ReadingSettings::default()
                 }),
             )
-            .expect_err("invalid lineHeight");
+            .expect_err("out of range lineHeight");
         assert_eq!(error.code, AppErrorCode::InvalidInput);
+    }
+
+    #[test]
+    fn reading_settings_empty_snapshot_clears_overrides() {
+        let (_directory, store) = test_store();
+        let id = import_test_book(&store, Path::new("/source/typography-clear.epub"));
+        store
+            .update_reading_state(
+                &id,
+                None,
+                Some(ReadingSettings {
+                    font_size: Some(18.0),
+                    ..ReadingSettings::default()
+                }),
+            )
+            .expect("persist override");
+        store
+            .update_reading_state(&id, None, Some(ReadingSettings::default()))
+            .expect("clear overrides");
+        assert!(store
+            .list_books()
+            .expect("list")
+            .remove(0)
+            .settings
+            .is_none());
     }
 
     #[test]
@@ -2555,7 +2738,9 @@ mod tests {
         let book = store.list_books().expect("list").remove(0);
         let hash = book.content_hash.expect("backfilled hash");
         assert_eq!(hash.len(), 64);
-        assert!(hash.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()));
+        assert!(hash
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()));
     }
 
     fn import_named_book(store: &LibraryStore, source: &Path, bytes: &[u8], title: &str) -> String {
@@ -2638,7 +2823,10 @@ mod tests {
         assert_eq!(after.last_fraction, Some(0.42));
         assert_eq!(after.last_opened_at, before.last_opened_at);
         assert_eq!(after.settings, before.settings);
-        assert_eq!(after.content_hash.as_deref(), Some(sha256_hex(b"version-two").as_str()));
+        assert_eq!(
+            after.content_hash.as_deref(),
+            Some(sha256_hex(b"version-two").as_str())
+        );
     }
 
     #[test]
@@ -2741,9 +2929,7 @@ mod tests {
         let error = store
             .read_import_bytes(&id, &import_id)
             .expect_err("pending should be gone");
-        assert!(
-            error.code == AppErrorCode::InvalidInput || error.code == AppErrorCode::StorageIo
-        );
+        assert!(error.code == AppErrorCode::InvalidInput || error.code == AppErrorCode::StorageIo);
         assert!(!directory
             .path()
             .join("books")
@@ -2791,8 +2977,7 @@ mod tests {
         import_test_book(&store, Path::new("/source/field-validation.epub"));
         let library_path = directory.path().join("library.json");
         let original = fs::read(&library_path).expect("original library");
-        let mut value: serde_json::Value =
-            serde_json::from_slice(&original).expect("library json");
+        let mut value: serde_json::Value = serde_json::from_slice(&original).expect("library json");
         value["books"][0]["lastOpenedAt"] = serde_json::Value::String("not-a-date".to_string());
         fs::write(
             &library_path,
@@ -2803,8 +2988,7 @@ mod tests {
         assert_eq!(error.code, AppErrorCode::StorageCorrupt);
 
         fs::write(&library_path, &original).expect("restore");
-        let mut value: serde_json::Value =
-            serde_json::from_slice(&original).expect("library json");
+        let mut value: serde_json::Value = serde_json::from_slice(&original).expect("library json");
         value["books"][0]["contentHash"] = serde_json::Value::String("abc".to_string());
         fs::write(
             &library_path,

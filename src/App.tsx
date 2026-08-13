@@ -21,7 +21,9 @@ import { SettingsPage } from "@/components/settings/SettingsPage";
 import {
   bookSettingsSnapshot,
   generateStylesCss,
+  isTypographyOverridden,
   normalizeSettings,
+  TYPOGRAPHY_KEYS,
   type TypographyKey,
 } from "@/lib/reader-styles";
 import { usePreferences, themeToClassName, type AppPreferences } from "@/lib/preferences";
@@ -382,31 +384,15 @@ function App() {
     [currentBook?.id, fileData?.bookId, persistSettings],
   );
 
-  const handleFontChange = useCallback(
-    (patch: { fontSize?: number; fontFamily?: string }) => {
-      if (!currentBook) return;
-      const nextSettings = bookSettingsSnapshot(
-        {
-          fontSize: patch.fontSize ?? styleStateRef.current.fontSize,
-          fontFamily: patch.fontFamily ?? styleStateRef.current.fontFamily,
-        },
-        currentBook.settings,
-      );
-      setCurrentBook({ ...currentBook, settings: nextSettings });
-      persistBookSnapshot(nextSettings);
-    },
-    [currentBook, persistBookSnapshot],
-  );
-
   const handleTypographyChange = useCallback(
-    (key: TypographyKey, value: string) => {
+    (key: TypographyKey, value: number | string) => {
       if (settingsReturnTo === "reader") {
         if (!currentBook) return;
-        const nextSettings = bookSettingsSnapshot(styleStateRef.current, {
-          ...currentBook.settings,
-          [key]: value,
+        const nextSettings = bookSettingsSnapshot(currentBook.settings, { [key]: value });
+        setCurrentBook({
+          ...currentBook,
+          settings: Object.keys(nextSettings).length ? nextSettings : undefined,
         });
-        setCurrentBook({ ...currentBook, settings: nextSettings });
         persistBookSnapshot(nextSettings);
         return;
       }
@@ -418,8 +404,11 @@ function App() {
   const handleRestoreDefault = useCallback(
     (key: TypographyKey) => {
       if (!currentBook) return;
-      const nextSettings = bookSettingsSnapshot(styleStateRef.current, currentBook.settings, key);
-      setCurrentBook({ ...currentBook, settings: nextSettings });
+      const nextSettings = bookSettingsSnapshot(currentBook.settings, undefined, key);
+      setCurrentBook({
+        ...currentBook,
+        settings: Object.keys(nextSettings).length ? nextSettings : undefined,
+      });
       persistBookSnapshot(nextSettings);
     },
     [currentBook, persistBookSnapshot],
@@ -432,12 +421,9 @@ function App() {
 
   const bookTitle = currentBook?.title || fileData?.name || "";
   const editingBook = settingsReturnTo === "reader" && Boolean(currentBook || fileData);
-  const overriddenKeys: TypographyKey[] = [];
-  if (editingBook && currentBook?.settings) {
-    if (currentBook.settings.lineHeight) overriddenKeys.push("lineHeight");
-    if (currentBook.settings.pageMargin) overriddenKeys.push("pageMargin");
-    if (currentBook.settings.textAlign) overriddenKeys.push("textAlign");
-  }
+  const overriddenKeys: TypographyKey[] = editingBook
+    ? TYPOGRAPHY_KEYS.filter((key) => isTypographyOverridden(currentBook?.settings, key))
+    : [];
 
   if (view === "library") {
     return (
@@ -478,7 +464,6 @@ function App() {
           bookTitle={editingBook ? bookTitle || null : null}
           hasBook={editingBook}
           styleState={styleState}
-          onFontChange={handleFontChange}
           onTypographyChange={handleTypographyChange}
           onRestoreDefault={handleRestoreDefault}
           overriddenKeys={overriddenKeys}

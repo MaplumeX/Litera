@@ -1,115 +1,245 @@
 import type { ReadingSettings } from "@/types/library";
 
-export const FONT_SIZES = [14, 16, 18, 20] as const;
-export const FONT_SIZE_LABELS = ["S", "M", "L", "XL"] as const;
 export const FONT_FAMILIES = [
   { value: "serif", label: "衬线", css: "serif" },
   { value: "sans-serif", label: "无衬线", css: "sans-serif" },
   { value: "monospace", label: "等宽", css: "monospace" },
 ] as const;
 export const THEMES = ["light", "dark", "sepia"] as const;
-
-export const LINE_HEIGHTS = [
-  { value: "compact", label: "密", css: "1.4" },
-  { value: "normal", label: "中", css: "1.7" },
-  { value: "relaxed", label: "疏", css: "2.0" },
-] as const;
-export const PAGE_MARGINS = [
-  { value: "narrow", label: "窄", maxWidth: "36em", padding: "1.25rem" },
-  { value: "normal", label: "中", maxWidth: "42em", padding: "1.75rem" },
-  { value: "wide", label: "宽", maxWidth: "52em", padding: "2.5rem" },
-] as const;
 export const TEXT_ALIGNS = [
   { value: "start", label: "左齐" },
   { value: "justify", label: "两端" },
 ] as const;
 
-export type LineHeightValue = (typeof LINE_HEIGHTS)[number]["value"];
-export type PageMarginValue = (typeof PAGE_MARGINS)[number]["value"];
 export type TextAlignValue = (typeof TEXT_ALIGNS)[number]["value"];
-export type TypographyKey = "lineHeight" | "pageMargin" | "textAlign";
+export type TypographyKey =
+  | "fontSize"
+  | "fontFamily"
+  | "lineHeight"
+  | "contentWidth"
+  | "pagePadding"
+  | "textAlign"
+  | "letterSpacing"
+  | "paragraphSpacing"
+  | "firstLineIndent";
+
+export const TYPOGRAPHY_KEYS: TypographyKey[] = [
+  "fontSize",
+  "fontFamily",
+  "lineHeight",
+  "contentWidth",
+  "pagePadding",
+  "textAlign",
+  "letterSpacing",
+  "paragraphSpacing",
+  "firstLineIndent",
+];
+
+export const TYPOGRAPHY_RANGES = {
+  fontSize: { min: 12, max: 32, step: 1, unit: "px" },
+  lineHeight: { min: 1.2, max: 2.4, step: 0.05, unit: "" },
+  contentWidth: { min: 28, max: 60, step: 1, unit: "em" },
+  pagePadding: { min: 0.5, max: 4, step: 0.25, unit: "rem" },
+  letterSpacing: { min: -0.05, max: 0.2, step: 0.01, unit: "em" },
+  paragraphSpacing: { min: 0, max: 2, step: 0.05, unit: "em" },
+  firstLineIndent: { min: 0, max: 3, step: 0.1, unit: "em" },
+} as const;
+
+export type ContinuousKey = keyof typeof TYPOGRAPHY_RANGES;
 
 export const DEFAULT_FONT_SIZE = 16;
 export const DEFAULT_FONT_FAMILY = "serif";
 export const DEFAULT_THEME = "light";
-export const DEFAULT_LINE_HEIGHT: LineHeightValue = "normal";
-export const DEFAULT_PAGE_MARGIN: PageMarginValue = "normal";
+export const DEFAULT_LINE_HEIGHT = 1.7;
+export const DEFAULT_CONTENT_WIDTH = 42;
+export const DEFAULT_PAGE_PADDING = 1.75;
 export const DEFAULT_TEXT_ALIGN: TextAlignValue = "start";
+export const DEFAULT_LETTER_SPACING = 0;
+export const DEFAULT_PARAGRAPH_SPACING = 1;
+export const DEFAULT_FIRST_LINE_INDENT = 0;
+
+const LINE_HEIGHT_ENUM: Record<string, number> = {
+  compact: 1.4,
+  normal: 1.7,
+  relaxed: 2.0,
+};
+
+const PAGE_MARGIN_ENUM: Record<string, { contentWidth: number; pagePadding: number }> = {
+  narrow: { contentWidth: 36, pagePadding: 1.25 },
+  normal: { contentWidth: 42, pagePadding: 1.75 },
+  wide: { contentWidth: 52, pagePadding: 2.5 },
+};
 
 export interface TypographyDefaults {
-  lineHeight: LineHeightValue;
-  pageMargin: PageMarginValue;
+  fontSize: number;
+  fontFamily: string;
+  lineHeight: number;
+  contentWidth: number;
+  pagePadding: number;
   textAlign: TextAlignValue;
+  letterSpacing: number;
+  paragraphSpacing: number;
+  firstLineIndent: number;
 }
 
 export const DEFAULT_TYPOGRAPHY: TypographyDefaults = {
+  fontSize: DEFAULT_FONT_SIZE,
+  fontFamily: DEFAULT_FONT_FAMILY,
   lineHeight: DEFAULT_LINE_HEIGHT,
-  pageMargin: DEFAULT_PAGE_MARGIN,
+  contentWidth: DEFAULT_CONTENT_WIDTH,
+  pagePadding: DEFAULT_PAGE_PADDING,
   textAlign: DEFAULT_TEXT_ALIGN,
+  letterSpacing: DEFAULT_LETTER_SPACING,
+  paragraphSpacing: DEFAULT_PARAGRAPH_SPACING,
+  firstLineIndent: DEFAULT_FIRST_LINE_INDENT,
 };
 
-export interface ReaderStyleState {
-  fontSize: number;
-  fontFamily: string;
+export interface ReaderStyleState extends TypographyDefaults {
   theme: string;
-  lineHeight: LineHeightValue;
-  pageMargin: PageMarginValue;
-  textAlign: TextAlignValue;
-}
-
-export function isLineHeight(value: string | undefined): value is LineHeightValue {
-  return LINE_HEIGHTS.some((item) => item.value === value);
-}
-
-export function isPageMargin(value: string | undefined): value is PageMarginValue {
-  return PAGE_MARGINS.some((item) => item.value === value);
 }
 
 export function isTextAlign(value: string | undefined): value is TextAlignValue {
   return TEXT_ALIGNS.some((item) => item.value === value);
 }
 
-export function normalizeLineHeight(value?: string): LineHeightValue {
-  return isLineHeight(value) ? value : DEFAULT_LINE_HEIGHT;
-}
-
-export function normalizePageMargin(value?: string): PageMarginValue {
-  return isPageMargin(value) ? value : DEFAULT_PAGE_MARGIN;
+export function isFontFamily(value: string | undefined): boolean {
+  return FONT_FAMILIES.some((item) => item.value === value);
 }
 
 export function normalizeTextAlign(value?: string): TextAlignValue {
   return isTextAlign(value) ? value : DEFAULT_TEXT_ALIGN;
 }
 
+export function stepDecimals(step: number): number {
+  const text = String(step);
+  const dot = text.indexOf(".");
+  return dot === -1 ? 0 : text.length - dot - 1;
+}
+
+export function clampSnap(value: number, min: number, max: number, step: number): number {
+  if (!Number.isFinite(value)) return min;
+  const snapped = Math.round((value - min) / step) * step + min;
+  const clamped = Math.min(max, Math.max(min, snapped));
+  return Number(clamped.toFixed(stepDecimals(step)));
+}
+
+export function formatTypographyValue(key: ContinuousKey, value: number): string {
+  const spec = TYPOGRAPHY_RANGES[key];
+  const text = value.toFixed(stepDecimals(spec.step));
+  return spec.unit ? `${text}${spec.unit}` : text;
+}
+
+export function migrateLineHeight(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    if (value in LINE_HEIGHT_ENUM) return LINE_HEIGHT_ENUM[value];
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
+}
+
+export function splitPageMargin(
+  value: string | undefined,
+): { contentWidth: number; pagePadding: number } | undefined {
+  if (!value) return undefined;
+  return PAGE_MARGIN_ENUM[value];
+}
+
+function normalizeContinuous(key: ContinuousKey, value: unknown): number {
+  const spec = TYPOGRAPHY_RANGES[key];
+  const resolved = typeof value === "number" && Number.isFinite(value) ? value : DEFAULT_TYPOGRAPHY[key];
+  return clampSnap(resolved, spec.min, spec.max, spec.step);
+}
+
 export function normalizeSettings(
   settings?: ReadingSettings,
-  preferences?: Partial<TypographyDefaults> & { theme?: string },
+  preferences?: Partial<TypographyDefaults> & { theme?: string; pageMargin?: string },
 ): ReaderStyleState {
+  const bookMargin = splitPageMargin(settings?.pageMargin);
+  const prefMargin = splitPageMargin(preferences?.pageMargin);
   return {
-    fontSize: settings?.fontSize ?? DEFAULT_FONT_SIZE,
-    fontFamily: settings?.fontFamily ?? DEFAULT_FONT_FAMILY,
+    fontSize: normalizeContinuous("fontSize", settings?.fontSize ?? preferences?.fontSize),
+    fontFamily: isFontFamily(settings?.fontFamily)
+      ? settings!.fontFamily!
+      : isFontFamily(preferences?.fontFamily)
+        ? preferences!.fontFamily!
+        : DEFAULT_FONT_FAMILY,
     theme: preferences?.theme ?? DEFAULT_THEME,
-    lineHeight: normalizeLineHeight(settings?.lineHeight ?? preferences?.lineHeight),
-    pageMargin: normalizePageMargin(settings?.pageMargin ?? preferences?.pageMargin),
+    lineHeight: normalizeContinuous(
+      "lineHeight",
+      migrateLineHeight(settings?.lineHeight) ?? migrateLineHeight(preferences?.lineHeight),
+    ),
+    contentWidth: normalizeContinuous(
+      "contentWidth",
+      settings?.contentWidth ?? bookMargin?.contentWidth ?? preferences?.contentWidth ?? prefMargin?.contentWidth,
+    ),
+    pagePadding: normalizeContinuous(
+      "pagePadding",
+      settings?.pagePadding ?? bookMargin?.pagePadding ?? preferences?.pagePadding ?? prefMargin?.pagePadding,
+    ),
     textAlign: normalizeTextAlign(settings?.textAlign ?? preferences?.textAlign),
+    letterSpacing: normalizeContinuous(
+      "letterSpacing",
+      settings?.letterSpacing ?? preferences?.letterSpacing,
+    ),
+    paragraphSpacing: normalizeContinuous(
+      "paragraphSpacing",
+      settings?.paragraphSpacing ?? preferences?.paragraphSpacing,
+    ),
+    firstLineIndent: normalizeContinuous(
+      "firstLineIndent",
+      settings?.firstLineIndent ?? preferences?.firstLineIndent,
+    ),
   };
+}
+
+function materializeOverrides(
+  overrides?: ReadingSettings,
+): Partial<Record<TypographyKey, number | string>> {
+  if (!overrides) return {};
+  const result: Partial<Record<TypographyKey, number | string>> = {};
+  if (overrides.fontSize != null) result.fontSize = overrides.fontSize;
+  if (overrides.fontFamily) result.fontFamily = overrides.fontFamily;
+  const lineHeight = migrateLineHeight(overrides.lineHeight);
+  if (lineHeight != null) result.lineHeight = lineHeight;
+  const split = splitPageMargin(overrides.pageMargin);
+  if (overrides.contentWidth != null) result.contentWidth = overrides.contentWidth;
+  else if (split) result.contentWidth = split.contentWidth;
+  if (overrides.pagePadding != null) result.pagePadding = overrides.pagePadding;
+  else if (split) result.pagePadding = split.pagePadding;
+  if (overrides.textAlign) result.textAlign = overrides.textAlign;
+  if (overrides.letterSpacing != null) result.letterSpacing = overrides.letterSpacing;
+  if (overrides.paragraphSpacing != null) result.paragraphSpacing = overrides.paragraphSpacing;
+  if (overrides.firstLineIndent != null) result.firstLineIndent = overrides.firstLineIndent;
+  return result;
+}
+
+export function isTypographyOverridden(
+  settings: ReadingSettings | undefined,
+  key: TypographyKey,
+): boolean {
+  if (!settings) return false;
+  if (key === "contentWidth" || key === "pagePadding") {
+    return settings[key] != null || Boolean(settings.pageMargin);
+  }
+  return settings[key] != null;
 }
 
 /** Persistable per-book snapshot. Omit a typography key to restore that default. */
 export function bookSettingsSnapshot(
-  style: Pick<ReaderStyleState, "fontSize" | "fontFamily">,
   overrides: ReadingSettings | undefined,
+  set?: Partial<Pick<ReaderStyleState, TypographyKey>>,
   omit?: TypographyKey,
 ): ReadingSettings {
-  const snapshot: ReadingSettings = {
-    fontSize: style.fontSize,
-    fontFamily: style.fontFamily,
-  };
-  const keys: TypographyKey[] = ["lineHeight", "pageMargin", "textAlign"];
-  for (const key of keys) {
-    if (key === omit) continue;
-    const value = overrides?.[key];
-    if (value) snapshot[key] = value;
+  const next = { ...materializeOverrides(overrides), ...set };
+  if (omit) delete next[omit];
+  const snapshot: ReadingSettings = {};
+  for (const key of TYPOGRAPHY_KEYS) {
+    const value = next[key];
+    if (value != null) {
+      (snapshot as Record<string, number | string>)[key] = value;
+    }
   }
   return snapshot;
 }
@@ -123,18 +253,10 @@ img { filter: brightness(0.8) !important; }`,
 a { color: #8a5a2b !important; }`,
 };
 
-function lineHeightCss(value: LineHeightValue): string {
-  return LINE_HEIGHTS.find((item) => item.value === value)?.css ?? "1.7";
-}
-
-function pageMarginPreset(value: PageMarginValue) {
-  return PAGE_MARGINS.find((item) => item.value === value) ?? PAGE_MARGINS[1];
-}
-
 /** Combine font + typography + theme into a single CSS string for `view.renderer.setStyles`. */
 export function generateStylesCss(state: ReaderStyleState): string {
-  const margin = pageMarginPreset(state.pageMargin);
-  const fontCss = `html, body { font-family: ${state.fontFamily}; font-size: ${state.fontSize}px !important; line-height: ${lineHeightCss(state.lineHeight)}; max-width: ${margin.maxWidth}; margin-inline: auto; padding-inline: ${margin.padding}; text-align: ${state.textAlign}; }`;
+  const fontCss = `html, body { font-family: ${state.fontFamily}; font-size: ${state.fontSize}px !important; line-height: ${state.lineHeight}; letter-spacing: ${state.letterSpacing}em; max-width: ${state.contentWidth}em; margin-inline: auto; padding-inline: ${state.pagePadding}rem; text-align: ${state.textAlign}; }
+p { margin-block-end: ${state.paragraphSpacing}em !important; text-indent: ${state.firstLineIndent}em !important; }`;
   const themeCss = THEME_CSS[state.theme] ?? "";
   return themeCss ? `${fontCss}\n${themeCss}` : fontCss;
 }

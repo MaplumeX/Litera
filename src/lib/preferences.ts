@@ -2,49 +2,58 @@ import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useDebouncedCallback } from "@/lib/use-debounced-callback";
 import {
-  DEFAULT_LINE_HEIGHT,
-  DEFAULT_PAGE_MARGIN,
-  DEFAULT_TEXT_ALIGN,
+  DEFAULT_TYPOGRAPHY,
   DEFAULT_THEME,
-  normalizeLineHeight,
-  normalizePageMargin,
+  isFontFamily,
+  migrateLineHeight,
+  normalizeSettings,
   normalizeTextAlign,
+  splitPageMargin,
   THEMES,
-  type LineHeightValue,
-  type PageMarginValue,
   type ReaderStyleState,
-  type TextAlignValue,
+  type TypographyDefaults,
 } from "@/lib/reader-styles";
 
-export interface AppPreferences {
+export interface AppPreferences extends TypographyDefaults {
   theme: string;
-  lineHeight: LineHeightValue;
-  pageMargin: PageMarginValue;
-  textAlign: TextAlignValue;
 }
 
 interface PreferencesResponse {
   theme?: string;
-  lineHeight?: string;
+  fontSize?: number;
+  fontFamily?: string;
+  lineHeight?: number | string;
+  contentWidth?: number;
+  pagePadding?: number;
   pageMargin?: string;
   textAlign?: string;
+  letterSpacing?: number;
+  paragraphSpacing?: number;
+  firstLineIndent?: number;
 }
 
 export const DEFAULT_PREFERENCES: AppPreferences = {
   theme: DEFAULT_THEME,
-  lineHeight: DEFAULT_LINE_HEIGHT,
-  pageMargin: DEFAULT_PAGE_MARGIN,
-  textAlign: DEFAULT_TEXT_ALIGN,
+  ...DEFAULT_TYPOGRAPHY,
 };
 
 function normalizePreferences(response: PreferencesResponse | null | undefined): AppPreferences {
   const theme = response?.theme;
-  return {
+  const split = splitPageMargin(response?.pageMargin);
+  const normalized = normalizeSettings(undefined, {
     theme: theme && (THEMES as readonly string[]).includes(theme) ? theme : DEFAULT_THEME,
-    lineHeight: normalizeLineHeight(response?.lineHeight),
-    pageMargin: normalizePageMargin(response?.pageMargin),
+    fontSize: response?.fontSize,
+    fontFamily: isFontFamily(response?.fontFamily) ? response?.fontFamily : undefined,
+    lineHeight: migrateLineHeight(response?.lineHeight),
+    contentWidth: response?.contentWidth ?? split?.contentWidth,
+    pagePadding: response?.pagePadding ?? split?.pagePadding,
     textAlign: normalizeTextAlign(response?.textAlign),
-  };
+    letterSpacing: response?.letterSpacing,
+    paragraphSpacing: response?.paragraphSpacing,
+    firstLineIndent: response?.firstLineIndent,
+  });
+  const { theme: nextTheme, ...typography } = normalized;
+  return { theme: nextTheme, ...typography };
 }
 
 export function usePreferences() {
@@ -56,9 +65,15 @@ export function usePreferences() {
     async (next: AppPreferences) => {
       await invoke("save_preferences", {
         theme: next.theme,
+        fontSize: next.fontSize,
+        fontFamily: next.fontFamily,
         lineHeight: next.lineHeight,
-        pageMargin: next.pageMargin,
+        contentWidth: next.contentWidth,
+        pagePadding: next.pagePadding,
         textAlign: next.textAlign,
+        letterSpacing: next.letterSpacing,
+        paragraphSpacing: next.paragraphSpacing,
+        firstLineIndent: next.firstLineIndent,
       });
     },
     300,

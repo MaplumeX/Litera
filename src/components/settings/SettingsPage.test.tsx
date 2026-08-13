@@ -4,6 +4,14 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { SettingsPage } from "./SettingsPage";
 import type { ReaderStyleState } from "@/lib/reader-styles";
 
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+
+vi.stubGlobal("ResizeObserver", ResizeObserverStub);
+
 vi.mock("@/lib/use-agent-config", () => ({
   useAgentConfig: () => ({
     snapshot: {
@@ -29,9 +37,13 @@ const styleState: ReaderStyleState = {
   fontSize: 16,
   fontFamily: "serif",
   theme: "light",
-  lineHeight: "normal",
-  pageMargin: "normal",
+  lineHeight: 1.7,
+  contentWidth: 42,
+  pagePadding: 1.75,
   textAlign: "start",
+  letterSpacing: 0,
+  paragraphSpacing: 1,
+  firstLineIndent: 0,
 };
 
 const noop = () => {};
@@ -41,14 +53,13 @@ afterEach(() => {
 });
 
 describe("SettingsPage", () => {
-  it("switches left-nav sections and disables fonts without a book", () => {
+  it("switches left-nav sections and enables fonts without a book", () => {
     const { getByRole, getByText, queryByText } = render(
       <SettingsPage
         onBack={noop}
         bookTitle={null}
         hasBook={false}
         styleState={styleState}
-        onFontChange={noop}
         onTypographyChange={noop}
         onRestoreDefault={noop}
         overriddenKeys={[]}
@@ -58,9 +69,10 @@ describe("SettingsPage", () => {
     );
 
     expect(getByText("正在编辑默认排版")).toBeTruthy();
-    expect(getByRole("button", { name: "S" })).toHaveProperty("disabled", true);
-    expect(getByRole("button", { name: "衬线" })).toHaveProperty("disabled", true);
-    expect(getByText("打开书籍后生效")).toBeTruthy();
+    expect(getByRole("slider", { name: "字体大小" })).toBeTruthy();
+    expect(getByText("16px")).toBeTruthy();
+    expect(getByRole("button", { name: "衬线" })).toHaveProperty("disabled", false);
+    expect(queryByText("打开书籍后生效")).toBeNull();
     expect(queryByText("恢复默认")).toBeNull();
 
     act(() => {
@@ -82,8 +94,7 @@ describe("SettingsPage", () => {
         onBack={noop}
         bookTitle="测试书"
         hasBook={true}
-        styleState={{ ...styleState, lineHeight: "compact" }}
-        onFontChange={noop}
+        styleState={{ ...styleState, lineHeight: 1.4 }}
         onTypographyChange={noop}
         onRestoreDefault={onRestore}
         overriddenKeys={["lineHeight"]}
@@ -106,7 +117,6 @@ describe("SettingsPage", () => {
         bookTitle={null}
         hasBook={true}
         styleState={styleState}
-        onFontChange={noop}
         onTypographyChange={noop}
         onRestoreDefault={noop}
         overriddenKeys={[]}
@@ -116,5 +126,25 @@ describe("SettingsPage", () => {
     );
 
     expect(getByText("正在编辑《这本书》的排版")).toBeTruthy();
+  });
+
+  it("exposes a slider and current value for a continuous field", () => {
+    const onChange = vi.fn();
+    const { getByRole, getByText } = render(
+      <SettingsPage
+        onBack={noop}
+        bookTitle={null}
+        hasBook={false}
+        styleState={{ ...styleState, firstLineIndent: 1.2 }}
+        onTypographyChange={onChange}
+        onRestoreDefault={noop}
+        overriddenKeys={[]}
+        theme="light"
+        onThemeChange={noop}
+      />,
+    );
+
+    expect(getByText("1.2em")).toBeTruthy();
+    expect(getByRole("slider", { name: "首行缩进" }).getAttribute("aria-valuenow")).toBe("1.2");
   });
 });
