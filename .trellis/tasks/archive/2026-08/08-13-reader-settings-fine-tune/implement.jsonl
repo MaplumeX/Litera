@@ -1,0 +1,9 @@
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend checklist before changing SettingsPage and style state"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "shadcn form fields, setStyles injection, settings entry ownership"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "No global store; App owns settings persist routing"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "normalizeSettings and ReadingSettings must stay aligned with Rust"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend checklist for preferences and library persistence"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "No schema bump; replace-not-merge settings; theme-safe preferences"}
+{"file": ".trellis/spec/backend/tauri-commands.md", "reason": "get/save_preferences and update_reading_state contracts"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "New numeric keys must match across Rust, TS, and CSS"}
+{"file": ".trellis/tasks/08-13-reader-settings-fine-tune/research/numeric-typography.md", "reason": "Dual-read enums, pageMargin split, p-tag CSS, shadcn slider"}

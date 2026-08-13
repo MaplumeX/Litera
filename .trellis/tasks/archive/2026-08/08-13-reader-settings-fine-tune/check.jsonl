@@ -1,0 +1,9 @@
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend quality checklist"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Chat gear stays dialog-only; new controls must be shadcn"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "No new global store; settings state stays in App"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "ReadingSettings and preferences types must match IPC"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Frontend quality bar"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "No library schema bump; full snapshot replace; theme-safe prefs"}
+{"file": ".trellis/spec/backend/tauri-commands.md", "reason": "Command signatures must match frontend invoke"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Cross-layer field contract for new numeric keys"}
+{"file": ".trellis/tasks/08-13-reader-settings-fine-tune/research/numeric-typography.md", "reason": "Must dual-read old enums and not wipe theme"}
