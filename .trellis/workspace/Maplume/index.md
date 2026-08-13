@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 36
+- **Total Sessions**: 37
 - **Last Active**: 2026-08-13
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~810 | Active |
+| `journal-1.md` | ~832 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 37 | 2026-08-13 | Fine-tune reader typography settings | `7d18f36`, `2ea3364` | `main` |
 | 36 | 2026-08-13 | Tune wheel paging to Readest sensitivity | `348f64d`, `f8bc73f`, `ecf98fb` | `main` |
 | 35 | 2026-08-13 | Remove reader progress bar | `9840d53` | `feat/progress-bar-presentation` |
 | 34 | 2026-08-13 | Settings page and typography defaults | `61a6851`, `0d0f855`, `38cb99a` | `feat/settings-ui-layout-and-configurable-items` |

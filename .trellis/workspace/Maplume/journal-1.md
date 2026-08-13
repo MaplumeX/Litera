@@ -808,3 +808,25 @@ Replaced extending-cooldown wheel paging with Readest idle-reset: 30px threshold
 ### Status
 
 [OK] **Completed**
+
+
+## Session 37: Fine-tune reader typography settings
+
+**Date**: 2026-08-13
+**Task**: Fine-tune reader typography settings
+**Branch**: `main`
+
+### Summary
+
+Converted reader typography from preset gears to numeric sliders (font size, line height, content width, page padding, letter spacing, paragraph spacing, first-line indent). Font size and family now use global default plus per-book override. Old lineHeight/pageMargin enums dual-read; specs updated.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7d18f36` | (see git log) |
+| `2ea3364` | (see git log) |
+
+### Status
+
+[OK] **Completed**
