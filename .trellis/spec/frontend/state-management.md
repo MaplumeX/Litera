@@ -40,7 +40,7 @@ These are the closest thing to "global state". They're passed down as props:
 
 Each component owns its own UI state:
 - `ChatPanel`: transient `input`, `pendingSelection`, `submitting`, `invokeError`, `showSessionList`, and `showConfig` (LLM settings dialog only); Agent messages/sessions/status live in `AgentState`
-- `LibraryView`: `books`, `search`, `importing`
+- `LibraryView`: `books`, `search`, `importing`, selection-mode ids, overwrite/delete dialog state, import banners. Selection mode is local UI state and is not persisted. `list_books` already returns recency order — do not re-sort in React.
 - `ReaderView`: `selectionPos` (transient selection button position)
 
 `App.settingsOpen` owns `SettingsDialog` (library gear + reader Aa). Do not lift ChatPanel LLM settings into that flag.
@@ -117,6 +117,10 @@ const persistFraction = useDebouncedCallback(
 ```
 
 **Pattern**: state change → local state update (immediate UI) → debounced persistence. Timer-triggered failures set a visible inline alert. Return-to-library, book switching, and close request call `flush()` and wait for active writes; a failed navigation flush keeps the reader open. Hook cleanup calls `cancel()` so React StrictMode/unmount cannot replay a stale timer.
+
+Reader chrome title comes from `get_book_open_context().title`, not `name` (`name` stays `"book.epub"` for `File()`). Do not construct a `BookRecord` with an empty `title` after open.
+
+`lastOpenedAt` is written by Rust after a successful `open_book_bytes`, not by the frontend debounce path.
 
 ---
 

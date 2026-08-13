@@ -34,6 +34,8 @@ export interface BookRecord {
   importedAt: string;      // ISO 8601 (RFC3339)
   lastFraction?: number;
   settings?: ReadingSettings;
+  lastOpenedAt?: string;
+  contentHash?: string;
 }
 ```
 

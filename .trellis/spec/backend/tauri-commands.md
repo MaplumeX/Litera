@@ -19,9 +19,17 @@ Book library persistence: import, metadata, list, open, delete, and reading stat
 ### Signatures
 
 ```rust
-// Import: pick/read once → stage exact bytes → return lightweight identity
+// Import: native multi-file picker → classify each EPUB → return outcomes
 #[tauri::command]
-async fn import_book(app: AppHandle, store: State<'_, LibraryStore>) -> AppResult<ImportBookResult>
+async fn import_book(app: AppHandle, store: State<'_, LibraryStore>) -> AppResult<Vec<ImportBookResult>>
+
+// Import from OS drag-drop paths (not a free-typed path field)
+#[tauri::command]
+async fn import_paths(store: State<'_, LibraryStore>, paths: Vec<String>) -> AppResult<Vec<ImportBookResult>>
+
+// Discard a staged overwrite the user cancelled
+#[tauri::command]
+async fn discard_import(store: State<'_, LibraryStore>, book_id: String, import_id: String) -> AppResult<()>
 
 // Read only that staged import as a Raw IPC body
 #[tauri::command]
@@ -71,6 +79,8 @@ interface BookRecord {
   importedAt: string;   // ISO 8601 (RFC3339)
   lastFraction?: number;
   settings?: ReadingSettings;
+  lastOpenedAt?: string;  // RFC3339; missing = never opened
+  contentHash?: string;   // SHA-256 hex of committed EPUB bytes
 }
 
 interface ReadingSettings {
@@ -79,9 +89,17 @@ interface ReadingSettings {
   theme?: string;  // "light" | "dark" | "sepia"
 }
 
-interface ImportBookResult { bookId: string; importId: string; name: string }
+type ImportStatus = "new" | "overwrite" | "duplicate";
+interface ImportBookResult {
+  status: ImportStatus;
+  bookId: string;
+  title: string;          // existing title, or source filename for new
+  importId?: string;      // present only for new / overwrite
+  name: string;           // source filename for foliate extract
+}
 interface BookOpenContext {
-  name: string;
+  name: string;           // still "book.epub" for File()
+  title: string;          // stored library title for the reader chrome
   bookId: string;
   contentVersion: string;
   lastFraction?: number;
@@ -107,9 +125,24 @@ interface BookOpenContext {
 └── sessions/<bookId>/   # sidecar-managed content under a LibraryStore-validated root
 ```
 
-**bookId generation**: `DefaultHasher` hash of the **source file path** (not the app data copy path). Same source file maps to the same record. Each import also receives an unpredictable UUID `importId` that binds frontend-extracted metadata and staged Raw IPC access to the exact bytes.
+**bookId generation**: `DefaultHasher` hash of the **source file path** (not the app data copy path). Same source file maps to the same record. Content identity is a separate SHA-256 of EPUB bytes (`contentHash`). Do not change `bookId` to a content hash.
 
-**Repeat-import transaction**: `import_book` reads the selected EPUB once and stages those exact bytes without replacing the current EPUB. `save_book_metadata(importId)` creates a persistent rollback journal, switches EPUB/cover, and atomically commits metadata plus an internal `contentVersion` in `library.json`. A parse/save failure leaves the previous complete version active. Startup restores a prepared transaction when `contentVersion` did not commit, and keeps the new version when it did.
+**Import classification** (before or instead of staging):
+- `duplicate` — another book already has this `contentHash`. Do not stage. Return that book's `bookId` + `title`.
+- `overwrite` — same path `bookId` exists. Stage pending bytes only. Frontend must confirm, then `save_book_metadata`, or `discard_import`.
+- `new` — stage and insert the record as before.
+
+`save_book_metadata` writes `contentHash` from the staged bytes. An overwrite must keep `lastFraction`, `settings`, and `lastOpenedAt`.
+
+**list_books order**: `lastOpenedAt` descending (missing last), then `importedAt` descending. Frontend search filters; it does not re-sort.
+
+**Open context / last opened**: `get_book_open_context` returns `title` and backfills a missing `contentHash` from the stored EPUB under the store lock. `open_book_bytes` notifies the sidecar first; writing `lastOpenedAt` after that is best-effort (log on failure, do not fail the open).
+
+**Repeat-import transaction**: `import_book` / `import_paths` read EPUB bytes and stage them without replacing the current EPUB until `save_book_metadata(importId)`. A parse/save failure leaves the previous complete version active. Startup restores a prepared transaction when `contentVersion` did not commit, and keeps the new version when it did.
+
+**Delete**: after the existing trash + `library.json` commit, `delete_book` removes `sessions/<bookId>/`. Missing session dir is success. If session removal fails after the book record is gone, return `StorageIo` and do not roll the book back.
+
+**Drag-drop paths**: `import_paths` accepts only OS drop / picker-equivalent absolute paths. Reject non-`.epub`, symlinks, and non-regular files. Do not add `dialog` / `fs` / `opener` permissions to the WebView capability.
 
 **Serialization boundary**: all commands return serializable `{ code, message }` errors. Frontend cancellation handling checks `code === "Cancelled"`; storage failures must be rendered to the user rather than silently converted to an empty library.
 
@@ -180,7 +213,9 @@ interface CustomProviderEntry {
 | Condition | Error |
 |-----------|-------|
 | User cancels file picker | `{ code: "Cancelled", ... }` — frontend ignores only this code |
-| Invalid ID/path/fraction/settings/import token | `{ code: "InvalidInput", ... }` |
+| User cancels overwrite confirm | not an error — call `discard_import`; missing pending file is success |
+| `import_paths` non-epub / symlink / non-file | `{ code: "InvalidInput", ... }` |
+| Invalid ID/path/fraction/settings/import token / contentHash | `{ code: "InvalidInput", ... }` |
 | Stale `contentVersion` after a committed re-import | `{ code: "InvalidInput", ... }` |
 | Book not found before any file mutation | `{ code: "BookNotFound", ... }` |
 | Invalid JSON/schema/record fields/controlled paths | `{ code: "StorageCorrupt", ... }` |
@@ -192,6 +227,9 @@ interface CustomProviderEntry {
 - **Good**: Import epub with cover → grid shows cover, title, author; reopen app → book persists
 - **Base**: Import epub without cover → grid shows placeholder (first char of title)
 - **Bad**: Re-import same file, then metadata extraction fails → old EPUB/title/author/cover remain active; staged bytes never partially replace them
+- **Good**: Same path re-import → `overwrite`; user confirms → progress/sessions kept
+- **Good**: Different path, same bytes → `duplicate`; library count unchanged
+- **Bad**: Classify a whole picker batch, then confirm overwrite, then treat a later file with the new bytes as `new` (hash not committed yet)
 
 ### Tests Required
 
@@ -201,6 +239,9 @@ interface CustomProviderEntry {
 - **Crash recovery**: leave a prepared import journal and a staged deletion on disk, reinitialize `LibraryStore`, and assert the uncommitted import is rolled back while the referenced deleted directory is restored.
 - **Path safety**: reject traversal-like IDs, forged stored paths, duplicate IDs, symlink book/session directories, and non-regular EPUB/cover files before mutation. Replace `.trash` with a symlink after initialization and assert delete fails while the canonical book and outside directory remain unchanged.
 - **Frontend lifecycle**: assert debounce keeps the latest call, `flush()` waits and propagates failures, and repeated `cancel()` is safe under StrictMode cleanup.
+- **Import status**: same-path import returns `overwrite` and does not replace EPUB until `save_book_metadata`; cancel + `discard_import` leaves the previous version; same-bytes different path returns `duplicate` with no new record.
+- **Open title / sort**: `get_book_open_context.title` equals the stored title; after a successful `open_book_bytes`, that book sorts first in `list_books`.
+- **Delete sessions**: `delete_book` removes `sessions/<bookId>/`; missing dir still succeeds.
 
 ### Storage and path rules
 
@@ -232,6 +273,20 @@ let book_id = {
 };
 // Then stage each import under its importId; do not replace the active EPUB
 // until save_book_metadata commits that exact staged version.
+```
+
+#### Wrong — fail the open if lastOpenedAt cannot be written
+```rust
+notify_sidecar_book_opened(...)?;
+store.mark_book_opened(&book_id)?; // sidecar already switched; UI would stay on library
+```
+
+#### Correct — lastOpenedAt is best-effort after sidecar accept
+```rust
+notify_sidecar_book_opened(...)?;
+if let Err(error) = store.mark_book_opened(&book_id) {
+    eprintln!("[library] Book opened but lastOpenedAt was not saved: {error}");
+}
 ```
 
 ---

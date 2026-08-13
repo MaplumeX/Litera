@@ -29,11 +29,12 @@ npx shadcn@latest add <component-name>
 
 - `button.tsx` — all toolbar/action buttons (icon variants via lucide)
 - `dialog.tsx` — modal overlays (used by `AgentConfigDialog`)
+- `alert-dialog.tsx` — destructive confirms (library delete / overwrite)
 - `select.tsx` — dropdown selectors (used by `AgentConfigDialog` provider picker)
 - `input.tsx` — text/password inputs
 - `label.tsx` — form labels
 
-**Rule**: New modals and form fields must use these shadcn components, not native `<select>`/`<input>`/`<label>`/hand-written overlay divs. Add more via `npx shadcn@latest add <name>` when needed; do not hand-roll equivalents.
+**Rule**: New modals and form fields must use these shadcn components, not native `<select>`/`<input>`/`<label>`/hand-written overlay divs. Add more via `npx shadcn@latest add <name>` when needed. `alert-dialog.tsx` may match the existing `dialog.tsx` Radix style if the CLI add fails; do not use `window.confirm()` / `window.alert()`.
 
 **Select grouping**: use `SelectGroup` + `SelectLabel` + `SelectSeparator` for grouped options; do not emulate separators with disabled `<option>` values. Special pseudo-options (e.g. "add new…") are regular `SelectItem`s with sentinel string values handled in `onValueChange`.
 
@@ -101,6 +102,18 @@ import { ChevronLeft, List, Settings } from "lucide-react"
 **Why**: Passing `onOpenSettings={() => setSettingsOpen(true)}` into `ChatPanel` made the chat gear open the general dialog. Combined with `onOpenSettings?.() ?? setShowConfig(true)`, both dialogs opened on one click.
 
 **Rule**: Do not add an `onOpenSettings` callback to `ChatPanel`. Chat settings stay local.
+
+### Convention: library confirms and selection mode
+
+**What**: Library delete and same-path overwrite use `AlertDialog`. Import/delete failures use an in-page banner. Toolbar「选择」enters selection mode; cover clicks toggle checkboxes and must not open a book. There is no「继续阅读」banner — recency is `list_books` order.
+
+**Why**: `confirm()` / `alert()` block the WebView and do not match the dialog system. Opening a book while an overwrite dialog is open unmounts `LibraryView` and leaves staged imports behind.
+
+**Rules**:
+- Disable cover open and duplicate-banner「打开」while `importing`.
+- Settle pending overwrite confirms as cancel if `LibraryView` unmounts.
+- Gate import (picker + drag-drop) with a synchronous `importingRef`, not only `useState`.
+- Process drag-drop files one path at a time (`import_paths([path])` then confirm/commit) so a later file can see a just-committed `contentHash`.
 
 ### Don't: `callback?.() ?? fallback()` for optional handlers
 

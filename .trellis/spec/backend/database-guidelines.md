@@ -44,6 +44,7 @@ fn update_reading_state(&self, book_id: &str, fraction: Option<f64>, settings: O
 - **Recoverable atomic write**: same-directory tempfile → write → flush → file `sync_all` → atomic persist → parent-directory sync. If failure occurs after persist, restore the prior complete bytes.
 - **All filesystem work is blocking work**: every Tauri library command is async and delegates store operations to `spawn_blocking`.
 - **Partial updates merge under the gate** so concurrent fraction/settings calls cannot overwrite one another.
+- **Optional shelf fields**: `lastOpenedAt` (RFC3339) and `contentHash` (64 lowercase hex SHA-256 of the committed EPUB). Both use `#[serde(default)]`. Missing is valid. Present-but-invalid is `StorageCorrupt`. Do not bump `schemaVersion` for these fields.
 
 ### Storage Layout
 
@@ -63,6 +64,10 @@ fn update_reading_state(&self, book_id: &str, fraction: Option<f64>, settings: O
 ### bookId Generation
 
 `bookId` is a `DefaultHasher` hash of the **source file path** (not the app data copy path). Same source file maps to the same record. Re-import is not a no-op: it stages exact bytes under a unique `importId`, then commits EPUB + extracted metadata/cover through the recovery protocol described in `tauri-commands.md`.
+
+Content identity is `contentHash`, not `bookId`. Duplicate detection compares SHA-256 of incoming bytes to existing `contentHash` values. Books missing a hash are hashed from the stored EPUB on the next open (`get_book_open_context`) or the next import classification — not at startup.
+
+`list_books` sorts by `lastOpenedAt` descending (unset last), then `importedAt` descending.
 
 ```rust
 let book_id = {
@@ -125,10 +130,17 @@ const { session: s } = await createAgentSession({ sessionManager, customTools, r
 - **`sessionsDir` passed from Rust**: `notify_sidecar_book_opened()` sends the Tauri app data dir + `/sessions` as `sessionsDir`.
 - **Lazy load from disk**: `loadSessionFromDisk()` reads a session JSONL when a `switch_session` request arrives for a session not in memory.
 - **Best-effort deletion**: `unlink(managed.filePath)` — ignore errors if the file is already gone.
+- **Deleting a book deletes its session directory**: after `library.json` commit, `delete_book` removes `<app_data>/sessions/<bookId>/`. Missing directory is success. Failure after the book record is gone is `StorageIo` without rolling the book back.
 
 ---
 
 ## Common Mistakes
+
+### Using content hash as bookId
+
+**Wrong**: replace path-hash `bookId` with SHA-256 of bytes so duplicates share an id.
+
+**Correct**: keep path-hash `bookId` (sessions, trash, `contentVersion` stay stable). Store SHA-256 as `contentHash` and classify imports as `duplicate` / `overwrite` / `new`.
 
 ### Hashing the wrong path for bookId
 
