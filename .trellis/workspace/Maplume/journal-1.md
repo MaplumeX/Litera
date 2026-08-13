@@ -616,3 +616,26 @@ Planned and implemented ChatGPT-style inline edit: edit_prompt/session_rewound a
 ### Status
 
 [OK] **Completed**
+
+
+## Session 29: Library shelf loop and import-delete UX
+
+**Date**: 2026-08-13
+**Task**: Library shelf loop and import-delete UX
+**Branch**: `main`
+
+### Summary
+
+Planned and implemented library shelf UX: reader title, card progress, lastOpenedAt sort, multi-file/drag-drop import, path+content-hash dedup with overwrite confirm, AlertDialog delete with session cleanup, and toolbar selection mode. Specs updated. cargo test 82 / npm test 43 / build green.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2890f8c` | (see git log) |
+| `bbbf5be` | (see git log) |
+| `99b31ad` | (see git log) |
+
+### Status
+
+[OK] **Completed**

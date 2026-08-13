@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 28
+- **Total Sessions**: 29
 - **Last Active**: 2026-08-13
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~618 | Active |
+| `journal-1.md` | ~641 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 29 | 2026-08-13 | Library shelf loop and import-delete UX | `2890f8c`, `bbbf5be`, `99b31ad` | `main` |
 | 28 | 2026-08-13 | Inline-edit chat user messages | `36b8bc7`, `8efae8a`, `bd65c3b` | `main` |
 | 27 | 2026-08-13 | Inject book snapshot aside | `b89dbbd`, `3176a32` | `main` |
 | 26 | 2026-08-13 | Separate chat and library settings | `9d77cb1`, `abe063b`, `5453976` | `main` |
