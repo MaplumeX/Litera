@@ -3,6 +3,7 @@ import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SettingsPage } from "./SettingsPage";
 import type { ReaderStyleState } from "@/lib/reader-styles";
+import { setLocale } from "@/lib/i18n";
 
 class ResizeObserverStub {
   observe() {}
@@ -50,6 +51,7 @@ const noop = () => {};
 
 afterEach(() => {
   cleanup();
+  setLocale("zh-CN");
 });
 
 describe("SettingsPage", () => {
@@ -146,5 +148,32 @@ describe("SettingsPage", () => {
 
     expect(getByText("1.2em")).toBeTruthy();
     expect(getByRole("slider", { name: "首行缩进" }).getAttribute("aria-valuenow")).toBe("1.2");
+  });
+
+  it("switches visible copy to English from the appearance language row", () => {
+    const { getByRole, getByText } = render(
+      <SettingsPage
+        onBack={noop}
+        bookTitle={null}
+        hasBook={false}
+        styleState={styleState}
+        onTypographyChange={noop}
+        onRestoreDefault={noop}
+        overriddenKeys={[]}
+        theme="light"
+        onThemeChange={noop}
+      />,
+    );
+
+    act(() => {
+      getByRole("button", { name: "外观" }).click();
+    });
+    act(() => {
+      getByRole("button", { name: "English" }).click();
+    });
+
+    expect(getByText("Language")).toBeTruthy();
+    expect(getByRole("button", { name: "Appearance" })).toBeTruthy();
+    expect(document.documentElement.lang).toBe("en");
   });
 });

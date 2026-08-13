@@ -11,6 +11,7 @@ import {
 } from "@/components/BookImportFeedback";
 import { invokeErrorMessage } from "@/lib/app-error";
 import { useBookImport } from "@/lib/use-book-import";
+import { useT } from "@/lib/i18n";
 
 interface LibraryViewProps {
   onOpenBook: (bookId: string) => void | Promise<void>;
@@ -23,6 +24,7 @@ function isEpubPath(path: string): boolean {
 }
 
 export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }: LibraryViewProps) {
+  const { t } = useT();
   const [books, setBooks] = useState<BookRecord[]>([]);
   const [search, setSearch] = useState("");
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -113,12 +115,12 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
     const single = targets.length === 1;
     const confirmed = await askConfirm({
       title: single
-        ? `删除「${targets[0].title}」？`
-        : `删除 ${targets.length} 本书？`,
+        ? t("library.deleteTitleOne", { title: targets[0].title })
+        : t("library.deleteTitleMany", { count: targets.length }),
       description: single
-        ? "将删除该书的 AI 对话，此操作无法撤销。"
-        : "将删除这些书的 AI 对话，此操作无法撤销。",
-      confirmLabel: "删除",
+        ? t("library.deleteDescOne")
+        : t("library.deleteDescMany"),
+      confirmLabel: t("common.delete"),
       destructive: true,
     });
     if (!confirmed) return;
@@ -137,7 +139,7 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
     if (failures.length > 0) {
       pushNotice({
         kind: "error",
-        message: `删除失败：${failures.join("、")}`,
+        message: t("library.deleteFailed", { titles: failures.join(t("common.listJoin")) }),
       });
     }
   }, [askConfirm, exitSelectMode, pushNotice, refreshBooks, selectMode]);
@@ -181,7 +183,7 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
         <div className="ml-auto flex items-center gap-2">
           <input
             type="text"
-            placeholder="搜索书名或作者…"
+            placeholder={t("library.searchPlaceholder")}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="w-56 rounded-md border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
@@ -189,7 +191,7 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
           {selectMode ? (
             <>
               <span className="text-sm text-muted-foreground tabular-nums">
-                已选 {selectedIds.size}
+                {t("library.selectedCount", { count: selectedIds.size })}
               </span>
               <Button
                 size="sm"
@@ -197,14 +199,14 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
                 disabled={selectedIds.size === 0 || busy}
                 onClick={() => void requestDelete(selectedBooks)}
               >
-                删除
+                {t("common.delete")}
               </Button>
               <Button
                 size="sm"
                 variant="outline"
                 onClick={exitSelectMode}
               >
-                取消
+                {t("common.cancel")}
               </Button>
             </>
           ) : (
@@ -215,7 +217,7 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
                 disabled={busy}
               >
                 <Plus className="size-4" />
-                <span>{importing ? "导入中…" : "导入"}</span>
+                <span>{importing ? t("library.importing") : t("library.import")}</span>
               </Button>
               {books.length > 0 && (
                 <Button
@@ -224,14 +226,14 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
                   onClick={() => setSelectMode(true)}
                   disabled={busy}
                 >
-                  选择
+                  {t("library.select")}
                 </Button>
               )}
               <Button
                 size="icon-sm"
                 variant="ghost"
                 onClick={onOpenSettings}
-                aria-label="设置"
+                aria-label={t("library.settings")}
               >
                 <Settings />
               </Button>
@@ -242,7 +244,7 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
 
       {loadError && (
         <div role="alert" className="border-b border-destructive/40 bg-destructive/10 px-4 py-2 text-sm text-destructive">
-          书库加载失败：{loadError}
+          {t("library.loadFailed", { message: loadError })}
         </div>
       )}
 
@@ -258,20 +260,20 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
         {books.length === 0 ? (
           <div className="flex h-full items-center justify-center">
             <div className="text-center space-y-3">
-              <p className="text-muted-foreground">还没有书籍</p>
-              <p className="text-xs text-muted-foreground">或将 EPUB 拖入此窗口</p>
+              <p className="text-muted-foreground">{t("library.empty")}</p>
+              <p className="text-xs text-muted-foreground">{t("library.dropHint")}</p>
               <Button
                 onClick={() => void handleImport()}
                 disabled={busy}
               >
                 <Plus className="size-4" />
-                <span>{importing ? "导入中…" : "导入 EPUB"}</span>
+                <span>{importing ? t("library.importing") : t("library.importEpub")}</span>
               </Button>
             </div>
           </div>
         ) : filtered.length === 0 ? (
           <div className="flex h-full items-center justify-center">
-            <p className="text-muted-foreground">没有匹配的书籍</p>
+            <p className="text-muted-foreground">{t("library.noMatches")}</p>
           </div>
         ) : (
           <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-6">

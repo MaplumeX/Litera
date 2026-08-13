@@ -7,6 +7,7 @@ import {
   useState,
 } from "react";
 import { cn } from "@/lib/utils";
+import { useT } from "@/lib/i18n";
 import {
   consumeWheelDelta,
   hitFromClientX,
@@ -109,7 +110,7 @@ interface ReaderViewProps {
   fileData: { bytes: Uint8Array<ArrayBuffer>; name: string } | null;
   /** Called when the reader relocates (page turn / scroll). */
   onRelocate?: (index: number, fraction: number, label?: string) => void;
-  /** Called when the user clicks the "问 agent" button on a selection. */
+  /** Called when the user clicks the ask-agent button on a selection. */
   onSelectionCapture?: (capture: SelectionCapture) => void;
   /** Last reading fraction to restore (0-1), from library persistence. */
   initialFraction?: number;
@@ -119,6 +120,7 @@ interface ReaderViewProps {
 
 export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
   function ReaderView({ fileData, onRelocate, onSelectionCapture, initialFraction, onBookReady }, ref) {
+    const { t } = useT();
     const containerRef = useRef<HTMLDivElement>(null);
     const viewRef = useRef<HTMLElement | null>(null);
     const currentChapterRef = useRef(0);
@@ -375,7 +377,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
               top: `${selectionPos.y - 8}px`,
             }}
           >
-            问 agent
+            {t("reader.askAgent")}
           </button>
         )}
       </div>

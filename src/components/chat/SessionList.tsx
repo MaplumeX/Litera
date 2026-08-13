@@ -2,6 +2,7 @@ import { Pencil, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { AgentSessionSummary } from "@/types/agent";
+import { useT } from "@/lib/i18n";
 
 interface SessionListProps {
   sessions: AgentSessionSummary[];
@@ -34,16 +35,17 @@ export function SessionList({
   onCancelRename,
   onDeleteSession,
 }: SessionListProps) {
+  const { t } = useT();
   return (
     <div className="absolute inset-x-0 top-[37px] bottom-0 z-10 flex flex-col bg-card">
       <div className="flex items-center justify-between border-b px-3 py-2">
-        <span className="text-sm font-semibold">会话列表</span>
+        <span className="text-sm font-semibold">{t("chat.sessions")}</span>
         <Button
           size="sm"
           variant="ghost"
           className="h-7 px-2 text-xs"
           onClick={onClose}
-          aria-label="关闭"
+          aria-label={t("chat.close")}
         >
           <X />
         </Button>
@@ -57,11 +59,11 @@ export function SessionList({
           disabled={isStreaming}
         >
           <Plus />
-          新建会话
+          {t("chat.newSession")}
         </Button>
         {sessions.length === 0 && (
           <p className="px-2 py-4 text-center text-xs text-muted-foreground">
-            暂无会话，可直接提问或新建会话。
+            {t("chat.noSessions")}
           </p>
         )}
         {sessions.map((session) => (
@@ -92,13 +94,13 @@ export function SessionList({
                   className="px-1 text-xs text-primary hover:underline"
                   onClick={() => onSaveRename(session.id)}
                 >
-                  保存
+                  {t("common.save")}
                 </button>
                 <button
                   className="px-1 text-xs text-muted-foreground hover:underline"
                   onClick={onCancelRename}
                 >
-                  取消
+                  {t("common.cancel")}
                 </button>
               </>
             ) : (
@@ -118,7 +120,7 @@ export function SessionList({
                   className="px-1 text-muted-foreground opacity-0 hover:text-primary disabled:opacity-30 group-hover:opacity-100"
                   onClick={() => onStartRename(session.id, session.title)}
                   disabled={isStreaming}
-                  aria-label="重命名"
+                  aria-label={t("chat.rename")}
                 >
                   <Pencil className="h-3.5 w-3.5" />
                 </button>
@@ -127,7 +129,7 @@ export function SessionList({
                   onClick={() => onDeleteSession(session.id)}
                   disabled={isStreaming}
                 >
-                  删除
+                  {t("common.delete")}
                 </button>
               </>
             )}

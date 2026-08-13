@@ -3,6 +3,7 @@ import type { BookRecord, ImportBookResult } from "@/types/library";
 import { extractEpubMetadata } from "@/lib/book-utils";
 import { invokeErrorMessage } from "@/lib/app-error";
 import { epubBytesFromIpc } from "@/lib/ipc-bytes";
+import { t } from "@/lib/i18n";
 
 export interface ImportNotice {
   kind: "error" | "info";
@@ -54,7 +55,7 @@ async function discardStagedImport(
     console.error("discard_import error:", err);
     onNotice({
       kind: "error",
-      message: `取消覆盖失败：${invokeErrorMessage(err)}`,
+      message: t("library.discardOverwriteFailed", { message: invokeErrorMessage(err) }),
     });
   }
 }
@@ -68,17 +69,17 @@ export async function processImportResults(
     if (result.status === "duplicate") {
       deps.onNotice({
         kind: "info",
-        message: `《${result.title}》已在书库`,
-        action: { label: "打开", bookId: result.bookId },
+        message: t("library.alreadyInLibrary", { title: result.title }),
+        action: { label: t("library.open"), bookId: result.bookId },
       });
       successfulBookIds.push(result.bookId);
       continue;
     }
     if (result.status === "overwrite") {
       const confirmed = await deps.askConfirm({
-        title: `覆盖「${result.title}」？`,
-        description: "将用新文件替换这本书。阅读进度、设置和对话会保留。",
-        confirmLabel: "覆盖",
+        title: t("library.overwriteTitle", { title: result.title }),
+        description: t("library.overwriteDesc"),
+        confirmLabel: t("library.overwrite"),
       });
       if (!confirmed) {
         await discardStagedImport(result, deps.onNotice);
@@ -92,7 +93,7 @@ export async function processImportResults(
       console.error("import commit error:", err);
       deps.onNotice({
         kind: "error",
-        message: `导入失败：${invokeErrorMessage(err)}`,
+        message: t("library.importFailed", { message: invokeErrorMessage(err) }),
       });
     }
   }
@@ -126,7 +127,7 @@ export async function importAbsolutePaths(
       console.error("import_paths error:", err);
       deps.onNotice({
         kind: "error",
-        message: `导入失败：${invokeErrorMessage(err)}`,
+        message: t("library.importFailed", { message: invokeErrorMessage(err) }),
       });
     }
   }

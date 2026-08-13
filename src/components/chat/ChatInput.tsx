@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { Quote, Send, Square, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useT } from "@/lib/i18n";
 
 export interface PendingSelection {
   text: string;
@@ -33,6 +34,7 @@ export function ChatInput({
   retryHighlight,
   textareaRef,
 }: ChatInputProps) {
+  const { t } = useT();
   const handleKeyDown = (event: React.KeyboardEvent) => {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
@@ -61,12 +63,14 @@ export function ChatInput({
         <div className="mb-1.5 flex items-start gap-1.5 rounded-lg bg-muted/50 px-3 py-1.5 text-xs text-muted-foreground">
           <Quote className="mt-0.5 h-3 w-3 shrink-0" />
           <span className="min-w-0 flex-1">
-            引用选段：&ldquo;{pendingSelection.text.slice(0, 60)}{pendingSelection.text.length > 60 ? "…" : ""}&rdquo;
+            {t("chat.quoteSelection", {
+              text: `${pendingSelection.text.slice(0, 60)}${pendingSelection.text.length > 60 ? "…" : ""}`,
+            })}
           </span>
           <button
             onClick={onClearSelection}
             className="text-muted-foreground transition-colors hover:text-foreground"
-            aria-label="清除引用"
+            aria-label={t("chat.clearQuote")}
           >
             <X className="h-3.5 w-3.5" />
           </button>
@@ -81,16 +85,16 @@ export function ChatInput({
             retryHighlight && "ring-2 ring-primary",
           )}
           rows={1}
-          placeholder="输入问题…"
+          placeholder={t("chat.placeholder")}
           value={value}
           onChange={(event) => onChange(event.target.value)}
           onKeyDown={handleKeyDown}
           disabled={isStreaming || !bookReady}
         />
         <div className="flex items-center justify-between px-2 pb-1.5 pt-0.5">
-          <span className="text-[10px] text-muted-foreground">Enter 发送 · Shift+Enter 换行</span>
+          <span className="text-[10px] text-muted-foreground">{t("chat.inputHint")}</span>
           {isStreaming ? (
-            <Button size="icon-sm" onClick={onAbort} aria-label="停止生成">
+            <Button size="icon-sm" onClick={onAbort} aria-label={t("chat.stop")}>
               <Square />
             </Button>
           ) : (
@@ -98,7 +102,7 @@ export function ChatInput({
               size="icon-sm"
               onClick={onSend}
               disabled={!value.trim() || isStreaming || !bookReady}
-              aria-label="发送"
+              aria-label={t("chat.send")}
             >
               <Send />
             </Button>

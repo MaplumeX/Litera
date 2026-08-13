@@ -14,29 +14,41 @@ import {
   type ReaderStyleState,
   type TypographyKey,
 } from "@/lib/reader-styles";
+import { useT, type MessageKey } from "@/lib/i18n";
 
 type SettingsSection = "typography" | "appearance" | "ai";
 
-const SECTIONS: { id: SettingsSection; label: string }[] = [
-  { id: "typography", label: "排版" },
-  { id: "appearance", label: "外观" },
-  { id: "ai", label: "AI" },
+const SECTIONS: { id: SettingsSection; labelKey: MessageKey }[] = [
+  { id: "typography", labelKey: "settings.typography" },
+  { id: "appearance", labelKey: "settings.appearance" },
+  { id: "ai", labelKey: "settings.ai" },
 ];
 
-const THEME_LABELS: Record<string, string> = {
-  light: "白天",
-  dark: "夜间",
-  sepia: "护眼",
+const THEME_LABEL_KEYS: Record<(typeof THEMES)[number], MessageKey> = {
+  light: "settings.theme.light",
+  dark: "settings.theme.dark",
+  sepia: "settings.theme.sepia",
 };
 
-const SLIDER_ROWS: { key: ContinuousKey; label: string }[] = [
-  { key: "fontSize", label: "字体大小" },
-  { key: "lineHeight", label: "行距" },
-  { key: "contentWidth", label: "版心宽度" },
-  { key: "pagePadding", label: "左右内边距" },
-  { key: "letterSpacing", label: "字间距" },
-  { key: "paragraphSpacing", label: "段距" },
-  { key: "firstLineIndent", label: "首行缩进" },
+const FONT_LABEL_KEYS: Record<(typeof FONT_FAMILIES)[number]["value"], MessageKey> = {
+  serif: "settings.font.serif",
+  "sans-serif": "settings.font.sans",
+  monospace: "settings.font.mono",
+};
+
+const ALIGN_LABEL_KEYS: Record<(typeof TEXT_ALIGNS)[number]["value"], MessageKey> = {
+  start: "settings.align.start",
+  justify: "settings.align.justify",
+};
+
+const SLIDER_ROWS: { key: ContinuousKey; labelKey: MessageKey }[] = [
+  { key: "fontSize", labelKey: "settings.slider.fontSize" },
+  { key: "lineHeight", labelKey: "settings.slider.lineHeight" },
+  { key: "contentWidth", labelKey: "settings.slider.contentWidth" },
+  { key: "pagePadding", labelKey: "settings.slider.pagePadding" },
+  { key: "letterSpacing", labelKey: "settings.slider.letterSpacing" },
+  { key: "paragraphSpacing", labelKey: "settings.slider.paragraphSpacing" },
+  { key: "firstLineIndent", labelKey: "settings.slider.firstLineIndent" },
 ];
 
 export interface SettingsPageProps {
@@ -57,7 +69,7 @@ function PresetRow({
   children,
 }: {
   label: string;
-  restore?: { show: boolean; onClick: () => void };
+  restore?: { show: boolean; onClick: () => void; label: string };
   children: ReactNode;
 }) {
   return (
@@ -70,7 +82,7 @@ function PresetRow({
             onClick={restore.onClick}
             className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
           >
-            恢复默认
+            {restore.label}
           </button>
         )}
       </div>
@@ -89,7 +101,7 @@ function SliderRow({
   label: string;
   field: ContinuousKey;
   value: number;
-  restore?: { show: boolean; onClick: () => void };
+  restore?: { show: boolean; onClick: () => void; label: string };
   onChange: (value: number) => void;
 }) {
   const spec = TYPOGRAPHY_RANGES[field];
@@ -107,7 +119,7 @@ function SliderRow({
               onClick={restore.onClick}
               className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
             >
-              恢复默认
+              {restore.label}
             </button>
           )}
         </div>
@@ -169,13 +181,15 @@ export function SettingsPage({
   theme,
   onThemeChange,
 }: SettingsPageProps) {
+  const { t, locale, setLocale } = useT();
   const [section, setSection] = useState<SettingsSection>("typography");
   const canRestore = (key: TypographyKey) => overriddenKeys.includes(key);
+  const restoreLabel = t("settings.restoreDefault");
 
   return (
     <div className="flex h-full min-h-0 flex-1 bg-background text-foreground">
       <aside className="flex w-48 shrink-0 flex-col border-r">
-        <div className="px-4 py-3 text-sm font-semibold">设置</div>
+        <div className="px-4 py-3 text-sm font-semibold">{t("settings.title")}</div>
         <nav className="flex flex-col gap-1 px-2">
           {SECTIONS.map((item) => (
             <button
@@ -189,7 +203,7 @@ export function SettingsPage({
                   : "hover:bg-accent",
               )}
             >
-              {item.label}
+              {t(item.labelKey)}
             </button>
           ))}
         </nav>
@@ -197,17 +211,17 @@ export function SettingsPage({
 
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex items-center gap-1 border-b px-3 py-2">
-          <Button size="icon-sm" variant="ghost" onClick={onBack} aria-label="返回">
+          <Button size="icon-sm" variant="ghost" onClick={onBack} aria-label={t("settings.back")}>
             <ChevronLeft />
           </Button>
-          <span className="text-sm">返回</span>
+          <span className="text-sm">{t("settings.back")}</span>
         </header>
 
         <div className="flex-1 overflow-y-auto p-6">
           <p className="mb-5 text-sm text-muted-foreground">
             {hasBook
-              ? `正在编辑《${bookTitle || "这本书"}》的排版`
-              : "正在编辑默认排版"}
+              ? t("settings.editingBook", { title: bookTitle || t("settings.thisBook") })
+              : t("settings.editingDefault")}
           </p>
 
           {section === "typography" && (
@@ -215,22 +229,24 @@ export function SettingsPage({
               {SLIDER_ROWS.slice(0, 1).map((row) => (
                 <SliderRow
                   key={row.key}
-                  label={row.label}
+                  label={t(row.labelKey)}
                   field={row.key}
                   value={styleState[row.key]}
                   restore={{
                     show: canRestore(row.key),
                     onClick: () => onRestoreDefault(row.key),
+                    label: restoreLabel,
                   }}
                   onChange={(value) => onTypographyChange(row.key, value)}
                 />
               ))}
 
               <PresetRow
-                label="字体"
+                label={t("settings.font")}
                 restore={{
                   show: canRestore("fontFamily"),
                   onClick: () => onRestoreDefault("fontFamily"),
+                  label: restoreLabel,
                 }}
               >
                 {FONT_FAMILIES.map((fam) => (
@@ -240,7 +256,7 @@ export function SettingsPage({
                     style={{ fontFamily: fam.css }}
                     onClick={() => onTypographyChange("fontFamily", fam.value)}
                   >
-                    {fam.label}
+                    {t(FONT_LABEL_KEYS[fam.value])}
                   </ChoiceButton>
                 ))}
               </PresetRow>
@@ -248,22 +264,24 @@ export function SettingsPage({
               {SLIDER_ROWS.slice(1).map((row) => (
                 <SliderRow
                   key={row.key}
-                  label={row.label}
+                  label={t(row.labelKey)}
                   field={row.key}
                   value={styleState[row.key]}
                   restore={{
                     show: canRestore(row.key),
                     onClick: () => onRestoreDefault(row.key),
+                    label: restoreLabel,
                   }}
                   onChange={(value) => onTypographyChange(row.key, value)}
                 />
               ))}
 
               <PresetRow
-                label="对齐"
+                label={t("settings.align")}
                 restore={{
                   show: canRestore("textAlign"),
                   onClick: () => onRestoreDefault("textAlign"),
+                  label: restoreLabel,
                 }}
               >
                 {TEXT_ALIGNS.map((item) => (
@@ -272,7 +290,7 @@ export function SettingsPage({
                     active={styleState.textAlign === item.value}
                     onClick={() => onTypographyChange("textAlign", item.value)}
                   >
-                    {item.label}
+                    {t(ALIGN_LABEL_KEYS[item.value])}
                   </ChoiceButton>
                 ))}
               </PresetRow>
@@ -281,16 +299,30 @@ export function SettingsPage({
 
           {section === "appearance" && (
             <div className="max-w-md space-y-5">
-              <PresetRow label="主题">
+              <PresetRow label={t("settings.theme")}>
                 {THEMES.map((item) => (
                   <ChoiceButton
                     key={item}
                     active={theme === item}
                     onClick={() => onThemeChange(item)}
                   >
-                    {THEME_LABELS[item]}
+                    {t(THEME_LABEL_KEYS[item])}
                   </ChoiceButton>
                 ))}
+              </PresetRow>
+              <PresetRow label={t("settings.language")}>
+                <ChoiceButton
+                  active={locale === "zh-CN"}
+                  onClick={() => setLocale("zh-CN")}
+                >
+                  中文
+                </ChoiceButton>
+                <ChoiceButton
+                  active={locale === "en"}
+                  onClick={() => setLocale("en")}
+                >
+                  English
+                </ChoiceButton>
               </PresetRow>
             </div>
           )}

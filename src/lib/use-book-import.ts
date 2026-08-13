@@ -8,6 +8,7 @@ import {
   importAbsolutePaths,
   processImportResults,
 } from "@/lib/book-import";
+import { t } from "@/lib/i18n";
 
 export interface BookImportNotice extends ImportNotice {
   id: string;
@@ -70,7 +71,7 @@ export function useBookImport() {
       console.error("import error:", err);
       pushNotice({
         kind: "error",
-        message: `导入失败：${invokeErrorMessage(err)}`,
+        message: t("library.importFailed", { message: invokeErrorMessage(err) }),
       });
       return [];
     } finally {

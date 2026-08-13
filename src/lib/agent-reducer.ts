@@ -6,6 +6,7 @@ import type {
   AgentSnapshot,
   AgentStatus,
 } from "@/types/agent";
+import { t } from "@/lib/i18n";
 
 export interface AgentState {
   version: number;
@@ -179,7 +180,7 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
             error: null,
             sessions: upsertSession(base.sessions, {
               id: event.sessionId,
-              title: "新会话",
+              title: t("chat.newSessionTitle"),
               createdAt: new Date().toISOString(),
               updatedAt: new Date().toISOString(),
             }),

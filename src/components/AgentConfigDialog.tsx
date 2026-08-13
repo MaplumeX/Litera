@@ -7,6 +7,7 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { AgentConfigForm } from "@/components/AgentConfigForm";
+import { useT } from "@/lib/i18n";
 
 interface AgentConfigDialogProps {
   open: boolean;
@@ -14,15 +15,16 @@ interface AgentConfigDialogProps {
 }
 
 export function AgentConfigDialog({ open, onClose }: AgentConfigDialogProps) {
+  const { t } = useT();
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
       <DialogContent
         className={cn("max-h-[85vh] overflow-y-auto", "sm:max-w-md")}
       >
         <DialogHeader>
-          <DialogTitle>LLM 设置</DialogTitle>
+          <DialogTitle>{t("agent.title")}</DialogTitle>
           <DialogDescription className="sr-only">
-            配置 LLM 供应商、API Key 与模型。
+            {t("agent.description")}
           </DialogDescription>
         </DialogHeader>
         <AgentConfigForm active={open} onClose={onClose} />

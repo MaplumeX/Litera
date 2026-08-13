@@ -34,6 +34,7 @@ import { epubBytesFromIpc } from "@/lib/ipc-bytes";
 import { createLatestSerializedTaskController } from "@/lib/latest-serialized-task";
 import { useBookImport } from "@/lib/use-book-import";
 import { useOpenPaths } from "@/lib/use-open-paths";
+import { useT } from "@/lib/i18n";
 
 interface FileData {
   bytes: Uint8Array<ArrayBuffer>;
@@ -48,21 +49,23 @@ function PersistenceErrorBanner({
   message: string | null;
   onDismiss: () => void;
 }) {
+  const { t } = useT();
   if (!message) return null;
   return (
     <div
       role="alert"
       className="flex items-center gap-3 border-b border-destructive/40 bg-destructive/10 px-4 py-2 text-sm text-destructive"
     >
-      <span className="min-w-0 flex-1">阅读状态保存失败：{message}</span>
+      <span className="min-w-0 flex-1">{t("reader.persistFailed", { message })}</span>
       <Button size="sm" variant="ghost" onClick={onDismiss}>
-        关闭
+        {t("common.close")}
       </Button>
     </div>
   );
 }
 
 function App() {
+  const { t } = useT();
   const [view, setView] = useState<"library" | "reader" | "settings">("library");
   const [settingsReturnTo, setSettingsReturnTo] = useState<"library" | "reader">("library");
   const [fileData, setFileData] = useState<FileData | null>(null);
@@ -256,7 +259,7 @@ function App() {
       setView("reader");
     } catch (err) {
       console.error("open_book_bytes error:", err);
-      alert(`打开书籍失败: ${invokeErrorMessage(err)}`);
+      alert(t("reader.openFailed", { message: invokeErrorMessage(err) }));
     } finally {
       if (request.isLatest()) setOpeningBookId(null);
     }
@@ -269,7 +272,7 @@ function App() {
       console.error("open-paths error:", error);
       bookImport.pushNotice({
         kind: "error",
-        message: `打开文件失败：${invokeErrorMessage(error)}`,
+        message: t("reader.openFileFailed", { message: invokeErrorMessage(error) }),
       });
     },
   });
@@ -289,7 +292,7 @@ function App() {
         });
       } catch (error) {
         console.error("close_book error:", error);
-        alert(`关闭阅读助手失败: ${invokeErrorMessage(error)}`);
+        alert(t("reader.closeAgentFailed", { message: invokeErrorMessage(error) }));
         return;
       }
     }
@@ -497,7 +500,7 @@ function App() {
           size="icon-sm"
           variant="ghost"
           onClick={() => void handleBackToLibrary()}
-          aria-label="返回书库"
+          aria-label={t("reader.backToLibrary")}
         >
           <ChevronLeft />
         </Button>
@@ -507,7 +510,7 @@ function App() {
             size="icon-sm"
             variant={tocVisible ? "secondary" : "ghost"}
             onClick={() => setTocVisible((v) => !v)}
-            aria-label="目录"
+            aria-label={t("reader.toc")}
           >
             <List />
           </Button>
@@ -516,7 +519,7 @@ function App() {
             size="icon-sm"
             variant="ghost"
             onClick={() => openSettings("reader")}
-            aria-label="字体与主题"
+            aria-label={t("reader.fontAndTheme")}
           >
             <Type />
           </Button>
@@ -524,7 +527,7 @@ function App() {
             size="icon-sm"
             variant={chatCollapsed ? "ghost" : "secondary"}
             onClick={() => setChatCollapsed((v) => !v)}
-            aria-label={chatCollapsed ? "显示对话" : "隐藏对话"}
+            aria-label={chatCollapsed ? t("reader.showChat") : t("reader.hideChat")}
           >
             <MessageSquare />
           </Button>
@@ -555,7 +558,7 @@ function App() {
                   <button
                     type="button"
                     className="absolute inset-0 z-20 bg-background/50"
-                    aria-label="关闭目录"
+                    aria-label={t("reader.closeToc")}
                     onClick={() => setTocVisible(false)}
                   />
                   <div className="absolute inset-y-0 left-0 z-30 w-56 overflow-hidden border-r bg-background shadow-md">

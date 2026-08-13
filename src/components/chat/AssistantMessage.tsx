@@ -5,6 +5,7 @@ import { Bot, Check, Copy } from "lucide-react";
 import type { AgentMessage } from "@/types/agent";
 import { ToolCallCard } from "./ToolCallCard";
 import { TypingIndicator } from "./TypingIndicator";
+import { useT } from "@/lib/i18n";
 
 const markdownComponents: Components = {
   a: ({ href, children }) => (
@@ -15,6 +16,7 @@ const markdownComponents: Components = {
 };
 
 function CopyButton({ text }: { text: string }) {
+  const { t } = useT();
   const [copied, setCopied] = useState(false);
   return (
     <button
@@ -26,7 +28,7 @@ function CopyButton({ text }: { text: string }) {
         });
       }}
       className="text-muted-foreground/50 transition-colors hover:text-muted-foreground"
-      aria-label="复制"
+      aria-label={t("chat.copy")}
     >
       {copied ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
     </button>

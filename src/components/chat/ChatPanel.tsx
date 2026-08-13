@@ -17,6 +17,7 @@ import { ChatInput } from "./ChatInput";
 import { EmptyState } from "./EmptyState";
 import { SessionList } from "./SessionList";
 import { TypingIndicator } from "./TypingIndicator";
+import { useT } from "@/lib/i18n";
 
 export interface ChatPanelHandle {
   fillInput: (text: string, chapterIndex: number) => void;
@@ -29,6 +30,7 @@ interface ChatPanelProps {
 
 export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
   function ChatPanel({ currentChapterIndex, bookId }, ref) {
+    const { t } = useT();
     const bridge = useAgentBridge(bookId);
     const { state } = bridge;
     const {
@@ -244,24 +246,24 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
               variant="ghost"
               onClick={() => setShowSessionList((value) => !value)}
               disabled={!bookId}
-              aria-label="会话列表"
+              aria-label={t("chat.sessions")}
             >
               <MessagesSquare />
             </Button>
-            <h2 className="text-sm font-semibold">阅读助手</h2>
+            <h2 className="text-sm font-semibold">{t("chat.title")}</h2>
           </div>
           {state.status === "restarting" ? (
-            <span className="text-xs text-amber-600">正在恢复…</span>
+            <span className="text-xs text-amber-600">{t("chat.restoring")}</span>
           ) : state.status === "unavailable" ? (
             <div className="flex items-center gap-2">
-              <Button size="icon-xs" variant="outline" onClick={() => void handleRestart()} aria-label="重启助手">
+              <Button size="icon-xs" variant="outline" onClick={() => void handleRestart()} aria-label={t("chat.restart")}>
                 <RefreshCw />
               </Button>
               <Button
                 size="icon-xs"
                 variant="ghost"
                 onClick={() => setShowConfig(true)}
-                aria-label="设置"
+                aria-label={t("chat.settings")}
               >
                 <Settings />
               </Button>
@@ -269,13 +271,13 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
           ) : (
             <div className="flex items-center gap-2">
               <span className="text-[10px] text-muted-foreground">
-                {bookReady ? "已就绪" : "等待书籍…"}
+                {bookReady ? t("chat.ready") : t("chat.waitingBook")}
               </span>
               <Button
                 size="icon-xs"
                 variant="ghost"
                 onClick={() => setShowConfig(true)}
-                aria-label="设置"
+                aria-label={t("chat.settings")}
               >
                 <Settings />
               </Button>
@@ -322,14 +324,14 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
             <div className="flex items-start gap-2 rounded border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-400">
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
               <div className="flex-1">
-                未配置 LLM provider，请先打开设置。
+                {t("chat.unconfigured")}
                 <Button
                   size="sm"
                   variant="outline"
                   className="ml-2 h-6 text-xs"
                   onClick={() => setShowConfig(true)}
                 >
-                  打开设置
+                  {t("chat.openSettings")}
                 </Button>
               </div>
             </div>

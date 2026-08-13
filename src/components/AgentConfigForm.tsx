@@ -20,6 +20,7 @@ import {
   isCustomProviderId,
   type CustomProviderEntry,
 } from "@/types/agent-config";
+import { useT } from "@/lib/i18n";
 
 const ADD_CUSTOM_VALUE = "__add_custom__";
 
@@ -29,6 +30,7 @@ export interface AgentConfigFormProps {
 }
 
 export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps) {
+  const { t } = useT();
   const {
     snapshot,
     load,
@@ -86,11 +88,11 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
   const isCustom = selectedCustom !== null;
   const hasExistingKey = snapshot?.hasApiKey ?? false;
   const apiKeyPlaceholder = hasExistingKey
-    ? "已配置（重新输入以修改）"
-    : "输入 API Key";
+    ? t("agent.apiKeyConfigured")
+    : t("agent.enterApiKey");
   const modelPlaceholder = isCustom
     ? selectedCustom?.model ?? ""
-    : findProviderExample(provider) || "输入 model id";
+    : findProviderExample(provider) || t("agent.enterModelId");
 
   const handleProviderChange = (value: string) => {
     setSuccessMessage(null);
@@ -118,7 +120,7 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
     setSuccessMessage(null);
     try {
       await save(provider, apiKey, model);
-      setSuccessMessage("保存成功");
+      setSuccessMessage(t("agent.saved"));
       if (onClose) {
         setTimeout(() => onClose(), 800);
       }
@@ -131,7 +133,7 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
     setSuccessMessage(null);
     try {
       await switchProvider(cp.id, cp.model);
-      setSuccessMessage("已切换，重启 sidecar 生效");
+      setSuccessMessage(t("agent.switched"));
       setTimeout(() => setSuccessMessage(null), 2000);
     } catch {
       // error state is surfaced from the hook
@@ -160,7 +162,7 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
       );
       setEditingCustom(false);
       setModel(entry.model);
-      setSuccessMessage("已保存，重启 sidecar 生效");
+      setSuccessMessage(t("agent.savedRestart"));
       setTimeout(() => setSuccessMessage(null), 2000);
     } catch {
       // error state is surfaced from the hook
@@ -175,7 +177,7 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
       setProvider(AGENT_PROVIDERS[0].id);
       setModel("");
       setEditingCustom(false);
-      setSuccessMessage("已删除自定义供应商");
+      setSuccessMessage(t("agent.deletedCustom"));
       setTimeout(() => setSuccessMessage(null), 2000);
     } catch {
       // error state is surfaced from the hook
@@ -198,7 +200,7 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
       setProvider(entry.id);
       setModel(entry.model);
       await switchProvider(entry.id, entry.model);
-      setSuccessMessage("已添加并切换，重启 sidecar 生效");
+      setSuccessMessage(t("agent.addedSwitched"));
       setTimeout(() => setSuccessMessage(null), 3000);
     } catch {
       // error state is surfaced from the hook
@@ -208,7 +210,7 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
   return (
     <>
       {loading && (
-        <p className="mb-3 text-xs text-muted-foreground">加载中…</p>
+        <p className="mb-3 text-xs text-muted-foreground">{t("agent.loading")}</p>
       )}
 
       <div className="space-y-4">
@@ -222,7 +224,7 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
             disabled={saving}
           >
             <SelectTrigger className="w-full" disabled={saving}>
-              <SelectValue placeholder="选择供应商" />
+              <SelectValue placeholder={t("agent.selectProvider")} />
             </SelectTrigger>
             <SelectContent>
               <SelectGroup>
@@ -236,10 +238,10 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
                 <>
                   <SelectSeparator />
                   <SelectGroup>
-                    <SelectLabel>自定义</SelectLabel>
+                    <SelectLabel>{t("agent.custom")}</SelectLabel>
                     {snapshot.customProviders.map((p) => (
                       <SelectItem key={p.id} value={p.id}>
-                        {p.name} (自定义)
+                        {t("agent.customSuffix", { name: p.name })}
                       </SelectItem>
                     ))}
                   </SelectGroup>
@@ -247,7 +249,7 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
               )}
               <SelectSeparator />
               <SelectItem value={ADD_CUSTOM_VALUE}>
-                ＋ 添加自定义供应商…
+                {t("agent.addCustom")}
               </SelectItem>
             </SelectContent>
           </Select>
@@ -255,44 +257,44 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
 
         {showAddForm && (
           <div className="space-y-3 rounded border border-border bg-muted/30 p-3">
-            <p className="text-xs font-medium text-muted-foreground">添加自定义 OpenAI 兼容供应商</p>
+            <p className="text-xs font-medium text-muted-foreground">{t("agent.addCustomTitle")}</p>
             <div>
-              <Label className="mb-1 block text-xs text-muted-foreground">名称</Label>
+              <Label className="mb-1 block text-xs text-muted-foreground">{t("agent.name")}</Label>
               <Input
                 type="text"
                 value={newName}
                 onChange={(e) => setNewName(e.target.value)}
-                placeholder="如：本地 Ollama"
+                placeholder={t("agent.namePlaceholder")}
                 className="w-full"
               />
             </div>
             <div>
-              <Label className="mb-1 block text-xs text-muted-foreground">Base URL</Label>
+              <Label className="mb-1 block text-xs text-muted-foreground">{t("agent.baseUrl")}</Label>
               <Input
                 type="text"
                 value={newBaseUrl}
                 onChange={(e) => setNewBaseUrl(e.target.value)}
-                placeholder="如：http://localhost:11434/v1"
+                placeholder={t("agent.baseUrlPlaceholder")}
                 className="w-full"
               />
             </div>
             <div>
-              <Label className="mb-1 block text-xs text-muted-foreground">API Key</Label>
+              <Label className="mb-1 block text-xs text-muted-foreground">{t("agent.apiKey")}</Label>
               <Input
                 type="password"
                 value={newApiKey}
                 onChange={(e) => setNewApiKey(e.target.value)}
-                placeholder={isLocalBaseUrl(newBaseUrl) ? "本地服务填任意占位值" : "输入 API Key"}
+                placeholder={isLocalBaseUrl(newBaseUrl) ? t("agent.localApiKeyHint") : t("agent.enterApiKey")}
                 className="w-full"
               />
             </div>
             <div>
-              <Label className="mb-1 block text-xs text-muted-foreground">Model</Label>
+              <Label className="mb-1 block text-xs text-muted-foreground">{t("agent.model")}</Label>
               <Input
                 type="text"
                 value={newModel}
                 onChange={(e) => setNewModel(e.target.value)}
-                placeholder="如：llama-3.1"
+                placeholder={t("agent.modelPlaceholder")}
                 className="w-full"
               />
             </div>
@@ -303,14 +305,14 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
                 onClick={() => setShowAddForm(false)}
                 disabled={saving}
               >
-                取消
+                {t("common.cancel")}
               </Button>
               <Button
                 size="sm"
                 onClick={() => void handleAddCustom()}
                 disabled={saving || !newName || !newBaseUrl || !newApiKey || !newModel}
               >
-                {saving ? "添加中…" : "添加"}
+                {saving ? t("agent.adding") : t("agent.add")}
               </Button>
             </div>
           </div>
@@ -327,7 +329,7 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
                 Model: <span className="font-mono">{selectedCustom.model}</span>
               </div>
               <div className="text-xs text-muted-foreground">
-                API Key: {selectedCustom.hasApiKey ? "已配置" : "未配置"}
+                {t("agent.apiKey")}: {selectedCustom.hasApiKey ? t("agent.configured") : t("agent.notConfigured")}
               </div>
             </div>
             <div className="flex gap-2">
@@ -337,17 +339,17 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
                 onClick={startEdit}
                 disabled={saving}
               >
-                编辑
+                {t("agent.edit")}
               </Button>
               <Button
                 size="sm"
                 variant="outline"
                 onClick={() => void handleDelete()}
                 disabled={saving}
-                aria-label="删除自定义供应商"
+                aria-label={t("agent.deleteCustom")}
               >
                 <Trash2 className="h-4 w-4 mr-1" />
-                删除
+                {t("common.delete")}
               </Button>
             </div>
           </div>
@@ -355,50 +357,50 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
 
         {isCustom && !showAddForm && editingCustom && selectedCustom && (
           <div className="space-y-3 rounded border border-border bg-muted/30 p-3">
-            <p className="text-xs font-medium text-muted-foreground">编辑自定义供应商</p>
+            <p className="text-xs font-medium text-muted-foreground">{t("agent.editCustomTitle")}</p>
             <div>
-              <Label className="mb-1 block text-xs text-muted-foreground">名称</Label>
+              <Label className="mb-1 block text-xs text-muted-foreground">{t("agent.name")}</Label>
               <Input
                 type="text"
                 value={editName}
                 onChange={(e) => setEditName(e.target.value)}
-                placeholder="如：本地 Ollama"
+                placeholder={t("agent.namePlaceholder")}
                 className="w-full"
               />
             </div>
             <div>
-              <Label className="mb-1 block text-xs text-muted-foreground">Base URL</Label>
+              <Label className="mb-1 block text-xs text-muted-foreground">{t("agent.baseUrl")}</Label>
               <Input
                 type="text"
                 value={editBaseUrl}
                 onChange={(e) => setEditBaseUrl(e.target.value)}
-                placeholder="如：http://localhost:11434/v1"
+                placeholder={t("agent.baseUrlPlaceholder")}
                 className="w-full"
               />
             </div>
             <div>
-              <Label className="mb-1 block text-xs text-muted-foreground">API Key</Label>
+              <Label className="mb-1 block text-xs text-muted-foreground">{t("agent.apiKey")}</Label>
               <Input
                 type="password"
                 value={editApiKey}
                 onChange={(e) => setEditApiKey(e.target.value)}
                 placeholder={
                   selectedCustom.hasApiKey
-                    ? "已配置，留空保持不变"
+                    ? t("agent.apiKeyKeep")
                     : isLocalBaseUrl(editBaseUrl)
-                      ? "本地服务填任意占位值"
-                      : "输入 API Key"
+                      ? t("agent.localApiKeyHint")
+                      : t("agent.enterApiKey")
                 }
                 className="w-full"
               />
             </div>
             <div>
-              <Label className="mb-1 block text-xs text-muted-foreground">Model</Label>
+              <Label className="mb-1 block text-xs text-muted-foreground">{t("agent.model")}</Label>
               <Input
                 type="text"
                 value={editModel}
                 onChange={(e) => setEditModel(e.target.value)}
-                placeholder="如：llama-3.1"
+                placeholder={t("agent.modelPlaceholder")}
                 className="w-full"
               />
             </div>
@@ -409,14 +411,14 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
                 onClick={() => setEditingCustom(false)}
                 disabled={saving}
               >
-                取消
+                {t("common.cancel")}
               </Button>
               <Button
                 size="sm"
                 onClick={() => void handleEditSave()}
                 disabled={saving || !editName || !editBaseUrl || !editModel}
               >
-                {saving ? "保存中…" : "保存"}
+                {saving ? t("agent.saving") : t("agent.save")}
               </Button>
             </div>
           </div>
@@ -437,7 +439,7 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
               />
               {hasExistingKey && !apiKey && (
                 <p className="mt-1 text-xs text-muted-foreground">
-                  已保存 API Key，重新输入可替换。
+                  {t("agent.apiKeySavedHint")}
                 </p>
               )}
             </div>
@@ -473,7 +475,7 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
         <div className="mt-5 flex justify-end gap-2">
           {onClose && (
             <Button size="sm" variant="outline" onClick={onClose} disabled={saving}>
-              取消
+              {t("common.cancel")}
             </Button>
           )}
           <Button
@@ -481,7 +483,7 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
             onClick={() => void handleSave()}
             disabled={saving || !provider || !model || (!apiKey && !hasExistingKey)}
           >
-            {saving ? "保存中…" : "保存"}
+            {saving ? t("agent.saving") : t("agent.save")}
           </Button>
         </div>
       )}
@@ -489,7 +491,7 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
       {isCustom && !showAddForm && !editingCustom && onClose && (
         <div className="mt-5 flex justify-end gap-2">
           <Button size="sm" variant="outline" onClick={onClose} disabled={saving}>
-            关闭
+            {t("common.close")}
           </Button>
         </div>
       )}

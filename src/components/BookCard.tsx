@@ -3,6 +3,7 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import { Check } from "lucide-react";
 import type { BookRecord } from "@/types/library";
 import { cn } from "@/lib/utils";
+import { useT } from "@/lib/i18n";
 
 interface BookCardProps {
   book: BookRecord;
@@ -27,6 +28,7 @@ export function BookCard({
   onToggleSelect,
   openDisabled = false,
 }: BookCardProps) {
+  const { t } = useT();
   const [imgError, setImgError] = useState(false);
 
   const coverSrc = book.coverPath ? convertFileSrc(book.coverPath) : null;
@@ -83,7 +85,7 @@ export function BookCard({
         )}
         {opening && !selectMode && (
           <span className="absolute inset-x-0 bottom-0 bg-background/90 px-2 py-1 text-xs font-medium">
-            正在打开…
+            {t("library.opening")}
           </span>
         )}
         {selectMode && (
@@ -109,7 +111,7 @@ export function BookCard({
             onDelete(book.id);
           }}
           disabled={deleteDisabled}
-          title="删除"
+          title={t("common.delete")}
         >
           ✕
         </button>

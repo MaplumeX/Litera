@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import type { ConfirmRequest } from "@/lib/book-import";
 import type { BookImportNotice } from "@/lib/use-book-import";
+import { useT } from "@/lib/i18n";
 
 export function BookImportNotices({
   notices,
@@ -23,6 +24,7 @@ export function BookImportNotices({
   onOpenBook?: (bookId: string) => void | Promise<void>;
   actionDisabled?: boolean;
 }) {
+  const { t } = useT();
   return (
     <>
       {notices.map((notice) => (
@@ -54,7 +56,7 @@ export function BookImportNotices({
             variant="ghost"
             onClick={() => dismissNotice(notice.id)}
           >
-            关闭
+            {t("common.close")}
           </Button>
         </div>
       ))}
@@ -71,6 +73,7 @@ export function BookImportConfirmDialog({
   confirmRequest: ConfirmRequest | null;
   settleConfirm: (value: boolean) => void;
 }) {
+  const { t } = useT();
   return (
     <AlertDialog
       open={confirmOpen}
@@ -87,13 +90,13 @@ export function BookImportConfirmDialog({
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel onClick={() => settleConfirm(false)}>
-            取消
+            {t("common.cancel")}
           </AlertDialogCancel>
           <AlertDialogAction
             variant={confirmRequest?.destructive ? "destructive" : "default"}
             onClick={() => settleConfirm(true)}
           >
-            {confirmRequest?.confirmLabel ?? "确定"}
+            {confirmRequest?.confirmLabel ?? t("common.confirm")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

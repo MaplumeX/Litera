@@ -1,6 +1,7 @@
 import type { KeyboardEvent } from "react";
 import { Check, Pencil, Quote, X } from "lucide-react";
 import type { AgentMessage } from "@/types/agent";
+import { useT } from "@/lib/i18n";
 
 interface MessageBubbleProps {
   message: AgentMessage;
@@ -23,6 +24,7 @@ export function MessageBubble({
   onCancel,
   editDisabled,
 }: MessageBubbleProps) {
+  const { t } = useT();
   const canSave = draft.trim().length > 0;
 
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -61,7 +63,7 @@ export function MessageBubble({
               type="button"
               onClick={onCancel}
               className="text-muted-foreground/50 transition-colors hover:text-muted-foreground"
-              aria-label="取消"
+              aria-label={t("common.cancel")}
             >
               <X className="h-3.5 w-3.5" />
             </button>
@@ -70,7 +72,7 @@ export function MessageBubble({
               onClick={onSave}
               disabled={!canSave}
               className="text-muted-foreground/50 transition-colors hover:text-muted-foreground disabled:pointer-events-none disabled:opacity-30"
-              aria-label="保存"
+              aria-label={t("common.save")}
             >
               <Check className="h-3.5 w-3.5" />
             </button>
@@ -81,7 +83,7 @@ export function MessageBubble({
             onClick={onStartEdit}
             disabled={editDisabled}
             className="text-muted-foreground/50 transition-colors hover:text-muted-foreground disabled:pointer-events-none disabled:opacity-30"
-            aria-label="编辑"
+            aria-label={t("chat.edit")}
           >
             <Pencil className="h-3.5 w-3.5" />
           </button>

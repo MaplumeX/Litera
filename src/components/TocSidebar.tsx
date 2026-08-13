@@ -1,4 +1,5 @@
 import type { TocItem } from "@/components/ReaderView";
+import { useT } from "@/lib/i18n";
 
 interface TocSidebarProps {
   toc: TocItem[];
@@ -32,12 +33,13 @@ function TocNode({
 }
 
 export function TocSidebar({ toc, onGoTo }: TocSidebarProps) {
+  const { t } = useT();
   return (
     <nav className="flex h-full w-full flex-col overflow-hidden">
-      <div className="border-b px-3 py-2 text-sm font-medium">目录</div>
+      <div className="border-b px-3 py-2 text-sm font-medium">{t("toc.title")}</div>
       <div className="flex-1 overflow-y-auto py-1">
         {toc.length === 0 ? (
-          <div className="px-3 py-2 text-xs text-muted-foreground">无目录</div>
+          <div className="px-3 py-2 text-xs text-muted-foreground">{t("toc.empty")}</div>
         ) : (
           toc.map((item, i) => (
             <TocNode key={i} item={item} depth={0} onGoTo={onGoTo} />
