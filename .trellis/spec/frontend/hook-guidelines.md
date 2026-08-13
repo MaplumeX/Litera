@@ -119,6 +119,8 @@ readerRef.current?.setStyles(css);
 readerRef.current?.goToTocItem(href);
 ```
 
+`ReaderView` also owns click / key / wheel page turning (bound on the host and each chapter iframe). Parents must not attach a second `window` `keydown` handler for `prev` / `next`.
+
 ### Pattern: Tauri event subscription with cleanup
 
 The Agent bridge owns one `agent_event` listener. Registration and snapshot hydration are separated into `registerAgentSubscription` so late `listen()` resolution is testable.

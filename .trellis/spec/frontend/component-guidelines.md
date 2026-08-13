@@ -202,6 +202,23 @@ See `src/lib/book-utils.ts` for the full implementation.
 >
 > **Correct order**: `await view.open(file)` → `await view.init({})` → `await view.goToFraction(frac)`. See `src/components/ReaderView.tsx`.
 
+### Gotcha: chapter iframe events do not reach the parent window
+
+> **Warning**: foliate.js renders each section in a sandboxed iframe. Parent `window` does not receive that iframe's `keydown`, `click`, or `wheel`. A host-only keyboard listener looks fine until the user clicks the text, then arrows stop working.
+>
+> Bind paging on each chapter `doc` from the `foliate-view` `load` CustomEvent (`detail.doc`). Unbind the previous `doc` before binding the next — section changes replace the iframe. Also bind pointer/wheel on the `foliate-view` host so paginator side margins work.
+>
+> `ReaderView` owns all page-turn input. Do not add a second `window` `keydown` listener in `App.tsx`.
+>
+> Spatial input (left/right click, arrow keys) uses `goLeft()` / `goRight()` (RTL-aware). Wheel uses reading order: down/right → `next()`, up/left → `prev()`.
+>
+> Do **not**:
+> - cover the iframe with left/right overlay hit-boxes (blocks text selection)
+> - set `flow="scrolled"` just to get native wheel scrolling (changes the reading model)
+> - edit `src/foliate-js/` (git submodule)
+
+Helpers live in `src/lib/reader-paging.ts`. Implementation: `src/components/ReaderView.tsx`.
+
 ### Display app-data images via convertFileSrc
 
 Images stored in Tauri's app data directory cannot be loaded via plain `file://` URLs (CSP blocks them). Use Tauri's asset protocol:
