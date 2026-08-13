@@ -664,7 +664,70 @@ Aligned get_toc, read_chapter, and search_in_book with ReadAware contracts: chap
 [OK] **Completed**
 
 
-## Session 31: Optimize reading UI layout
+## Session 31: Associate Litera as an EPUB opener
+
+**Date**: 2026-08-13
+**Task**: Associate Litera as an EPUB opener
+**Branch**: `litera-epub-association-design`
+
+### Summary
+
+Registered .epub file association and wired OS open to import-then-open the last successful book on macOS, Windows, and Linux.
+
+### Main Changes
+
+- Added bundle.fileAssociations, a drained OS-open path queue, and single-instance forwarding
+- App imports system-opened EPUBs and opens the last success; picker/drag-drop still import only
+- Recorded OS EPUB open contracts in backend/frontend specs
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c19294a` | (see git log) |
+| `03967af` | (see git log) |
+| `8032585` | (see git log) |
+
+### Testing
+
+- [OK] npx vitest run: 58 passed
+- [OK] cargo test in src-tauri: 92 passed
+- [OK] npx tsc --noEmit: passed
+- [OK] Not verified: packaged macOS open -a / Windows Explorer / Linux file manager association
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Verify packaged Open With on macOS; Windows/Linux association when those machines are available
+
+
+## Session 32: Restore desktop reader page turning
+
+**Date**: 2026-08-13
+**Task**: Restore desktop reader page turning
+**Branch**: `fix/fanye-wufafa`
+
+### Summary
+
+Restored desktop page turning after footer buttons were removed: left/right third click, arrow keys (including after focusing the chapter iframe), and trackpad/wheel one page per gesture. ReaderView owns all paging input; App no longer listens on window. Recorded the foliate iframe event model in frontend specs. Tests 56 passed, build green. Live UI not clicked.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d3daa9e` | (see git log) |
+| `60802d5` | (see git log) |
+| `730eb3c` | (see git log) |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 33: Optimize reading UI layout
 
 **Date**: 2026-08-13
 **Task**: Optimize reading UI layout

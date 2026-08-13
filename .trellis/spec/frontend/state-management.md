@@ -43,6 +43,7 @@ These are the closest thing to "global state". They're passed down as props:
 Each component owns its own UI state:
 - `ChatPanel`: transient `input`, `pendingSelection`, `submitting`, `invokeError`, `showSessionList`, and `showConfig` (LLM settings dialog only); Agent messages/sessions/status live in `AgentState`
 - `LibraryView`: `books`, `search`, `importing`, selection-mode ids, overwrite/delete dialog state, import banners. Selection mode is local UI state and is not persisted. `list_books` already returns recency order — do not re-sort in React.
+- OS-open notices / overwrite confirm live on `App`'s `useBookImport`, because `LibraryView` unmounts in the reader. Picker / drag-drop keep a second `useBookImport` on `LibraryView` and still do not auto-open.
 - `ReaderView`: `selectionPos` (transient selection button position)
 
 `App.settingsOpen` owns `SettingsDialog` (library gear + reader Aa). Do not lift ChatPanel LLM settings into that flag.

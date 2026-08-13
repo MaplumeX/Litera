@@ -10,7 +10,8 @@
 src-tauri/
 ├── src/
 │   ├── main.rs            # Entry point (calls lib::run())
-│   └── lib.rs              # Tauri builder, commands, sidecar management
+│   ├── lib.rs              # Tauri builder, command registration, sidecar + OS-open wiring
+│   └── open_paths.rs       # argv / Opened / single-instance queue + take command
 ├── binaries/               # target-triple sidecar executables (gitignored)
 ├── capabilities/
 │   └── default.json        # Tauri 2 permissions

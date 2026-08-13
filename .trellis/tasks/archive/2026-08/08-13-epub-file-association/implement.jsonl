@@ -1,0 +1,10 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/backend/tauri-commands.md", "reason": "Reuse import_paths / open_book_bytes contracts; do not invent a second import path"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "OS-open failures must stay structured AppError and visible in UI"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "New Rust module placement and lib.rs wiring conventions"}
+{"file": ".trellis/spec/frontend/hook-guidelines.md", "reason": "listen() disposed-flag lifecycle and latest-serialized open"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "App owns root view; LibraryView unmounts in reader"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "Rust↔TS command/event contracts stay typed"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "OS → Rust queue → App import → open_book_bytes span three layers"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Extract import/overwrite flow instead of copying LibraryView"}
+{"file": ".trellis/tasks/08-13-epub-file-association/research/tauri-file-association.md", "reason": "Tauri fileAssociations, Opened, single-instance constraints"}

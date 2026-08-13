@@ -7,10 +7,76 @@ import {
   useState,
 } from "react";
 import { cn } from "@/lib/utils";
+import {
+  consumeWheelDelta,
+  hitFromClientX,
+  shouldIgnorePagingTarget,
+  type WheelPagingState,
+} from "@/lib/reader-paging";
 
 // foliate.js view.js defines the <foliate-view> custom element.
 // Importing the module registers it with the customElements registry.
 import "../foliate-js/view.js";
+
+const CLICK_SLOP_PX = 5;
+
+function hasHrefTarget(target: EventTarget | null): boolean {
+  if (target == null || typeof target !== "object") return false;
+  const node = target as {
+    nodeType?: number;
+    parentElement?: EventTarget | null;
+    closest?: (selector: string) => unknown;
+  };
+  if (node.nodeType === 3) return hasHrefTarget(node.parentElement ?? null);
+  return Boolean(node.closest?.("a[href]"));
+}
+
+function bindPointerPaging(
+  target: EventTarget,
+  getX: (event: PointerEvent) => number,
+  getWidth: () => number,
+  getSelection: () => Selection | null,
+  pageLeft: () => void,
+  pageRight: () => void,
+): () => void {
+  let startX = 0;
+  let startY = 0;
+  let armed = false;
+  let hadSelection = false;
+
+  const onDown = (event: Event) => {
+    const pe = event as PointerEvent;
+    if (pe.button !== 0) return;
+    startX = pe.clientX;
+    startY = pe.clientY;
+    armed = true;
+    const sel = getSelection();
+    hadSelection = Boolean(sel && !sel.isCollapsed);
+  };
+
+  const onUp = (event: Event) => {
+    if (!armed) return;
+    armed = false;
+    const pe = event as PointerEvent;
+    if (pe.button !== 0) return;
+    if (Math.hypot(pe.clientX - startX, pe.clientY - startY) >= CLICK_SLOP_PX) return;
+    if (hasHrefTarget(pe.target)) return;
+    // pointerdown typically collapses an existing range; don't page on that click.
+    if (hadSelection) return;
+    const sel = getSelection();
+    if (sel && !sel.isCollapsed) return;
+    const zone = hitFromClientX(getX(pe), getWidth());
+    if (zone === "left") pageLeft();
+    else if (zone === "right") pageRight();
+  };
+
+  target.addEventListener("pointerdown", onDown);
+  target.addEventListener("pointerup", onUp);
+  return () => {
+    target.removeEventListener("pointerdown", onDown);
+    target.removeEventListener("pointerup", onUp);
+  };
+}
 
 interface RelocateDetail {
   fraction?: number;
@@ -88,8 +154,98 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       };
       el.addEventListener("relocate", handleRelocate as EventListener);
 
+      type FoliatePager = {
+        goLeft?: () => void | Promise<void>;
+        goRight?: () => void | Promise<void>;
+        prev?: () => void | Promise<void>;
+        next?: () => void | Promise<void>;
+      };
+      const pager = () => el as unknown as FoliatePager;
+      const pageLeft = () => {
+        const view = pager();
+        if (view.goLeft) void view.goLeft();
+        else void view.prev?.();
+      };
+      const pageRight = () => {
+        const view = pager();
+        if (view.goRight) void view.goRight();
+        else void view.next?.();
+      };
+      const pagePrev = () => {
+        void pager().prev?.();
+      };
+      const pageNext = () => {
+        void pager().next?.();
+      };
+
+      let wheelState: WheelPagingState = { accumulated: 0, cooldownUntil: 0 };
+      const handleWheel = (e: Event) => {
+        const we = e as WheelEvent;
+        if (we.ctrlKey) return;
+        we.preventDefault();
+        const delta = Math.abs(we.deltaX) > Math.abs(we.deltaY) ? we.deltaX : we.deltaY;
+        const result = consumeWheelDelta(wheelState, delta);
+        wheelState = result.state;
+        if (result.turn === 1) pageNext();
+        else if (result.turn === -1) pagePrev();
+      };
+
+      const handleKeyDown = (e: Event) => {
+        const ke = e as KeyboardEvent;
+        if (ke.defaultPrevented) return;
+        if (ke.altKey || ke.metaKey || ke.ctrlKey || ke.shiftKey) return;
+        if (shouldIgnorePagingTarget(ke.target)) return;
+        if (ke.key === "ArrowLeft") {
+          ke.preventDefault();
+          pageLeft();
+        } else if (ke.key === "ArrowRight") {
+          ke.preventDefault();
+          pageRight();
+        }
+      };
+
+      const unbindHostPointer = bindPointerPaging(
+        el,
+        (ev) => ev.clientX - el.getBoundingClientRect().left,
+        () => el.clientWidth,
+        () => window.getSelection(),
+        pageLeft,
+        pageRight,
+      );
+      el.addEventListener("wheel", handleWheel, { passive: false });
+      window.addEventListener("keydown", handleKeyDown);
+
+      let unbindDoc: (() => void) | undefined;
+      const handleLoad = (e: Event) => {
+        unbindDoc?.();
+        unbindDoc = undefined;
+        const doc = (e as CustomEvent<{ doc?: Document }>).detail?.doc;
+        if (!doc) return;
+        const unbindPointer = bindPointerPaging(
+          doc,
+          (ev) => ev.clientX,
+          () => doc.defaultView?.innerWidth ?? 0,
+          () => doc.getSelection(),
+          pageLeft,
+          pageRight,
+        );
+        doc.addEventListener("keydown", handleKeyDown);
+        doc.addEventListener("wheel", handleWheel, { passive: false });
+        unbindDoc = () => {
+          unbindPointer();
+          doc.removeEventListener("keydown", handleKeyDown);
+          doc.removeEventListener("wheel", handleWheel);
+        };
+      };
+      el.addEventListener("load", handleLoad as EventListener);
+
       return () => {
         el.removeEventListener("relocate", handleRelocate as EventListener);
+        el.removeEventListener("load", handleLoad as EventListener);
+        unbindDoc?.();
+        unbindHostPointer();
+        el.removeEventListener("wheel", handleWheel);
+        window.removeEventListener("keydown", handleKeyDown);
         (el as unknown as { close?: () => void }).close?.();
         el.remove();
         viewRef.current = null;

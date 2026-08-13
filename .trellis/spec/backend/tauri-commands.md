@@ -27,6 +27,10 @@ async fn import_book(app: AppHandle, store: State<'_, LibraryStore>) -> AppResul
 #[tauri::command]
 async fn import_paths(store: State<'_, LibraryStore>, paths: Vec<String>) -> AppResult<Vec<ImportBookResult>>
 
+// Drain OS-open queue filled by argv / RunEvent::Opened / single-instance
+#[tauri::command]
+fn take_pending_open_paths(state: State<'_, OpenedPaths>) -> Vec<String>
+
 // Discard a staged overwrite the user cancelled
 #[tauri::command]
 async fn discard_import(store: State<'_, LibraryStore>, book_id: String, import_id: String) -> AppResult<()>
@@ -143,6 +147,92 @@ interface BookOpenContext {
 **Delete**: after the existing trash + `library.json` commit, `delete_book` removes `sessions/<bookId>/`. Missing session dir is success. If session removal fails after the book record is gone, return `StorageIo` and do not roll the book back.
 
 **Drag-drop paths**: `import_paths` accepts only OS drop / picker-equivalent absolute paths. Reject non-`.epub`, symlinks, and non-regular files. Do not add `dialog` / `fs` / `opener` permissions to the WebView capability.
+
+**OS file open**: system "Open With" / double-click is a third path source. It must reuse `import_paths` after `take_pending_open_paths`. See "Scenario: OS EPUB open" below.
+
+## Scenario: OS EPUB open
+
+### 1. Scope / Trigger
+
+- Trigger: `bundle.fileAssociations` registers `.epub`. Finder / Explorer / the file manager launches Litera or forwards a path to the running instance.
+- Cross-layer: OS → Rust queue → empty `open-paths-available` event → App `take` → `import_paths` → `open_book_bytes`.
+
+### 2. Signatures
+
+```rust
+#[tauri::command]
+fn take_pending_open_paths(state: State<'_, OpenedPaths>) -> Vec<String>
+```
+
+```json
+// tauri.conf.json bundle.fileAssociations
+{ "ext": ["epub"], "mimeType": "application/epub+zip", "name": "EPUB", "role": "Viewer", "rank": "Default" }
+```
+
+Do not set `exportedType`. EPUB is a public type.
+
+### 3. Contracts
+
+- `take_pending_open_paths` **drains** the queue and returns absolute path strings. Empty queue → `[]`, not an error.
+- Event `open-paths-available` has an empty payload. It is a wake-up only; the frontend must `take`, never trust emitted paths.
+- Sources:
+  - macOS: `RunEvent::Opened` `file://` URLs (also iOS/Android if enabled later).
+  - Windows / Linux cold start: `std::env::args()` in `setup`.
+  - Windows / Linux hot start: `tauri-plugin-single-instance` callback `(app, args, cwd)` — first registered plugin, then focus `main`.
+- Parser drops argv[0], `-` flags, non-`.epub`, non-`file` schemes. Relative args join the provided `cwd`.
+- Do not `canonicalize` a symlink: that would turn it into a regular file and skip `import_paths` `InvalidInput`.
+- Queue insert is path-unique. Frontend also ignores a path successfully imported in the last 5s (macOS argv + `Opened` can deliver the same file twice). Failed / cancelled imports clear that recent entry so retry works.
+- After a batch: open the last successful book (`new` committed, `duplicate`, or confirmed `overwrite`). Picker / drag-drop still import without auto-open.
+- App owns the listener. `LibraryView` unmounts in the reader, so OS-open and overwrite confirm cannot live only there.
+
+### 4. Validation & Error Matrix
+
+| Condition | Result |
+|---|---|
+| Empty queue take | `[]` |
+| Flag / argv0 / non-epub / `https:` | Dropped before queue (no banner; association is epub-only) |
+| Symlink or non-regular `.epub` | Queued → `import_paths` → `{ code: "InvalidInput" }` visible |
+| Unreadable `.epub` | `{ code: "StorageIo" }` visible; later files still process |
+| Same path in one queue | Insert once |
+| argv then Opened same path within 5s | Second take ignored after first success |
+| Overwrite cancelled | No library change; recent-path entry cleared; rest of batch continues |
+
+### 5. Good/Base/Bad Cases
+
+- **Good**: cold-start a new `.epub` → imported and reader opens that book.
+- **Base**: app already running → existing window focuses, imports, opens last success; no second process.
+- **Bad**: emit path lists and also leave them in the queue → cold start double-imports and hits overwrite.
+
+### 6. Tests Required
+
+- Rust: `file://` (including percent-encoding), relative + cwd, skip flags/non-epub/other schemes, drop argv0, take drains, symlink not canonicalized, queue unique insert.
+- Frontend: listen then take opens last success; empty take does not open; cancelled overwrite still opens a later success; dispose before listen resolves unlistens; 5s burst of the same path is ignored; failed import allows immediate retry.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```rust
+app.emit("opened", urls); // payload + leftover queue
+path.canonicalize()?;     // follows symlink, bypasses import_paths reject
+```
+
+```ts
+listen("opened", (e) => importPaths(e.payload));
+const again = await invoke("opened_urls"); // same paths twice
+```
+
+#### Correct
+
+```rust
+enqueue_paths(app, parsed); // unique insert, then emit ()
+take_pending_open_paths     // drain
+```
+
+```ts
+listen("open-paths-available", () => drain());
+const paths = await invoke("take_pending_open_paths");
+```
 
 **Serialization boundary**: all commands return serializable `{ code, message }` errors. Frontend cancellation handling checks `code === "Cancelled"`; storage failures must be rendered to the user rather than silently converted to an empty library.
 

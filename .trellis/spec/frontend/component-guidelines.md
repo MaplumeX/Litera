@@ -81,7 +81,7 @@ body:     [TOC overlay]  Reader  |  Chat (collapsed = 0 width, still mounted)
 **Rules**:
 - Reader header title is the book name. Do not put the `Litera` brand in the reader toolbar.
 - Progress is a full-width thin bar under the header, not a `w-24` chip in the icon row.
-- TOC is an absolute left drawer over `ReaderView` (backdrop / Esc / chapter click close). Do not insert a `w-56 shrink-0` column beside the reader.
+- TOC is an absolute left drawer over `ReaderView` (backdrop / Esc / chapter click close). Do not insert a `w-56 shrink-0` column beside the reader. `App` may listen for `Escape` to close TOC; do not handle `ArrowLeft` / `ArrowRight` in `App` (ReaderView owns paging on the chapter iframe).
 - Mount exactly one `ReaderView`. Keep `ChatPanel` mounted when collapsed (`hidden` + panel collapse). Do not branch two copies of `ReaderView`.
 - Chat open size is ~22%. Do not bind `Panel` `defaultSize` / `minSize` to `chatCollapsed` — that re-registers the panel and resets the layout.
 - 「问 agent」 while chat is collapsed: store a pending capture, expand the panel, then `fillInput` after layout. Do not call `fillInput` on a `display:none` panel.
@@ -224,6 +224,23 @@ See `src/lib/book-utils.ts` for the full implementation.
 > **Warning**: `view.init({})` internally calls `next()` to advance to the first content section. If you call `view.goToFraction(frac)` concurrently with `init()`, the two navigations conflict and the position may not restore correctly.
 >
 > **Correct order**: `await view.open(file)` → `await view.init({})` → `await view.goToFraction(frac)`. See `src/components/ReaderView.tsx`.
+
+### Gotcha: chapter iframe events do not reach the parent window
+
+> **Warning**: foliate.js renders each section in a sandboxed iframe. Parent `window` does not receive that iframe's `keydown`, `click`, or `wheel`. A host-only keyboard listener looks fine until the user clicks the text, then arrows stop working.
+>
+> Bind paging on each chapter `doc` from the `foliate-view` `load` CustomEvent (`detail.doc`). Unbind the previous `doc` before binding the next — section changes replace the iframe. Also bind pointer/wheel on the `foliate-view` host so paginator side margins work.
+>
+> `ReaderView` owns all page-turn input. Do not add a second `window` `keydown` listener in `App.tsx`.
+>
+> Spatial input (left/right click, arrow keys) uses `goLeft()` / `goRight()` (RTL-aware). Wheel uses reading order: down/right → `next()`, up/left → `prev()`.
+>
+> Do **not**:
+> - cover the iframe with left/right overlay hit-boxes (blocks text selection)
+> - set `flow="scrolled"` just to get native wheel scrolling (changes the reading model)
+> - edit `src/foliate-js/` (git submodule)
+
+Helpers live in `src/lib/reader-paging.ts`. Implementation: `src/components/ReaderView.tsx`.
 
 ### Display app-data images via convertFileSrc
 

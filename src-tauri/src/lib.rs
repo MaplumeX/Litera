@@ -3,6 +3,7 @@ use tauri::Manager;
 mod agent_config;
 mod error;
 mod library;
+mod open_paths;
 mod preferences;
 mod sidecar;
 mod sidecar_protocol;
@@ -23,33 +24,46 @@ pub(crate) fn notify_sidecar_book_opened(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    #[allow(unused_mut)]
+    let mut builder = tauri::Builder::default();
+    #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
+    {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
+            open_paths::handle_second_instance(app, args, cwd);
+        }));
+    }
+
+    builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
+        .manage(open_paths::OpenedPaths::default())
         .setup(|app| {
             let root_result = app.path().app_data_dir().map_err(|error| {
                 error::AppError::storage_io(format!("Failed to resolve app data dir: {error}"))
             });
             let (library_store, library_ready, preferences_store) = match root_result {
                 Ok(root) => {
-                    let library_result = tauri::async_runtime::block_on(
-                        tauri::async_runtime::spawn_blocking({
+                    let library_result =
+                        tauri::async_runtime::block_on(tauri::async_runtime::spawn_blocking({
                             let root = root.clone();
                             move || LibraryStore::initialize(root)
+                        }))
+                        .map_err(|error| {
+                            error::AppError::storage_io(format!(
+                                "Library initialization worker failed: {error}"
+                            ))
                         })
-                    )
-                    .map_err(|error| {
-                        error::AppError::storage_io(format!(
-                            "Library initialization worker failed: {error}"
-                        ))
-                    })
-                    .and_then(|result| result);
+                        .and_then(|result| result);
                     let preferences_result = PreferencesStore::initialize(root.clone());
                     match library_result {
-                        Ok(store) => (store, true, preferences_result.unwrap_or_else(|error| {
-                            eprintln!("[preferences] Initialization failed: {error}");
-                            PreferencesStore::unavailable()
-                        })),
+                        Ok(store) => (
+                            store,
+                            true,
+                            preferences_result.unwrap_or_else(|error| {
+                                eprintln!("[preferences] Initialization failed: {error}");
+                                PreferencesStore::unavailable()
+                            }),
+                        ),
                         Err(error) => {
                             eprintln!("[library] Initialization failed: {error}");
                             (
@@ -82,6 +96,7 @@ pub fn run() {
                 SidecarSupervisor::unavailable("Library initialization failed")
             };
             app.manage(supervisor);
+            open_paths::enqueue_current_process_args(app.handle());
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -94,6 +109,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             library::import_book,
             library::import_paths,
+            open_paths::take_pending_open_paths,
             library::discard_import,
             library::read_import_bytes,
             library::save_book_metadata,
@@ -123,6 +139,12 @@ pub fn run() {
             preferences::get_preferences,
             preferences::save_preferences,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            #[cfg(any(target_os = "macos", target_os = "ios", target_os = "android"))]
+            if let tauri::RunEvent::Opened { urls } = &event {
+                open_paths::enqueue_opened_urls(app, urls);
+            }
+        });
 }

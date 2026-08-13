@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 31
+- **Total Sessions**: 33
 - **Last Active**: 2026-08-13
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~687 | Active |
+| `journal-1.md` | ~750 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,7 +29,9 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
-| 31 | 2026-08-13 | Optimize reading UI layout | `c3f4832`, `e37c573`, `0e5a6b1` | `feat/reading-ui-layout-optimization` |
+| 33 | 2026-08-13 | Optimize reading UI layout | `c3f4832`, `e37c573`, `0e5a6b1` | `feat/reading-ui-layout-optimization` |
+| 32 | 2026-08-13 | Restore desktop reader page turning | `d3daa9e`, `60802d5`, `730eb3c` | `fix/fanye-wufafa` |
+| 31 | 2026-08-13 | Associate Litera as an EPUB opener | `c19294a`, `03967af`, `8032585` | `litera-epub-association-design` |
 | 30 | 2026-08-13 | Align book tools with ReadAware | `62def2e`, `4510111`, `5268846` | `main` |
 | 29 | 2026-08-13 | Library shelf loop and import-delete UX | `2890f8c`, `bbbf5be`, `99b31ad` | `main` |
 | 28 | 2026-08-13 | Inline-edit chat user messages | `36b8bc7`, `8efae8a`, `bd65c3b` | `main` |

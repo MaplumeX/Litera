@@ -12,6 +12,10 @@ import {
 } from "@/components/ReaderView";
 import { ChatPanel, type ChatPanelHandle } from "@/components/chat/ChatPanel";
 import { LibraryView } from "@/components/LibraryView";
+import {
+  BookImportConfirmDialog,
+  BookImportNotices,
+} from "@/components/BookImportFeedback";
 import { TocSidebar } from "@/components/TocSidebar";
 import { SettingsDialog } from "@/components/SettingsDialog";
 import {
@@ -25,6 +29,8 @@ import { useDebouncedCallback } from "@/lib/use-debounced-callback";
 import { invokeErrorMessage } from "@/lib/app-error";
 import { epubBytesFromIpc } from "@/lib/ipc-bytes";
 import { createLatestSerializedTaskController } from "@/lib/latest-serialized-task";
+import { useBookImport } from "@/lib/use-book-import";
+import { useOpenPaths } from "@/lib/use-open-paths";
 
 interface FileData {
   bytes: Uint8Array<ArrayBuffer>;
@@ -96,6 +102,7 @@ function App() {
     theme: "light",
   });
   const { theme: globalTheme, setTheme: setGlobalTheme, flush: flushPreferences } = usePreferences();
+  const bookImport = useBookImport();
   const readerRef = useRef<ReaderViewHandle>(null);
   const chatRef = useRef<ChatPanelHandle>(null);
   const chatPanelRef = usePanelRef();
@@ -210,9 +217,10 @@ function App() {
     readerRef.current?.setStyles(css);
   }, [styleState]);
 
-  // Keyboard page navigation (reader view only).
+  // Escape closes the TOC overlay. Page turning lives in ReaderView
+  // (chapter iframe + host); do not handle ArrowLeft/ArrowRight here.
   useEffect(() => {
-    if (view !== "reader" || !fileData) return;
+    if (view !== "reader" || !tocVisible) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
       if (
@@ -221,22 +229,14 @@ function App() {
         target.isContentEditable
       )
         return;
-      if (e.key === "Escape" && tocVisible) {
+      if (e.key === "Escape") {
         e.preventDefault();
         setTocVisible(false);
-        return;
-      }
-      if (e.key === "ArrowLeft") {
-        e.preventDefault();
-        void readerRef.current?.prev();
-      } else if (e.key === "ArrowRight") {
-        e.preventDefault();
-        void readerRef.current?.next();
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [view, fileData, tocVisible]);
+  }, [view, tocVisible]);
 
   const handleOpenBook = useCallback(async (bookId: string) => {
     // `open_book_bytes` also switches the sidecar, so it is intentionally
@@ -289,6 +289,18 @@ function App() {
       if (request.isLatest()) setOpeningBookId(null);
     }
   }, [flushReadingState, globalTheme]);
+
+  useOpenPaths({
+    importPaths: bookImport.importFromPaths,
+    openBook: handleOpenBook,
+    onError: (error) => {
+      console.error("open-paths error:", error);
+      bookImport.pushNotice({
+        kind: "error",
+        message: `打开文件失败：${invokeErrorMessage(error)}`,
+      });
+    },
+  });
 
   const handleBackToLibrary = useCallback(async () => {
     try {
@@ -407,6 +419,12 @@ function App() {
           message={persistenceError}
           onDismiss={() => setPersistenceError(null)}
         />
+        <BookImportNotices
+          notices={bookImport.notices}
+          dismissNotice={bookImport.dismissNotice}
+          onOpenBook={handleOpenBook}
+          actionDisabled={bookImport.importing}
+        />
         <LibraryView
           onOpenBook={handleOpenBook}
           openingBookId={openingBookId}
@@ -421,6 +439,11 @@ function App() {
           onThemeChange={handleGlobalThemeChange}
           hasBook={false}
         />
+        <BookImportConfirmDialog
+          confirmOpen={bookImport.confirmOpen}
+          confirmRequest={bookImport.confirmRequest}
+          settleConfirm={bookImport.settleConfirm}
+        />
       </main>
     );
   }
@@ -430,6 +453,12 @@ function App() {
       <PersistenceErrorBanner
         message={persistenceError}
         onDismiss={() => setPersistenceError(null)}
+      />
+      <BookImportNotices
+        notices={bookImport.notices}
+        dismissNotice={bookImport.dismissNotice}
+        onOpenBook={handleOpenBook}
+        actionDisabled={bookImport.importing}
       />
       {/* Top toolbar */}
       <header className="flex items-center gap-3 border-b px-4 py-2">
@@ -540,6 +569,11 @@ function App() {
         globalTheme={globalTheme}
         onThemeChange={handleGlobalThemeChange}
         hasBook={true}
+      />
+      <BookImportConfirmDialog
+        confirmOpen={bookImport.confirmOpen}
+        confirmRequest={bookImport.confirmRequest}
+        settleConfirm={bookImport.settleConfirm}
       />
     </main>
   );
