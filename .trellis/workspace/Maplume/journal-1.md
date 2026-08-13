@@ -830,3 +830,25 @@ Converted reader typography from preset gears to numeric sliders (font size, lin
 ### Status
 
 [OK] **Completed**
+
+
+## Session 38: Improve new session UX
+
+**Date**: 2026-08-13
+**Task**: Improve new session UX
+**Branch**: `main`
+
+### Summary
+
+Polished the chat-list 新建会话 path: close overlay and focus input, reuse an already-empty session, default title 新会话, and ready-state empty copy. Spec updated to keep reducer and sidecar titles in sync.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d664cec` | (see git log) |
+| `3619bae` | (see git log) |
+
+### Status
+
+[OK] **Completed**
