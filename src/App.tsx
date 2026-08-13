@@ -17,7 +17,7 @@ import {
   BookImportNotices,
 } from "@/components/BookImportFeedback";
 import { TocSidebar } from "@/components/TocSidebar";
-import { SettingsPage } from "@/components/settings/SettingsPage";
+import { SettingsDialog } from "@/components/settings/SettingsDialog";
 import {
   bookSettingsSnapshot,
   generateStylesCss,
@@ -66,8 +66,8 @@ function PersistenceErrorBanner({
 
 function App() {
   const { t } = useT();
-  const [view, setView] = useState<"library" | "reader" | "settings">("library");
-  const [settingsReturnTo, setSettingsReturnTo] = useState<"library" | "reader">("library");
+  const [view, setView] = useState<"library" | "reader">("library");
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [fileData, setFileData] = useState<FileData | null>(null);
   const [currentBook, setCurrentBook] = useState<BookRecord | null>(null);
   const [progress, setProgress] = useState<{ index: number; fraction: number; label?: string }>({
@@ -97,7 +97,7 @@ function App() {
   const pendingCaptureRef = useRef<SelectionCapture | null>(null);
   const closingRef = useRef(false);
   const openBookControllerRef = useRef(createLatestSerializedTaskController());
-  // Latest fraction for settings-page remount; do not write it into currentBook
+  // Latest fraction for open-book / relocate; do not write it into currentBook
   // on every relocate or ReaderView's [fileData, initialFraction] effect re-opens.
   const lastKnownFractionRef = useRef<number | undefined>(undefined);
   // Track latest style state so handleBookReady can apply it after renderer mounts.
@@ -357,26 +357,14 @@ function App() {
     readerRef.current?.setStyles(generateStylesCss(styleStateRef.current));
   }, []);
 
-  const openSettings = useCallback((from: "library" | "reader") => {
-    if (from === "reader") {
-      setCurrentBook((prev) =>
-        prev
-          ? { ...prev, lastFraction: lastKnownFractionRef.current ?? prev.lastFraction }
-          : prev,
-      );
-    }
-    setSettingsReturnTo(from);
-    setView("settings");
-  }, []);
-
-  const handleBackFromSettings = useCallback(async () => {
+  const handleCloseSettings = useCallback(async () => {
     try {
       await flushReadingState();
     } catch {
       return;
     }
-    setView(settingsReturnTo);
-  }, [flushReadingState, settingsReturnTo]);
+    setSettingsOpen(false);
+  }, [flushReadingState]);
 
   const persistBookSnapshot = useCallback(
     (settings: ReadingSettings) => {
@@ -389,7 +377,7 @@ function App() {
 
   const handleTypographyChange = useCallback(
     (key: TypographyKey, value: number | string) => {
-      if (settingsReturnTo === "reader") {
+      if (view === "reader") {
         if (!currentBook) return;
         const nextSettings = bookSettingsSnapshot(currentBook.settings, { [key]: value });
         setCurrentBook({
@@ -401,7 +389,7 @@ function App() {
       }
       updatePreferences({ [key]: value } as Partial<AppPreferences>);
     },
-    [currentBook, persistBookSnapshot, settingsReturnTo, updatePreferences],
+    [currentBook, persistBookSnapshot, updatePreferences, view],
   );
 
   const handleRestoreDefault = useCallback(
@@ -423,10 +411,24 @@ function App() {
   }, []);
 
   const bookTitle = currentBook?.title || fileData?.name || "";
-  const editingBook = settingsReturnTo === "reader" && Boolean(currentBook || fileData);
+  const editingBook = view === "reader" && Boolean(currentBook || fileData);
   const overriddenKeys: TypographyKey[] = editingBook
     ? TYPOGRAPHY_KEYS.filter((key) => isTypographyOverridden(currentBook?.settings, key))
     : [];
+  const settingsDialog = (
+    <SettingsDialog
+      open={settingsOpen}
+      onClose={() => void handleCloseSettings()}
+      bookTitle={editingBook ? bookTitle || null : null}
+      hasBook={editingBook}
+      styleState={styleState}
+      onTypographyChange={handleTypographyChange}
+      onRestoreDefault={handleRestoreDefault}
+      overriddenKeys={overriddenKeys}
+      theme={globalTheme}
+      onThemeChange={setGlobalTheme}
+    />
+  );
 
   if (view === "library") {
     return (
@@ -444,35 +446,9 @@ function App() {
         <LibraryView
           onOpenBook={handleOpenBook}
           openingBookId={openingBookId}
-          onOpenSettings={() => openSettings("library")}
+          onOpenSettings={() => setSettingsOpen(true)}
         />
-        <BookImportConfirmDialog
-          confirmOpen={bookImport.confirmOpen}
-          confirmRequest={bookImport.confirmRequest}
-          settleConfirm={bookImport.settleConfirm}
-        />
-      </main>
-    );
-  }
-
-  if (view === "settings") {
-    return (
-      <main className="flex h-screen flex-col bg-background text-foreground">
-        <PersistenceErrorBanner
-          message={persistenceError}
-          onDismiss={() => setPersistenceError(null)}
-        />
-        <SettingsPage
-          onBack={() => void handleBackFromSettings()}
-          bookTitle={editingBook ? bookTitle || null : null}
-          hasBook={editingBook}
-          styleState={styleState}
-          onTypographyChange={handleTypographyChange}
-          onRestoreDefault={handleRestoreDefault}
-          overriddenKeys={overriddenKeys}
-          theme={globalTheme}
-          onThemeChange={setGlobalTheme}
-        />
+        {settingsDialog}
         <BookImportConfirmDialog
           confirmOpen={bookImport.confirmOpen}
           confirmRequest={bookImport.confirmRequest}
@@ -514,11 +490,11 @@ function App() {
           >
             <List />
           </Button>
-          {/* Font + theme controls (opens settings page) */}
+          {/* Font + theme controls */}
           <Button
             size="icon-sm"
             variant="ghost"
-            onClick={() => openSettings("reader")}
+            onClick={() => setSettingsOpen(true)}
             aria-label={t("reader.fontAndTheme")}
           >
             <Type />
@@ -594,6 +570,7 @@ function App() {
           </Panel>
         </Group>
       </div>
+      {settingsDialog}
       <BookImportConfirmDialog
         confirmOpen={bookImport.confirmOpen}
         confirmRequest={bookImport.confirmRequest}

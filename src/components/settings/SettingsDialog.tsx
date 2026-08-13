@@ -1,6 +1,11 @@
 import { useState, type CSSProperties, type ReactNode } from "react";
-import { ChevronLeft } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Slider } from "@/components/ui/slider";
 import { AgentConfigForm } from "@/components/AgentConfigForm";
 import { cn } from "@/lib/utils";
@@ -51,8 +56,9 @@ const SLIDER_ROWS: { key: ContinuousKey; labelKey: MessageKey }[] = [
   { key: "firstLineIndent", labelKey: "settings.slider.firstLineIndent" },
 ];
 
-export interface SettingsPageProps {
-  onBack: () => void;
+export interface SettingsDialogProps {
+  open: boolean;
+  onClose: () => void;
   bookTitle: string | null;
   hasBook: boolean;
   styleState: ReaderStyleState;
@@ -170,8 +176,9 @@ function ChoiceButton({
   );
 }
 
-export function SettingsPage({
-  onBack,
+export function SettingsDialog({
+  open,
+  onClose,
   bookTitle,
   hasBook,
   styleState,
@@ -180,49 +187,45 @@ export function SettingsPage({
   overriddenKeys,
   theme,
   onThemeChange,
-}: SettingsPageProps) {
+}: SettingsDialogProps) {
   const { t, locale, setLocale } = useT();
   const [section, setSection] = useState<SettingsSection>("typography");
   const canRestore = (key: TypographyKey) => overriddenKeys.includes(key);
   const restoreLabel = t("settings.restoreDefault");
+  const scopeCopy = hasBook
+    ? t("settings.editingBook", { title: bookTitle || t("settings.thisBook") })
+    : t("settings.editingDefault");
 
   return (
-    <div className="flex h-full min-h-0 flex-1 bg-background text-foreground">
-      <aside className="flex w-48 shrink-0 flex-col border-r">
-        <div className="px-4 py-3 text-sm font-semibold">{t("settings.title")}</div>
-        <nav className="flex flex-col gap-1 px-2">
-          {SECTIONS.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => setSection(item.id)}
-              className={cn(
-                "rounded-md px-3 py-1.5 text-left text-sm transition-colors",
-                section === item.id
-                  ? "bg-secondary text-secondary-foreground"
-                  : "hover:bg-accent",
-              )}
-            >
-              {t(item.labelKey)}
-            </button>
-          ))}
-        </nav>
-      </aside>
+    <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent className="flex max-h-[85vh] gap-0 overflow-hidden p-0 sm:max-w-3xl">
+        <aside className="flex w-48 shrink-0 flex-col border-r">
+          <DialogHeader className="gap-0 p-0 text-left">
+            <DialogTitle className="px-4 py-3 text-sm font-semibold">
+              {t("settings.title")}
+            </DialogTitle>
+          </DialogHeader>
+          <nav className="flex flex-col gap-1 px-2">
+            {SECTIONS.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => setSection(item.id)}
+                className={cn(
+                  "rounded-md px-3 py-1.5 text-left text-sm transition-colors",
+                  section === item.id
+                    ? "bg-secondary text-secondary-foreground"
+                    : "hover:bg-accent",
+                )}
+              >
+                {t(item.labelKey)}
+              </button>
+            ))}
+          </nav>
+        </aside>
 
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center gap-1 border-b px-3 py-2">
-          <Button size="icon-sm" variant="ghost" onClick={onBack} aria-label={t("settings.back")}>
-            <ChevronLeft />
-          </Button>
-          <span className="text-sm">{t("settings.back")}</span>
-        </header>
-
-        <div className="flex-1 overflow-y-auto p-6">
-          <p className="mb-5 text-sm text-muted-foreground">
-            {hasBook
-              ? t("settings.editingBook", { title: bookTitle || t("settings.thisBook") })
-              : t("settings.editingDefault")}
-          </p>
+        <div className="min-h-0 flex-1 overflow-y-auto p-6">
+          <DialogDescription className="mb-5">{scopeCopy}</DialogDescription>
 
           {section === "typography" && (
             <div className="max-w-md space-y-5">
@@ -333,7 +336,7 @@ export function SettingsPage({
             </div>
           )}
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { SettingsPage } from "./SettingsPage";
+import { SettingsDialog } from "./SettingsDialog";
 import type { ReaderStyleState } from "@/lib/reader-styles";
 import { setLocale } from "@/lib/i18n";
 
@@ -54,11 +54,52 @@ afterEach(() => {
   setLocale("zh-CN");
 });
 
-describe("SettingsPage", () => {
+describe("SettingsDialog", () => {
+  it("renders a dialog when open and closes via the Dialog control", () => {
+    const onClose = vi.fn();
+    const { getByRole, queryByRole, rerender } = render(
+      <SettingsDialog
+        open
+        onClose={onClose}
+        bookTitle={null}
+        hasBook={false}
+        styleState={styleState}
+        onTypographyChange={noop}
+        onRestoreDefault={noop}
+        overriddenKeys={[]}
+        theme="light"
+        onThemeChange={noop}
+      />,
+    );
+
+    expect(getByRole("dialog")).toBeTruthy();
+    act(() => {
+      getByRole("button", { name: "Close" }).click();
+    });
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <SettingsDialog
+        open={false}
+        onClose={onClose}
+        bookTitle={null}
+        hasBook={false}
+        styleState={styleState}
+        onTypographyChange={noop}
+        onRestoreDefault={noop}
+        overriddenKeys={[]}
+        theme="light"
+        onThemeChange={noop}
+      />,
+    );
+    expect(queryByRole("dialog")).toBeNull();
+  });
+
   it("switches left-nav sections and enables fonts without a book", () => {
     const { getByRole, getByText, queryByText } = render(
-      <SettingsPage
-        onBack={noop}
+      <SettingsDialog
+        open
+        onClose={noop}
         bookTitle={null}
         hasBook={false}
         styleState={styleState}
@@ -92,8 +133,9 @@ describe("SettingsPage", () => {
   it("shows book copy and restore-default only for overridden keys", () => {
     const onRestore = vi.fn();
     const { getByText, queryByText, getAllByText } = render(
-      <SettingsPage
-        onBack={noop}
+      <SettingsDialog
+        open
+        onClose={noop}
         bookTitle="测试书"
         hasBook={true}
         styleState={{ ...styleState, lineHeight: 1.4 }}
@@ -114,8 +156,9 @@ describe("SettingsPage", () => {
 
   it("uses book copy when hasBook is true even without a title", () => {
     const { getByText } = render(
-      <SettingsPage
-        onBack={noop}
+      <SettingsDialog
+        open
+        onClose={noop}
         bookTitle={null}
         hasBook={true}
         styleState={styleState}
@@ -133,8 +176,9 @@ describe("SettingsPage", () => {
   it("exposes a slider and current value for a continuous field", () => {
     const onChange = vi.fn();
     const { getByRole, getByText } = render(
-      <SettingsPage
-        onBack={noop}
+      <SettingsDialog
+        open
+        onClose={noop}
         bookTitle={null}
         hasBook={false}
         styleState={{ ...styleState, firstLineIndent: 1.2 }}
@@ -152,8 +196,9 @@ describe("SettingsPage", () => {
 
   it("switches visible copy to English from the appearance language row", () => {
     const { getByRole, getByText } = render(
-      <SettingsPage
-        onBack={noop}
+      <SettingsDialog
+        open
+        onClose={noop}
         bookTitle={null}
         hasBook={false}
         styleState={styleState}
