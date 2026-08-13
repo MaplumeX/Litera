@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend layer entry"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "paging still bound on host + iframe; no scrolled flow"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "frontend quality bar for the check pass"}
+{"file": ".trellis/spec/frontend/directory-structure.md", "reason": "foliate-js submodule must stay untouched"}
+{"file": ".trellis/tasks/08-13-tune-wheel-paging/research/readest-wheel-gesture.md", "reason": "verify idle-reset model and 30/200/deltaMode match the research"}

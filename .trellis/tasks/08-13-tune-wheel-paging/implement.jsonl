@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend layer entry"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "iframe paging bindings; do not set scrolled flow or overlay hit-boxes"}
+{"file": ".trellis/spec/frontend/hook-guidelines.md", "reason": "ReaderView owns wheel paging; App must not add a second handler"}
+{"file": ".trellis/spec/frontend/directory-structure.md", "reason": "do not edit foliate-js submodule"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "changing paging constants; keep consumeWheelDelta as the single helper"}
+{"file": ".trellis/tasks/08-13-tune-wheel-paging/research/readest-wheel-gesture.md", "reason": "target algorithm, constants, and deltaMode normalization"}
