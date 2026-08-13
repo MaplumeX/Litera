@@ -141,10 +141,10 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|app, event| {
+        .run(|_app, _event| {
             #[cfg(any(target_os = "macos", target_os = "ios", target_os = "android"))]
-            if let tauri::RunEvent::Opened { urls } = &event {
-                open_paths::enqueue_opened_urls(app, urls);
+            if let tauri::RunEvent::Opened { urls } = &_event {
+                open_paths::enqueue_opened_urls(_app, urls);
             }
         });
 }

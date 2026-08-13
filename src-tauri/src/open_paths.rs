@@ -87,6 +87,10 @@ where
         .collect()
 }
 
+#[cfg_attr(
+    not(any(target_os = "macos", target_os = "ios", target_os = "android")),
+    allow(dead_code)
+)]
 pub fn parse_opened_urls(urls: &[tauri::Url]) -> Vec<PathBuf> {
     urls.iter()
         .filter_map(|url| {
@@ -127,6 +131,10 @@ pub fn enqueue_paths(app: &AppHandle, paths: Vec<PathBuf>) {
     let _ = app.emit(OPEN_PATHS_EVENT, ());
 }
 
+#[cfg_attr(
+    not(any(target_os = "macos", target_os = "ios", target_os = "android")),
+    allow(dead_code)
+)]
 pub fn enqueue_opened_urls(app: &AppHandle, urls: &[tauri::Url]) {
     enqueue_paths(app, parse_opened_urls(urls));
 }
