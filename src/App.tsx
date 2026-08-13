@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { Group, Panel, Separator } from "react-resizable-panels";
+import { Group, Panel, Separator, usePanelRef } from "react-resizable-panels";
 import { Button } from "@/components/ui/button";
-import { ChevronLeft, List, Type, MessageSquare, MessageSquareOff } from "lucide-react";
+import { ChevronLeft, List, Type, MessageSquare } from "lucide-react";
 import {
   ReaderView,
   type ReaderViewHandle,
@@ -47,14 +47,14 @@ function ReaderProgressBar({
 }) {
   const pct = Math.round(fraction * 100);
   return (
-    <div className="flex items-center gap-2">
-      <div className="h-1 w-24 rounded bg-muted">
+    <div className="flex h-5 items-center gap-3 border-b px-4">
+      <div className="h-1 min-w-0 flex-1 rounded bg-muted">
         <div
           className="h-full rounded bg-primary transition-all"
           style={{ width: `${pct}%` }}
         />
       </div>
-      <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">
+      <span className="shrink-0 text-xs text-muted-foreground tabular-nums whitespace-nowrap">
         {chapterLabel} · {pct}%
       </span>
     </div>
@@ -90,7 +90,7 @@ function App() {
     index: 0,
     fraction: 0,
   });
-  const [chatCollapsed, setChatCollapsed] = useState(false);
+  const [chatCollapsed, setChatCollapsed] = useState(true);
   const [tocVisible, setTocVisible] = useState(false);
   const [toc, setToc] = useState<TocItem[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -105,6 +105,8 @@ function App() {
   const bookImport = useBookImport();
   const readerRef = useRef<ReaderViewHandle>(null);
   const chatRef = useRef<ChatPanelHandle>(null);
+  const chatPanelRef = usePanelRef();
+  const pendingCaptureRef = useRef<SelectionCapture | null>(null);
   const closingRef = useRef(false);
   const openBookControllerRef = useRef(createLatestSerializedTaskController());
   // Track latest style state so handleBookReady can apply it after renderer mounts.
@@ -215,6 +217,27 @@ function App() {
     readerRef.current?.setStyles(css);
   }, [styleState]);
 
+  // Escape closes the TOC overlay. Page turning lives in ReaderView
+  // (chapter iframe + host); do not handle ArrowLeft/ArrowRight here.
+  useEffect(() => {
+    if (view !== "reader" || !tocVisible) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      if (
+        target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.isContentEditable
+      )
+        return;
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setTocVisible(false);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [view, tocVisible]);
+
   const handleOpenBook = useCallback(async (bookId: string) => {
     // `open_book_bytes` also switches the sidecar, so it is intentionally
     // serialized. A later click supersedes the older UI result without letting
@@ -302,7 +325,6 @@ function App() {
     setFileData(null);
     setCurrentBook(null);
     setToc([]);
-    setTocVisible(false);
     setSettingsOpen(false);
   }, [fileData?.bookId, flushReadingState]);
 
@@ -318,8 +340,40 @@ function App() {
   );
 
   const handleSelectionCapture = useCallback((capture: SelectionCapture) => {
-    chatRef.current?.fillInput(capture.text, capture.chapterIndex);
-  }, []);
+    if (chatCollapsed) {
+      pendingCaptureRef.current = capture;
+      setChatCollapsed(false);
+      return;
+    }
+    if (chatRef.current) {
+      chatRef.current.fillInput(capture.text, capture.chapterIndex);
+    } else {
+      pendingCaptureRef.current = capture;
+    }
+  }, [chatCollapsed]);
+
+  useLayoutEffect(() => {
+    if (view !== "reader") return;
+    const panel = chatPanelRef.current;
+    if (!panel) return;
+    if (chatCollapsed) {
+      panel.collapse();
+      return;
+    }
+    panel.expand();
+    // First expand has no saved size, so the library opens at minSize (18).
+    if (panel.isCollapsed() || panel.getSize().asPercentage <= 18) {
+      panel.resize("22");
+    }
+  }, [view, chatCollapsed, chatPanelRef]);
+
+  useLayoutEffect(() => {
+    if (chatCollapsed) return;
+    const pending = pendingCaptureRef.current;
+    if (!pending) return;
+    pendingCaptureRef.current = null;
+    chatRef.current?.fillInput(pending.text, pending.chapterIndex);
+  }, [chatCollapsed]);
 
   const handleBookReady = useCallback((bookToc: TocItem[]) => {
     setToc(bookToc);
@@ -352,6 +406,7 @@ function App() {
 
   const handleTocGoTo = useCallback((href: string) => {
     readerRef.current?.goToTocItem(href);
+    setTocVisible(false);
   }, []);
 
   const chapterLabel = progress.label ?? `Chapter ${progress.index + 1}`;
@@ -415,14 +470,8 @@ function App() {
         >
           <ChevronLeft />
         </Button>
-        <h1 className="text-lg font-bold">Litera</h1>
-        {bookTitle && (
-          <span className="truncate text-sm text-muted-foreground">{bookTitle}</span>
-        )}
-        <div className="ml-auto flex items-center gap-2">
-          {/* Progress bar */}
-          <ReaderProgressBar fraction={progress.fraction} chapterLabel={chapterLabel} />
-          {/* TOC toggle */}
+        <h1 className="min-w-0 flex-1 truncate text-lg font-bold">{bookTitle}</h1>
+        <div className="flex items-center gap-1">
           <Button
             size="icon-sm"
             variant={tocVisible ? "secondary" : "ghost"}
@@ -431,7 +480,6 @@ function App() {
           >
             <List />
           </Button>
-          {/* Font + theme controls (opens settings dialog) */}
           <Button
             size="icon-sm"
             variant={settingsOpen ? "secondary" : "ghost"}
@@ -440,62 +488,77 @@ function App() {
           >
             <Type />
           </Button>
-          {/* Chat toggle */}
           <Button
             size="icon-sm"
-            variant={chatCollapsed ? "outline" : "ghost"}
+            variant={chatCollapsed ? "ghost" : "secondary"}
             onClick={() => setChatCollapsed((v) => !v)}
             aria-label={chatCollapsed ? "显示对话" : "隐藏对话"}
           >
-            {chatCollapsed ? <MessageSquare /> : <MessageSquareOff />}
+            <MessageSquare />
           </Button>
         </div>
       </header>
+      <ReaderProgressBar fraction={progress.fraction} chapterLabel={chapterLabel} />
 
       {/* Reader + Chat panel split */}
       <div className="relative flex flex-1 overflow-hidden">
-        {/* TOC sidebar */}
-        {tocVisible && (
-          <div className="h-full w-56 shrink-0 overflow-y-auto border-r">
-            <TocSidebar toc={toc} onGoTo={handleTocGoTo} />
-          </div>
-        )}
-
-        {chatCollapsed ? (
-          <div className="relative h-full w-full overflow-hidden">
-            {fileData && (
-              <ReaderView
-                ref={readerRef}
-                fileData={fileData}
-                onRelocate={handleRelocate}
-                onSelectionCapture={handleSelectionCapture}
-                initialFraction={currentBook?.lastFraction}
-                onBookReady={handleBookReady}
-              />
-            )}
-          </div>
-        ) : (
-          <Group orientation="horizontal" className="h-full">
-            <Panel defaultSize={65} minSize={30}>
-              <div className="relative h-full w-full overflow-hidden">
-                {fileData && (
-                  <ReaderView
-                    ref={readerRef}
-                    fileData={fileData}
-                    onRelocate={handleRelocate}
-                    onSelectionCapture={handleSelectionCapture}
-                    initialFraction={currentBook?.lastFraction}
-                    onBookReady={handleBookReady}
+        <Group
+          orientation="horizontal"
+          className="h-full w-full"
+          defaultLayout={chatCollapsed ? { reader: 100, chat: 0 } : { reader: 78, chat: 22 }}
+        >
+          <Panel id="reader" defaultSize="78" minSize="40">
+            <div className="relative h-full w-full overflow-hidden">
+              {fileData && (
+                <ReaderView
+                  ref={readerRef}
+                  fileData={fileData}
+                  onRelocate={handleRelocate}
+                  onSelectionCapture={handleSelectionCapture}
+                  initialFraction={currentBook?.lastFraction}
+                  onBookReady={handleBookReady}
+                />
+              )}
+              {tocVisible && (
+                <>
+                  <button
+                    type="button"
+                    className="absolute inset-0 z-20 bg-background/50"
+                    aria-label="关闭目录"
+                    onClick={() => setTocVisible(false)}
                   />
-                )}
-              </div>
-            </Panel>
-            <Separator className="w-px bg-border hover:bg-primary/30 transition-colors cursor-col-resize" />
-            <Panel defaultSize={35} minSize={20}>
-              <ChatPanel ref={chatRef} currentChapterIndex={progress.index} bookId={fileData?.bookId ?? ""} />
-            </Panel>
-          </Group>
-        )}
+                  <div className="absolute inset-y-0 left-0 z-30 w-56 overflow-hidden border-r bg-background shadow-md">
+                    <TocSidebar toc={toc} onGoTo={handleTocGoTo} />
+                  </div>
+                </>
+              )}
+            </div>
+          </Panel>
+          <Separator
+            className={
+              chatCollapsed
+                ? "hidden"
+                : "w-px cursor-col-resize bg-border transition-colors hover:bg-primary/30"
+            }
+            disabled={chatCollapsed}
+          />
+          <Panel
+            id="chat"
+            defaultSize="22"
+            minSize="18"
+            collapsible
+            collapsedSize="0"
+            panelRef={chatPanelRef}
+          >
+            <div className={chatCollapsed ? "hidden h-full" : "h-full"}>
+              <ChatPanel
+                ref={chatRef}
+                currentChapterIndex={progress.index}
+                bookId={fileData?.bookId ?? ""}
+              />
+            </div>
+          </Panel>
+        </Group>
       </div>
 
       <SettingsDialog

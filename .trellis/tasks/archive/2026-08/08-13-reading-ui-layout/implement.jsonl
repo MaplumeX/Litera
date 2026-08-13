@@ -1,0 +1,5 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend package index and pre-dev checklist"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Icon buttons, toolbar grouping, settings entry ownership"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "App-local reader chrome state; no new global store or preferences schema"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Reuse ReaderProgressBar and existing panel primitives"}
