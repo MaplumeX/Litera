@@ -1,0 +1,7 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend layer entry and guideline index"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "foliate-view mount, load/init order, setStyles"}
+{"file": ".trellis/spec/frontend/hook-guidelines.md", "reason": "callback refs and ReaderView imperative handle"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "narrow as-unknown-as casts for foliate methods"}
+{"file": ".trellis/spec/frontend/directory-structure.md", "reason": "do not edit foliate-js submodule"}
+{"file": ".trellis/tasks/08-13-restore-reader-paging/research/foliate-paging-events.md", "reason": "foliate has no click/wheel paging; iframe event model"}
