@@ -1,0 +1,7 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend guideline index for sidecar work"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Book snapshot aside, tool/error protocol, BookWorker generation gate"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "In-memory FTS5 is the search backend to keep"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Tools must return errorResult, not throw"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Tool result JSON crosses sidecar → protocol → ToolCallCard"}
+{"file": ".trellis/tasks/08-13-book-tools-readaware/research/readaware-book-tools.md", "reason": "ReadAware contracts to copy and explicit non-goals"}
