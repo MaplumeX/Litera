@@ -57,39 +57,58 @@ describe("shouldIgnorePagingTarget", () => {
 });
 
 describe("consumeWheelDelta", () => {
-  const idle = (): WheelPagingState => ({ accumulated: 0, cooldownUntil: 0 });
+  const idle = (): WheelPagingState => ({ accumulated: 0, lastTime: 0, flipped: false });
 
   it("does not turn below the threshold and keeps the remainder", () => {
-    const result = consumeWheelDelta(idle(), 40, 1_000);
+    const result = consumeWheelDelta(idle(), 20, 1_000);
     expect(result.turn).toBe(0);
-    expect(result.state.accumulated).toBe(40);
-    expect(result.state.cooldownUntil).toBe(0);
+    expect(result.state.accumulated).toBe(20);
+    expect(result.state.flipped).toBe(false);
   });
 
-  it("turns forward once the accumulated delta reaches the threshold and clears", () => {
-    const first = consumeWheelDelta(idle(), 50, 1_000);
-    const second = consumeWheelDelta(first.state, 30, 1_000);
+  it("turns forward at the 30px threshold and clears the remainder", () => {
+    const result = consumeWheelDelta(idle(), 30, 1_000);
+    expect(result.turn).toBe(1);
+    expect(result.state.accumulated).toBe(0);
+    expect(result.state.flipped).toBe(true);
+  });
+
+  it("turns forward once accumulated deltas reach the threshold", () => {
+    const first = consumeWheelDelta(idle(), 20, 1_000);
+    const second = consumeWheelDelta(first.state, 10, 1_010);
     expect(second.turn).toBe(1);
     expect(second.state.accumulated).toBe(0);
-    expect(second.state.cooldownUntil).toBeGreaterThan(1_000);
+    expect(second.state.flipped).toBe(true);
   });
 
   it("turns backward for a negative delta at the threshold", () => {
-    const result = consumeWheelDelta(idle(), -80, 1_000);
+    const result = consumeWheelDelta(idle(), -30, 1_000);
     expect(result.turn).toBe(-1);
     expect(result.state.accumulated).toBe(0);
+    expect(result.state.flipped).toBe(true);
   });
 
-  it("ignores further deltas during cooldown, then turns again after it expires", () => {
-    const turned = consumeWheelDelta(idle(), 80, 1_000);
+  it("swallows further deltas in the same gesture after a turn", () => {
+    const turned = consumeWheelDelta(idle(), 30, 1_000);
     expect(turned.turn).toBe(1);
 
     const during = consumeWheelDelta(turned.state, 80, 1_010);
     expect(during.turn).toBe(0);
     expect(during.state.accumulated).toBe(0);
-    expect(during.state.cooldownUntil).toBeGreaterThan(turned.state.cooldownUntil);
+    expect(during.state.flipped).toBe(true);
+  });
 
-    const after = consumeWheelDelta(during.state, 80, 10_000);
+  it("turns again after 200ms of idle", () => {
+    const turned = consumeWheelDelta(idle(), 30, 1_000);
+    const swallowed = consumeWheelDelta(turned.state, 80, 1_010);
+    const after = consumeWheelDelta(swallowed.state, 30, 1_211);
     expect(after.turn).toBe(1);
+    expect(after.state.flipped).toBe(true);
+  });
+
+  it("turns on a line-mode mouse notch (deltaMode 1, delta 1)", () => {
+    const result = consumeWheelDelta(idle(), 1, 1_000, 1);
+    expect(result.turn).toBe(1);
+    expect(result.state.flipped).toBe(true);
   });
 });

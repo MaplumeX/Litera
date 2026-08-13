@@ -2,11 +2,20 @@ export type HitZone = "left" | "right" | "middle";
 
 export interface WheelPagingState {
   accumulated: number;
-  cooldownUntil: number;
+  lastTime: number;
+  flipped: boolean;
 }
 
-const WHEEL_THRESHOLD = 80;
-const WHEEL_COOLDOWN_MS = 280;
+const WHEEL_THRESHOLD = 30;
+const WHEEL_IDLE_RESET_MS = 200;
+const WHEEL_LINE_PX = 40;
+const WHEEL_PAGE_PX = 800;
+
+function normalizeWheelDelta(delta: number, deltaMode: number): number {
+  if (deltaMode === 1) return delta * WHEEL_LINE_PX;
+  if (deltaMode === 2) return delta * WHEEL_PAGE_PX;
+  return delta;
+}
 
 export function hitFromClientX(x: number, width: number): HitZone {
   if (width <= 0) return "middle";
@@ -37,22 +46,24 @@ export function consumeWheelDelta(
   state: WheelPagingState,
   delta: number,
   now: number = Date.now(),
+  deltaMode: number = 0,
 ): { turn: -1 | 1 | 0; state: WheelPagingState } {
-  if (now < state.cooldownUntil) {
-    // Keep the cooldown alive while the same gesture still emits events
-    // (macOS trackpad inertia lasts longer than a single short window).
-    return {
-      turn: 0,
-      state: { accumulated: 0, cooldownUntil: now + WHEEL_COOLDOWN_MS },
-    };
+  let accumulated = state.accumulated;
+  let flipped = state.flipped;
+  if (now - state.lastTime > WHEEL_IDLE_RESET_MS) {
+    accumulated = 0;
+    flipped = false;
   }
-  const accumulated = state.accumulated + delta;
+
+  if (flipped) {
+    return { turn: 0, state: { accumulated: 0, lastTime: now, flipped: true } };
+  }
+
+  accumulated += normalizeWheelDelta(delta, deltaMode);
   if (Math.abs(accumulated) < WHEEL_THRESHOLD) {
-    return { turn: 0, state: { accumulated, cooldownUntil: 0 } };
+    return { turn: 0, state: { accumulated, lastTime: now, flipped: false } };
   }
+
   const turn: -1 | 1 = accumulated > 0 ? 1 : -1;
-  return {
-    turn,
-    state: { accumulated: 0, cooldownUntil: now + WHEEL_COOLDOWN_MS },
-  };
+  return { turn, state: { accumulated: 0, lastTime: now, flipped: true } };
 }

@@ -178,13 +178,14 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         void pager().next?.();
       };
 
-      let wheelState: WheelPagingState = { accumulated: 0, cooldownUntil: 0 };
+      let wheelState: WheelPagingState = { accumulated: 0, lastTime: 0, flipped: false };
       const handleWheel = (e: Event) => {
         const we = e as WheelEvent;
         if (we.ctrlKey) return;
         we.preventDefault();
         const delta = Math.abs(we.deltaX) > Math.abs(we.deltaY) ? we.deltaX : we.deltaY;
-        const result = consumeWheelDelta(wheelState, delta);
+        const now = we.timeStamp || Date.now();
+        const result = consumeWheelDelta(wheelState, delta, now, we.deltaMode);
         wheelState = result.state;
         if (result.turn === 1) pageNext();
         else if (result.turn === -1) pagePrev();
