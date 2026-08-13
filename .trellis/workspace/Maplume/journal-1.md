@@ -702,3 +702,26 @@ Registered .epub file association and wired OS open to import-then-open the last
 ### Next Steps
 
 - Verify packaged Open With on macOS; Windows/Linux association when those machines are available
+
+
+## Session 32: Restore desktop reader page turning
+
+**Date**: 2026-08-13
+**Task**: Restore desktop reader page turning
+**Branch**: `fix/fanye-wufafa`
+
+### Summary
+
+Restored desktop page turning after footer buttons were removed: left/right third click, arrow keys (including after focusing the chapter iframe), and trackpad/wheel one page per gesture. ReaderView owns all paging input; App no longer listens on window. Recorded the foliate iframe event model in frontend specs. Tests 56 passed, build green. Live UI not clicked.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d3daa9e` | (see git log) |
+| `60802d5` | (see git log) |
+| `730eb3c` | (see git log) |
+
+### Status
+
+[OK] **Completed**
