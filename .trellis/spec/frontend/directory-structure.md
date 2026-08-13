@@ -14,7 +14,7 @@ litera/
 │   ├── index.css           # Tailwind v4 entry + shadcn/ui theme variables
 │   ├── components/
 │   │   ├── chat/         # Reading-assistant chat panel (ChatPanel container + subcomponents)
-│   │   ├── settings/     # SettingsPage (typography / appearance / AI) + tests
+│   │   ├── settings/     # SettingsDialog (typography / appearance / AI) + tests
 │   │   └── ui/           # shadcn/ui components (code-owned, not npm)
 │   │       └── button.tsx
 │   ├── lib/
@@ -40,7 +40,7 @@ litera/
 
 - **shadcn/ui components are code-owned**: `src/components/ui/*.tsx` are copied source files, not an npm dependency. Modify them freely.
 - **Path alias `@/*`**: maps to `src/*` in both `tsconfig.json` and `vite.config.ts`. Use `@/components/ui/button` not relative paths.
-- **Multi-file feature components get their own directory**: `src/components/chat/` holds the ChatPanel container and its subcomponents. `src/components/settings/` holds `SettingsPage` (third root view). `AgentConfigForm` lives next to `AgentConfigDialog` so the settings AI section and the chat dialog share one form. Sibling imports inside a directory use relative paths; cross-directory imports use `@/`.
+- **Multi-file feature components get their own directory**: `src/components/chat/` holds the ChatPanel container and its subcomponents. `src/components/settings/` holds `SettingsDialog` (centered overlay, not a root view). `AgentConfigForm` lives next to `AgentConfigDialog` so the settings AI section and the chat dialog share one form. Sibling imports inside a directory use relative paths; cross-directory imports use `@/`.
 - **Tauri 2 capabilities**: permissions live in `src-tauri/capabilities/default.json`, not inline in builder code.
 - **foliate-js as git submodule**: `src/foliate-js/` is a git submodule (commit `78914ae`). foliate.js API is unstable; submodule locks the version. Do NOT npm install foliate-js.
 - **`<foliate-view>` is a web component**: Mount via `document.createElement("foliate-view")` + ref in React. Do NOT use it as a React component (`<foliate-view />`).

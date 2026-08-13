@@ -28,10 +28,10 @@ npx shadcn@latest add <component-name>
 `src/components/ui/` holds the shadcn components copied into the project. Current set:
 
 - `button.tsx` — all toolbar/action buttons (icon variants via lucide)
-- `dialog.tsx` — modal overlays (used by `AgentConfigDialog`)
+- `dialog.tsx` — modal overlays (used by `AgentConfigDialog` and `SettingsDialog`)
 - `alert-dialog.tsx` — destructive confirms (library delete / overwrite)
 - `select.tsx` — dropdown selectors (used by `AgentConfigDialog` provider picker)
-- `slider.tsx` — continuous typography controls on `SettingsPage`
+- `slider.tsx` — continuous typography controls on `SettingsDialog`
 - `input.tsx` — text/password inputs
 - `label.tsx` — form labels
 
@@ -118,13 +118,13 @@ body:     [TOC overlay]  Reader  |  Chat (collapsed = 0 width, still mounted)
 
 | Entry | Owner / state | Surface |
 |---|---|---|
-| Library gear | `App` `view === "settings"` via `LibraryView.onOpenSettings` | `SettingsPage` (typography / appearance / AI) |
-| Reader toolbar Aa (`aria-label="字体与主题"`) | `App` `view === "settings"` (`settingsReturnTo = "reader"`) | `SettingsPage` |
+| Library gear | `App` `settingsOpen` via `LibraryView.onOpenSettings` | `SettingsDialog` (typography / appearance / AI) |
+| Reader toolbar Aa (`aria-label="字体与主题"`) | `App` `settingsOpen` | `SettingsDialog` |
 | Chat panel gear / "打开设置" banner | `ChatPanel` local `showConfig` | `AgentConfigDialog` only |
 
-**Why**: Passing `onOpenSettings={() => setSettingsOpen(true)}` into `ChatPanel` made the chat gear open the general settings. Combined with `onOpenSettings?.() ?? setShowConfig(true)`, both surfaces opened on one click.
+**Why**: Passing a general-settings opener into `ChatPanel` plus `callback?.() ?? fallback()` opened both surfaces on one click (`void` callbacks return `undefined`). A third `view === "settings"` also unmounted the library/reader, so closing settings had to reconstruct the previous page.
 
-**Rule**: Do not add an `onOpenSettings` callback to `ChatPanel`. Chat settings stay local. Do not mount `SettingsDialog` as the general-settings surface. Settings back uses `setView(settingsReturnTo)` and must not call `close_book` / `handleBackToLibrary`.
+**Rule**: Do not add an `onOpenSettings` callback to `ChatPanel`. Chat settings stay local. General settings is a centered `SettingsDialog` overlay (`settingsOpen`); `view` stays `"library" | "reader"` so the current page stays mounted. Closing the dialog must not call `close_book` / `handleBackToLibrary`. Flush failure on close leaves the dialog open. Typography scope is `view === "reader"` (book override) vs library (global defaults).
 
 ### Convention: library confirms and selection mode
 
