@@ -785,3 +785,26 @@ Deleted the dedicated reader progress row so the book sits under the toolbar. Re
 ### Status
 
 [OK] **Completed**
+
+
+## Session 36: Tune wheel paging to Readest sensitivity
+
+**Date**: 2026-08-13
+**Task**: Tune wheel paging to Readest sensitivity
+**Branch**: `main`
+
+### Summary
+
+Replaced extending-cooldown wheel paging with Readest idle-reset: 30px threshold, 200ms silence starts a new gesture, deltaMode line/page normalized. Spec and task artifacts recorded.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `348f64d` | (see git log) |
+| `f8bc73f` | (see git log) |
+| `ecf98fb` | (see git log) |
+
+### Status
+
+[OK] **Completed**
