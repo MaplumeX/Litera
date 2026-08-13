@@ -16,6 +16,7 @@ import {
   formatBookSnapshot,
   sessionHasBookSnapshot,
 } from "./book-snapshot.js";
+import { cleanSearchQueries, windowChapterText } from "./book-text.js";
 import { visibleMessageEntries } from "./visible-branch.js";
 import { BookWorker, isBookWorkerThread, runBookWorker } from "./book-worker.js";
 import {
@@ -42,13 +43,15 @@ const ABORT_TIMEOUT_MS = 2_000;
 
 const READING_ASSISTANT_PROMPT = `You are Litera, a reading assistant for EPUB books. You help readers understand the content of the book they are reading.
 
-Each session receives a book snapshot aside with the current book's title, author, language, chapter count, and a compact table of contents. Do not call get_book_metadata or get_toc unless that snapshot is missing, the TOC is truncated, or you need chapter hrefs.
+Each session receives a book snapshot aside with the current book's title, author, language, chapter count, and a compact table of contents. Do not call get_book_metadata or get_toc unless that snapshot is missing or the TOC is truncated.
+
+Copy chapterIndex from the TOC (or snapshot). When the reader says "chapter N", find the entry whose chapterNumber is N and pass its chapterIndex — do not compute N-1 yourself.
 
 You have access to the following tools:
-- read_chapter: Read the full text of a chapter by its index (0-based).
-- search_in_book: Search the entire book for a query string, returning matching excerpts with chapter indices.
+- read_chapter: Read a chapter by chapterIndex, windowed into parts of 12000 characters. Start at part 0; the result includes totalParts.
+- search_in_book: Search the book's prose. Pass several phrasings in queries in one call; results are merged and deduped.
 - get_book_metadata: Fallback — get the book's title, author, language, and total chapter count if the snapshot is missing.
-- get_toc: Fallback — get the full table of contents (chapter index, label, and href) if the snapshot TOC is truncated or you need hrefs.
+- get_toc: Fallback — get the full table of contents (chapterIndex, chapterNumber, title, chars) if the snapshot TOC is truncated.
 
 Always answer in the same language as the user's question. Be concise but thorough.`;
 
@@ -182,13 +185,18 @@ function createBookTools(bookId: string, generation: number): ToolDefinition[] {
     defineTool({
       name: "get_toc",
       label: "Get Table of Contents",
-      description: "Get the table of contents: list of chapters with index, label, and href.",
-      promptSnippet: "get_toc: list all chapters with index and label",
+      description: "Get the table of contents. Each entry has chapterIndex (pass this to read_chapter), chapterNumber (1-based; match spoken \"chapter N\" here), title, and chars (text length; one read_chapter part is 12000 chars).",
+      promptSnippet: "get_toc: list chapters as chapterIndex, chapterNumber, title, chars",
       parameters: Type.Object({}),
       execute: async () => {
         try {
           const toc = await worker().toc(bookId, generation);
-          return okResult(`Table of Contents (${toc.length} entries):\n${toc.map((entry) => `${entry.index}: ${entry.label} (${entry.href})`).join("\n")}`);
+          return okResult(JSON.stringify(toc.map((entry) => ({
+            chapterIndex: entry.index,
+            chapterNumber: entry.index + 1,
+            title: entry.label,
+            chars: entry.chars ?? 0,
+          }))));
         } catch (error) {
           return errorResult(error instanceof Error ? error.message : String(error));
         }
@@ -197,12 +205,25 @@ function createBookTools(bookId: string, generation: number): ToolDefinition[] {
     defineTool({
       name: "read_chapter",
       label: "Read Chapter",
-      description: "Read the full text of a chapter by its index (0-based, from the TOC).",
-      promptSnippet: "read_chapter(index): read full text of chapter by index",
-      parameters: Type.Object({ index: Type.Number({ description: "0-based chapter index" }) }),
-      execute: async (_, { index }) => {
+      description: "Read a chapter's text in windows of 12000 characters. Copy chapterIndex from the TOC (match spoken \"chapter N\" to chapterNumber). Start at part 0; the result includes totalParts.",
+      promptSnippet: "read_chapter(chapterIndex, part?): read a 12000-char window; start at part 0",
+      parameters: Type.Object({
+        chapterIndex: Type.Number({
+          description: "0-based chapterIndex copied from the TOC (match spoken \"chapter N\" to chapterNumber)",
+        }),
+        part: Type.Optional(Type.Number({ description: "Window index, default 0" })),
+      }),
+      execute: async (_, { chapterIndex, part }) => {
         try {
-          return okResult(await worker().readChapter(bookId, generation, index));
+          const text = await worker().readChapter(bookId, generation, chapterIndex);
+          const windowed = windowChapterText(text, part ?? 0);
+          return okResult(JSON.stringify({
+            chapterIndex,
+            chapterNumber: chapterIndex + 1,
+            part: windowed.part,
+            totalParts: windowed.totalParts,
+            text: windowed.text,
+          }));
         } catch (error) {
           return errorResult(error instanceof Error ? error.message : String(error));
         }
@@ -211,14 +232,21 @@ function createBookTools(bookId: string, generation: number): ToolDefinition[] {
     defineTool({
       name: "search_in_book",
       label: "Search in Book",
-      description: "Search the entire book for a query string and return matching excerpts.",
-      promptSnippet: "search_in_book(query): full-text search returning excerpts with chapter indices",
-      parameters: Type.Object({ query: Type.String({ description: "Search query" }) }),
-      execute: async (_, { query }) => {
+      description: "Search the book's prose. Pass several phrasings or synonyms in queries in this one call (merged and deduped). Exact matches come first; token-level fallback matches are marked partial. Each hit includes the read_chapter part.",
+      promptSnippet: "search_in_book(queries): pass several phrasings in one call; hits include part and match",
+      parameters: Type.Object({
+        queries: Type.Array(Type.String(), {
+          minItems: 1,
+          description: "Query variants, searched together. 2-5 focused variants beat a broad sweep; extras past 12 are ignored.",
+        }),
+      }),
+      execute: async (_, { queries }) => {
         try {
-          const results = await worker().search(bookId, generation, query);
-          if (results.length === 0) return okResult(`No matches found for "${query}".`);
-          return okResult(`Found ${results.length} matches:\n\n${results.map((result) => `[Chapter ${result.chapterIndex}] ${result.excerpt}`).join("\n\n")}`);
+          const cleaned = cleanSearchQueries(queries);
+          const results = cleaned.length === 0
+            ? []
+            : await worker().search(bookId, generation, cleaned);
+          return okResult(JSON.stringify(results));
         } catch (error) {
           return errorResult(error instanceof Error ? error.message : String(error));
         }

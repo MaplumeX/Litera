@@ -18,7 +18,7 @@ type BookWorkerRequest =
   | { id: number; type: "metadata"; bookId: string; generation: number }
   | { id: number; type: "toc"; bookId: string; generation: number }
   | { id: number; type: "read_chapter"; bookId: string; generation: number; index: number }
-  | { id: number; type: "search"; bookId: string; generation: number; query: string }
+  | { id: number; type: "search"; bookId: string; generation: number; queries: string[] }
   | { id: number; type: "close" };
 
 type BookWorkerResponse =
@@ -85,7 +85,7 @@ async function handleWorkerRequest(request: BookWorkerRequest): Promise<unknown>
       return readChapter(request.index);
     case "search":
       requireLoadedBook(request.bookId, request.generation);
-      return searchInBook(request.query);
+      return searchInBook(request.queries);
     case "close":
       closeBook();
       loadedBook = null;
@@ -134,8 +134,8 @@ export class BookWorker {
     return this.request({ type: "read_chapter", bookId, generation, index });
   }
 
-  search(bookId: string, generation: number, query: string): Promise<SearchResult[]> {
-    return this.request({ type: "search", bookId, generation, query });
+  search(bookId: string, generation: number, queries: string[]): Promise<SearchResult[]> {
+    return this.request({ type: "search", bookId, generation, queries });
   }
 
   async closeBook(): Promise<void> {

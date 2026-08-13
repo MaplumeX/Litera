@@ -9,6 +9,13 @@
 import AdmZip from "adm-zip";
 import { initSqlJs, type Database, type SqlJsStatic } from "fts5-sql-bundle";
 import { join } from "node:path";
+import {
+  escapeFtsPhrase,
+  searchChapters,
+  toSearchToolHit,
+  type ChapterLike,
+  type SearchToolHit,
+} from "./book-text.js";
 
 // --- Types ------------------------------------------------------------------
 
@@ -23,6 +30,7 @@ export interface TocEntry {
   index: number;
   label: string;
   href: string;
+  chars?: number;
 }
 
 interface ManifestItem {
@@ -351,7 +359,10 @@ export function getBookMetadata(): BookMetadata {
 
 export function getToc(): TocEntry[] {
   if (!currentBook) throw new Error("No book loaded. Open a book first.");
-  return currentBook.toc;
+  return currentBook.toc.map((entry) => ({
+    ...entry,
+    chars: currentBook!.chapterTexts.get(entry.index)?.length ?? 0,
+  }));
 }
 
 export function readChapter(index: number): string {
@@ -365,25 +376,36 @@ export function readChapter(index: number): string {
   return text;
 }
 
-export interface SearchResult {
-  chapterIndex: number;
-  excerpt: string;
+export type SearchResult = SearchToolHit;
+
+function ftsMatchChapterIndices(fts: Database, query: string): number[] {
+  const stmt = fts.prepare("SELECT rowid FROM chapters WHERE content MATCH ?");
+  try {
+    stmt.bind([escapeFtsPhrase(query)]);
+    const indices: number[] = [];
+    while (stmt.step()) {
+      const row = stmt.getAsObject();
+      indices.push(Number(row.rowid) - 1);
+    }
+    return indices;
+  } finally {
+    stmt.free();
+  }
 }
 
-export function searchInBook(query: string): SearchResult[] {
+export function searchInBook(queries: string[]): SearchResult[] {
   if (!currentBook || !currentBook.fts) throw new Error("No book loaded. Open a book first.");
-  const stmt = currentBook.fts.prepare(
-    "SELECT rowid, snippet(chapters, 0, '【', '】', '…', 16) AS excerpt FROM chapters WHERE content MATCH ?",
-  );
-  stmt.bind([query]);
-  const results: SearchResult[] = [];
-  while (stmt.step()) {
-    const row = stmt.getAsObject();
-    results.push({
-      chapterIndex: row.rowid - 1,
-      excerpt: String(row.excerpt),
+  const book = currentBook;
+  const maxIndex = Math.max(-1, book.metadata.totalChapters - 1, ...book.chapterTexts.keys());
+  const chapters: ChapterLike[] = [];
+  for (let index = 0; index <= maxIndex; index++) {
+    const title = book.toc.find((entry) => entry.index === index)?.label;
+    chapters.push({
+      title: title || undefined,
+      text: book.chapterTexts.get(index) ?? "",
     });
   }
-  stmt.free();
-  return results;
+  return searchChapters(chapters, queries, {
+    ftsCandidates: (query) => ftsMatchChapterIndices(book.fts!, query),
+  }).map(toSearchToolHit);
 }

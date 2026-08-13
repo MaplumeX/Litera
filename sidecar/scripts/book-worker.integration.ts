@@ -54,7 +54,7 @@ if (isBookWorkerThread()) {
       assert.equal(resultA.metadata.title, "Book A");
       assert.equal(resultB.metadata.title, "Book B");
       assert.match(await worker.readChapter("book-b", 2, 0), /bravo-only-token/);
-      assert.equal((await worker.search("book-b", 2, "bravo")).length, 1);
+      assert.equal((await worker.search("book-b", 2, ["bravo"])).length, 1);
       await assert.rejects(
         worker.readChapter("book-a", 1, 0),
         /does not match the loaded book generation/,

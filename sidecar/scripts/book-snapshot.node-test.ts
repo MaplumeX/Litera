@@ -22,37 +22,39 @@ test("short TOC is complete with no truncated note and no hrefs", () => {
     { index: 2, label: "The Spouter-Inn", href: "ch3.xhtml" },
   ];
   const text = formatBookSnapshot(meta, toc);
-  assert.match(text, /^Book snapshot \(already provided; do not call get_book_metadata or get_toc unless the TOC is truncated or you need hrefs\):/);
+  assert.match(text, /^Book snapshot \(already provided; do not call get_book_metadata or get_toc unless the TOC is truncated\):/);
   assert.match(text, /Title: Moby-Dick/);
   assert.match(text, /Author: Herman Melville/);
   assert.match(text, /Language: en/);
   assert.match(text, /Total chapters: 3/);
   assert.match(text, /Table of Contents \(3 of 3 entries\):/);
-  assert.match(text, /0: Loomings/);
-  assert.match(text, /1: The Carpet-Bag/);
-  assert.match(text, /2: The Spouter-Inn/);
+  assert.match(text, /1 \[index 0\]: Loomings/);
+  assert.match(text, /2 \[index 1\]: The Carpet-Bag/);
+  assert.match(text, /3 \[index 2\]: The Spouter-Inn/);
   assert.equal(text.includes("ch1.xhtml"), false);
   assert.equal(text.includes("ch2.xhtml"), false);
   assert.equal(text.includes("ch3.xhtml"), false);
+  assert.equal(text.includes("href"), false);
+  assert.equal(text.includes("need hrefs"), false);
   assert.equal(text.includes("[TOC truncated."), false);
 });
 
 test("201 entries keep 200 lines and add a truncated note", () => {
   const toc = Array.from({ length: 201 }, (_, index) => ({
     index,
-    label: `Chapter ${index}`,
+    label: `${index}`,
     href: `ch${index}.xhtml`,
   }));
   const text = formatBookSnapshot(meta, toc);
   assert.match(text, /Table of Contents \(200 of 201 entries\):/);
-  assert.match(text, /0: Chapter 0/);
-  assert.match(text, /199: Chapter 199/);
-  assert.equal(text.includes("200: Chapter 200"), false);
+  assert.match(text, /1 \[index 0\]: 0/);
+  assert.match(text, /200 \[index 199\]: 199/);
+  assert.equal(text.includes("201 [index 200]: 200"), false);
   assert.match(text, /\[TOC truncated\. Call get_toc for the full list\.\]/);
   const bodyLines = text
     .split("Table of Contents (200 of 201 entries):\n")[1]
     .split("\n")
-    .filter((line) => /^\d+: /.test(line));
+    .filter((line) => /^\d+ \[index \d+\]: /.test(line));
   assert.equal(bodyLines.length, BOOK_SNAPSHOT_MAX_TOC_ENTRIES);
 });
 
@@ -65,8 +67,8 @@ test("long labels hit the 4000-char cap with fewer than 200 lines", () => {
   }));
   const text = formatBookSnapshot(meta, toc);
   assert.match(text, /Table of Contents \(1 of 3 entries\):/);
-  assert.match(text, new RegExp(`0: ${label}`));
-  assert.equal(text.includes(`1: ${label}`), false);
+  assert.match(text, new RegExp(`1 \\[index 0\\]: ${label}`));
+  assert.equal(text.includes(`2 [index 1]: ${label}`), false);
   assert.match(text, /\[TOC truncated\. Call get_toc for the full list\.\]/);
   const body = text.split("Table of Contents (1 of 3 entries):\n")[1].split("\n")[0];
   assert.equal(body.length <= BOOK_SNAPSHOT_MAX_TOC_CHARS, true);
