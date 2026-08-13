@@ -1,0 +1,3 @@
+{"file": ".trellis/tasks/08-13-remove-reader-progress-bar/prd.md", "reason": "任务范围：只删阅读页通栏，保留 progress state 与书库卡片进度"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "阅读页布局与组件约定；不要另造替代进度 UI"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "progress 是 App 根状态，index 仍要下传 ChatPanel"}

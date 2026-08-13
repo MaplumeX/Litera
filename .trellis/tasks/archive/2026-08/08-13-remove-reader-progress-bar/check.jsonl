@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/08-13-remove-reader-progress-bar/prd.md", "reason": "对照验收：阅读页无进度条，对话章节与书库进度仍在"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "检查没有手写新的进度组件或替代 chrome"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "检查不要误删 progress / relocate 持久化"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "前端质量约定"}
