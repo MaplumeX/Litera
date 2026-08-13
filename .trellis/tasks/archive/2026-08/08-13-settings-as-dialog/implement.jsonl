@@ -1,0 +1,6 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend guideline index before touching React settings surface"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Settings entry ownership and shadcn Dialog conventions"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "App view ownership; settings must not lift ChatPanel LLM state"}
+{"file": ".trellis/spec/frontend/directory-structure.md", "reason": "settings/ directory currently described as third root view"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Reuse AgentConfigDialog Dialog pattern; do not invent a new overlay"}

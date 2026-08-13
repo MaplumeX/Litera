@@ -1,0 +1,5 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Verify settings entry ownership and Dialog usage after the change"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "Verify view is library|reader only and ChatPanel stays local"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Quality bar for frontend check"}
+{"file": ".trellis/spec/frontend/directory-structure.md", "reason": "settings/ is no longer a third root view"}
