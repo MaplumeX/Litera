@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend entry: component/state conventions for ChatPanel and EmptyState"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Chat overlay and empty-state UI must follow shadcn + lucide rules"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "Session list visibility and reuse check live in ChatPanel local state + agent bridge"}
+{"file": ".trellis/spec/frontend/hook-guidelines.md", "reason": "newSession / input focus must stay ref-stable and not break useImperativeHandle"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Sidecar deriveTitle fallback is backend/sidecar-owned"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Default title string exists in frontend reducer and sidecar deriveTitle"}

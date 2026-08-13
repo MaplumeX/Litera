@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/frontend/index.md", "reason": "Quality Check entry for frontend layer"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Frontend quality bar for UI changes"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Verify empty-state and session-list changes stay on shadcn/lucide"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Sidecar title fallback must not break protocol/event shape"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Title string must stay consistent across reducer and sidecar"}
