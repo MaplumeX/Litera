@@ -29,6 +29,8 @@ const [currentBook, setCurrentBook] = useState<BookRecord | null>(null);
 const [progress, setProgress] = useState<{ index: number; fraction: number; label?: string }>({ ... });
 const [styleState, setStyleState] = useState<ReaderStyleState>({ fontSize: 16, fontFamily: "serif", theme: "light" });
 const [toc, setToc] = useState<TocItem[]>([]);
+const [chatCollapsed, setChatCollapsed] = useState(true);
+const [tocVisible, setTocVisible] = useState(false);
 ```
 
 These are the closest thing to "global state". They're passed down as props:
@@ -44,6 +46,8 @@ Each component owns its own UI state:
 - `ReaderView`: `selectionPos` (transient selection button position)
 
 `App.settingsOpen` owns `SettingsDialog` (library gear + reader Aa). Do not lift ChatPanel LLM settings into that flag.
+
+Reader chrome flags (`tocVisible`, `chatCollapsed`) live only in `App` `useState`. They survive back-to-library and book switches in the same process. `handleBackToLibrary` must not reset them. Do not write them to `save_preferences`. Restart returns to TOC closed + chat collapsed. Clear `toc` data when leaving a book; only the open/closed flags persist in memory.
 
 ### 3. Ref state (non-rendering)
 
