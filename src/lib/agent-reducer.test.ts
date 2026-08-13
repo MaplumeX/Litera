@@ -205,7 +205,7 @@ describe("agentReducer", () => {
     // New session appears immediately and is current
     expect(state.sessionId).toBe("session-new");
     expect(state.sessions.map((s) => s.id)).toEqual(["session-new"]);
-    expect(state.sessions[0].title).toBe("New Session");
+    expect(state.sessions[0].title).toBe("新会话");
 
     // Duplicate session_created for same id does not create a second entry
     state = reduce(state, {

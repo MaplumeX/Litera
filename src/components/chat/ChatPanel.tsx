@@ -293,7 +293,11 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
             onClose={() => setShowSessionList(false)}
             onNewSession={() => {
               setInvokeError(null);
-              void newSession().catch((error) => setInvokeError(String(error)));
+              setShowSessionList(false);
+              if (!(state.sessionId && state.messages.length === 0)) {
+                void newSession().catch((error) => setInvokeError(String(error)));
+              }
+              queueMicrotask(() => inputRef.current?.focus());
             }}
             onSwitchSession={(id) => {
               setInvokeError(null);

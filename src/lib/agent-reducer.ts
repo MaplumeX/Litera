@@ -179,7 +179,7 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
             error: null,
             sessions: upsertSession(base.sessions, {
               id: event.sessionId,
-              title: "New Session",
+              title: "新会话",
               createdAt: new Date().toISOString(),
               updatedAt: new Date().toISOString(),
             }),

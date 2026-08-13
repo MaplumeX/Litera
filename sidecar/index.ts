@@ -697,7 +697,7 @@ async function handleListSessions(command: Extract<SidecarCommand, { type: "list
 function deriveTitle(firstMessage: string, name?: string): string {
   if (name?.trim()) return name;
   if (firstMessage && firstMessage !== "(no messages)") return firstMessage.slice(0, 30);
-  return "New Session";
+  return "新会话";
 }
 
 function serializeMessages(messages: readonly unknown[]): SerializedMessage[] {

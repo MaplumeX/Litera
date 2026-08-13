@@ -19,7 +19,9 @@ export function EmptyState({ hasSelection, bookReady, onSuggestion }: EmptyState
       </div>
       <div>
         <h3 className="text-sm font-semibold">阅读助手</h3>
-        <p className="mt-1 text-sm text-muted-foreground">打开一本书，选中段落或直接提问。</p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          {bookReady ? "选中段落，或直接提问。" : "打开一本书，选中段落或直接提问。"}
+        </p>
       </div>
       {suggestions.length > 0 && (
         <div className="flex w-full max-w-60 flex-col gap-2">
