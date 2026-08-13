@@ -764,3 +764,24 @@ Planned and implemented reading-first layout: book title as header, full-width p
 ### Status
 
 [OK] **Completed**
+
+
+## Session 35: Remove reader progress bar
+
+**Date**: 2026-08-13
+**Task**: Remove reader progress bar
+**Branch**: `feat/progress-bar-presentation`
+
+### Summary
+
+Deleted the dedicated reader progress row so the book sits under the toolbar. Relocate state still feeds chat chapter index and library card progress. Updated frontend specs to match.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9840d53` | (see git log) |
+
+### Status
+
+[OK] **Completed**
