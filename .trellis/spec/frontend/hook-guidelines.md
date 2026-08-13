@@ -121,6 +121,26 @@ readerRef.current?.goToTocItem(href);
 
 `ReaderView` also owns click / key / wheel page turning (bound on the host and each chapter iframe). Parents must not attach a second `window` `keydown` handler for `prev` / `next`.
 
+### Pattern: OS-open wake-up then drain
+
+`registerOpenPathsListener` (`src/lib/open-paths.ts`) listens for `open-paths-available`, then **drains** `take_pending_open_paths` in a serialized chain. Mount it from `App` via `useOpenPaths`, not `LibraryView` (the library unmounts in the reader).
+
+```typescript
+listen("open-paths-available", () => handler());
+const paths = await invoke<string[]>("take_pending_open_paths");
+```
+
+**Key details**:
+
+- Event payload is empty. Paths come only from take.
+- After listen resolves, take once for the cold-start queue; later events take again.
+- Disposed flag: if `listen()` resolves after cleanup, call unlisten immediately and do not take.
+- Drain until take returns nothing. Dedup a path for 5s after a successful import so macOS argv + `RunEvent::Opened` do not overwrite the same file. Clear that entry when the batch has no success so cancel/fail can retry.
+- Open only the last successful `bookId`. Picker / drag-drop keep a separate `useBookImport` and do not auto-open.
+- Overwrite confirm must render in `App` so it still works on the reader view.
+
+**Tests required**: cold-start take opens the last id; empty queue does not call `openBook`; cancelled overwrite still opens a later id; dispose-before-listen-resolve unlistens; same path within 5s is skipped.
+
 ### Pattern: Tauri event subscription with cleanup
 
 The Agent bridge owns one `agent_event` listener. Registration and snapshot hydration are separated into `registerAgentSubscription` so late `listen()` resolution is testable.

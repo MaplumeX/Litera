@@ -1,0 +1,5 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Quality check entry for frontend"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Verify lucide aria-label and settings entry ownership"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "Chrome state stays in App; chat settings stay local"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Frontend quality bar before commit"}

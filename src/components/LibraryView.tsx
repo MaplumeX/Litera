@@ -1,45 +1,21 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
-import type { BookRecord, ImportBookResult } from "@/types/library";
-import { extractEpubMetadata } from "@/lib/book-utils";
+import type { BookRecord } from "@/types/library";
 import { Button } from "@/components/ui/button";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { Plus, Settings } from "lucide-react";
 import { BookCard } from "@/components/BookCard";
 import {
-  invokeErrorMessage,
-  isInvokeAppError,
-} from "@/lib/app-error";
-import { epubBytesFromIpc } from "@/lib/ipc-bytes";
+  BookImportConfirmDialog,
+  BookImportNotices,
+} from "@/components/BookImportFeedback";
+import { invokeErrorMessage } from "@/lib/app-error";
+import { useBookImport } from "@/lib/use-book-import";
 
 interface LibraryViewProps {
   onOpenBook: (bookId: string) => void | Promise<void>;
   openingBookId?: string | null;
   onOpenSettings: () => void;
-}
-
-interface Notice {
-  id: string;
-  kind: "error" | "info";
-  message: string;
-  action?: { label: string; bookId: string };
-}
-
-interface ConfirmRequest {
-  title: string;
-  description: string;
-  confirmLabel: string;
-  destructive?: boolean;
 }
 
 function isEpubPath(path: string): boolean {
@@ -49,47 +25,22 @@ function isEpubPath(path: string): boolean {
 export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }: LibraryViewProps) {
   const [books, setBooks] = useState<BookRecord[]>([]);
   const [search, setSearch] = useState("");
-  const [importing, setImporting] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [notices, setNotices] = useState<Notice[]>([]);
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest | null>(null);
-  const confirmResolver = useRef<((value: boolean) => void) | null>(null);
-  const importingRef = useRef(false);
-
-  const pushNotice = useCallback((notice: Omit<Notice, "id">) => {
-    setNotices((current) => [
-      ...current,
-      { ...notice, id: crypto.randomUUID() },
-    ]);
-  }, []);
-
-  const dismissNotice = useCallback((id: string) => {
-    setNotices((current) => current.filter((notice) => notice.id !== id));
-  }, []);
-
-  const settleConfirm = useCallback((value: boolean) => {
-    const resolve = confirmResolver.current;
-    confirmResolver.current = null;
-    setConfirmOpen(false);
-    resolve?.(value);
-  }, []);
-
-  const askConfirm = useCallback((request: ConfirmRequest) => {
-    setConfirmRequest(request);
-    setConfirmOpen(true);
-    return new Promise<boolean>((resolve) => {
-      confirmResolver.current = resolve;
-    });
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      settleConfirm(false);
-    };
-  }, [settleConfirm]);
+  const {
+    notices,
+    dismissNotice,
+    pushNotice,
+    confirmOpen,
+    confirmRequest,
+    settleConfirm,
+    askConfirm,
+    importing,
+    importingRef,
+    importFromPicker,
+    importFromPaths,
+  } = useBookImport();
 
   const exitSelectMode = useCallback(() => {
     setSelectMode(false);
@@ -112,125 +63,21 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
     void refreshBooks();
   }, [refreshBooks]);
 
-  const commitStagedImport = useCallback(async (result: ImportBookResult) => {
-    if (!result.importId) {
-      throw new Error("Missing importId for staged import");
-    }
-    const buffer = await invoke<ArrayBuffer>("read_import_bytes", {
-      bookId: result.bookId,
-      importId: result.importId,
-    });
-    const metadata = await extractEpubMetadata(epubBytesFromIpc(buffer), result.name);
-    await invoke<BookRecord>("save_book_metadata", {
-      bookId: result.bookId,
-      title: metadata.title,
-      author: metadata.author,
-      coverBytes: metadata.coverBytes ?? null,
-      importId: result.importId,
-    });
-  }, []);
-
-  const processImportResults = useCallback(async (results: ImportBookResult[]) => {
-    for (const result of results) {
-      if (result.status === "duplicate") {
-        pushNotice({
-          kind: "info",
-          message: `《${result.title}》已在书库`,
-          action: { label: "打开", bookId: result.bookId },
-        });
-        continue;
-      }
-      if (result.status === "overwrite") {
-        const confirmed = await askConfirm({
-          title: `覆盖「${result.title}」？`,
-          description: "将用新文件替换这本书。阅读进度、设置和对话会保留。",
-          confirmLabel: "覆盖",
-        });
-        if (!confirmed) {
-          if (result.importId) {
-            try {
-              await invoke("discard_import", {
-                bookId: result.bookId,
-                importId: result.importId,
-              });
-            } catch (err) {
-              console.error("discard_import error:", err);
-              pushNotice({
-                kind: "error",
-                message: `取消覆盖失败：${invokeErrorMessage(err)}`,
-              });
-            }
-          }
-          continue;
-        }
-      }
-      try {
-        await commitStagedImport(result);
-      } catch (err) {
-        console.error("import commit error:", err);
-        pushNotice({
-          kind: "error",
-          message: `导入失败：${invokeErrorMessage(err)}`,
-        });
-      }
-    }
-    await refreshBooks();
-  }, [askConfirm, commitStagedImport, pushNotice, refreshBooks]);
-
   const handleImport = useCallback(async () => {
     if (importingRef.current) return;
-    importingRef.current = true;
-    setImporting(true);
-    try {
-      const results = await invoke<ImportBookResult[]>("import_book");
-      await processImportResults(results);
-    } catch (err) {
-      if (
-        (isInvokeAppError(err) && err.code === "Cancelled") ||
-        String(err).includes("No file selected")
-      ) {
-        // User cancelled — no error.
-      } else {
-        console.error("import error:", err);
-        pushNotice({
-          kind: "error",
-          message: `导入失败：${invokeErrorMessage(err)}`,
-        });
-      }
-    } finally {
-      importingRef.current = false;
-      setImporting(false);
-    }
-  }, [processImportResults, pushNotice]);
+    await importFromPicker();
+    await refreshBooks();
+  }, [importFromPicker, importingRef, refreshBooks]);
 
   const handleDroppedPaths = useCallback(async (paths: string[]) => {
     const epubs = paths.filter(isEpubPath);
     if (epubs.length === 0 || importingRef.current) return;
-    importingRef.current = true;
-    setImporting(true);
-    try {
-      // One file at a time so a confirmed overwrite hash is visible to the
-      // next path (same-batch overwrite-then-duplicate) and a later failure
-      // still lets earlier files finish metadata commit.
-      for (const path of epubs) {
-        try {
-          const results = await invoke<ImportBookResult[]>("import_paths", {
-            paths: [path],
-          });
-          await processImportResults(results);
-        } catch (err) {
-          console.error("import_paths error:", err);
-          pushNotice({
-            kind: "error",
-            message: `导入失败：${invokeErrorMessage(err)}`,
-          });
-        }
-      }
-    } finally {
-      importingRef.current = false;
-      setImporting(false);
-    }
-  }, [processImportResults, pushNotice]);
+    // One file at a time so a confirmed overwrite hash is visible to the
+    // next path (same-batch overwrite-then-duplicate) and a later failure
+    // still lets earlier files finish metadata commit.
+    await importFromPaths(epubs);
+    await refreshBooks();
+  }, [importFromPaths, importingRef, refreshBooks]);
 
   useEffect(() => {
     let disposed = false;
@@ -399,39 +246,12 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
         </div>
       )}
 
-      {notices.map((notice) => (
-        <div
-          key={notice.id}
-          role={notice.kind === "error" ? "alert" : "status"}
-          className={
-            notice.kind === "error"
-              ? "flex items-center gap-3 border-b border-destructive/40 bg-destructive/10 px-4 py-2 text-sm text-destructive"
-              : "flex items-center gap-3 border-b bg-muted/60 px-4 py-2 text-sm"
-          }
-        >
-          <span className="min-w-0 flex-1">{notice.message}</span>
-          {notice.action && (
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={importing}
-              onClick={() => {
-                dismissNotice(notice.id);
-                void onOpenBook(notice.action!.bookId);
-              }}
-            >
-              {notice.action.label}
-            </Button>
-          )}
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => dismissNotice(notice.id)}
-          >
-            关闭
-          </Button>
-        </div>
-      ))}
+      <BookImportNotices
+        notices={notices}
+        dismissNotice={dismissNotice}
+        onOpenBook={onOpenBook}
+        actionDisabled={importing}
+      />
 
       {/* Grid or empty state */}
       <div className="flex-1 overflow-y-auto p-4">
@@ -473,32 +293,11 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
         )}
       </div>
 
-      <AlertDialog
-        open={confirmOpen}
-        onOpenChange={(open) => {
-          if (!open) settleConfirm(false);
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{confirmRequest?.title}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {confirmRequest?.description}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => settleConfirm(false)}>
-              取消
-            </AlertDialogCancel>
-            <AlertDialogAction
-              variant={confirmRequest?.destructive ? "destructive" : "default"}
-              onClick={() => settleConfirm(true)}
-            >
-              {confirmRequest?.confirmLabel ?? "确定"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <BookImportConfirmDialog
+        confirmOpen={confirmOpen}
+        confirmRequest={confirmRequest}
+        settleConfirm={settleConfirm}
+      />
     </div>
   );
 }

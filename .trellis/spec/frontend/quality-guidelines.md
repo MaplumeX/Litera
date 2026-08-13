@@ -44,10 +44,18 @@ frame-src 'self' blob:
 ```rust
 // src-tauri/src/lib.rs
 pub fn run() {
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default();
+    #[cfg(desktop)]
+    {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
+            open_paths::handle_second_instance(app, args, cwd);
+        }));
+    }
+    builder
         .plugin(tauri_plugin_dialog::init())
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| { /* macOS RunEvent::Opened */ });
 }
 ```
 
@@ -59,3 +67,5 @@ pub fn run() {
 ```
 
 **Why**: Tauri 2 separates plugin registration (builder code) from permission grants (capabilities JSON). Don't inline permissions in Rust code.
+
+`tauri-plugin-single-instance` has no JS API and needs no capability. It **must be the first plugin**. File associations live in `tauri.conf.json` `bundle.fileAssociations`, not capabilities. Catching `RunEvent::Opened` requires `build().run(|app, event|)`, not `Builder::run`.

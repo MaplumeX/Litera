@@ -65,6 +65,29 @@ import { ChevronLeft, List, Settings } from "lucide-react"
 - Group related icon buttons in a `<div className="flex items-center gap-1">` container.
 - Active/pressed states use `variant="secondary"` (background highlight); inactive uses `variant="ghost"`.
 
+### Convention: reader chrome is reading-first
+
+**What**: The reader view is book-title + full-width progress + overlay TOC + on-demand chat. Chat starts collapsed. TOC is never a third column.
+
+**Why**: A fixed TOC column and a default 35% chat pane make the book a side panel. Toggling chat by remounting `ReaderView` / `ChatPanel` reopens the EPUB and breaks `fillInput`.
+
+**Layout**:
+```
+header:   [←]  book title (h1, truncate)     [TOC][Aa][chat]
+progress: ================= chapter · 42% =================
+body:     [TOC overlay]  Reader  |  Chat (collapsed = 0 width, still mounted)
+```
+
+**Rules**:
+- Reader header title is the book name. Do not put the `Litera` brand in the reader toolbar.
+- Progress is a full-width thin bar under the header, not a `w-24` chip in the icon row.
+- TOC is an absolute left drawer over `ReaderView` (backdrop / Esc / chapter click close). Do not insert a `w-56 shrink-0` column beside the reader. `App` may listen for `Escape` to close TOC; do not handle `ArrowLeft` / `ArrowRight` in `App` (ReaderView owns paging on the chapter iframe).
+- Mount exactly one `ReaderView`. Keep `ChatPanel` mounted when collapsed (`hidden` + panel collapse). Do not branch two copies of `ReaderView`.
+- Chat open size is ~22%. Do not bind `Panel` `defaultSize` / `minSize` to `chatCollapsed` — that re-registers the panel and resets the layout.
+- 「问 agent」 while chat is collapsed: store a pending capture, expand the panel, then `fillInput` after layout. Do not call `fillInput` on a `display:none` panel.
+
+**Related**: [State Management](./state-management.md) for process-only `tocVisible` / `chatCollapsed`.
+
 ### Convention: chat message action rows reserve height
 
 **What**: User-message edit and assistant-message copy live in a fixed-height row **below** the bubble / markdown (`h-6`). Hover may change icon contrast. Editing replaces that row with save/cancel; the bubble becomes a textarea.
