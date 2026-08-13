@@ -208,29 +208,6 @@ function App() {
     readerRef.current?.setStyles(css);
   }, [styleState]);
 
-  // Keyboard page navigation (reader view only).
-  useEffect(() => {
-    if (view !== "reader" || !fileData) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement;
-      if (
-        target.tagName === "INPUT" ||
-        target.tagName === "TEXTAREA" ||
-        target.isContentEditable
-      )
-        return;
-      if (e.key === "ArrowLeft") {
-        e.preventDefault();
-        void readerRef.current?.prev();
-      } else if (e.key === "ArrowRight") {
-        e.preventDefault();
-        void readerRef.current?.next();
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [view, fileData]);
-
   const handleOpenBook = useCallback(async (bookId: string) => {
     // `open_book_bytes` also switches the sidecar, so it is intentionally
     // serialized. A later click supersedes the older UI result without letting
