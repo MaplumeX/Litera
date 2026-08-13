@@ -234,10 +234,14 @@ See `src/lib/book-utils.ts` for the full implementation.
 >
 > Spatial input (left/right click, arrow keys) uses `goLeft()` / `goRight()` (RTL-aware). Wheel uses reading order: down/right → `next()`, up/left → `prev()`.
 >
+> Wheel paging is an idle-reset gesture (`consumeWheelDelta` in `src/lib/reader-paging.ts`), matching Readest / Apple Books: accumulate normalized travel, flip once at **30px**, swallow the inertial tail (`flipped`), reset only after **200ms** of silence. Pass `WheelEvent.deltaMode` (`1` → ×40, `2` → ×800) and `timeStamp`. A line-mode mouse notch (`deltaMode === 1`, `delta === 1`) must turn a page.
+>
 > Do **not**:
 > - cover the iframe with left/right overlay hit-boxes (blocks text selection)
 > - set `flow="scrolled"` just to get native wheel scrolling (changes the reading model)
 > - edit `src/foliate-js/` (git submodule)
+> - use a cooldown that **extends on every event** — macOS trackpad inertia keeps that lock alive and the next intentional swipe feels dead
+> - ignore `deltaMode` and treat every delta as pixels — line-mode notches never reach a pixel threshold
 
 Helpers live in `src/lib/reader-paging.ts`. Implementation: `src/components/ReaderView.tsx`.
 
