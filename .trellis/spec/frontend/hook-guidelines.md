@@ -119,6 +119,8 @@ readerRef.current?.setStyles(css);
 readerRef.current?.goToTocItem(href);
 ```
 
+`ReaderView` also owns click / key / wheel page turning (bound on the host and each chapter iframe). Parents must not attach a second `window` `keydown` handler for `prev` / `next`.
+
 ### Pattern: OS-open wake-up then drain
 
 `registerOpenPathsListener` (`src/lib/open-paths.ts`) listens for `open-paths-available`, then **drains** `take_pending_open_paths` in a serialized chain. Mount it from `App` via `useOpenPaths`, not `LibraryView` (the library unmounts in the reader).
