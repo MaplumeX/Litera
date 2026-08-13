@@ -96,7 +96,9 @@ await listen<AgentEvent>("agent_event", (event) => {
 
 The sidecar's `SessionManager` does **not** persist an empty session to disk — it only writes the file once an assistant message exists (pi design to avoid empty-file buildup). This means `listSessions()` called right after `session_created` returns a list that **excludes** the just-created session.
 
-Therefore the reducer's `session_created` case must **optimistically insert** a `AgentSessionSummary` (id from event, title `"New Session"`, current timestamps) into `state.sessions` via a dedupe-by-id `upsertSession` helper. The `useAgentBridge` listener must **not** call `listSessions()` on `session_created` — that would overwrite the optimistic entry with a disk list that lacks it. The first real message persists the session; the subsequent `prompt_end` → `listSessions()` refresh replaces the optimistic entry with real disk data (same id, no duplicate).
+Therefore the reducer's `session_created` case must **optimistically insert** a `AgentSessionSummary` (id from event, title `"新会话"`, current timestamps) into `state.sessions` via a dedupe-by-id `upsertSession` helper. Sidecar `deriveTitle` uses the same fallback when there is no custom name and no first message — keep those two strings in sync. The `useAgentBridge` listener must **not** call `listSessions()` on `session_created` — that would overwrite the optimistic entry with a disk list that lacks it. The first real message persists the session; the subsequent `prompt_end` → `listSessions()` refresh replaces the optimistic entry with real disk data (same id, no duplicate).
+
+`ChatPanel` "新建会话" stays inside the overlay session list (no header shortcut). After click: close the overlay and focus the input. If `state.sessionId` is set and `state.messages` is empty, do **not** invoke `new_session` — reuse that empty session. EmptyState subtitle when `bookReady` is 「选中段落，或直接提问。」; only the not-ready state may say 「打开一本书」.
 
 ---
 
