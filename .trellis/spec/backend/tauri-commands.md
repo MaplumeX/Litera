@@ -88,12 +88,17 @@ interface BookRecord {
 }
 
 interface ReadingSettings {
-  fontSize?: number;
-  fontFamily?: string;
-  theme?: string;  // "light" | "dark" | "sepia" — accepted for old files, not written
-  lineHeight?: string;  // "compact" | "normal" | "relaxed"
-  pageMargin?: string;  // "narrow" | "normal" | "wide"
-  textAlign?: string;   // "start" | "justify"
+  fontSize?: number;           // px, 12–32
+  fontFamily?: string;         // "serif" | "sans-serif" | "monospace"
+  theme?: string;              // "light" | "dark" | "sepia" — accepted for old files, not written
+  lineHeight?: number;         // 1.2–2.4; leftover "compact"|"normal"|"relaxed" dual-read as 1.4/1.7/2.0
+  pageMargin?: string;         // leftover "narrow"|"normal"|"wide"; read-only, never written
+  contentWidth?: number;       // em, 28–60
+  pagePadding?: number;        // rem, 0.5–4
+  textAlign?: string;          // "start" | "justify"
+  letterSpacing?: number;      // em, -0.05–0.2
+  paragraphSpacing?: number;   // em, 0–2
+  firstLineIndent?: number;    // em, 0–3
 }
 
 type ImportStatus = "new" | "overwrite" | "duplicate";
@@ -248,7 +253,7 @@ const paths = await invoke("take_pending_open_paths");
 
 ### 1. Scope / Trigger
 
-Global app preferences in `<app_data>/preferences.json`: theme plus typography defaults (`lineHeight`, `pageMargin`, `textAlign`). Cross-layer contract — extending this file without a read-modify-write wipe the user's theme.
+Global app preferences in `<app_data>/preferences.json`: theme plus typography defaults (`fontSize`, `fontFamily`, `lineHeight`, `contentWidth`, `pagePadding`, `textAlign`, `letterSpacing`, `paragraphSpacing`, `firstLineIndent`). Cross-layer contract — extending this file without a read-modify-write wipe the user's theme.
 
 ### 2. Signatures
 
@@ -260,9 +265,15 @@ async fn get_preferences(store: State<'_, PreferencesStore>) -> AppResult<Prefer
 async fn save_preferences(
     store: State<'_, PreferencesStore>,
     theme: Option<String>,
-    line_height: Option<String>,
-    page_margin: Option<String>,
+    font_size: Option<f64>,
+    font_family: Option<String>,
+    line_height: Option<f64>,
+    content_width: Option<f64>,
+    page_padding: Option<f64>,
     text_align: Option<String>,
+    letter_spacing: Option<f64>,
+    paragraph_spacing: Option<f64>,
+    first_line_indent: Option<f64>,
 ) -> AppResult<()>
 ```
 
@@ -270,10 +281,16 @@ async fn save_preferences(
 
 ```typescript
 interface PreferencesResponse {
-  theme: string;        // "light" | "dark" | "sepia"
-  lineHeight: string;   // "compact" | "normal" | "relaxed"
-  pageMargin: string;   // "narrow" | "normal" | "wide"
-  textAlign: string;    // "start" | "justify"
+  theme: string;             // "light" | "dark" | "sepia"
+  fontSize: number;          // px, 12–32
+  fontFamily: string;        // "serif" | "sans-serif" | "monospace"
+  lineHeight: number;        // 1.2–2.4
+  contentWidth: number;      // em, 28–60
+  pagePadding: number;       // rem, 0.5–4
+  textAlign: string;         // "start" | "justify"
+  letterSpacing: number;     // em, -0.05–0.2
+  paragraphSpacing: number;  // em, 0–2
+  firstLineIndent: number;   // em, 0–3
 }
 ```
 
@@ -283,42 +300,52 @@ interface PreferencesResponse {
 {
   "schemaVersion": 1,
   "theme": "light",
-  "lineHeight": "normal",
-  "pageMargin": "normal",
-  "textAlign": "start"
+  "fontSize": 16,
+  "fontFamily": "serif",
+  "lineHeight": 1.7,
+  "contentWidth": 42,
+  "pagePadding": 1.75,
+  "textAlign": "start",
+  "letterSpacing": 0,
+  "paragraphSpacing": 1,
+  "firstLineIndent": 0
 }
 ```
 
-- New keys use `#[serde(default = "...")]`. A theme-only v1 file still loads; missing typography keys become `normal` / `normal` / `start`.
+- New keys use `#[serde(default)]`. A theme-only v1 file still loads; missing typography keys become the builtin defaults above.
+- Dual-read leftover `lineHeight` enums (`compact`/`normal`/`relaxed` → 1.4/1.7/2.0) and leftover `pageMargin` (`narrow`/`normal`/`wide` → 36+1.25 / 42+1.75 / 52+2.5). Already-present `contentWidth` / `pagePadding` win. New writes omit `pageMargin`.
 - `ensure_file` must **not** rewrite a valid theme-only file. Rewriting would add keys that older `deny_unknown_fields` builds then treat as corrupt and reset to `theme: light`.
-- `save_preferences` is a patch: read current file under the gate, merge only supplied fields, write. At least one field is required.
-- Frontend `invoke("save_preferences", { theme, lineHeight, pageMargin, textAlign })` uses camelCase. Do not send a theme-only rewrite that drops typography keys.
+- `save_preferences` is a patch: read current file under the gate, merge only supplied fields, write. At least one field is required. Do not accept a `pageMargin` patch arg.
+- Frontend `invoke("save_preferences", { theme, fontSize, fontFamily, lineHeight, contentWidth, pagePadding, textAlign, letterSpacing, paragraphSpacing, firstLineIndent })` uses camelCase. Do not send a theme-only rewrite that drops typography keys.
 
-Book-level overrides of the three typography keys live on `ReadingSettings` via `update_reading_state`, not in this file. Theme is global-only.
+Book-level overrides of the typography keys live on `ReadingSettings` via `update_reading_state`, not in this file. Theme is global-only.
 
 ### 4. Validation & Error Matrix
 
 - empty patch → `InvalidInput` ("At least one preference field is required")
 - `theme` not in `light|dark|sepia` → `InvalidInput` ("Unsupported theme")
-- `lineHeight` not in `compact|normal|relaxed` → `InvalidInput` ("Unsupported lineHeight")
-- `pageMargin` not in `narrow|normal|wide` → `InvalidInput` ("Unsupported pageMargin")
+- `fontFamily` not in `serif|sans-serif|monospace` → `InvalidInput` ("Unsupported fontFamily")
+- continuous number not finite or outside its PRD range → `InvalidInput`
 - `textAlign` not in `start|justify` → `InvalidInput` ("Unsupported textAlign")
 - unreadable / unparseable file on read after init → `StorageIo` / `StorageCorrupt`
-- unsupported schema or invalid stored enum on init → overwrite with defaults (theme becomes `light`)
+- unsupported schema or invalid stored theme/fontFamily/textAlign on init → overwrite with defaults (theme becomes `light`)
 
 ### 5. Good / Base / Bad Cases
 
 - Good: existing `{"schemaVersion":1,"theme":"sepia"}` loads as sepia + typography defaults; file bytes unchanged.
-- Good: `save_preferences({ theme: "dark" })` keeps stored `lineHeight` / `pageMargin` / `textAlign`.
-- Base: missing file is created with light / normal / normal / start.
+- Good: `save_preferences({ theme: "dark" })` keeps stored typography numbers / enums.
+- Good: leftover `lineHeight: "normal"` + `pageMargin: "wide"` loads as 1.7 / 52 / 2.5 without rewrite.
+- Base: missing file is created with light + builtin typography defaults. Never writes `pageMargin`.
 - Bad: `save_preferences({})` or all-None → `InvalidInput`.
-- Bad: `lineHeight: "1.7"` → `InvalidInput`.
+- Bad: `lineHeight: 3.0` → `InvalidInput`.
 
 ### 6. Tests Required
 
 - theme-only file loads; theme preserved; file not rewritten
+- old enum file migrates on read without rewrite
 - theme save does not drop typography keys
-- invalid enum rejected
+- numbers persist; written file omits `pageMargin`
+- out-of-range number rejected
 - unsupported schema overwritten with defaults
 
 ### 7. Wrong vs Correct
@@ -326,7 +353,7 @@ Book-level overrides of the three typography keys live on `ReadingSettings` via 
 #### Wrong
 
 ```rust
-// Rewrites the whole file from theme only — wipes lineHeight/pageMargin/textAlign
+// Rewrites the whole file from theme only — wipes typography defaults
 let data = PreferencesData { schema_version: 1, theme: theme.to_string(), ..Default::default() };
 atomic_write(path, &serde_json::to_vec_pretty(&data)?, "preferences.json")?;
 ```

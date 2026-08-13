@@ -169,12 +169,16 @@ export function normalizeSettings(
   preferences?: Partial<TypographyDefaults> & { theme?: string },
 ): ReaderStyleState {
   return {
-    fontSize: settings?.fontSize ?? DEFAULT_FONT_SIZE,
-    fontFamily: settings?.fontFamily ?? DEFAULT_FONT_FAMILY,
+    fontSize: settings?.fontSize ?? preferences?.fontSize ?? DEFAULT_FONT_SIZE,
+    fontFamily: settings?.fontFamily ?? preferences?.fontFamily ?? DEFAULT_FONT_FAMILY,
     theme: preferences?.theme ?? DEFAULT_THEME,
-    lineHeight: normalizeLineHeight(settings?.lineHeight ?? preferences?.lineHeight),
-    pageMargin: normalizePageMargin(settings?.pageMargin ?? preferences?.pageMargin),
+    lineHeight: settings?.lineHeight ?? preferences?.lineHeight ?? DEFAULT_LINE_HEIGHT,
+    contentWidth: settings?.contentWidth ?? preferences?.contentWidth ?? DEFAULT_CONTENT_WIDTH,
+    pagePadding: settings?.pagePadding ?? preferences?.pagePadding ?? DEFAULT_PAGE_PADDING,
     textAlign: normalizeTextAlign(settings?.textAlign ?? preferences?.textAlign),
+    letterSpacing: settings?.letterSpacing ?? preferences?.letterSpacing ?? DEFAULT_LETTER_SPACING,
+    paragraphSpacing: settings?.paragraphSpacing ?? preferences?.paragraphSpacing ?? DEFAULT_PARAGRAPH_SPACING,
+    firstLineIndent: settings?.firstLineIndent ?? preferences?.firstLineIndent ?? DEFAULT_FIRST_LINE_INDENT,
   };
 }
 ```

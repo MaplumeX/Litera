@@ -31,6 +31,7 @@ npx shadcn@latest add <component-name>
 - `dialog.tsx` — modal overlays (used by `AgentConfigDialog`)
 - `alert-dialog.tsx` — destructive confirms (library delete / overwrite)
 - `select.tsx` — dropdown selectors (used by `AgentConfigDialog` provider picker)
+- `slider.tsx` — continuous typography controls on `SettingsPage`
 - `input.tsx` — text/password inputs
 - `label.tsx` — form labels
 
@@ -259,22 +260,16 @@ Requires `assetProtocol.enable = true` + `scope` in `tauri.conf.json`, and `img-
 
 ### Inject font/theme CSS via view.renderer.setStyles
 
-**Problem**: Need to apply font family, font size, and theme colors to the EPUB content rendered inside foliate.js iframes, persisting across section changes.
+**Problem**: Need to apply reader typography and theme colors to the EPUB content rendered inside foliate.js iframes, persisting across section changes.
 
-**Solution**: `view.renderer.setStyles(css)` is a foliate.js Paginator built-in method. It stores the CSS string and automatically reapplies it on every section load (`#onLoad` calls `this.setStyles(this.#styles)`). No need to manually listen to `load` events.
+**Solution**: Build the stylesheet only in `generateStylesCss` (`src/lib/reader-styles.ts`), then call `view.renderer.setStyles(css)`. The foliate.js Paginator stores the string and reapplies it on every section load (`#onLoad` calls `this.setStyles(this.#styles)`). Do not assemble CSS in `App` or `ReaderView`.
 
 ```typescript
-// view.renderer is a public field (not #private) on the View class
-const css = `html, body {
-  font-family: ${fontFamily};
-  font-size: ${fontSize}px !important;
-  ${themeColors}
-}`
-// Apply once — Paginator re-applies on every section change automatically
-;(viewRef.current as any).renderer.setStyles(css)
+const css = generateStylesCss(styleState)
+readerRef.current?.setStyles(css)
 ```
 
-Combine font + theme into one CSS string per call. Each style change replaces the full stylesheet (not additive).
+`generateStylesCss` writes `font-family`, `font-size`, `line-height`, `letter-spacing`, `max-width`, `padding-inline`, and `text-align` on `html, body`, plus `p { margin-block-end; text-indent }` with `!important` so EPUB chapter CSS does not win. Each `setStyles` call replaces the full stylesheet (not additive).
 
 **Caveat**: `view.renderer` is a non-official public field (not documented in foliate.js README). Submodule commit lock mitigates upgrade risk. Fixed-layout epub (foliate-fxl) may not support `setStyles` — MVP targets reflowable only.
 
