@@ -18,7 +18,9 @@ litera/
 │   │   └── ui/           # shadcn/ui components (code-owned, not npm)
 │   │       └── button.tsx
 │   ├── lib/
+│   │   ├── i18n.ts         # locale store + t() / useT()
 │   │   └── utils.ts        # cn() helper for shadcn/ui
+│   ├── locales/            # zh-CN.ts + en.ts (same MessageKey set)
 │   └── assets/
 ├── src-tauri/              # Tauri Rust backend
 │   ├── src/

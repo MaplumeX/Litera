@@ -9,6 +9,7 @@
 Litera's frontend uses React 19 hooks directly. Hook patterns are minimal and purpose-driven: one tested debounced-callback controller/hook and heavy use of refs for stable identities.
 
 Reference files:
+- `src/lib/i18n.ts` — `useT()` locale subscription (`useSyncExternalStore`); call it before any early return
 - `src/lib/debounced-callback.ts`, `src/lib/use-debounced-callback.ts` — controller and React lifecycle wrapper
 - `src/lib/latest-serialized-task.ts` — latest-request-wins serialization for side-effecting async flows
 - `src/components/ReaderView.tsx` — ref-stable callbacks, `useImperativeHandle`

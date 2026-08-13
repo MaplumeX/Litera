@@ -18,6 +18,7 @@ Litera's frontend is a React 19 + TypeScript 5.8 single-page app running in the 
 | [Component Guidelines](./component-guidelines.md) | shadcn/ui patterns, foliate-view web component, setStyles, iframe paging |
 | [Hook Guidelines](./hook-guidelines.md) | `useDebouncedCallback`, ref-stable callbacks, `useImperativeHandle`, Tauri `listen()` |
 | [State Management](./state-management.md) | Local state + props, Tauri events, persisted reading state |
+| [UI i18n](./i18n.md) | zh-CN / en catalogs, `useT()`, localStorage locale |
 | [Type Safety](./type-safety.md) | Rust↔TS serde contract, foliate.js typing, no `any` |
 | [Quality Guidelines](./quality-guidelines.md) | CSP configuration, Tauri plugin registration |
 
