@@ -662,3 +662,43 @@ Aligned get_toc, read_chapter, and search_in_book with ReadAware contracts: chap
 ### Status
 
 [OK] **Completed**
+
+
+## Session 31: Associate Litera as an EPUB opener
+
+**Date**: 2026-08-13
+**Task**: Associate Litera as an EPUB opener
+**Branch**: `litera-epub-association-design`
+
+### Summary
+
+Registered .epub file association and wired OS open to import-then-open the last successful book on macOS, Windows, and Linux.
+
+### Main Changes
+
+- Added bundle.fileAssociations, a drained OS-open path queue, and single-instance forwarding
+- App imports system-opened EPUBs and opens the last success; picker/drag-drop still import only
+- Recorded OS EPUB open contracts in backend/frontend specs
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c19294a` | (see git log) |
+| `03967af` | (see git log) |
+| `8032585` | (see git log) |
+
+### Testing
+
+- [OK] npx vitest run: 58 passed
+- [OK] cargo test in src-tauri: 92 passed
+- [OK] npx tsc --noEmit: passed
+- [OK] Not verified: packaged macOS open -a / Windows Explorer / Linux file manager association
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Verify packaged Open With on macOS; Windows/Linux association when those machines are available
