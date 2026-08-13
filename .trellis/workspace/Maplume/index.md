@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 38
+- **Total Sessions**: 39
 - **Last Active**: 2026-08-13
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~854 | Active |
+| `journal-1.md` | ~876 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 39 | 2026-08-13 | Add zh-CN/en UI i18n | `fed35d0`, `5c0db39` | `main` |
 | 38 | 2026-08-13 | Improve new session UX | `d664cec`, `3619bae` | `main` |
 | 37 | 2026-08-13 | Fine-tune reader typography settings | `7d18f36`, `2ea3364` | `main` |
 | 36 | 2026-08-13 | Tune wheel paging to Readest sensitivity | `348f64d`, `f8bc73f`, `ecf98fb` | `main` |

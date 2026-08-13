@@ -852,3 +852,25 @@ Polished the chat-list 新建会话 path: close overlay and focus input, reuse a
 ### Status
 
 [OK] **Completed**
+
+
+## Session 39: Add zh-CN/en UI i18n
+
+**Date**: 2026-08-13
+**Task**: Add zh-CN/en UI i18n
+**Branch**: `main`
+
+### Summary
+
+Shipped React UI i18n for zh-CN and English: in-house t()/useT catalogs, localStorage persistence, OS-locale default, Settings appearance switcher. Did not touch preferences.json. Recorded frontend i18n spec.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `fed35d0` | (see git log) |
+| `5c0db39` | (see git log) |
+
+### Status
+
+[OK] **Completed**
