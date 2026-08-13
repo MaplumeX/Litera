@@ -23,11 +23,12 @@ Reference files:
 
 ```typescript
 // src/App.tsx
-const [view, setView] = useState<"library" | "reader">("library");
+const [view, setView] = useState<"library" | "reader" | "settings">("library");
+const [settingsReturnTo, setSettingsReturnTo] = useState<"library" | "reader">("library");
 const [fileData, setFileData] = useState<FileData | null>(null);
 const [currentBook, setCurrentBook] = useState<BookRecord | null>(null);
 const [progress, setProgress] = useState<{ index: number; fraction: number; label?: string }>({ ... });
-const [styleState, setStyleState] = useState<ReaderStyleState>({ fontSize: 16, fontFamily: "serif", theme: "light" });
+const styleState = normalizeSettings(currentBook?.settings, preferences);
 const [toc, setToc] = useState<TocItem[]>([]);
 ```
 
@@ -43,7 +44,7 @@ Each component owns its own UI state:
 - `LibraryView`: `books`, `search`, `importing`, selection-mode ids, overwrite/delete dialog state, import banners. Selection mode is local UI state and is not persisted. `list_books` already returns recency order — do not re-sort in React.
 - `ReaderView`: `selectionPos` (transient selection button position)
 
-`App.settingsOpen` owns `SettingsDialog` (library gear + reader Aa). Do not lift ChatPanel LLM settings into that flag.
+`App` `view === "settings"` owns `SettingsPage` (library gear + reader Aa). Do not lift ChatPanel LLM settings into that view.
 
 ### 3. Ref state (non-rendering)
 
