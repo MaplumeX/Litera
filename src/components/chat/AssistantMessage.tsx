@@ -1,10 +1,18 @@
 import { useState } from "react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Bot, Check, Copy } from "lucide-react";
 import type { AgentMessage } from "@/types/agent";
 import { ToolCallCard } from "./ToolCallCard";
 import { TypingIndicator } from "./TypingIndicator";
+
+const markdownComponents: Components = {
+  a: ({ href, children }) => (
+    <a href={href} target="_blank" rel="noreferrer">
+      {children}
+    </a>
+  ),
+};
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
@@ -50,8 +58,10 @@ export function AssistantMessage({ message, streaming = false }: AssistantMessag
         {message.toolCalls?.map((call) => <ToolCallCard key={call.toolCallId} call={call} />)}
         {message.content && (
           <div>
-            <div className="prose prose-sm max-w-none dark:prose-invert">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
+            <div className="prose prose-sm max-w-none overflow-x-auto dark:prose-invert">
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+                {message.content}
+              </ReactMarkdown>
               {streaming && (
                 <span className="ml-0.5 inline-block h-4 w-2 animate-pulse bg-primary/70" />
               )}
