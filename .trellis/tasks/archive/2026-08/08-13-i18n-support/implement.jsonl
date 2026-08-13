@@ -1,0 +1,8 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend guideline index and pre-dev checklist"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "No Redux/Context; locale must be a module store not a provider"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Settings/appearance controls and icon aria-labels"}
+{"file": ".trellis/spec/frontend/hook-guidelines.md", "reason": "Custom hooks live under src/lib"}
+{"file": ".trellis/spec/frontend/directory-structure.md", "reason": "Where locales and i18n module belong"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Do not put locale in preferences.json"}
+{"file": ".trellis/tasks/08-13-i18n-support/research/i18n-approach.md", "reason": "Library choice, localStorage, OS detect, test pin"}
