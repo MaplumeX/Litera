@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Group, Panel, Separator } from "react-resizable-panels";
@@ -13,14 +13,15 @@ import {
 import { ChatPanel, type ChatPanelHandle } from "@/components/chat/ChatPanel";
 import { LibraryView } from "@/components/LibraryView";
 import { TocSidebar } from "@/components/TocSidebar";
-import { SettingsDialog } from "@/components/SettingsDialog";
+import { SettingsPage } from "@/components/settings/SettingsPage";
 import {
+  bookSettingsSnapshot,
   generateStylesCss,
   normalizeSettings,
-  type ReaderStyleState,
+  type TypographyKey,
 } from "@/lib/reader-styles";
-import { usePreferences, themeToClassName, syncStyleTheme } from "@/lib/preferences";
-import type { BookOpenContext, BookRecord } from "@/types/library";
+import { usePreferences, themeToClassName, type AppPreferences } from "@/lib/preferences";
+import type { BookOpenContext, BookRecord, ReadingSettings } from "@/types/library";
 import { useDebouncedCallback } from "@/lib/use-debounced-callback";
 import { invokeErrorMessage } from "@/lib/app-error";
 import { epubBytesFromIpc } from "@/lib/ipc-bytes";
@@ -77,7 +78,8 @@ function PersistenceErrorBanner({
 }
 
 function App() {
-  const [view, setView] = useState<"library" | "reader">("library");
+  const [view, setView] = useState<"library" | "reader" | "settings">("library");
+  const [settingsReturnTo, setSettingsReturnTo] = useState<"library" | "reader">("library");
   const [fileData, setFileData] = useState<FileData | null>(null);
   const [currentBook, setCurrentBook] = useState<BookRecord | null>(null);
   const [progress, setProgress] = useState<{ index: number; fraction: number; label?: string }>({
@@ -87,19 +89,26 @@ function App() {
   const [chatCollapsed, setChatCollapsed] = useState(false);
   const [tocVisible, setTocVisible] = useState(false);
   const [toc, setToc] = useState<TocItem[]>([]);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [persistenceError, setPersistenceError] = useState<string | null>(null);
   const [openingBookId, setOpeningBookId] = useState<string | null>(null);
-  const [styleState, setStyleState] = useState<ReaderStyleState>({
-    fontSize: 16,
-    fontFamily: "serif",
-    theme: "light",
-  });
-  const { theme: globalTheme, setTheme: setGlobalTheme, flush: flushPreferences } = usePreferences();
+  const {
+    theme: globalTheme,
+    setTheme: setGlobalTheme,
+    preferences,
+    updatePreferences,
+    flush: flushPreferences,
+  } = usePreferences();
+  const styleState = useMemo(
+    () => normalizeSettings(currentBook?.settings, preferences),
+    [currentBook?.settings, preferences],
+  );
   const readerRef = useRef<ReaderViewHandle>(null);
   const chatRef = useRef<ChatPanelHandle>(null);
   const closingRef = useRef(false);
   const openBookControllerRef = useRef(createLatestSerializedTaskController());
+  // Latest fraction for settings-page remount; do not write it into currentBook
+  // on every relocate or ReaderView's [fileData, initialFraction] effect re-opens.
+  const lastKnownFractionRef = useRef<number | undefined>(undefined);
   // Track latest style state so handleBookReady can apply it after renderer mounts.
   const styleStateRef = useRef(styleState);
   styleStateRef.current = styleState;
@@ -118,16 +127,10 @@ function App() {
     reportPersistenceError,
   );
 
-  // Persist reading settings (debounced) — only fontSize/fontFamily per book.
+  // Persist the full per-book settings snapshot (replace, not merge).
   const persistSettings = useDebouncedCallback(
-    async (bookId: string, state: ReaderStyleState) => {
-      await invoke("update_reading_state", {
-        bookId,
-        settings: {
-          fontSize: state.fontSize,
-          fontFamily: state.fontFamily,
-        },
-      });
+    async (bookId: string, settings: ReadingSettings) => {
+      await invoke("update_reading_state", { bookId, settings });
     },
     500,
     reportPersistenceError,
@@ -189,11 +192,6 @@ function App() {
     };
   }, [flushReadingState, reportPersistenceError]);
 
-  // Sync styleState.theme with globalTheme whenever globalTheme changes.
-  useEffect(() => {
-    setStyleState((prev) => syncStyleTheme(prev, globalTheme));
-  }, [globalTheme]);
-
   // Apply theme class to <html> so CSS variables cascade to portaled dialogs.
   useEffect(() => {
     const root = document.documentElement;
@@ -234,6 +232,7 @@ function App() {
 
       // Build a partial BookRecord for passing lastFraction + settings to ReaderView.
       // The full record is fetched from list_books; this context stays lightweight.
+      lastKnownFractionRef.current = context.lastFraction;
       setCurrentBook({
         id: context.bookId,
         title: context.title,
@@ -245,12 +244,6 @@ function App() {
         settings: context.settings,
       });
 
-      // Initialize style state from saved settings (theme comes from global preferences).
-      setStyleState({
-        ...normalizeSettings(context.settings),
-        theme: globalTheme,
-      });
-
       setView("reader");
     } catch (err) {
       console.error("open_book_bytes error:", err);
@@ -258,7 +251,7 @@ function App() {
     } finally {
       if (request.isLatest()) setOpeningBookId(null);
     }
-  }, [flushReadingState, globalTheme]);
+  }, [flushReadingState]);
 
   const handleBackToLibrary = useCallback(async () => {
     try {
@@ -284,11 +277,11 @@ function App() {
     setCurrentBook(null);
     setToc([]);
     setTocVisible(false);
-    setSettingsOpen(false);
   }, [fileData?.bookId, flushReadingState]);
 
   const handleRelocate = useCallback(
     (index: number, fraction: number, label?: string) => {
+      lastKnownFractionRef.current = fraction;
       setProgress({ index, fraction, label });
       // Persist reading position.
       if (fileData?.bookId) {
@@ -308,27 +301,77 @@ function App() {
     readerRef.current?.setStyles(generateStylesCss(styleStateRef.current));
   }, []);
 
-  const handleStyleChange = useCallback(
-    (state: ReaderStyleState) => {
-      // Theme is global — route through setGlobalTheme instead of per-book persist.
-      if (state.theme !== globalTheme) {
-        setGlobalTheme(state.theme);
-      }
-      const fontSizeChanged = state.fontSize !== styleStateRef.current.fontSize;
-      const fontFamilyChanged = state.fontFamily !== styleStateRef.current.fontFamily;
-      setStyleState(state);
-      if (fileData?.bookId && (fontSizeChanged || fontFamilyChanged)) {
-        persistSettings.schedule(fileData.bookId, state);
-      }
+  const openSettings = useCallback((from: "library" | "reader") => {
+    if (from === "reader") {
+      setCurrentBook((prev) =>
+        prev
+          ? { ...prev, lastFraction: lastKnownFractionRef.current ?? prev.lastFraction }
+          : prev,
+      );
+    }
+    setSettingsReturnTo(from);
+    setView("settings");
+  }, []);
+
+  const handleBackFromSettings = useCallback(async () => {
+    try {
+      await flushReadingState();
+    } catch {
+      return;
+    }
+    setView(settingsReturnTo);
+  }, [flushReadingState, settingsReturnTo]);
+
+  const persistBookSnapshot = useCallback(
+    (settings: ReadingSettings) => {
+      const bookId = fileData?.bookId ?? currentBook?.id;
+      if (!bookId) return;
+      persistSettings.schedule(bookId, settings);
     },
-    [fileData?.bookId, persistSettings, globalTheme, setGlobalTheme],
+    [currentBook?.id, fileData?.bookId, persistSettings],
   );
 
-  const handleGlobalThemeChange = useCallback(
-    (newTheme: string) => {
-      setGlobalTheme(newTheme);
+  const handleFontChange = useCallback(
+    (patch: { fontSize?: number; fontFamily?: string }) => {
+      if (!currentBook) return;
+      const nextSettings = bookSettingsSnapshot(
+        {
+          fontSize: patch.fontSize ?? styleStateRef.current.fontSize,
+          fontFamily: patch.fontFamily ?? styleStateRef.current.fontFamily,
+        },
+        currentBook.settings,
+      );
+      setCurrentBook({ ...currentBook, settings: nextSettings });
+      persistBookSnapshot(nextSettings);
     },
-    [setGlobalTheme],
+    [currentBook, persistBookSnapshot],
+  );
+
+  const handleTypographyChange = useCallback(
+    (key: TypographyKey, value: string) => {
+      if (settingsReturnTo === "reader") {
+        if (!currentBook) return;
+        const nextSettings = bookSettingsSnapshot(styleStateRef.current, {
+          ...currentBook.settings,
+          [key]: value,
+        });
+        setCurrentBook({ ...currentBook, settings: nextSettings });
+        persistBookSnapshot(nextSettings);
+        return;
+      }
+      updatePreferences({ [key]: value } as Partial<AppPreferences>);
+    },
+    [currentBook, persistBookSnapshot, settingsReturnTo, updatePreferences],
+  );
+
+  const handleRestoreDefault = useCallback(
+    (key: TypographyKey) => {
+      if (!currentBook) return;
+      const nextSettings = bookSettingsSnapshot(styleStateRef.current, currentBook.settings, key);
+      setCurrentBook({ ...currentBook, settings: nextSettings });
+      persistBookSnapshot(nextSettings);
+    },
+    [currentBook, persistBookSnapshot],
   );
 
   const handleTocGoTo = useCallback((href: string) => {
@@ -337,6 +380,13 @@ function App() {
 
   const chapterLabel = progress.label ?? `Chapter ${progress.index + 1}`;
   const bookTitle = currentBook?.title || fileData?.name || "";
+  const editingBook = settingsReturnTo === "reader" && Boolean(currentBook || fileData);
+  const overriddenKeys: TypographyKey[] = [];
+  if (editingBook && currentBook?.settings) {
+    if (currentBook.settings.lineHeight) overriddenKeys.push("lineHeight");
+    if (currentBook.settings.pageMargin) overriddenKeys.push("pageMargin");
+    if (currentBook.settings.textAlign) overriddenKeys.push("textAlign");
+  }
 
   if (view === "library") {
     return (
@@ -348,16 +398,30 @@ function App() {
         <LibraryView
           onOpenBook={handleOpenBook}
           openingBookId={openingBookId}
-          onOpenSettings={() => setSettingsOpen(true)}
+          onOpenSettings={() => openSettings("library")}
         />
-        <SettingsDialog
-          open={settingsOpen}
-          onClose={() => setSettingsOpen(false)}
+      </main>
+    );
+  }
+
+  if (view === "settings") {
+    return (
+      <main className="flex h-screen flex-col bg-background text-foreground">
+        <PersistenceErrorBanner
+          message={persistenceError}
+          onDismiss={() => setPersistenceError(null)}
+        />
+        <SettingsPage
+          onBack={() => void handleBackFromSettings()}
+          bookTitle={editingBook ? bookTitle || null : null}
+          hasBook={editingBook}
           styleState={styleState}
-          onStyleChange={handleStyleChange}
-          globalTheme={globalTheme}
-          onThemeChange={handleGlobalThemeChange}
-          hasBook={false}
+          onFontChange={handleFontChange}
+          onTypographyChange={handleTypographyChange}
+          onRestoreDefault={handleRestoreDefault}
+          overriddenKeys={overriddenKeys}
+          theme={globalTheme}
+          onThemeChange={setGlobalTheme}
         />
       </main>
     );
@@ -395,11 +459,11 @@ function App() {
           >
             <List />
           </Button>
-          {/* Font + theme controls (opens settings dialog) */}
+          {/* Font + theme controls (opens settings page) */}
           <Button
             size="icon-sm"
-            variant={settingsOpen ? "secondary" : "ghost"}
-            onClick={() => setSettingsOpen(true)}
+            variant="ghost"
+            onClick={() => openSettings("reader")}
             aria-label="字体与主题"
           >
             <Type />
@@ -461,16 +525,6 @@ function App() {
           </Group>
         )}
       </div>
-
-      <SettingsDialog
-        open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
-        styleState={styleState}
-        onStyleChange={handleStyleChange}
-        globalTheme={globalTheme}
-        onThemeChange={handleGlobalThemeChange}
-        hasBook={true}
-      />
     </main>
   );
 }

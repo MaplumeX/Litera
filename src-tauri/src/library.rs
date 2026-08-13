@@ -21,9 +21,12 @@ const MAX_COVER_BYTES: usize = 20 * 1024 * 1024;
 const VALID_FONT_SIZES: [f64; 4] = [14.0, 16.0, 18.0, 20.0];
 const VALID_FONT_FAMILIES: [&str; 3] = ["serif", "sans-serif", "monospace"];
 const VALID_THEMES: [&str; 3] = ["light", "dark", "sepia"];
+const VALID_LINE_HEIGHTS: [&str; 3] = ["compact", "normal", "relaxed"];
+const VALID_PAGE_MARGINS: [&str; 3] = ["narrow", "normal", "wide"];
+const VALID_TEXT_ALIGNS: [&str; 2] = ["start", "justify"];
 static OPERATION_COUNTER: AtomicU64 = AtomicU64::new(0);
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default)]
 #[serde(deny_unknown_fields)]
 pub struct ReadingSettings {
     #[serde(rename = "fontSize", skip_serializing_if = "Option::is_none")]
@@ -32,6 +35,12 @@ pub struct ReadingSettings {
     pub font_family: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub theme: Option<String>,
+    #[serde(rename = "lineHeight", skip_serializing_if = "Option::is_none")]
+    pub line_height: Option<String>,
+    #[serde(rename = "pageMargin", skip_serializing_if = "Option::is_none")]
+    pub page_margin: Option<String>,
+    #[serde(rename = "textAlign", skip_serializing_if = "Option::is_none")]
+    pub text_align: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -1297,7 +1306,13 @@ fn validate_text(name: &str, value: &str, max_bytes: usize, allow_empty: bool) -
 }
 
 fn validate_settings(settings: &ReadingSettings) -> AppResult<()> {
-    if settings.font_size.is_none() && settings.font_family.is_none() && settings.theme.is_none() {
+    if settings.font_size.is_none()
+        && settings.font_family.is_none()
+        && settings.theme.is_none()
+        && settings.line_height.is_none()
+        && settings.page_margin.is_none()
+        && settings.text_align.is_none()
+    {
         return Err(AppError::invalid_input(
             "settings must contain at least one field",
         ));
@@ -1317,6 +1332,21 @@ fn validate_settings(settings: &ReadingSettings) -> AppResult<()> {
     if let Some(theme) = &settings.theme {
         if !VALID_THEMES.contains(&theme.as_str()) {
             return Err(AppError::invalid_input("Unsupported theme"));
+        }
+    }
+    if let Some(line_height) = &settings.line_height {
+        if !VALID_LINE_HEIGHTS.contains(&line_height.as_str()) {
+            return Err(AppError::invalid_input("Unsupported lineHeight"));
+        }
+    }
+    if let Some(page_margin) = &settings.page_margin {
+        if !VALID_PAGE_MARGINS.contains(&page_margin.as_str()) {
+            return Err(AppError::invalid_input("Unsupported pageMargin"));
+        }
+    }
+    if let Some(text_align) = &settings.text_align {
+        if !VALID_TEXT_ALIGNS.contains(&text_align.as_str()) {
+            return Err(AppError::invalid_input("Unsupported textAlign"));
         }
     }
     Ok(())
@@ -1950,6 +1980,7 @@ mod tests {
                     font_size: Some(18.0),
                     font_family: Some("serif".to_string()),
                     theme: Some("sepia".to_string()),
+                    ..ReadingSettings::default()
                 }),
             )
         });
@@ -2285,10 +2316,127 @@ mod tests {
                     font_size: Some(17.0),
                     font_family: Some("Comic Sans".to_string()),
                     theme: Some("neon".to_string()),
+                    ..ReadingSettings::default()
                 }),
             )
             .expect_err("settings validation");
         assert_eq!(error.code, AppErrorCode::InvalidInput);
+    }
+
+    #[test]
+    fn reading_settings_persists_typography_override() {
+        let (_directory, store) = test_store();
+        let id = import_test_book(&store, Path::new("/source/typography-override.epub"));
+        store
+            .update_reading_state(
+                &id,
+                None,
+                Some(ReadingSettings {
+                    font_size: Some(16.0),
+                    font_family: Some("serif".to_string()),
+                    line_height: Some("relaxed".to_string()),
+                    page_margin: Some("wide".to_string()),
+                    text_align: Some("justify".to_string()),
+                    ..ReadingSettings::default()
+                }),
+            )
+            .expect("persist override");
+
+        let settings = store
+            .list_books()
+            .expect("list")
+            .remove(0)
+            .settings
+            .expect("settings");
+        assert_eq!(settings.font_size, Some(16.0));
+        assert_eq!(settings.font_family.as_deref(), Some("serif"));
+        assert_eq!(settings.line_height.as_deref(), Some("relaxed"));
+        assert_eq!(settings.page_margin.as_deref(), Some("wide"));
+        assert_eq!(settings.text_align.as_deref(), Some("justify"));
+    }
+
+    #[test]
+    fn reading_settings_restore_omits_typography_key() {
+        let (_directory, store) = test_store();
+        let id = import_test_book(&store, Path::new("/source/typography-restore.epub"));
+        store
+            .update_reading_state(
+                &id,
+                None,
+                Some(ReadingSettings {
+                    font_size: Some(18.0),
+                    font_family: Some("sans-serif".to_string()),
+                    line_height: Some("compact".to_string()),
+                    page_margin: Some("narrow".to_string()),
+                    ..ReadingSettings::default()
+                }),
+            )
+            .expect("persist override");
+        store
+            .update_reading_state(
+                &id,
+                None,
+                Some(ReadingSettings {
+                    font_size: Some(18.0),
+                    font_family: Some("sans-serif".to_string()),
+                    page_margin: Some("narrow".to_string()),
+                    ..ReadingSettings::default()
+                }),
+            )
+            .expect("restore lineHeight");
+
+        let settings = store
+            .list_books()
+            .expect("list")
+            .remove(0)
+            .settings
+            .expect("settings");
+        assert_eq!(settings.font_size, Some(18.0));
+        assert_eq!(settings.font_family.as_deref(), Some("sans-serif"));
+        assert!(settings.line_height.is_none());
+        assert_eq!(settings.page_margin.as_deref(), Some("narrow"));
+    }
+
+    #[test]
+    fn reading_settings_rejects_unknown_typography_enum() {
+        let (_directory, store) = test_store();
+        let id = import_test_book(&store, Path::new("/source/typography-invalid.epub"));
+        let error = store
+            .update_reading_state(
+                &id,
+                None,
+                Some(ReadingSettings {
+                    font_size: Some(16.0),
+                    line_height: Some("huge".to_string()),
+                    ..ReadingSettings::default()
+                }),
+            )
+            .expect_err("invalid lineHeight");
+        assert_eq!(error.code, AppErrorCode::InvalidInput);
+    }
+
+    #[test]
+    fn reading_settings_old_font_only_snapshot_still_valid() {
+        let settings: ReadingSettings =
+            serde_json::from_str(r#"{"fontSize":18.0,"fontFamily":"serif"}"#)
+                .expect("old settings json");
+        validate_settings(&settings).expect("old font snapshot is valid");
+
+        let (_directory, store) = test_store();
+        let id = import_test_book(&store, Path::new("/source/old-font-settings.epub"));
+        store
+            .update_reading_state(&id, None, Some(settings.clone()))
+            .expect("persist old snapshot");
+        let stored = store
+            .list_books()
+            .expect("list")
+            .remove(0)
+            .settings
+            .expect("settings");
+        assert_eq!(stored, settings);
+        assert!(stored.line_height.is_none());
+        assert!(stored.page_margin.is_none());
+        assert!(stored.text_align.is_none());
     }
 
     #[test]

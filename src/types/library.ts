@@ -3,6 +3,9 @@ export interface ReadingSettings {
   fontSize?: number;
   fontFamily?: string;
   theme?: string; // "light" | "dark" | "sepia"
+  lineHeight?: string; // "compact" | "normal" | "relaxed"
+  pageMargin?: string; // "narrow" | "normal" | "wide"
+  textAlign?: string; // "start" | "justify"
 }
 
 /** A book record stored in library.json. */
