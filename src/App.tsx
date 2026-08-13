@@ -259,7 +259,7 @@ function App() {
       // The full record is fetched from list_books; this context stays lightweight.
       setCurrentBook({
         id: context.bookId,
-        title: "",
+        title: context.title,
         author: "",
         coverPath: "",
         filePath: "",

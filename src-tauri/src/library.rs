@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use tauri_plugin_dialog::DialogExt;
 use tempfile::NamedTempFile;
 
@@ -50,6 +51,18 @@ pub struct BookRecord {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub settings: Option<ReadingSettings>,
     #[serde(
+        rename = "lastOpenedAt",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub last_opened_at: Option<String>,
+    #[serde(
+        rename = "contentHash",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub content_hash: Option<String>,
+    #[serde(
         rename = "contentVersion",
         default,
         skip_serializing_if = "Option::is_none"
@@ -57,18 +70,29 @@ pub struct BookRecord {
     content_version: Option<String>,
 }
 
+#[derive(Debug, Serialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ImportStatus {
+    New,
+    Overwrite,
+    Duplicate,
+}
+
 #[derive(Debug, Serialize)]
 pub struct ImportBookResult {
+    pub status: ImportStatus,
     #[serde(rename = "bookId")]
     pub book_id: String,
-    #[serde(rename = "importId")]
-    pub import_id: String,
+    pub title: String,
+    #[serde(rename = "importId", skip_serializing_if = "Option::is_none")]
+    pub import_id: Option<String>,
     pub name: String,
 }
 
 #[derive(Debug, Serialize)]
 pub struct BookOpenContext {
     pub name: String,
+    pub title: String,
     #[serde(rename = "bookId")]
     pub book_id: String,
     #[serde(rename = "contentVersion")]
@@ -210,7 +234,17 @@ impl LibraryStore {
 
     pub fn list_books(&self) -> AppResult<Vec<BookRecord>> {
         let _guard = self.transaction()?;
-        Ok(self.read_library()?.books)
+        let mut books = self.read_library()?.books;
+        books.sort_by(|left, right| {
+            match (&left.last_opened_at, &right.last_opened_at) {
+                (Some(left_opened), Some(right_opened)) => right_opened.cmp(left_opened),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => std::cmp::Ordering::Equal,
+            }
+            .then_with(|| right.imported_at.cmp(&left.imported_at))
+        });
+        Ok(books)
     }
 
     pub fn import_bytes(
@@ -226,11 +260,33 @@ impl LibraryStore {
         }
         validate_text("filename", &display_name, MAX_TITLE_BYTES, false)?;
 
+        let incoming_hash = sha256_hex(&bytes);
         let _guard = self.transaction()?;
         let mut library = self.read_library()?;
+        if self.backfill_missing_content_hashes(&mut library)? {
+            self.write_library(&library)?;
+        }
+
+        if let Some(existing) = library.books.iter().find(|book| {
+            book.id != book_id && book.content_hash.as_deref() == Some(incoming_hash.as_str())
+        }) {
+            return Ok(ImportBookResult {
+                status: ImportStatus::Duplicate,
+                book_id: existing.id.clone(),
+                title: existing.title.clone(),
+                import_id: None,
+                name: display_name,
+            });
+        }
+
         let book_dir = self.book_dir(&book_id)?;
         let epub_path = book_dir.join("book.epub");
         let existed = library.books.iter().any(|book| book.id == book_id);
+        let existing_title = library
+            .books
+            .iter()
+            .find(|book| book.id == book_id)
+            .map(|book| book.title.clone());
         // This token is returned to the WebView and authorizes access to one
         // staged import. Keep it unpredictable rather than reusing the
         // timestamp-based identifiers used only for internal trash paths.
@@ -271,6 +327,8 @@ impl LibraryStore {
                 imported_at: Utc::now().to_rfc3339(),
                 last_fraction: None,
                 settings: None,
+                last_opened_at: None,
+                content_hash: Some(incoming_hash),
                 content_version: Some(import_id.clone()),
             });
             if let Err(error) = self.write_library(&library) {
@@ -285,8 +343,14 @@ impl LibraryStore {
         }
 
         Ok(ImportBookResult {
+            status: if existed {
+                ImportStatus::Overwrite
+            } else {
+                ImportStatus::New
+            },
             book_id,
-            import_id,
+            title: existing_title.unwrap_or_else(|| display_name.clone()),
+            import_id: Some(import_id),
             name: display_name,
         })
     }
@@ -376,6 +440,7 @@ impl LibraryStore {
             } else {
                 String::new()
             };
+            record.content_hash = Some(sha256_hex(&pending_bytes));
             record.content_version = Some(import_id.to_string());
         }
         let updated = library.books[record_index].clone();
@@ -436,15 +501,29 @@ impl LibraryStore {
     pub fn get_book_open_context(&self, book_id: &str) -> AppResult<BookOpenContext> {
         validate_book_id(book_id)?;
         let _guard = self.transaction()?;
-        let library = self.read_library()?;
-        let record = library
+        let mut library = self.read_library()?;
+        let record_index = library
             .books
             .iter()
-            .find(|book| book.id == book_id)
+            .position(|book| book.id == book_id)
             .ok_or_else(|| AppError::book_not_found(book_id))?;
 
+        if library.books[record_index].content_hash.is_none() {
+            let epub_path = self.book_dir(book_id)?.join("book.epub");
+            require_regular_file(&epub_path, "EPUB")?;
+            let bytes = fs::read(&epub_path)
+                .map_err(|error| AppError::storage_io(format!("Failed to read EPUB: {error}")))?;
+            if bytes.is_empty() {
+                return Err(AppError::storage_corrupt("EPUB file is empty"));
+            }
+            library.books[record_index].content_hash = Some(sha256_hex(&bytes));
+            self.write_library(&library)?;
+        }
+
+        let record = &library.books[record_index];
         Ok(BookOpenContext {
             name: "book.epub".to_string(),
+            title: record.title.clone(),
             book_id: book_id.to_string(),
             content_version: record.content_version.clone().ok_or_else(|| {
                 AppError::storage_corrupt(format!("Book {book_id} has no committed contentVersion"))
@@ -452,6 +531,49 @@ impl LibraryStore {
             last_fraction: record.last_fraction,
             settings: record.settings.clone(),
         })
+    }
+
+    pub fn mark_book_opened(&self, book_id: &str) -> AppResult<()> {
+        validate_book_id(book_id)?;
+        let _guard = self.transaction()?;
+        let mut library = self.read_library()?;
+        let record = library
+            .books
+            .iter_mut()
+            .find(|book| book.id == book_id)
+            .ok_or_else(|| AppError::book_not_found(book_id))?;
+        record.last_opened_at = Some(Utc::now().to_rfc3339());
+        self.write_library(&library)
+    }
+
+    pub fn discard_import(&self, book_id: &str, import_id: &str) -> AppResult<()> {
+        validate_book_id(book_id)?;
+        validate_import_id(import_id)?;
+        let _guard = self.transaction()?;
+        let library = self.read_library()?;
+        if !library.books.iter().any(|book| book.id == book_id) {
+            return Err(AppError::book_not_found(book_id));
+        }
+        let pending = self.pending_import_path(book_id, import_id)?;
+        match fs::symlink_metadata(&pending) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(AppError::storage_io(format!(
+                "Failed to inspect staged import: {error}"
+            ))),
+            Ok(metadata) if metadata.file_type().is_file() => {
+                fs::remove_file(&pending).map_err(|error| {
+                    AppError::storage_io(format!("Failed to discard staged import: {error}"))
+                })?;
+                if let Some(parent) = pending.parent() {
+                    sync_parent_directory(parent, "pending import directory")?;
+                }
+                Ok(())
+            }
+            Ok(_) => Err(AppError::storage_corrupt(format!(
+                "Staged import is not a regular file: {}",
+                pending.display()
+            ))),
+        }
     }
 
     pub(crate) fn read_book_content(
@@ -527,7 +649,55 @@ impl LibraryStore {
 
         // Intentionally retain staged directories. A separate retention policy may
         // clean `.trash` later; this operation itself remains recoverable.
-        Ok(())
+        self.remove_book_sessions(book_id)
+    }
+
+    fn remove_book_sessions(&self, book_id: &str) -> AppResult<()> {
+        let sessions_root = self.sessions_root();
+        require_real_directory(&sessions_root, "sessions")?;
+        let session_dir = sessions_root.join(book_id);
+        if session_dir.parent() != Some(sessions_root.as_path()) {
+            return Err(AppError::invalid_input("Invalid bookId path"));
+        }
+        match fs::symlink_metadata(&session_dir) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(AppError::storage_io(format!(
+                "Failed to inspect book sessions: {error}"
+            ))),
+            Ok(metadata) if metadata.file_type().is_dir() => {
+                fs::remove_dir_all(&session_dir).map_err(|error| {
+                    AppError::storage_io(format!("Failed to delete book sessions: {error}"))
+                })?;
+                sync_parent_directory(&sessions_root, "sessions")
+            }
+            Ok(_) => Err(AppError::storage_corrupt(format!(
+                "Book session path is not a real directory: {}",
+                session_dir.display()
+            ))),
+        }
+    }
+
+    fn backfill_missing_content_hashes(&self, library: &mut LibraryData) -> AppResult<bool> {
+        let mut changed = false;
+        for book in &mut library.books {
+            if book.content_hash.is_some() {
+                continue;
+            }
+            let epub_path = self.book_dir(&book.id)?.join("book.epub");
+            require_regular_file(&epub_path, "stored EPUB")?;
+            let bytes = fs::read(&epub_path).map_err(|error| {
+                AppError::storage_io(format!("Failed to read stored EPUB: {error}"))
+            })?;
+            if bytes.is_empty() {
+                return Err(AppError::storage_corrupt(format!(
+                    "Stored EPUB is empty for book {}",
+                    book.id
+                )));
+            }
+            book.content_hash = Some(sha256_hex(&bytes));
+            changed = true;
+        }
+        Ok(changed)
     }
 
     pub fn update_reading_state(
@@ -996,6 +1166,22 @@ fn validate_library_records(root: &Path, data: &LibraryData) -> AppResult<()> {
         chrono::DateTime::parse_from_rfc3339(&book.imported_at).map_err(|error| {
             AppError::storage_corrupt(format!("Invalid importedAt for book {}: {error}", book.id))
         })?;
+        if let Some(opened_at) = &book.last_opened_at {
+            chrono::DateTime::parse_from_rfc3339(opened_at).map_err(|error| {
+                AppError::storage_corrupt(format!(
+                    "Invalid lastOpenedAt for book {}: {error}",
+                    book.id
+                ))
+            })?;
+        }
+        if let Some(hash) = &book.content_hash {
+            validate_content_hash(hash).map_err(|error| {
+                AppError::storage_corrupt(format!(
+                    "Invalid contentHash for book {}: {error}",
+                    book.id
+                ))
+            })?;
+        }
         if let Some(version) = &book.content_version {
             validate_import_id(version).map_err(|error| {
                 AppError::storage_corrupt(format!(
@@ -1140,6 +1326,49 @@ fn book_id_for_source(source_path: &Path) -> String {
     let mut hasher = DefaultHasher::new();
     source_path.to_string_lossy().hash(&mut hasher);
     format!("{:x}", hasher.finish())
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(bytes))
+}
+
+fn validate_content_hash(hash: &str) -> AppResult<()> {
+    if hash.len() != 64 || !hash.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    {
+        return Err(AppError::invalid_input(
+            "contentHash must be 64 lowercase hex characters",
+        ));
+    }
+    Ok(())
+}
+
+fn is_epub_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("epub"))
+}
+
+fn validate_import_source(path: &Path) -> AppResult<()> {
+    if !is_epub_path(path) {
+        return Err(AppError::invalid_input("Only EPUB files can be imported"));
+    }
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_file() => Ok(()),
+        Ok(metadata) if metadata.file_type().is_symlink() => Err(AppError::invalid_input(
+            "Refusing to import a symbolic link",
+        )),
+        Ok(_) => Err(AppError::invalid_input("Import path is not a regular file")),
+        Err(error) => Err(AppError::storage_io(format!(
+            "Failed to inspect import path: {error}"
+        ))),
+    }
+}
+
+fn display_name_for_path(path: &Path) -> String {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("book.epub")
+        .to_string()
 }
 
 fn operation_id() -> String {
@@ -1395,31 +1624,70 @@ where
 pub async fn import_book(
     app: tauri::AppHandle,
     store: tauri::State<'_, LibraryStore>,
-) -> AppResult<ImportBookResult> {
+) -> AppResult<Vec<ImportBookResult>> {
     let dialog_app = app.clone();
     let picked = run_blocking(move || {
-        let file_path = dialog_app
+        let file_paths = dialog_app
             .dialog()
             .file()
             .add_filter("EPUB", &["epub"])
-            .blocking_pick_file()
+            .blocking_pick_files()
             .ok_or_else(|| AppError::cancelled("No file selected"))?;
-        let path = file_path
-            .into_path()
-            .map_err(|_| AppError::invalid_input("Selected file has an invalid path"))?;
-        let bytes = fs::read(&path)
-            .map_err(|error| AppError::storage_io(format!("Failed to read EPUB: {error}")))?;
-        let name = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("book.epub")
-            .to_string();
-        Ok((path, name, bytes))
+        let mut sources = Vec::new();
+        for file_path in file_paths {
+            let path = file_path
+                .into_path()
+                .map_err(|_| AppError::invalid_input("Selected file has an invalid path"))?;
+            validate_import_source(&path)?;
+            let bytes = fs::read(&path)
+                .map_err(|error| AppError::storage_io(format!("Failed to read EPUB: {error}")))?;
+            let name = display_name_for_path(&path);
+            sources.push((path, name, bytes));
+        }
+        Ok(sources)
     })
     .await?;
 
     let store = store.inner().clone();
-    run_blocking(move || store.import_bytes(&picked.0, picked.1, picked.2)).await
+    run_blocking(move || {
+        let mut results = Vec::with_capacity(picked.len());
+        for (path, name, bytes) in picked {
+            results.push(store.import_bytes(&path, name, bytes)?);
+        }
+        Ok(results)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn import_paths(
+    store: tauri::State<'_, LibraryStore>,
+    paths: Vec<String>,
+) -> AppResult<Vec<ImportBookResult>> {
+    let store = store.inner().clone();
+    run_blocking(move || {
+        let mut results = Vec::with_capacity(paths.len());
+        for path in paths {
+            let path = PathBuf::from(path);
+            validate_import_source(&path)?;
+            let bytes = fs::read(&path)
+                .map_err(|error| AppError::storage_io(format!("Failed to read EPUB: {error}")))?;
+            let name = display_name_for_path(&path);
+            results.push(store.import_bytes(&path, name, bytes)?);
+        }
+        Ok(results)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn discard_import(
+    store: tauri::State<'_, LibraryStore>,
+    book_id: String,
+    import_id: String,
+) -> AppResult<()> {
+    let store = store.inner().clone();
+    run_blocking(move || store.discard_import(&book_id, &import_id)).await
 }
 
 fn raw_response(bytes: Vec<u8>) -> tauri::ipc::Response {
@@ -1485,13 +1753,20 @@ pub async fn open_book_bytes(
     content_version: String,
 ) -> AppResult<tauri::ipc::Response> {
     let notification_book_id = book_id.clone();
+    let opened_book_id = book_id.clone();
     let store = store.inner().clone();
+    let opened_store = store.clone();
     let content = run_blocking(move || store.read_book_content(&book_id, &content_version)).await?;
     let notification_path = content.path.to_string_lossy().into_owned();
     run_blocking(move || {
         crate::notify_sidecar_book_opened(&app, &notification_path, &notification_book_id)
     })
     .await?;
+    // Sidecar already accepted the open. A lastOpenedAt write failure must not
+    // fail the command or the Reader would stay closed while the Agent has the book.
+    if let Err(error) = run_blocking(move || opened_store.mark_book_opened(&opened_book_id)).await {
+        eprintln!("[library] Book opened but lastOpenedAt was not saved: {error}");
+    }
     Ok(raw_response(content.bytes))
 }
 
@@ -1524,6 +1799,13 @@ mod tests {
         (directory, store)
     }
 
+    fn staged_import_id(result: &ImportBookResult) -> &str {
+        result
+            .import_id
+            .as_deref()
+            .expect("import should have been staged")
+    }
+
     fn import_test_book(store: &LibraryStore, source: &Path) -> String {
         let result = store
             .import_bytes(source, "book.epub".to_string(), b"version-one".to_vec())
@@ -1534,7 +1816,7 @@ mod tests {
                 "Version One".to_string(),
                 "Author One".to_string(),
                 Some(vec![1, 2, 3]),
-                &result.import_id,
+                staged_import_id(&result),
             )
             .expect("metadata");
         result.book_id
@@ -1878,7 +2160,7 @@ mod tests {
 
         assert_eq!(
             store
-                .read_import_bytes(&result.book_id, &result.import_id)
+                .read_import_bytes(&result.book_id, staged_import_id(&result))
                 .expect("staged bytes"),
             version_two
         );
@@ -1900,7 +2182,7 @@ mod tests {
                 "Version Two".to_string(),
                 "Author Two".to_string(),
                 Some(vec![4, 5, 6]),
-                &result.import_id,
+                staged_import_id(&result),
             )
             .expect("commit reimport metadata");
 
@@ -1934,7 +2216,7 @@ mod tests {
                 "Version Two".to_string(),
                 "Author Two".to_string(),
                 Some(vec![4, 5, 6]),
-                &result.import_id,
+                staged_import_id(&result),
             )
             .expect_err("metadata commit must fail");
 
@@ -1962,7 +2244,7 @@ mod tests {
             .import_bytes(source, "book.epub".to_string(), b"version-two".to_vec())
             .expect("stage reimport");
         let book_dir = directory.path().join("books").join(&id);
-        prepare_import_transaction(&book_dir, &result.import_id).expect("prepare journal");
+        prepare_import_transaction(&book_dir, staged_import_id(&result)).expect("prepare journal");
         atomic_write(&book_dir.join("book.epub"), b"version-two", "EPUB")
             .expect("replace epub before simulated crash");
         atomic_write(&book_dir.join("cover.png"), &[4, 5, 6], "cover")
@@ -2026,9 +2308,9 @@ mod tests {
         let pending = store
             .import_bytes(source, "book.epub".to_string(), b"version-two".to_vec())
             .expect("stage second version");
-        assert_ne!(pending.import_id, first_context.content_version);
+        assert_ne!(staged_import_id(&pending), first_context.content_version);
         let error = store
-            .read_book_content(&id, &pending.import_id)
+            .read_book_content(&id, staged_import_id(&pending))
             .expect_err("uncommitted content must not open as the active book");
         assert_eq!(error.code, AppErrorCode::InvalidInput);
 
@@ -2038,7 +2320,7 @@ mod tests {
                 "Version Two".to_string(),
                 "Author Two".to_string(),
                 None,
-                &pending.import_id,
+                staged_import_id(&pending),
             )
             .expect("commit second version");
         let stale_error = store
@@ -2047,7 +2329,7 @@ mod tests {
         assert_eq!(stale_error.code, AppErrorCode::InvalidInput);
 
         let second_context = store.get_book_open_context(&id).expect("second context");
-        assert_eq!(second_context.content_version, pending.import_id);
+        assert_eq!(second_context.content_version, staged_import_id(&pending));
         assert_eq!(
             store
                 .read_book_content(&id, &second_context.content_version)
@@ -2066,6 +2348,347 @@ mod tests {
         match body {
             InvokeResponseBody::Raw(bytes) => assert_eq!(bytes, payload),
             InvokeResponseBody::Json(_) => panic!("EPUB bytes must not be JSON serialized"),
+        }
+    }
+
+    #[test]
+    fn old_library_json_without_new_fields_still_reads() {
+        let (directory, store) = test_store();
+        let id = import_test_book(&store, Path::new("/source/legacy-fields.epub"));
+        let library_path = directory.path().join("library.json");
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&fs::read(&library_path).expect("library bytes"))
+                .expect("library json");
+        value["books"][0]
+            .as_object_mut()
+            .expect("book object")
+            .remove("contentHash");
+        value["books"][0]
+            .as_object_mut()
+            .expect("book object")
+            .remove("lastOpenedAt");
+        fs::write(
+            &library_path,
+            serde_json::to_vec_pretty(&value).expect("legacy json"),
+        )
+        .expect("write legacy record");
+
+        let books = store.list_books().expect("old records still read");
+        assert_eq!(books.len(), 1);
+        assert_eq!(books[0].id, id);
+        assert!(books[0].content_hash.is_none());
+        assert!(books[0].last_opened_at.is_none());
+    }
+
+    #[test]
+    fn open_context_returns_stored_title_and_backfills_hash() {
+        let (directory, store) = test_store();
+        let id = import_test_book(&store, Path::new("/source/open-title.epub"));
+        let library_path = directory.path().join("library.json");
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&fs::read(&library_path).expect("library bytes"))
+                .expect("library json");
+        value["books"][0]
+            .as_object_mut()
+            .expect("book object")
+            .remove("contentHash");
+        fs::write(
+            &library_path,
+            serde_json::to_vec_pretty(&value).expect("stripped json"),
+        )
+        .expect("write stripped hash");
+
+        let context = store.get_book_open_context(&id).expect("open context");
+        assert_eq!(context.title, "Version One");
+        assert_eq!(context.name, "book.epub");
+        assert_ne!(context.title, "book.epub");
+        assert!(!context.title.is_empty());
+
+        let book = store.list_books().expect("list").remove(0);
+        let hash = book.content_hash.expect("backfilled hash");
+        assert_eq!(hash.len(), 64);
+        assert!(hash.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()));
+    }
+
+    fn import_named_book(store: &LibraryStore, source: &Path, bytes: &[u8], title: &str) -> String {
+        let result = store
+            .import_bytes(source, "book.epub".to_string(), bytes.to_vec())
+            .expect("import");
+        store
+            .save_book_metadata(
+                &result.book_id,
+                title.to_string(),
+                "Author One".to_string(),
+                Some(vec![1, 2, 3]),
+                staged_import_id(&result),
+            )
+            .expect("metadata");
+        result.book_id
+    }
+
+    #[test]
+    fn list_books_orders_recently_opened_first() {
+        let (_directory, store) = test_store();
+        let first = import_named_book(
+            &store,
+            Path::new("/source/older.epub"),
+            b"older-book-bytes",
+            "Older",
+        );
+        let second = import_named_book(
+            &store,
+            Path::new("/source/newer.epub"),
+            b"newer-book-bytes",
+            "Newer",
+        );
+
+        let before = store.list_books().expect("list before open");
+        assert_eq!(before[0].id, second);
+        assert_eq!(before[1].id, first);
+
+        store.mark_book_opened(&first).expect("mark opened");
+
+        let after = store.list_books().expect("list after open");
+        assert_eq!(after[0].id, first);
+        assert_eq!(after[1].id, second);
+        assert!(after[0].last_opened_at.is_some());
+        assert!(after[1].last_opened_at.is_none());
+    }
+
+    #[test]
+    fn same_path_reimport_is_overwrite_and_keeps_progress() {
+        let (_directory, store) = test_store();
+        let source = Path::new("/source/overwrite.epub");
+        let id = import_test_book(&store, source);
+        store
+            .update_reading_state(&id, Some(0.42), None)
+            .expect("progress");
+        store.mark_book_opened(&id).expect("opened");
+        let before = store.list_books().expect("before").remove(0);
+
+        let result = store
+            .import_bytes(source, "book.epub".to_string(), b"version-two".to_vec())
+            .expect("reimport");
+
+        assert_eq!(result.status, ImportStatus::Overwrite);
+        assert_eq!(result.book_id, id);
+        assert_eq!(result.title, "Version One");
+        assert!(result.import_id.is_some());
+
+        store
+            .save_book_metadata(
+                &id,
+                "Version Two".to_string(),
+                "Author Two".to_string(),
+                Some(vec![9, 9, 9]),
+                staged_import_id(&result),
+            )
+            .expect("commit overwrite");
+
+        let after = store.list_books().expect("after").remove(0);
+        assert_eq!(after.title, "Version Two");
+        assert_eq!(after.last_fraction, Some(0.42));
+        assert_eq!(after.last_opened_at, before.last_opened_at);
+        assert_eq!(after.settings, before.settings);
+        assert_eq!(after.content_hash.as_deref(), Some(sha256_hex(b"version-two").as_str()));
+    }
+
+    #[test]
+    fn same_batch_new_then_same_content_is_duplicate() {
+        let (_directory, store) = test_store();
+        let first = store
+            .import_bytes(
+                Path::new("/source/first.epub"),
+                "first.epub".to_string(),
+                b"shared-bytes".to_vec(),
+            )
+            .expect("first import");
+        assert_eq!(first.status, ImportStatus::New);
+
+        let second = store
+            .import_bytes(
+                Path::new("/other/second.epub"),
+                "second.epub".to_string(),
+                b"shared-bytes".to_vec(),
+            )
+            .expect("second import");
+
+        assert_eq!(second.status, ImportStatus::Duplicate);
+        assert_eq!(second.book_id, first.book_id);
+        assert_eq!(second.title, "first.epub");
+        assert!(second.import_id.is_none());
+        assert_eq!(store.list_books().expect("list").len(), 1);
+    }
+
+    #[test]
+    fn overwrite_commit_then_other_path_same_content_is_duplicate() {
+        let (_directory, store) = test_store();
+        let source = Path::new("/source/then-copy.epub");
+        let id = import_test_book(&store, source);
+        let overwrite = store
+            .import_bytes(source, "book.epub".to_string(), b"version-two".to_vec())
+            .expect("overwrite");
+        store
+            .save_book_metadata(
+                &id,
+                "Version Two".to_string(),
+                "Author Two".to_string(),
+                Some(vec![9, 9, 9]),
+                staged_import_id(&overwrite),
+            )
+            .expect("commit overwrite");
+
+        let duplicate = store
+            .import_bytes(
+                Path::new("/other/copy-two.epub"),
+                "copy-two.epub".to_string(),
+                b"version-two".to_vec(),
+            )
+            .expect("duplicate after overwrite commit");
+
+        assert_eq!(duplicate.status, ImportStatus::Duplicate);
+        assert_eq!(duplicate.book_id, id);
+        assert_eq!(store.list_books().expect("list").len(), 1);
+    }
+
+    #[test]
+    fn same_content_different_path_is_duplicate_and_does_not_stage() {
+        let (directory, store) = test_store();
+        let existing = import_test_book(&store, Path::new("/source/original.epub"));
+        let copy = Path::new("/other/copy.epub");
+
+        let result = store
+            .import_bytes(copy, "copy.epub".to_string(), b"version-one".to_vec())
+            .expect("duplicate import");
+
+        assert_eq!(result.status, ImportStatus::Duplicate);
+        assert_eq!(result.book_id, existing);
+        assert_eq!(result.title, "Version One");
+        assert!(result.import_id.is_none());
+        assert_eq!(store.list_books().expect("list").len(), 1);
+        assert!(!directory
+            .path()
+            .join("books")
+            .join(book_id_for_source(copy))
+            .exists());
+    }
+
+    #[test]
+    fn discard_overwrite_removes_pending_and_keeps_old_book() {
+        let (directory, store) = test_store();
+        let source = Path::new("/source/discard-overwrite.epub");
+        let id = import_test_book(&store, source);
+        store
+            .update_reading_state(&id, Some(0.3), None)
+            .expect("progress");
+
+        let result = store
+            .import_bytes(source, "book.epub".to_string(), b"version-two".to_vec())
+            .expect("stage overwrite");
+        let import_id = staged_import_id(&result).to_string();
+        assert!(store.read_import_bytes(&id, &import_id).is_ok());
+
+        store.discard_import(&id, &import_id).expect("discard");
+
+        let error = store
+            .read_import_bytes(&id, &import_id)
+            .expect_err("pending should be gone");
+        assert!(
+            error.code == AppErrorCode::InvalidInput || error.code == AppErrorCode::StorageIo
+        );
+        assert!(!directory
+            .path()
+            .join("books")
+            .join(&id)
+            .join(".imports")
+            .join(format!("{import_id}.epub"))
+            .exists());
+        let book = store.list_books().expect("old book remains").remove(0);
+        assert_eq!(book.title, "Version One");
+        assert_eq!(book.last_fraction, Some(0.3));
+        assert_eq!(
+            fs::read(directory.path().join("books").join(&id).join("book.epub")).expect("old epub"),
+            b"version-one"
+        );
+    }
+
+    #[test]
+    fn delete_book_removes_session_directory() {
+        let (directory, store) = test_store();
+        let id = import_test_book(&store, Path::new("/source/delete-sessions.epub"));
+        let session_dir = directory.path().join("sessions").join(&id);
+        fs::create_dir(&session_dir).expect("session dir");
+        fs::write(session_dir.join("chat.jsonl"), b"{}").expect("session file");
+
+        store.delete_book(&id).expect("delete");
+
+        assert!(!session_dir.exists());
+        assert!(store.list_books().expect("list").is_empty());
+    }
+
+    #[test]
+    fn delete_book_succeeds_when_session_directory_is_missing() {
+        let (directory, store) = test_store();
+        let id = import_test_book(&store, Path::new("/source/delete-no-session.epub"));
+        let session_dir = directory.path().join("sessions").join(&id);
+        assert!(!session_dir.exists());
+
+        store.delete_book(&id).expect("delete without sessions");
+        assert!(store.list_books().expect("list").is_empty());
+    }
+
+    #[test]
+    fn validation_rejects_invalid_last_opened_at_and_content_hash() {
+        let (directory, store) = test_store();
+        import_test_book(&store, Path::new("/source/field-validation.epub"));
+        let library_path = directory.path().join("library.json");
+        let original = fs::read(&library_path).expect("original library");
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&original).expect("library json");
+        value["books"][0]["lastOpenedAt"] = serde_json::Value::String("not-a-date".to_string());
+        fs::write(
+            &library_path,
+            serde_json::to_vec_pretty(&value).expect("bad opened"),
+        )
+        .expect("write bad opened");
+        let error = store.list_books().expect_err("bad lastOpenedAt");
+        assert_eq!(error.code, AppErrorCode::StorageCorrupt);
+
+        fs::write(&library_path, &original).expect("restore");
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&original).expect("library json");
+        value["books"][0]["contentHash"] = serde_json::Value::String("abc".to_string());
+        fs::write(
+            &library_path,
+            serde_json::to_vec_pretty(&value).expect("bad hash"),
+        )
+        .expect("write bad hash");
+        let error = store.list_books().expect_err("bad contentHash");
+        assert_eq!(error.code, AppErrorCode::StorageCorrupt);
+    }
+
+    #[test]
+    fn import_paths_reject_non_epub_and_symlinks() {
+        let (directory, store) = test_store();
+        let txt = directory.path().join("notes.txt");
+        fs::write(&txt, b"not an epub").expect("txt");
+        let error = validate_import_source(&txt).expect_err("txt is not epub");
+        assert_eq!(error.code, AppErrorCode::InvalidInput);
+
+        let missing = directory.path().join("ghost.epub");
+        let error = validate_import_source(&missing).expect_err("missing epub");
+        assert_eq!(error.code, AppErrorCode::StorageIo);
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            let target = directory.path().join("real.epub");
+            fs::write(&target, b"version-one").expect("real epub");
+            let link = directory.path().join("alias.epub");
+            symlink(&target, &link).expect("symlink");
+            let error = validate_import_source(&link).expect_err("symlink epub");
+            assert_eq!(error.code, AppErrorCode::InvalidInput);
+            assert!(store.list_books().expect("list").is_empty());
         }
     }
 }

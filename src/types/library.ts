@@ -15,18 +15,25 @@ export interface BookRecord {
   importedAt: string;
   lastFraction?: number;
   settings?: ReadingSettings;
+  lastOpenedAt?: string;
+  contentHash?: string;
 }
 
-/** Result of staging an import for frontend metadata extraction. */
+export type ImportStatus = "new" | "overwrite" | "duplicate";
+
+/** Result of classifying / staging an import for frontend metadata extraction. */
 export interface ImportBookResult {
+  status: ImportStatus;
   bookId: string;
-  importId: string;
+  title: string;
+  importId?: string;
   name: string;
 }
 
 /** Lightweight context loaded separately from the raw EPUB body. */
 export interface BookOpenContext {
   name: string;
+  title: string;
   bookId: string;
   contentVersion: string;
   lastFraction?: number;

@@ -93,6 +93,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             library::import_book,
+            library::import_paths,
+            library::discard_import,
             library::read_import_bytes,
             library::save_book_metadata,
             library::list_books,
