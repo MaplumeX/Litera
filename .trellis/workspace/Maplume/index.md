@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 54
+- **Total Sessions**: 55
 - **Last Active**: 2026-08-14
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1257 | Active |
+| `journal-1.md` | ~1278 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 55 | 2026-08-14 | Persist AI chat panel width | `c88f338` | `main` |
 | 54 | 2026-08-14 | Remove native window shell | `bc7e8ae` | `fix/remove-native-shell` |
 | 53 | 2026-08-14 | Reader bookmarks and highlights | `02419cb` | `feat/reader-gap-analysis` |
 | 52 | 2026-08-14 | Reader progress scrubber | `7ec411a`, `94d58ad` | `feat/reader-gap-analysis` |

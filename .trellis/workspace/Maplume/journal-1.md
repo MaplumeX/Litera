@@ -1255,3 +1255,24 @@ Merged window chrome into the existing library and reader toolbars. macOS keeps 
 ### Next Steps
 
 - Manual tauri dev on macOS/Windows/Linux: traffic lights, custom buttons, drag, double-click maximize, close flush, window-state restore
+
+
+## Session 55: Persist AI chat panel width
+
+**Date**: 2026-08-14
+**Task**: Persist AI chat panel width
+**Branch**: `main`
+
+### Summary
+
+Persistence for the AI chat panel width: wired react-resizable-panels useDefaultLayout (onlySaveAfterUserInteractions) into the reader/chat Group, restore saved width on expand with a percentage string (numbers are pixels in this library), keep the 22% fallback only when nothing is saved, and add a mock + regression test. Check sub-agent caught the pixel-vs-percent resize bug; fixed and re-verified (170 tests pass). Spec updated with the persistence exception and gotchas.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c88f338` | (see git log) |
+
+### Status
+
+[OK] **Completed**
