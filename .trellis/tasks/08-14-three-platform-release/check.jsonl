@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "CI must not commit binaries; target selection must stay host-native"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Release job should run sidecar smoke before bundling"}
+{"file": ".trellis/tasks/08-14-three-platform-release/research/tauri-action-and-signing.md", "reason": "Draft release, existing tag, Node 22, bundle flags"}
+{"file": ".trellis/tasks/08-14-three-platform-release/research/sidecar-ci-constraints.md", "reason": "Version files and sidecar host-triple invariant"}

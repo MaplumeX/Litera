@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Sidecar target triples, gitignored binaries, root prebuild owns sidecar generation"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Sidecar smoke: empty PATH, no source-path leak, JSONL stdout"}
+{"file": ".trellis/tasks/08-14-three-platform-release/research/tauri-action-and-signing.md", "reason": "tauri-action tag/draft contract and macOS ad-hoc signing"}
+{"file": ".trellis/tasks/08-14-three-platform-release/research/sidecar-ci-constraints.md", "reason": "No cross-compile; dual npm ci; version lockstep files"}
