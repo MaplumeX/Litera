@@ -1020,3 +1020,25 @@ Replaced settings theme/language/align ChoiceButtons with a local radiogroup seg
 ### Status
 
 [OK] **Completed**
+
+
+## Session 46: Unify custom LLM model picker
+
+**Date**: 2026-08-14
+**Task**: Unify custom LLM model picker
+**Branch**: `main`
+
+### Summary
+
+Unified custom-provider model UX: pick, type-to-add, and refresh live in one combobox. Built-in stays a text field. Catalog only grows. Spec updated.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a4976d1` | (see git log) |
+| `6785b18` | (see git log) |
+
+### Status
+
+[OK] **Completed**
