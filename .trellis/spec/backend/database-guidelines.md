@@ -106,7 +106,7 @@ for (const [index, text] of chapterTexts) {
 ### Conventions
 
 - **Trigram tokenizer**: `tokenize='trigram'` — queries of 3+ characters work best.
-- **rowid = chapter index + 1**: FTS5 rowid is 1-based; chapter indices are 0-based. Convert on read: `chapterIndex: row.rowid - 1`.
+- **rowid = owned chapter index + 1**: FTS5 rowid is 1-based. `chapterTexts` keys are TOC-owned chapter indices (not raw spine file order). Convert on read: `chapterIndex: row.rowid - 1`. Ownership lives in `sidecar/chapter-ownership.ts`; see quality-guidelines "Scenario: reader/agent chapter coordinates".
 - **FTS is a candidate finder, not the excerpt source**: `searchInBook(queries)` runs exact `indexOf` first. When a query has no exact hit, `MATCH` an escaped quoted phrase (`escapeFtsPhrase`) to collect chapter rowids, then token-AND fallback. Snippets come from `snippetAround` (160-char radius) so `part = floor(offset / 12000)` is honest. Do not restore `snippet(chapters, …)` — it has no usable chapter offset.
 - **Close previous DB on book reload**: `if (currentBook?.fts) currentBook.fts.close()` before resetting state.
 

@@ -530,8 +530,8 @@ Apply this contract whenever an Agent command, sidecar protocol field, superviso
 
 ```rust
 fn get_agent_snapshot(State<SidecarSupervisor>) -> Result<AgentSnapshot, String>
-fn agent_prompt(prompt, selection?, chapter_index?, book_id, request_id?, prompt_id?, State<SidecarSupervisor>) -> Result<CommandReceipt, String>
-fn agent_edit_prompt(message_index, prompt, selection?, chapter_index?, book_id, request_id?, prompt_id?, State<SidecarSupervisor>) -> Result<CommandReceipt, String>
+fn agent_prompt(prompt, selection?, chapter_href?, book_id, request_id?, prompt_id?, State<SidecarSupervisor>) -> Result<CommandReceipt, String>
+fn agent_edit_prompt(message_index, prompt, selection?, chapter_href?, book_id, request_id?, prompt_id?, State<SidecarSupervisor>) -> Result<CommandReceipt, String>
 fn agent_abort(prompt_id?, request_id?, State<SidecarSupervisor>) -> Result<CommandReceipt, String>
 fn list_sessions(book_id, request_id?, State<SidecarSupervisor>) -> Result<CommandReceipt, String>
 fn new_session(book_id, request_id?, State<SidecarSupervisor>) -> Result<CommandReceipt, String>
@@ -614,7 +614,7 @@ fn agent_edit_prompt(
     message_index: u32,
     prompt: String,
     selection: Option<String>,
-    chapter_index: Option<u32>,
+    chapter_href: Option<String>,
     book_id: String,
     request_id: Option<String>,
     prompt_id: Option<String>,

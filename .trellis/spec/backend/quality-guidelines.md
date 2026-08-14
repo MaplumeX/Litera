@@ -114,7 +114,7 @@ tauri::async_runtime::spawn(async move {
 
 ### Convention: inject reading context as a nextTurn aside, never mutate the user message
 
-**What**: When a prompt carries reading context (`selection`, `chapterIndex`), the sidecar MUST deliver that context to the model via `session.sendCustomMessage(..., { triggerTurn: false, deliverAs: "nextTurn" })` before calling `session.prompt(text)`. If `session.messages` does not already contain a `bookSnapshot` custom message, `handlePrompt` MUST also queue a one-time book snapshot aside (`customType: "bookSnapshot"`, same `nextTurn` options) before the reading-context aside and before `session.prompt(text)`. The user message passed to `prompt()` is always the raw user input.
+**What**: When a prompt carries reading context (`selection`, `chapterHref`), the sidecar MUST deliver that context to the model via `session.sendCustomMessage(..., { triggerTurn: false, deliverAs: "nextTurn" })` before calling `session.prompt(text)`. If `session.messages` does not already contain a `bookSnapshot` custom message, `handlePrompt` MUST also queue a one-time book snapshot aside (`customType: "bookSnapshot"`, same `nextTurn` options) before the reading-context aside and before `session.prompt(text)`. The user message passed to `prompt()` is always the raw user input. The live locator is a chapter href, never a raw spine `chapterIndex`.
 
 **Why**: `session.prompt()` stores its argument verbatim as a `user` role message in session history. `serializeMessages` → `extractUserText` returns that stored text to the frontend for display. Concatenating context wrappers (`（当前在第 N 章）`, `用户选中的文本：`, `用户问题：`) or book metadata/TOC into the prompt string pollutes the persisted user message, so the chat panel shows LM-facing metadata as if the user typed it. The snapshot persists as a custom message so later turns and reloaded sessions do not enqueue a second copy.
 
@@ -139,7 +139,10 @@ const context = command.context;
 if (context) {
   const asideParts: string[] = [];
   if (context.selection) asideParts.push(`用户选中的文本：\n"${context.selection}"`);
-  else if (context.chapterIndex !== undefined) asideParts.push(`（当前在第 ${context.chapterIndex} 章）`);
+  else if (context.chapterHref) {
+    const aside = formatChapterAside(findChapterByHref(toc, context.chapterHref));
+    if (aside) asideParts.push(aside);
+  }
   if (asideParts.length) {
     await managed.session.sendCustomMessage(
       { customType: "readingContext", content: asideParts.join("\n"), display: false, details: undefined },
@@ -153,11 +156,11 @@ void managed.session.prompt(command.text).then(/* ... */);
 **Wrong**:
 ```typescript
 // NEVER concatenate context or the book snapshot into the user text
-const fullPrompt = `（当前在第 ${ctx.chapterIndex} 章）\n\n用户问题：${text}`;
+const fullPrompt = `（当前在第 ${ctx.chapterIndex} 章）\n\n用户问题：${text}`; // spine integer + pollutes history
 session.prompt(fullPrompt);  // pollutes stored user message
 ```
 
-**Rule**: Context asides must not include a `用户问题：` label — the user text is delivered separately by `prompt()`. The reading-context aside contains only the context (selected text or chapter index). The book snapshot aside is idempotent (skip when any message has `role === "custom"` and `customType === "bookSnapshot"`), includes a compact TOC truncated at 200 entries or 4000 formatted characters, and must not block `prompt()` on fetch or enqueue failure (one-line `process.stderr.write` only; stdout stays JSONL). TOC lines are `{chapterNumber} [index {chapterIndex}]: {title}` (`chapterNumber = index + 1`). Do not put hrefs in the snapshot or tell the model to call `get_toc` for hrefs.
+**Rule**: Context asides must not include a `用户问题：` label — the user text is delivered separately by `prompt()`. The reading-context aside contains only the context (selected text, or a resolved chapter title + `chapterNumber`; never a raw spine integer or href). Resolve `chapterHref` through the owned TOC; if the href is missing or unmatched, omit the chapter line. The book snapshot aside is idempotent (skip when any message has `role === "custom"` and `customType === "bookSnapshot"`), includes a compact TOC truncated at 200 entries or 4000 formatted characters, and must not block `prompt()` on fetch or enqueue failure (one-line `process.stderr.write` only; stdout stays JSONL). TOC lines are `{chapterNumber} [index {chapterIndex}]: {title}` (`chapterNumber = index + 1`). Do not put hrefs in the snapshot, `get_toc` JSON, or the aside, or tell the model to call `get_toc` for hrefs.
 
 ### Convention: book-reading tools are structured, windowed, and multi-query
 
@@ -183,7 +186,90 @@ const text = await worker().readChapter(bookId, generation, chapterIndex);
 return okResult(JSON.stringify({ chapterIndex, chapterNumber: chapterIndex + 1, ...windowChapterText(text, part ?? 0) }));
 ```
 
-**Related**: FTS candidate pipeline in `database-guidelines.md`. Pure helpers live in `sidecar/book-text.ts` so tests can import them without WASM.
+**Related**: FTS candidate pipeline in `database-guidelines.md`. Search merge lives in `sidecar/book-text.ts`; chapter identity lives in `sidecar/chapter-ownership.ts`. Both stay WASM-free for unit tests.
+
+## Scenario: reader/agent chapter coordinates
+
+### 1. Scope / Trigger
+
+- Trigger: any change to EPUB chapter identity, `PromptContext`, reading-context aside, `get_toc` / `read_chapter` / `search_in_book` indices, or the reader locator sent with a prompt.
+- Prevents the reader (foliate spine / TOC href) and the sidecar tools from numbering different objects as "chapter N".
+
+### 2. Signatures
+
+```typescript
+// sidecar/protocol.ts + src-tauri PromptContext (deny_unknown_fields)
+interface PromptContext {
+  selection?: string;     // max MAX_SELECTION_LENGTH
+  chapterHref?: string;   // max 4096; empty string = absent
+}
+
+// sidecar/chapter-ownership.ts — internal, never sent to the model
+interface OwnedChapter {
+  index: number;
+  label: string;
+  hrefs: string[];
+  text: string;
+}
+```
+
+```rust
+fn agent_prompt(..., selection: Option<String>, chapter_href: Option<String>, ...)
+fn agent_edit_prompt(..., selection: Option<String>, chapter_href: Option<String>, ...)
+```
+
+### 3. Contracts
+
+- Sidecar builds one owned list on `open_book`: resolve each TOC href onto a spine file (nav/ncx directory as base); first TOC entry to claim a file wins; unclaimed files join the previous owner; empty/unresolvable TOC → one chapter per non-empty spine file; drop chapters with empty text.
+- `metadata.totalChapters`, snapshot TOC, `get_toc`, `read_chapter`, `search_in_book`, and FTS `rowid` all use that owned index. `chapterNumber = chapterIndex + 1`.
+- `hrefs` (TOC href + owned spine hrefs) stay internal. Snapshot, `get_toc` JSON, and the aside never include hrefs.
+- Live locator is `chapterHref` from the reader: `relocate.tocItem.href` if truthy, else `book.sections[index].id`. Do not send a spine `chapterIndex`.
+- Aside with no selection: `findChapterByHref` → `（当前在「{title}」，第 {N} 章）` or untitled `（当前在第 {N} 章）`. Missing/unmatched href: omit the chapter line.
+- Clear the locator when `fileData` / the open book changes. Do not ship the previous book's href.
+- Do not send full chapter bodies over JSONL (`MAX_JSONL_BYTES` is 1 MiB).
+
+### 4. Validation & Error Matrix
+
+| Condition | Result |
+|---|---|
+| `PromptContext.chapterIndex` present | Rust `deny_unknown_fields` rejects the command before a receipt |
+| `chapterHref` empty / whitespace | Treat as absent; do not fail the prompt |
+| `chapterHref` unmatched | Prompt proceeds; aside omits the chapter line |
+| Cover / unlabeled spine file | Not its own owned chapter unless TOC is empty |
+| Chapter split across two XHTML files | One `read_chapter` target; text is both files concatenated |
+| Unknown href after switching books | Impossible if the frontend cleared the locator; unmatched href still omits the line |
+
+### 5. Good/Base/Bad Cases
+
+- **Good**: fixture with cover + a two-file chapter → `totalChapters === 2`; `read_chapter(0)` is the labeled chapter, not the cover.
+- **Base**: empty nav → one chapter per non-empty spine file; section `id` still resolves.
+- **Bad**: print `（当前在第 ${relocate.index} 章）` or zip TOC titles onto spine files by order.
+
+### 6. Tests Required
+
+- Pure: `canonicalHref` / `hrefMatches` (no `part0010.html` ↔ `0.html`); ownership for cover + split file; empty TOC fallback; aside formatter.
+- `loadBook` integration: owned `totalChapters`, `read_chapter(0)` text, search `chapterIndex` on the same list.
+- Protocol: accept `chapterHref`; reject `chapterIndex` on Rust; `agent_prompt` JSON has `chapterHref` and no `chapterIndex`.
+- Frontend: capture `tocItem.href ?? section.id`; clear locator on book change; empty href falls back to section id.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```typescript
+asideParts.push(`（当前在第 ${context.chapterIndex} 章）`); // spine integer
+chapterTexts.set(spineIndex, htmlToText(html));
+toc.find((entry) => entry.index === spineIndex); // sequential nav index ≠ spine
+```
+
+#### Correct
+
+```typescript
+const chapter = findChapterByHref(owned, context.chapterHref);
+const aside = formatChapterAside(chapter);
+if (aside) asideParts.push(aside);
+// FTS rowid = owned.index + 1; get_toc / read_chapter share owned.index
+```
 
 ### Convention: rewind a user turn with `navigateTree`, never `branch()` alone
 

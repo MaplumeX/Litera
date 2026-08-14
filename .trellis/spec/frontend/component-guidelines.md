@@ -78,6 +78,19 @@ header:   [←]  book title (h1, truncate)     [TOC][Aa][chat]
 body:     [TOC overlay]  Reader  |  Chat (collapsed = 0 width, still mounted)
 ```
 
+### Convention: chat locator is a chapter href, not a spine index
+
+**What**: `ReaderView` relocate / selection capture a `chapterHref` (`tocItem.href` if truthy, else `book.sections[index].id`) and pass it through `App` → `ChatPanel` → `agent_prompt` / `agent_edit_prompt`. Empty string is not a locator — fall back to section `id`, then omit.
+
+**Why**: Foliate `relocate.detail.index` is a spine file. Sidecar tools use a TOC-owned chapter list. Sending the integer made the aside say "第 N 章" for the wrong object.
+
+**Rules**:
+- Do not send `chapterIndex` on the live prompt path (`PromptContext` is `deny_unknown_fields`).
+- Clear `chapterHref` when the open book / `fileData` changes; a leftover href from book A must not go to book B.
+- The reader TOC sidebar may stay foliate's nested tree. Only the agent locator and sidecar owned list share `chapterHref` / owned `chapterIndex`.
+
+**Related**: backend quality-guidelines "Scenario: reader/agent chapter coordinates".
+
 **Rules**:
 - Reader header title is the book name. Do not put the `Litera` brand in the reader toolbar.
 - Do not add a full-width progress bar, hairline, header percentage, or footer page numbers on the reader page. `App` still keeps `progress` state: `index` goes to `ChatPanel` as `currentChapterIndex`; `fraction` persists as `lastFraction`. Visible progress lives on `BookCard`, not in reader chrome.
