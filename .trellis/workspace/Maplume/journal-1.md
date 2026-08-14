@@ -1163,3 +1163,25 @@ Iframe click paging used clientX against innerWidth; foliate expands the chapter
 
 [OK] **Completed**
 
+
+
+## Session 52: Reader progress scrubber
+
+**Date**: 2026-08-14
+**Task**: Reader progress scrubber
+**Branch**: `feat/reader-gap-analysis`
+
+### Summary
+
+Restored always-visible reader progress bar under the header as a click/drag scrubber (goToFraction, latest-wins). Updated frontend specs. Bookmarks/highlights child remains next.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7ec411a` | (see git log) |
+| `94d58ad` | (see git log) |
+
+### Status
+
+[OK] **Completed**
