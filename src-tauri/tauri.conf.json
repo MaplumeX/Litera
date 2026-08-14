@@ -48,6 +48,9 @@
         "role": "Viewer",
         "rank": "Default"
       }
-    ]
+    ],
+    "macOS": {
+      "signingIdentity": "-"
+    }
   }
 }

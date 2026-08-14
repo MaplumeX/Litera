@@ -1,0 +1,19 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.1.0] - 2026-08-14
+
+Litera 的首个公开版本：带阅读助手的跨平台 EPUB 阅读器。
+
+### Added
+
+- **阅读器**：分页阅读 EPUB，目录侧栏，阅读进度恢复，滚轮 / 键盘翻页，正文字体与排版（字号、行高、页宽、边距、字距、段距、首行缩进），可选系统字体。
+- **书库**：本地书架，文件选择或拖放导入，按书名 / 作者搜索，替换已有书并保留进度与对话，关联 `.epub` 文件。
+- **阅读助手**：阅读页旁栏对话；选中文本即问；每本书多个会话，可新建、切换、重命名、编辑重发；助手可按需读目录、按窗读取章节、书内检索。
+- **Agent sidecar**：自包含 Node sidecar，无需系统安装 Node；支持 OpenAI 兼容的自定义供应商与模型。
+- **设置**：独立设置对话框，含全局 / 单本排版、外观（浅色 / 深色 / 跟随系统）、语言和 AI 供应商。
+- **国际化**：简体中文与 English。

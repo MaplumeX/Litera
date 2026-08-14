@@ -12,7 +12,8 @@
     "build": "tsc && vite build",
     "test": "vitest",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "version:bump": "node scripts/bump-version.mjs"
   },
   "dependencies": {
     "@tailwindcss/typography": "^0.5.20",
