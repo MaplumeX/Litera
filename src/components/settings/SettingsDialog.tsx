@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { CheckIcon, ChevronsUpDown } from "lucide-react";
 import {
@@ -299,35 +299,69 @@ function FontFamilyPicker({
   );
 }
 
-function ChoiceButton({
-  active,
-  disabled,
-  onClick,
-  children,
-  style,
+type SegmentedOption<T extends string> = { value: T; label: string };
+
+function SegmentedControl<T extends string>({
+  value,
+  options,
+  onChange,
+  ariaLabel,
 }: {
-  active: boolean;
-  disabled?: boolean;
-  onClick: () => void;
-  children: ReactNode;
-  style?: CSSProperties;
+  value: T;
+  options: readonly SegmentedOption<T>[];
+  onChange: (value: T) => void;
+  ariaLabel: string;
 }) {
+  const buttonRefs = useRef<Array<HTMLButtonElement | null>>([]);
+
+  function moveFocus(from: number, delta: number) {
+    const next = (from + delta + options.length) % options.length;
+    buttonRefs.current[next]?.focus();
+  }
+
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      style={style}
-      className={cn(
-        "flex-1 rounded border px-2 py-1 text-xs transition-colors",
-        disabled && "cursor-not-allowed opacity-50",
-        active
-          ? "border-primary bg-primary text-primary-foreground"
-          : "hover:bg-accent",
-      )}
+    <div
+      role="radiogroup"
+      aria-label={ariaLabel}
+      className="inline-flex w-full rounded-md bg-muted p-0.5"
     >
-      {children}
-    </button>
+      {options.map((option, index) => {
+        const selected = option.value === value;
+        return (
+          <button
+            key={option.value}
+            ref={(node) => {
+              buttonRefs.current[index] = node;
+            }}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            tabIndex={selected ? 0 : -1}
+            onClick={() => onChange(option.value)}
+            onKeyDown={(event) => {
+              if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+                event.preventDefault();
+                moveFocus(index, 1);
+              } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+                event.preventDefault();
+                moveFocus(index, -1);
+              } else if (event.key === " " || event.key === "Enter") {
+                event.preventDefault();
+                onChange(option.value);
+              }
+            }}
+            className={cn(
+              "flex-1 rounded-sm px-2 py-1 text-xs transition-colors",
+              selected
+                ? "bg-background text-foreground shadow-xs"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {option.label}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -437,15 +471,15 @@ export function SettingsDialog({
                   label: restoreLabel,
                 }}
               >
-                {TEXT_ALIGNS.map((item) => (
-                  <ChoiceButton
-                    key={item.value}
-                    active={styleState.textAlign === item.value}
-                    onClick={() => onTypographyChange("textAlign", item.value)}
-                  >
-                    {t(ALIGN_LABEL_KEYS[item.value])}
-                  </ChoiceButton>
-                ))}
+                <SegmentedControl
+                  value={styleState.textAlign}
+                  options={TEXT_ALIGNS.map((item) => ({
+                    value: item.value,
+                    label: t(ALIGN_LABEL_KEYS[item.value]),
+                  }))}
+                  onChange={(next) => onTypographyChange("textAlign", next)}
+                  ariaLabel={t("settings.align")}
+                />
               </PresetRow>
             </div>
           )}
@@ -453,29 +487,26 @@ export function SettingsDialog({
           {section === "appearance" && (
             <div className="max-w-md space-y-5">
               <PresetRow label={t("settings.theme")}>
-                {THEMES.map((item) => (
-                  <ChoiceButton
-                    key={item}
-                    active={theme === item}
-                    onClick={() => onThemeChange(item)}
-                  >
-                    {t(THEME_LABEL_KEYS[item])}
-                  </ChoiceButton>
-                ))}
+                <SegmentedControl
+                  value={theme}
+                  options={THEMES.map((item) => ({
+                    value: item,
+                    label: t(THEME_LABEL_KEYS[item]),
+                  }))}
+                  onChange={onThemeChange}
+                  ariaLabel={t("settings.theme")}
+                />
               </PresetRow>
               <PresetRow label={t("settings.language")}>
-                <ChoiceButton
-                  active={locale === "zh-CN"}
-                  onClick={() => setLocale("zh-CN")}
-                >
-                  中文
-                </ChoiceButton>
-                <ChoiceButton
-                  active={locale === "en"}
-                  onClick={() => setLocale("en")}
-                >
-                  English
-                </ChoiceButton>
+                <SegmentedControl
+                  value={locale}
+                  options={[
+                    { value: "zh-CN", label: "中文" },
+                    { value: "en", label: "English" },
+                  ]}
+                  onChange={setLocale}
+                  ariaLabel={t("settings.language")}
+                />
               </PresetRow>
             </div>
           )}

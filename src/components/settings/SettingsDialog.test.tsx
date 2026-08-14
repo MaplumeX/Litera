@@ -163,7 +163,7 @@ describe("SettingsDialog", () => {
     act(() => {
       getByRole("button", { name: "外观" }).click();
     });
-    expect(getByRole("button", { name: "白天" })).toBeTruthy();
+    expect(getByRole("radio", { name: "白天" })).toBeTruthy();
     expect(queryByText("字体大小")).toBeNull();
 
     act(() => {
@@ -256,12 +256,44 @@ describe("SettingsDialog", () => {
       getByRole("button", { name: "外观" }).click();
     });
     act(() => {
-      getByRole("button", { name: "English" }).click();
+      getByRole("radio", { name: "English" }).click();
     });
 
     expect(getByText("Language")).toBeTruthy();
     expect(getByRole("button", { name: "Appearance" })).toBeTruthy();
     expect(document.documentElement.lang).toBe("en");
+  });
+
+  it("exposes exclusive choice rows as radiogroups with the current value checked", () => {
+    const { getByRole } = render(
+      <SettingsDialog
+        open
+        onClose={noop}
+        bookTitle={null}
+        hasBook={false}
+        styleState={styleState}
+        onTypographyChange={noop}
+        onRestoreDefault={noop}
+        overriddenKeys={[]}
+        theme="light"
+        onThemeChange={noop}
+      />,
+    );
+
+    expect(getByRole("radiogroup", { name: "对齐" })).toBeTruthy();
+    expect(getByRole("radio", { name: "左齐" }).getAttribute("aria-checked")).toBe("true");
+    expect(getByRole("radio", { name: "两端" }).getAttribute("aria-checked")).toBe("false");
+
+    act(() => {
+      getByRole("button", { name: "外观" }).click();
+    });
+
+    expect(getByRole("radiogroup", { name: "主题" })).toBeTruthy();
+    expect(getByRole("radiogroup", { name: "语言" })).toBeTruthy();
+    expect(getByRole("radio", { name: "白天" }).getAttribute("aria-checked")).toBe("true");
+    expect(getByRole("radio", { name: "夜间" }).getAttribute("aria-checked")).toBe("false");
+    expect(getByRole("radio", { name: "中文" }).getAttribute("aria-checked")).toBe("true");
+    expect(getByRole("radio", { name: "English" }).getAttribute("aria-checked")).toBe("false");
   });
 
   it("opens a searchable font combobox with generics at the top", async () => {
