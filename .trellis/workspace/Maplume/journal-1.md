@@ -1217,3 +1217,41 @@ Added per-book bookmarks and single-color highlights in annotations.json, plus a
 ### Status
 
 [OK] **Completed**
+
+
+## Session 54: Remove native window shell
+
+**Date**: 2026-08-14
+**Task**: Remove native window shell
+**Branch**: `fix/remove-native-shell`
+
+### Summary
+
+Merged window chrome into the existing library and reader toolbars. macOS keeps traffic lights via Overlay; Windows/Linux use undecorated windows with custom min/max/close. Custom close still flushes reading state.
+
+### Main Changes
+
+- Apply Overlay or set_decorations(false) in lib.rs setup before show()
+- Grant start-dragging, minimize, toggle-maximize, close capabilities
+- WindowControls + platform UA detect; drag regions on title and spacer only
+- Record window-chrome contracts in frontend quality and component specs
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `bc7e8ae` | (see git log) |
+
+### Testing
+
+- [OK] CI=true npm test: 26 files / 169 tests
+- [OK] npm run build (tsc && vite build)
+- [OK] cargo check --locked --manifest-path src-tauri/Cargo.toml
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Manual tauri dev on macOS/Windows/Linux: traffic lights, custom buttons, drag, double-click maximize, close flush, window-state restore
