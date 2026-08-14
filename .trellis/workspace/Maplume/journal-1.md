@@ -1185,3 +1185,24 @@ Restored always-visible reader progress bar under the header as a click/drag scr
 ### Status
 
 [OK] **Completed**
+
+
+## Session 53: Reader bookmarks and highlights
+
+**Date**: 2026-08-14
+**Task**: Reader bookmarks and highlights
+**Branch**: `feat/reader-gap-analysis`
+
+### Summary
+
+Added per-book bookmarks and single-color highlights in annotations.json, plus a TOC-like annotations drawer and selection highlight action. Progress scrubber sibling already shipped.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `02419cb` | (see git log) |
+
+### Status
+
+[OK] **Completed**
