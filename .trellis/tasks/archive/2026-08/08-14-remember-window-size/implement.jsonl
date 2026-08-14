@@ -1,0 +1,8 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Tauri 2 plugin registration: lib.rs + capabilities split; single-instance must be first"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend layer index; this task should not change React code"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend layer index for src-tauri plugin wiring"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "lib.rs owns builder/plugins; capabilities live under src-tauri/capabilities"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "preferences.json deny_unknown_fields; do not persist window state next to theme"}
+{"file": ".trellis/tasks/08-14-remember-window-size/research/window-state-plugin.md", "reason": "Plugin flags, visible:false + app show(), no JS/capability, 2.4.1 pin"}
+{"file": ".trellis/tasks/08-14-remember-window-size/research/repo-integration-points.md", "reason": "Exact files to touch/not touch, plugin order, cargo target cfg"}

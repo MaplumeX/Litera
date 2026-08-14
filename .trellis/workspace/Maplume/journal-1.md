@@ -1151,6 +1151,15 @@ Same-path reimport of unchanged EPUB bytes is now duplicate: no overwrite dialog
 ### Summary
 
 Iframe click paging used clientX against innerWidth; foliate expands the chapter iframe to the full column strip so long chapters mis-hit left/middle/right. Mapped clicks onto documentElement.clientWidth via pageLocalX. Tests 128 passed, tsc green. Live UI not clicked.
+## Session 51: Remember window size
+
+**Date**: 2026-08-14
+**Task**: Remember window size
+**Branch**: `fix/app-not-remember-window-size`
+
+### Summary
+
+Persist main window size, position, and maximized state via tauri-plugin-window-state 2.4.1. Rust-only plugin after single-instance; visible:false plus setup show/focus; no preferences.json or fullscreen restore.
 
 ### Git Commits
 
@@ -1158,6 +1167,8 @@ Iframe click paging used clientX against innerWidth; foliate expands the chapter
 |------|---------|
 | `4f28460` | (see git log) |
 | `92a49bf` | (see git log) |
+| `383fc0f` | (see git log) |
+| `2be28f8` | (see git log) |
 
 ### Status
 
