@@ -28,7 +28,7 @@ pub struct CustomProviderEntry {
     pub id: String,
     pub name: String,
     pub base_url: String,
-    pub model: String,
+    pub models: Vec<String>,
     pub has_api_key: bool,
 }
 
@@ -72,31 +72,28 @@ pub async fn add_custom_provider(
     name: String,
     base_url: String,
     api_key: String,
-    model: String,
+    models: Vec<String>,
 ) -> AppResult<CustomProviderEntry> {
     let name = name.trim().to_string();
     let base_url = base_url.trim().to_string();
     let api_key = api_key.trim().to_string();
-    let model = model.trim().to_string();
-    if name.is_empty() || base_url.is_empty() || api_key.is_empty() || model.is_empty() {
+    let models = normalize_model_ids(models)?;
+    if name.is_empty() || base_url.is_empty() || api_key.is_empty() {
         return Err(AppError::invalid_input(
-            "name, base_url, api_key, and model are all required",
+            "name, base_url, api_key, and models are all required",
         ));
     }
 
     let agent_dir = resolve_agent_dir(&app)?;
     tauri::async_runtime::spawn_blocking(move || {
-        add_custom_provider_impl(&agent_dir, &name, &base_url, &api_key, &model)
+        add_custom_provider_impl(&agent_dir, &name, &base_url, &api_key, &models)
     })
     .await
     .map_err(|error| AppError::storage_io(format!("Agent config write worker failed: {error}")))?
 }
 
 #[tauri::command]
-pub async fn delete_custom_provider(
-    app: tauri::AppHandle,
-    provider_id: String,
-) -> AppResult<()> {
+pub async fn delete_custom_provider(app: tauri::AppHandle, provider_id: String) -> AppResult<()> {
     if !provider_id.starts_with("custom-") {
         return Err(AppError::invalid_input(
             "provider_id must start with 'custom-'",
@@ -118,30 +115,63 @@ pub async fn update_custom_provider(
     name: String,
     base_url: String,
     api_key: String,
-    model: String,
+    models: Vec<String>,
 ) -> AppResult<CustomProviderEntry> {
     let provider_id = provider_id.trim().to_string();
     let name = name.trim().to_string();
     let base_url = base_url.trim().to_string();
     let api_key = api_key.trim().to_string();
-    let model = model.trim().to_string();
+    let models = normalize_model_ids(models)?;
     if !provider_id.starts_with("custom-") {
         return Err(AppError::invalid_input(
             "provider_id must start with 'custom-'",
         ));
     }
-    if name.is_empty() || base_url.is_empty() || model.is_empty() {
+    if name.is_empty() || base_url.is_empty() {
         return Err(AppError::invalid_input(
-            "name, base_url, and model are all required",
+            "name, base_url, and models are all required",
         ));
     }
 
     let agent_dir = resolve_agent_dir(&app)?;
     tauri::async_runtime::spawn_blocking(move || {
-        update_custom_provider_impl(&agent_dir, &provider_id, &name, &base_url, &api_key, &model)
+        update_custom_provider_impl(
+            &agent_dir,
+            &provider_id,
+            &name,
+            &base_url,
+            &api_key,
+            &models,
+        )
     })
     .await
     .map_err(|error| AppError::storage_io(format!("Agent config write worker failed: {error}")))?
+}
+
+#[tauri::command]
+pub async fn list_remote_models(
+    app: tauri::AppHandle,
+    base_url: String,
+    api_key: String,
+    provider_id: Option<String>,
+) -> AppResult<Vec<String>> {
+    let url = models_endpoint_url(&base_url)?;
+    let api_key = api_key.trim().to_string();
+    let key = if !api_key.is_empty() {
+        api_key
+    } else {
+        let provider_id = provider_id.unwrap_or_default();
+        let agent_dir = resolve_agent_dir(&app)?;
+        tauri::async_runtime::spawn_blocking(move || {
+            resolve_list_models_key(&agent_dir, "", Some(provider_id.as_str()))
+        })
+        .await
+        .map_err(|error| {
+            AppError::storage_io(format!("Agent config read worker failed: {error}"))
+        })??
+    };
+
+    fetch_remote_models(&url, &key).await
 }
 
 #[tauri::command]
@@ -179,7 +209,9 @@ fn read_json_or_empty(path: &Path, label: &str) -> AppResult<serde_json::Value> 
             AppError::storage_corrupt(format!("Failed to parse {label}: {error}"))
         }),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(serde_json::Value::Null),
-        Err(error) => Err(AppError::storage_io(format!("Failed to read {label}: {error}"))),
+        Err(error) => Err(AppError::storage_io(format!(
+            "Failed to read {label}: {error}"
+        ))),
     }
 }
 
@@ -197,18 +229,19 @@ fn read_snapshot(agent_dir: &Path) -> AppResult<AgentConfigSnapshot> {
         .map(|string| string.to_string());
 
     let has_api_key = match &provider {
-        Some(provider_id) => auth
-            .get(provider_id)
-            .and_then(|entry| entry.get("type"))
-            .and_then(|value| value.as_str())
-            .map(|entry_type| entry_type == "api_key")
-            .unwrap_or(false)
-            && auth
-                .get(provider_id)
-                .and_then(|entry| entry.get("key"))
+        Some(provider_id) => {
+            auth.get(provider_id)
+                .and_then(|entry| entry.get("type"))
                 .and_then(|value| value.as_str())
-                .map(|key| !key.is_empty())
-                .unwrap_or(false),
+                .map(|entry_type| entry_type == "api_key")
+                .unwrap_or(false)
+                && auth
+                    .get(provider_id)
+                    .and_then(|entry| entry.get("key"))
+                    .and_then(|value| value.as_str())
+                    .map(|key| !key.is_empty())
+                    .unwrap_or(false)
+        }
         None => false,
     };
 
@@ -255,14 +288,7 @@ fn read_custom_providers(
             .and_then(|value| value.as_str())
             .unwrap_or("")
             .to_string();
-        let model = provider
-            .get("models")
-            .and_then(|value| value.as_array())
-            .and_then(|models| models.first())
-            .and_then(|entry| entry.get("id"))
-            .and_then(|value| value.as_str())
-            .unwrap_or("")
-            .to_string();
+        let models = collect_model_ids(provider.get("models"));
 
         let has_api_key = auth
             .get(id)
@@ -281,7 +307,7 @@ fn read_custom_providers(
             id: id.clone(),
             name,
             base_url,
-            model,
+            models,
             has_api_key,
         });
     }
@@ -295,6 +321,151 @@ fn read_custom_providers(
 fn generate_custom_id() -> String {
     let uuid = uuid::Uuid::new_v4();
     format!("custom-{}", &uuid.simple().to_string()[..8])
+}
+
+fn collect_model_ids(models: Option<&serde_json::Value>) -> Vec<String> {
+    models
+        .and_then(|value| value.as_array())
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(|entry| entry.get("id").and_then(|value| value.as_str()))
+                .filter(|id| !id.is_empty())
+                .map(|id| id.to_string())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn normalize_model_ids(models: Vec<String>) -> AppResult<Vec<String>> {
+    let mut out = Vec::with_capacity(models.len());
+    for model in models {
+        let trimmed = model.trim().to_string();
+        if trimmed.is_empty() {
+            return Err(AppError::invalid_input("model id must not be empty"));
+        }
+        out.push(trimmed);
+    }
+    if out.is_empty() {
+        return Err(AppError::invalid_input("models must not be empty"));
+    }
+    Ok(out)
+}
+
+fn models_json(models: &[String]) -> serde_json::Value {
+    serde_json::Value::Array(
+        models
+            .iter()
+            .map(|id| serde_json::json!({ "id": id }))
+            .collect(),
+    )
+}
+
+fn models_endpoint_url(base_url: &str) -> AppResult<String> {
+    let trimmed = base_url.trim();
+    if trimmed.is_empty() {
+        return Err(AppError::invalid_input("base_url is required"));
+    }
+    Ok(format!("{}/models", trimmed.trim_end_matches('/')))
+}
+
+fn resolve_list_models_key(
+    agent_dir: &Path,
+    api_key: &str,
+    provider_id: Option<&str>,
+) -> AppResult<String> {
+    let trimmed = api_key.trim();
+    if !trimmed.is_empty() {
+        return Ok(trimmed.to_string());
+    }
+    let Some(id) = provider_id
+        .map(str::trim)
+        .filter(|id| !id.is_empty() && id.starts_with("custom-"))
+    else {
+        return Err(AppError::invalid_input("API key is required"));
+    };
+    let auth = read_json_or_empty(&agent_dir.join("auth.json"), "auth.json")?;
+    auth.get(id)
+        .and_then(|entry| entry.get("key"))
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|key| !key.is_empty())
+        .map(|key| key.to_string())
+        .ok_or_else(|| AppError::invalid_input("API key is required"))
+}
+
+fn parse_openai_model_ids(body: &[u8]) -> AppResult<Vec<String>> {
+    let value: serde_json::Value = serde_json::from_slice(body).map_err(|error| {
+        AppError::invalid_input(format!("Failed to parse models response: {error}"))
+    })?;
+
+    let mut ids = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut push = |id: &str| {
+        let id = id.trim();
+        if id.is_empty() || !seen.insert(id.to_string()) {
+            return;
+        }
+        ids.push(id.to_string());
+    };
+
+    if let Some(data) = value.get("data").and_then(|value| value.as_array()) {
+        for entry in data {
+            if let Some(id) = entry.get("id").and_then(|value| value.as_str()) {
+                push(id);
+            }
+        }
+    } else if let Some(array) = value.as_array() {
+        for entry in array {
+            if let Some(id) = entry.as_str() {
+                push(id);
+            }
+        }
+    }
+
+    if ids.is_empty() {
+        return Err(AppError::invalid_input("no models returned"));
+    }
+    Ok(ids)
+}
+
+const MAX_MODELS_BODY: usize = 1024 * 1024;
+
+async fn fetch_remote_models(url: &str, api_key: &str) -> AppResult<Vec<String>> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|error| {
+            AppError::invalid_input(format!("Failed to build HTTP client: {error}"))
+        })?;
+
+    let mut response = client
+        .get(url)
+        .header(reqwest::header::AUTHORIZATION, format!("Bearer {api_key}"))
+        .header(reqwest::header::ACCEPT, "application/json")
+        .send()
+        .await
+        .map_err(|error| AppError::invalid_input(format!("Failed to fetch models: {error}")))?;
+
+    let status = response.status();
+    if !status.is_success() {
+        return Err(AppError::invalid_input(format!(
+            "Models endpoint returned HTTP {}",
+            status.as_u16()
+        )));
+    }
+
+    let mut body = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(|error| {
+        AppError::invalid_input(format!("Failed to read models response: {error}"))
+    })? {
+        if body.len().saturating_add(chunk.len()) > MAX_MODELS_BODY {
+            return Err(AppError::invalid_input("Models response exceeded 1 MiB"));
+        }
+        body.extend_from_slice(&chunk);
+    }
+
+    parse_openai_model_ids(&body)
 }
 
 fn save_config(agent_dir: &Path, provider: &str, api_key: &str, model: &str) -> AppResult<()> {
@@ -366,17 +537,18 @@ fn add_custom_provider_impl(
     name: &str,
     base_url: &str,
     api_key: &str,
-    model: &str,
+    models: &[String],
 ) -> AppResult<CustomProviderEntry> {
+    let models = normalize_model_ids(models.to_vec())?;
     let custom_id = generate_custom_id();
 
     // Write models.json provider entry.
     let models_path = agent_dir.join("models.json");
-    let mut models = read_json_or_empty(&models_path, "models.json")?;
-    if models.is_null() {
-        models = serde_json::Value::Object(serde_json::Map::new());
+    let mut models_file = read_json_or_empty(&models_path, "models.json")?;
+    if models_file.is_null() {
+        models_file = serde_json::Value::Object(serde_json::Map::new());
     }
-    let models_object = models.as_object_mut().ok_or_else(|| {
+    let models_object = models_file.as_object_mut().ok_or_else(|| {
         AppError::storage_corrupt("models.json root is not a JSON object".to_string())
     })?;
     let providers = models_object
@@ -391,10 +563,10 @@ fn add_custom_provider_impl(
             "name": name,
             "baseUrl": base_url,
             "api": "openai-completions",
-            "models": [{ "id": model }]
+            "models": models_json(&models)
         }),
     );
-    let models_bytes = serde_json::to_vec_pretty(&models).map_err(|error| {
+    let models_bytes = serde_json::to_vec_pretty(&models_file).map_err(|error| {
         AppError::storage_io(format!("Failed to serialize models.json: {error}"))
     })?;
     library::atomic_write(&models_path, &models_bytes, "models.json")?;
@@ -412,16 +584,15 @@ fn add_custom_provider_impl(
         custom_id.clone(),
         serde_json::json!({ "type": "api_key", "key": api_key }),
     );
-    let auth_bytes = serde_json::to_vec_pretty(&auth).map_err(|error| {
-        AppError::storage_io(format!("Failed to serialize auth.json: {error}"))
-    })?;
+    let auth_bytes = serde_json::to_vec_pretty(&auth)
+        .map_err(|error| AppError::storage_io(format!("Failed to serialize auth.json: {error}")))?;
     library::atomic_write(&auth_path, &auth_bytes, "auth.json")?;
 
     Ok(CustomProviderEntry {
         id: custom_id,
         name: name.to_string(),
         base_url: base_url.to_string(),
-        model: model.to_string(),
+        models,
         has_api_key: true,
     })
 }
@@ -486,17 +657,19 @@ fn update_custom_provider_impl(
     name: &str,
     base_url: &str,
     api_key: &str,
-    model: &str,
+    models: &[String],
 ) -> AppResult<CustomProviderEntry> {
+    let models = normalize_model_ids(models.to_vec())?;
+
     // Update models.json provider entry.
     let models_path = agent_dir.join("models.json");
-    let mut models = read_json_or_empty(&models_path, "models.json")?;
-    if models.is_null() {
+    let mut models_file = read_json_or_empty(&models_path, "models.json")?;
+    if models_file.is_null() {
         return Err(AppError::invalid_input(
             "Custom provider not found".to_string(),
         ));
     }
-    let providers = models
+    let providers = models_file
         .get_mut("providers")
         .and_then(|value| value.as_object_mut())
         .ok_or_else(|| {
@@ -515,9 +688,9 @@ fn update_custom_provider_impl(
         "name": name,
         "baseUrl": base_url,
         "api": api,
-        "models": [{ "id": model }]
+        "models": models_json(&models)
     });
-    let models_bytes = serde_json::to_vec_pretty(&models).map_err(|error| {
+    let models_bytes = serde_json::to_vec_pretty(&models_file).map_err(|error| {
         AppError::storage_io(format!("Failed to serialize models.json: {error}"))
     })?;
     library::atomic_write(&models_path, &models_bytes, "models.json")?;
@@ -542,30 +715,8 @@ fn update_custom_provider_impl(
         library::atomic_write(&auth_path, &auth_bytes, "auth.json")?;
     }
 
-    // Update settings.json defaultModel when this provider is active.
-    let settings_path = agent_dir.join("settings.json");
-    let mut settings = read_json_or_empty(&settings_path, "settings.json")?;
-    if !settings.is_null() {
-        let is_active = settings
-            .get("defaultProvider")
-            .and_then(|value| value.as_str())
-            .map(|value| value == provider_id)
-            .unwrap_or(false);
-        if is_active {
-            if let Some(settings_object) = settings.as_object_mut() {
-                settings_object.insert(
-                    "defaultModel".to_string(),
-                    serde_json::Value::String(model.to_string()),
-                );
-            }
-            let settings_bytes = serde_json::to_vec_pretty(&settings).map_err(|error| {
-                AppError::storage_io(format!("Failed to serialize settings.json: {error}"))
-            })?;
-            library::atomic_write(&settings_path, &settings_bytes, "settings.json")?;
-        }
-    }
-
     // Compute has_api_key from auth.json after the update.
+    // Activation lives on switch_provider / save_agent_config; do not touch settings.json.
     let auth = read_json_or_empty(&agent_dir.join("auth.json"), "auth.json")?;
     let has_api_key = auth
         .get(provider_id)
@@ -584,16 +735,12 @@ fn update_custom_provider_impl(
         id: provider_id.to_string(),
         name: name.to_string(),
         base_url: base_url.to_string(),
-        model: model.to_string(),
+        models,
         has_api_key,
     })
 }
 
-fn switch_provider_impl(
-    agent_dir: &Path,
-    provider_id: &str,
-    model: &str,
-) -> AppResult<()> {
+fn switch_provider_impl(agent_dir: &Path, provider_id: &str, model: &str) -> AppResult<()> {
     let settings_path = agent_dir.join("settings.json");
     let mut settings = read_json_or_empty(&settings_path, "settings.json")?;
     if settings.is_null() {
@@ -631,6 +778,10 @@ mod tests {
         tempfile::tempdir().expect("temporary directory")
     }
 
+    fn ids(models: &[&str]) -> Vec<String> {
+        models.iter().map(|model| (*model).to_string()).collect()
+    }
+
     #[test]
     fn empty_dir_reports_unconfigured() {
         let dir = temp_agent_dir();
@@ -644,8 +795,7 @@ mod tests {
     #[test]
     fn save_then_read_round_trip() {
         let dir = temp_agent_dir();
-        save_config(dir.path(), "anthropic", "secret-key", "claude-opus-4-5")
-            .expect("save config");
+        save_config(dir.path(), "anthropic", "secret-key", "claude-opus-4-5").expect("save config");
 
         let snapshot = read_snapshot(dir.path()).expect("read snapshot");
         assert!(snapshot.configured);
@@ -678,8 +828,11 @@ mod tests {
     fn save_preserves_other_settings_fields() {
         let dir = temp_agent_dir();
         let settings_path = dir.path().join("settings.json");
-        fs::write(&settings_path, br#"{"theme":"dark","defaultModel":"old-model"}"#)
-            .expect("seed settings");
+        fs::write(
+            &settings_path,
+            br#"{"theme":"dark","defaultModel":"old-model"}"#,
+        )
+        .expect("seed settings");
 
         save_config(dir.path(), "anthropic", "anthropic-key", "claude-opus-4-5")
             .expect("save config");
@@ -744,12 +897,7 @@ mod tests {
         let leftover: Vec<_> = fs::read_dir(dir.path())
             .expect("list dir")
             .filter_map(|entry| entry.ok())
-            .filter(|entry| {
-                entry
-                    .file_name()
-                    .to_string_lossy()
-                    .ends_with(".tmp")
-            })
+            .filter(|entry| entry.file_name().to_string_lossy().ends_with(".tmp"))
             .collect();
         assert!(leftover.is_empty(), "temp files left behind: {leftover:?}");
     }
@@ -757,8 +905,13 @@ mod tests {
     #[test]
     fn save_does_not_write_api_key_to_a_log_file() {
         let dir = temp_agent_dir();
-        save_config(dir.path(), "anthropic", "super-secret-key", "claude-opus-4-5")
-            .expect("save config");
+        save_config(
+            dir.path(),
+            "anthropic",
+            "super-secret-key",
+            "claude-opus-4-5",
+        )
+        .expect("save config");
 
         // The only files in the agent dir should be auth.json and settings.json.
         let mut files: Vec<String> = fs::read_dir(dir.path())
@@ -767,7 +920,10 @@ mod tests {
             .map(|entry| entry.file_name().to_string_lossy().to_string())
             .collect();
         files.sort();
-        assert_eq!(files, vec!["auth.json".to_string(), "settings.json".to_string()]);
+        assert_eq!(
+            files,
+            vec!["auth.json".to_string(), "settings.json".to_string()]
+        );
 
         let auth = fs::read_to_string(dir.path().join("auth.json")).expect("read auth");
         assert!(auth.contains("super-secret-key"));
@@ -785,14 +941,14 @@ mod tests {
             "本地 Ollama",
             "http://localhost:11434/v1",
             "ollama-key",
-            "llama-3.1",
+            &ids(&["llama-3.1"]),
         )
         .expect("add custom provider");
 
         assert!(entry.id.starts_with("custom-"));
         assert_eq!(entry.name, "本地 Ollama");
         assert_eq!(entry.base_url, "http://localhost:11434/v1");
-        assert_eq!(entry.model, "llama-3.1");
+        assert_eq!(entry.models, ids(&["llama-3.1"]));
         assert!(entry.has_api_key);
 
         let snapshot = read_snapshot(dir.path()).expect("read snapshot");
@@ -801,8 +957,53 @@ mod tests {
         assert_eq!(cp.id, entry.id);
         assert_eq!(cp.name, "本地 Ollama");
         assert_eq!(cp.base_url, "http://localhost:11434/v1");
-        assert_eq!(cp.model, "llama-3.1");
+        assert_eq!(cp.models, ids(&["llama-3.1"]));
         assert!(cp.has_api_key);
+
+        let models: serde_json::Value =
+            serde_json::from_slice(&fs::read(dir.path().join("models.json")).expect("read models"))
+                .expect("parse models");
+        assert_eq!(
+            models["providers"][&entry.id]["models"]
+                .as_array()
+                .map(Vec::len),
+            Some(1)
+        );
+        assert_eq!(
+            models["providers"][&entry.id]["models"][0]["id"],
+            "llama-3.1"
+        );
+    }
+
+    #[test]
+    fn read_snapshot_returns_all_model_ids() {
+        let dir = temp_agent_dir();
+        fs::write(
+            dir.path().join("models.json"),
+            br#"{
+              "providers": {
+                "custom-abc12345": {
+                  "name": "Ollama",
+                  "baseUrl": "http://localhost:11434/v1",
+                  "api": "openai-completions",
+                  "models": [{ "id": "llama-3.1" }, { "id": "qwen-2.5" }, { "id": "" }]
+                }
+              }
+            }"#,
+        )
+        .expect("seed models");
+        fs::write(
+            dir.path().join("auth.json"),
+            br#"{"custom-abc12345":{"type":"api_key","key":"k"}}"#,
+        )
+        .expect("seed auth");
+
+        let snapshot = read_snapshot(dir.path()).expect("read snapshot");
+        assert_eq!(snapshot.custom_providers.len(), 1);
+        assert_eq!(
+            snapshot.custom_providers[0].models,
+            ids(&["llama-3.1", "qwen-2.5"])
+        );
     }
 
     #[test]
@@ -813,7 +1014,7 @@ mod tests {
             "vLLM",
             "http://localhost:8000/v1",
             "vllm-key",
-            "qwen-2.5",
+            &ids(&["qwen-2.5"]),
         )
         .expect("add custom provider");
 
@@ -837,7 +1038,7 @@ mod tests {
             "Ollama",
             "http://localhost:11434/v1",
             "ollama-key",
-            "llama-3.1",
+            &ids(&["llama-3.1"]),
         )
         .expect("add custom provider");
 
@@ -866,16 +1067,14 @@ mod tests {
             "Ollama",
             "http://localhost:11434/v1",
             "key",
-            "llama-3.1",
+            &ids(&["llama-3.1"]),
         )
         .expect("add custom provider");
 
         let leftover: Vec<_> = fs::read_dir(dir.path())
             .expect("list dir")
             .filter_map(|entry| entry.ok())
-            .filter(|entry| {
-                entry.file_name().to_string_lossy().ends_with(".tmp")
-            })
+            .filter(|entry| entry.file_name().to_string_lossy().ends_with(".tmp"))
             .collect();
         assert!(leftover.is_empty(), "temp files left behind: {leftover:?}");
     }
@@ -925,7 +1124,7 @@ mod tests {
             "Ollama",
             "http://localhost:11434/v1",
             "key1",
-            "llama-3.1",
+            &ids(&["llama-3.1"]),
         )
         .expect("add first");
 
@@ -934,7 +1133,7 @@ mod tests {
             "vLLM",
             "http://localhost:8000/v1",
             "key2",
-            "qwen-2.5",
+            &ids(&["qwen-2.5"]),
         )
         .expect("add second");
 
@@ -958,15 +1157,16 @@ mod tests {
             "Ollama",
             "http://localhost:11434/v1",
             "key",
-            "llama-3.1",
+            &ids(&["llama-3.1"]),
         )
         .expect("add custom provider");
 
         switch_provider_impl(dir.path(), &entry.id, "llama-3.1").expect("switch provider");
 
-        let settings: serde_json::Value =
-            serde_json::from_slice(&fs::read(dir.path().join("settings.json")).expect("read settings"))
-                .expect("parse settings");
+        let settings: serde_json::Value = serde_json::from_slice(
+            &fs::read(dir.path().join("settings.json")).expect("read settings"),
+        )
+        .expect("parse settings");
         assert_eq!(settings["defaultProvider"], entry.id);
         assert_eq!(settings["defaultModel"], "llama-3.1");
         assert_eq!(settings["defaultThinkingLevel"], "medium");
@@ -975,26 +1175,23 @@ mod tests {
     #[test]
     fn switch_provider_preserves_other_settings() {
         let dir = temp_agent_dir();
-        fs::write(
-            dir.path().join("settings.json"),
-            br#"{"theme":"dark"}"#,
-        )
-        .expect("seed settings");
+        fs::write(dir.path().join("settings.json"), br#"{"theme":"dark"}"#).expect("seed settings");
 
         let entry = add_custom_provider_impl(
             dir.path(),
             "Ollama",
             "http://localhost:11434/v1",
             "key",
-            "llama-3.1",
+            &ids(&["llama-3.1"]),
         )
         .expect("add custom provider");
 
         switch_provider_impl(dir.path(), &entry.id, "llama-3.1").expect("switch provider");
 
-        let settings: serde_json::Value =
-            serde_json::from_slice(&fs::read(dir.path().join("settings.json")).expect("read settings"))
-                .expect("parse settings");
+        let settings: serde_json::Value = serde_json::from_slice(
+            &fs::read(dir.path().join("settings.json")).expect("read settings"),
+        )
+        .expect("parse settings");
         assert_eq!(settings["theme"], "dark");
         assert_eq!(settings["defaultProvider"], entry.id);
     }
@@ -1063,7 +1260,7 @@ mod tests {
             "Ollama",
             "http://localhost:11434/v1",
             "ollama-key",
-            "llama-3.1",
+            &ids(&["llama-3.1"]),
         )
         .expect("add custom provider");
 
@@ -1073,17 +1270,17 @@ mod tests {
             "本地 Ollama 2",
             "http://localhost:11434/v2",
             "",
-            "llama-3.2",
+            &ids(&["llama-3.2", "qwen-2.5"]),
         )
         .expect("update custom provider");
 
         assert_eq!(updated.id, entry.id);
         assert_eq!(updated.name, "本地 Ollama 2");
         assert_eq!(updated.base_url, "http://localhost:11434/v2");
-        assert_eq!(updated.model, "llama-3.2");
+        assert_eq!(updated.models, ids(&["llama-3.2", "qwen-2.5"]));
         assert!(updated.has_api_key, "existing key preserved");
 
-        // models.json reflects the new fields.
+        // models.json reflects the new fields and keeps api.
         let models: serde_json::Value =
             serde_json::from_slice(&fs::read(dir.path().join("models.json")).expect("read models"))
                 .expect("parse models");
@@ -1092,6 +1289,7 @@ mod tests {
         assert_eq!(provider["baseUrl"], "http://localhost:11434/v2");
         assert_eq!(provider["api"], "openai-completions");
         assert_eq!(provider["models"][0]["id"], "llama-3.2");
+        assert_eq!(provider["models"][1]["id"], "qwen-2.5");
 
         // auth.json key unchanged.
         let auth: serde_json::Value =
@@ -1108,7 +1306,7 @@ mod tests {
             "Ollama",
             "http://localhost:11434/v1",
             "old-key",
-            "llama-3.1",
+            &ids(&["llama-3.1"]),
         )
         .expect("add custom provider");
 
@@ -1118,7 +1316,7 @@ mod tests {
             "Ollama",
             "http://localhost:11434/v1",
             "new-key",
-            "llama-3.1",
+            &ids(&["llama-3.1"]),
         )
         .expect("update custom provider");
         assert!(updated.has_api_key);
@@ -1138,7 +1336,7 @@ mod tests {
             "Ghost",
             "http://localhost:9999/v1",
             "",
-            "model",
+            &ids(&["model"]),
         );
         assert!(result.is_err());
         let error = result.expect_err("update should fail");
@@ -1147,14 +1345,14 @@ mod tests {
     }
 
     #[test]
-    fn update_custom_provider_active_updates_default_model() {
+    fn update_custom_provider_active_does_not_change_settings() {
         let dir = temp_agent_dir();
         let entry = add_custom_provider_impl(
             dir.path(),
             "Ollama",
             "http://localhost:11434/v1",
             "key",
-            "llama-3.1",
+            &ids(&["llama-3.1"]),
         )
         .expect("add custom provider");
 
@@ -1166,7 +1364,7 @@ mod tests {
             "Ollama",
             "http://localhost:11434/v1",
             "",
-            "llama-3.2",
+            &ids(&["llama-3.2"]),
         )
         .expect("update active provider");
 
@@ -1175,7 +1373,7 @@ mod tests {
         )
         .expect("parse settings");
         assert_eq!(settings["defaultProvider"], entry.id);
-        assert_eq!(settings["defaultModel"], "llama-3.2");
+        assert_eq!(settings["defaultModel"], "llama-3.1");
     }
 
     #[test]
@@ -1186,7 +1384,7 @@ mod tests {
             "Ollama",
             "http://localhost:11434/v1",
             "key",
-            "llama-3.1",
+            &ids(&["llama-3.1"]),
         )
         .expect("add custom provider");
 
@@ -1200,7 +1398,7 @@ mod tests {
             "Ollama",
             "http://localhost:11434/v1",
             "",
-            "llama-3.2",
+            &ids(&["llama-3.2"]),
         )
         .expect("update inactive provider");
 
@@ -1210,5 +1408,122 @@ mod tests {
         .expect("parse settings");
         assert_eq!(settings["defaultProvider"], "anthropic");
         assert_eq!(settings["defaultModel"], "claude-opus-4-5");
+    }
+
+    #[test]
+    fn empty_models_is_invalid_input() {
+        let dir = temp_agent_dir();
+        let add = add_custom_provider_impl(
+            dir.path(),
+            "Ollama",
+            "http://localhost:11434/v1",
+            "key",
+            &[],
+        );
+        assert_eq!(add.expect_err("add").code, AppErrorCode::InvalidInput);
+
+        let blank = add_custom_provider_impl(
+            dir.path(),
+            "Ollama",
+            "http://localhost:11434/v1",
+            "key",
+            &ids(&["  "]),
+        );
+        assert_eq!(
+            blank.expect_err("add blank").code,
+            AppErrorCode::InvalidInput
+        );
+
+        let entry = add_custom_provider_impl(
+            dir.path(),
+            "Ollama",
+            "http://localhost:11434/v1",
+            "key",
+            &ids(&["llama-3.1"]),
+        )
+        .expect("add custom provider");
+        let update = update_custom_provider_impl(
+            dir.path(),
+            &entry.id,
+            "Ollama",
+            "http://localhost:11434/v1",
+            "",
+            &[],
+        );
+        assert_eq!(update.expect_err("update").code, AppErrorCode::InvalidInput);
+    }
+
+    // --- Remote catalog helpers ---
+
+    #[test]
+    fn parse_openai_model_ids_from_data_array() {
+        let body =
+            br#"{"data":[{"id":"llama-3.1"},{"id":"qwen-2.5"},{"id":""},{"id":"llama-3.1"}]}"#;
+        assert_eq!(
+            parse_openai_model_ids(body).expect("parse"),
+            ids(&["llama-3.1", "qwen-2.5"])
+        );
+    }
+
+    #[test]
+    fn parse_openai_model_ids_from_string_array() {
+        let body = br#"["alpha","beta",""]"#;
+        assert_eq!(
+            parse_openai_model_ids(body).expect("parse"),
+            ids(&["alpha", "beta"])
+        );
+    }
+
+    #[test]
+    fn parse_openai_model_ids_empty_is_error() {
+        let error = parse_openai_model_ids(br#"{"data":[]}"#).expect_err("empty");
+        assert_eq!(error.code, AppErrorCode::InvalidInput);
+        assert!(error.message.contains("no models returned"));
+    }
+
+    #[test]
+    fn models_endpoint_url_strips_trailing_slash() {
+        assert_eq!(
+            models_endpoint_url("http://localhost:11434/v1/").expect("url"),
+            "http://localhost:11434/v1/models"
+        );
+        assert_eq!(
+            models_endpoint_url("http://localhost:11434/v1").expect("url"),
+            "http://localhost:11434/v1/models"
+        );
+        let error = models_endpoint_url("   ").expect_err("empty");
+        assert_eq!(error.code, AppErrorCode::InvalidInput);
+    }
+
+    #[test]
+    fn resolve_list_models_key_uses_draft_or_stored() {
+        let dir = temp_agent_dir();
+        add_custom_provider_impl(
+            dir.path(),
+            "Ollama",
+            "http://localhost:11434/v1",
+            "stored-key",
+            &ids(&["llama-3.1"]),
+        )
+        .expect("add");
+        let snapshot = read_snapshot(dir.path()).expect("snapshot");
+        let id = snapshot.custom_providers[0].id.clone();
+
+        assert_eq!(
+            resolve_list_models_key(dir.path(), "draft-key", Some(&id)).expect("draft"),
+            "draft-key"
+        );
+        assert_eq!(
+            resolve_list_models_key(dir.path(), "", Some(&id)).expect("stored"),
+            "stored-key"
+        );
+        let missing = resolve_list_models_key(dir.path(), "", None).expect_err("no key");
+        assert_eq!(missing.code, AppErrorCode::InvalidInput);
+        let builtin =
+            resolve_list_models_key(dir.path(), "", Some("anthropic")).expect_err("builtin");
+        assert_eq!(builtin.code, AppErrorCode::InvalidInput);
+        let unknown =
+            resolve_list_models_key(dir.path(), "", Some("custom-deadbeef")).expect_err("unknown");
+        assert_eq!(unknown.code, AppErrorCode::InvalidInput);
     }
 }

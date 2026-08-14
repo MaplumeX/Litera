@@ -3,7 +3,7 @@ export interface CustomProviderEntry {
   id: string;
   name: string;
   baseUrl: string;
-  model: string;
+  models: string[];
   hasApiKey: boolean;
 }
 

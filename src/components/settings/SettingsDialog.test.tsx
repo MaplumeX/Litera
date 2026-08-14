@@ -35,6 +35,7 @@ vi.mock("@/lib/use-agent-config", () => ({
     updateCustomProvider: vi.fn(),
     deleteCustomProvider: vi.fn(),
     switchProvider: vi.fn(),
+    listRemoteModels: vi.fn(),
     loading: false,
     saving: false,
     error: null,
@@ -168,7 +169,7 @@ describe("SettingsDialog", () => {
     act(() => {
       getByRole("button", { name: "AI" }).click();
     });
-    expect(getByText("Provider")).toBeTruthy();
+    expect(getByText("当前使用")).toBeTruthy();
   });
 
   it("shows book copy and restore-default only for overridden keys", () => {

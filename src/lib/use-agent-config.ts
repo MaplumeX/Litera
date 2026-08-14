@@ -38,7 +38,7 @@ export function useAgentConfig() {
   }, [load]);
 
   const addCustomProvider = useCallback(
-    async (name: string, baseUrl: string, apiKey: string, model: string) => {
+    async (name: string, baseUrl: string, apiKey: string, models: string[]) => {
       setSaving(true);
       setError(null);
       try {
@@ -46,7 +46,7 @@ export function useAgentConfig() {
           name,
           baseUrl,
           apiKey,
-          model,
+          models,
         });
         await load();
         return entry;
@@ -61,11 +61,14 @@ export function useAgentConfig() {
   );
 
   const deleteCustomProvider = useCallback(
-    async (id: string) => {
+    async (id: string, options?: { restart?: boolean }) => {
       setSaving(true);
       setError(null);
       try {
         await invoke("delete_custom_provider", { providerId: id });
+        if (options?.restart) {
+          await invoke("restart_sidecar");
+        }
         await load();
       } catch (err) {
         setError(invokeErrorMessage(err));
@@ -78,7 +81,7 @@ export function useAgentConfig() {
   );
 
   const updateCustomProvider = useCallback(
-    async (id: string, name: string, baseUrl: string, apiKey: string, model: string) => {
+    async (id: string, name: string, baseUrl: string, apiKey: string, models: string[]) => {
       setSaving(true);
       setError(null);
       try {
@@ -87,9 +90,8 @@ export function useAgentConfig() {
           name,
           baseUrl,
           apiKey,
-          model,
+          models,
         });
-        await invoke("restart_sidecar");
         await load();
         return entry;
       } catch (err) {
@@ -120,6 +122,17 @@ export function useAgentConfig() {
     [load],
   );
 
+  const listRemoteModels = useCallback(
+    async (baseUrl: string, apiKey: string, providerId?: string) => {
+      return invoke<string[]>("list_remote_models", {
+        baseUrl,
+        apiKey,
+        providerId: providerId ?? null,
+      });
+    },
+    [],
+  );
+
   return {
     snapshot,
     load,
@@ -128,6 +141,7 @@ export function useAgentConfig() {
     updateCustomProvider,
     deleteCustomProvider,
     switchProvider,
+    listRemoteModels,
     loading,
     saving,
     error,

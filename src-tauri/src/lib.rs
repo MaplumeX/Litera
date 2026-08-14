@@ -136,6 +136,7 @@ pub fn run() {
             agent_config::update_custom_provider,
             agent_config::delete_custom_provider,
             agent_config::switch_provider,
+            agent_config::list_remote_models,
             preferences::get_preferences,
             preferences::save_preferences,
             preferences::list_system_fonts,
