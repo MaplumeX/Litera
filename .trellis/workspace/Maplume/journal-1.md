@@ -1276,3 +1276,25 @@ Persistence for the AI chat panel width: wired react-resizable-panels useDefault
 ### Status
 
 [OK] **Completed**
+
+
+## Session 56: Embed Pi agent runtime and remove sidecar
+
+**Date**: 2026-08-15
+**Task**: Embed Pi agent runtime and remove sidecar
+**Branch**: `main`
+
+### Summary
+
+Replaced pi-coding-agent sidecar architecture with embedded pi-ai/pi-agent-core, Rust-owned Pi v3 JSONL sessions and guarded native model transport; removed legacy sidecar build/runtime paths, verified live desktop behavior and all automated quality gates, and documented the new cross-layer contracts.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6f4045b` | (see git log) |
+| `08b8069` | (see git log) |
+
+### Status
+
+[OK] **Completed**
