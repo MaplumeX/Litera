@@ -11,6 +11,7 @@ import { useT } from "@/lib/i18n";
 import {
   consumeWheelDelta,
   hitFromClientX,
+  pageLocalX,
   shouldIgnorePagingTarget,
   type WheelPagingState,
 } from "@/lib/reader-paging";
@@ -226,10 +227,12 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         unbindDoc = undefined;
         const doc = (e as CustomEvent<{ doc?: Document }>).detail?.doc;
         if (!doc) return;
+        const pageWidthOf = (chapterDoc: Document) =>
+          chapterDoc.documentElement?.clientWidth ?? 0;
         const unbindPointer = bindPointerPaging(
           doc,
-          (ev) => ev.clientX,
-          () => doc.defaultView?.innerWidth ?? 0,
+          (ev) => pageLocalX(ev.clientX, pageWidthOf(doc)),
+          () => pageWidthOf(doc),
           () => doc.getSelection(),
           pageLeft,
           pageRight,

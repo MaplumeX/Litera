@@ -17,6 +17,11 @@ function normalizeWheelDelta(delta: number, deltaMode: number): number {
   return delta;
 }
 
+export function pageLocalX(clientX: number, pageWidth: number): number {
+  if (pageWidth <= 0) return 0;
+  return ((clientX % pageWidth) + pageWidth) % pageWidth;
+}
+
 export function hitFromClientX(x: number, width: number): HitZone {
   if (width <= 0) return "middle";
   if (x < width / 3) return "left";

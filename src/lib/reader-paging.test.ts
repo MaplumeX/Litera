@@ -3,9 +3,39 @@ import { describe, expect, it } from "vitest";
 import {
   consumeWheelDelta,
   hitFromClientX,
+  pageLocalX,
   shouldIgnorePagingTarget,
   type WheelPagingState,
 } from "./reader-paging";
+
+describe("pageLocalX", () => {
+  it("maps the first page edges onto themselves", () => {
+    expect(pageLocalX(0, 800)).toBe(0);
+    expect(pageLocalX(799, 800)).toBe(799);
+  });
+
+  it("wraps the next page's left edge to 0", () => {
+    expect(pageLocalX(800, 800)).toBe(0);
+  });
+
+  it("maps later-page coordinates onto the visible page", () => {
+    expect(pageLocalX(1600 + 50, 800)).toBe(50);
+    expect(pageLocalX(1600 + 700, 800)).toBe(700);
+  });
+
+  it("folds a negative remainder into the positive interval", () => {
+    expect(pageLocalX(-50, 800)).toBe(750);
+  });
+
+  it("returns 0 when pageWidth is not positive", () => {
+    expect(pageLocalX(10, 0)).toBe(0);
+  });
+
+  it("keeps left/right hit zones after mapping page 3", () => {
+    expect(hitFromClientX(pageLocalX(1600 + 50, 800), 800)).toBe("left");
+    expect(hitFromClientX(pageLocalX(1600 + 700, 800), 800)).toBe("right");
+  });
+});
 
 describe("hitFromClientX", () => {
   it("maps the left third, including the left edge", () => {
