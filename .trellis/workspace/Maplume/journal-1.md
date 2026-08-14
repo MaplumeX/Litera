@@ -1140,3 +1140,26 @@ Same-path reimport of unchanged EPUB bytes is now duplicate: no overwrite dialog
 ### Status
 
 [OK] **Completed**
+
+
+## Session 51: Fix click page-turn hit testing
+
+**Date**: 2026-08-14
+**Task**: Fix click page-turn hit testing
+**Branch**: `fix/click-scroll-prev-next-recognition`
+
+### Summary
+
+Iframe click paging used clientX against innerWidth; foliate expands the chapter iframe to the full column strip so long chapters mis-hit left/middle/right. Mapped clicks onto documentElement.clientWidth via pageLocalX. Tests 128 passed, tsc green. Live UI not clicked.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4f28460` | (see git log) |
+| `92a49bf` | (see git log) |
+
+### Status
+
+[OK] **Completed**
+

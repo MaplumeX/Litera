@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 50
+- **Total Sessions**: 51
 - **Last Active**: 2026-08-14
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1142 | Active |
+| `journal-1.md` | ~1165 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 51 | 2026-08-14 | Fix click page-turn hit testing | `4f28460`, `92a49bf` | `fix/click-scroll-prev-next-recognition` |
 | 50 | 2026-08-14 | Same-path unchanged reimport no overwrite | `5e5561e`, `50aeda1` | `fix/same-position-reopen-overwrite-prompt` |
 | 49 | 2026-08-14 | Replace Tauri app icon | `1eba5b6` | `main` |
 | 48 | 2026-08-14 | Three-platform GitHub Release v0.1.0 | `f6b0d3f`, `66423c1`, `698f0fc`, `a945ba1` | `main` |
