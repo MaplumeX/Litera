@@ -17,6 +17,7 @@ import {
   sessionHasBookSnapshot,
 } from "./book-snapshot.js";
 import { cleanSearchQueries, windowChapterText } from "./book-text.js";
+import { findChapterByHref, formatChapterAside } from "./chapter-ownership.js";
 import { visibleMessageEntries } from "./visible-branch.js";
 import { BookWorker, isBookWorkerThread, runBookWorker } from "./book-worker.js";
 import {
@@ -494,7 +495,15 @@ async function startPrompt(
   if (context) {
     const asideParts: string[] = [];
     if (context.selection) asideParts.push(`用户选中的文本：\n"${context.selection}"`);
-    else if (context.chapterIndex !== undefined) asideParts.push(`（当前在第 ${context.chapterIndex} 章）`);
+    else if (context.chapterHref) {
+      try {
+        const toc = await requireBookWorker().toc(managed.bookId, managed.generation);
+        const aside = formatChapterAside(findChapterByHref(toc, context.chapterHref));
+        if (aside) asideParts.push(aside);
+      } catch (error) {
+        process.stderr.write(`[reading-context] failed to resolve chapterHref: ${error instanceof Error ? error.message : String(error)}\n`);
+      }
+    }
     if (asideParts.length) {
       await managed.session.sendCustomMessage(
         { customType: "readingContext", content: asideParts.join("\n"), display: false, details: undefined },

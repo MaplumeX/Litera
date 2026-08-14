@@ -16,6 +16,7 @@ import {
   type ChapterLike,
   type SearchToolHit,
 } from "./book-text.js";
+import { buildOwnedChapters } from "./chapter-ownership.js";
 
 // --- Types ------------------------------------------------------------------
 
@@ -30,6 +31,7 @@ export interface TocEntry {
   index: number;
   label: string;
   href: string;
+  hrefs?: string[];
   chars?: number;
 }
 
@@ -133,12 +135,10 @@ function parseEpub(filePath: string): ParsedEpub {
   }
 
   // 5. Parse TOC (nav.xhtml for EPUB 3, toc.ncx for EPUB 2).
-  const toc = parseToc(zip, opfDir, opfXml, manifest);
-
-  // Total chapters = spine length.
+  // totalChapters is filled after ownership in loadBook.
   return {
-    metadata: { ...metadata, totalChapters: spineHrefs.length },
-    toc,
+    metadata: { ...metadata, totalChapters: 0 },
+    toc: parseToc(zip, opfDir, opfXml, manifest),
     spineHrefs,
   };
 }
@@ -217,7 +217,7 @@ function parseToc(zip: AdmZip, opfDir: string, opfXml: string, manifest: Manifes
   if (navItem) {
     const navHref = resolveHref(opfDir, navItem.href);
     const navHtml = readZipText(zip, navHref);
-    if (navHtml) return parseNavToc(navHtml);
+    if (navHtml) return resolveTocHrefs(parseNavToc(navHtml), hrefDir(navHref));
   }
 
   // EPUB 2: look for ncx item (application/x-dtbncx+xml)
@@ -225,7 +225,7 @@ function parseToc(zip: AdmZip, opfDir: string, opfXml: string, manifest: Manifes
   if (ncxItem) {
     const ncxHref = resolveHref(opfDir, ncxItem.href);
     const ncxXml = readZipText(zip, ncxHref);
-    if (ncxXml) return parseNcxToc(ncxXml);
+    if (ncxXml) return resolveTocHrefs(parseNcxToc(ncxXml), hrefDir(ncxHref));
   }
 
   return [];
@@ -248,7 +248,7 @@ function parseNavToc(navHtml: string): TocEntry[] {
     const label = stripTags(match[2]).trim();
     // Skip anchor-only links (href="#...") — they point within the same file.
     if (label) {
-      entries.push({ index: index, label, href: href.split("#")[0] });
+      entries.push({ index, label, href: href.split("#")[0], hrefs: [] });
       index++;
     }
   }
@@ -268,7 +268,7 @@ function parseNcxToc(ncxXml: string): TocEntry[] {
     const label = labelMatch?.[1]?.trim();
     const href = hrefMatch?.[1]?.split("#")[0];
     if (label && href) {
-      entries.push({ index, label, href });
+      entries.push({ index, label, href, hrefs: [] });
       index++;
     }
   }
@@ -279,6 +279,18 @@ function parseNcxToc(ncxXml: string): TocEntry[] {
 function resolveHref(opfDir: string, href: string): string {
   if (href.startsWith("/")) return href.slice(1);
   return join(opfDir, href).replace(/\\/g, "/");
+}
+
+function hrefDir(path: string): string {
+  const slash = path.lastIndexOf("/");
+  return slash === -1 ? "" : path.slice(0, slash + 1);
+}
+
+function resolveTocHrefs(entries: TocEntry[], tocDir: string): TocEntry[] {
+  return entries.map((entry) => {
+    const href = resolveHref(tocDir, entry.href);
+    return { ...entry, href, hrefs: [href] };
+  });
 }
 
 /** Strip HTML tags from text. */
@@ -319,14 +331,22 @@ export async function loadBook(filePath: string): Promise<BookMetadata> {
   const parsed = parseEpub(filePath);
   const zip = new AdmZip(filePath);
 
-  // Extract chapter texts from spine hrefs.
+  const spineTexts = parsed.spineHrefs.map((href) => {
+    const html = readZipText(zip, href);
+    return html ? htmlToText(html) : "";
+  });
+  const owned = buildOwnedChapters(parsed.toc, parsed.spineHrefs, spineTexts);
   const chapterTexts = new Map<number, string>();
-  for (let i = 0; i < parsed.spineHrefs.length; i++) {
-    const html = readZipText(zip, parsed.spineHrefs[i]);
-    if (html) {
-      chapterTexts.set(i, htmlToText(html));
-    }
-  }
+  const toc = owned.map((chapter) => {
+    chapterTexts.set(chapter.index, chapter.text);
+    return {
+      index: chapter.index,
+      label: chapter.label,
+      href: chapter.hrefs[0] ?? "",
+      hrefs: chapter.hrefs,
+    };
+  });
+  const metadata = { ...parsed.metadata, totalChapters: owned.length };
 
   // Initialize FTS5 database.
   const sql = await getSqlStatic();
@@ -337,13 +357,13 @@ export async function loadBook(filePath: string): Promise<BookMetadata> {
   }
 
   currentBook = {
-    metadata: parsed.metadata,
-    toc: parsed.toc,
+    metadata,
+    toc,
     chapterTexts,
     fts: db,
   };
 
-  return parsed.metadata;
+  return metadata;
 }
 
 // --- Book accessors (for tools) ---------------------------------------------

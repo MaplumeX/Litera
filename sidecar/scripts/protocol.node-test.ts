@@ -18,6 +18,34 @@ test("shared protocol fixtures decode and round-trip", async () => {
   }
 });
 
+test("prompt context decodes chapterHref and rejects a non-string locator", () => {
+  const command = decodeCommand({
+    protocolVersion: 1,
+    type: "prompt",
+    requestId: "r",
+    promptId: "p",
+    bookId: "b",
+    text: "hello",
+    context: { chapterHref: "OEBPS/ch1.xhtml#start" },
+  });
+  if (command.type !== "prompt") throw new Error("expected prompt");
+  assert.equal(command.context?.chapterHref, "OEBPS/ch1.xhtml#start");
+  assert.equal(command.context && "chapterIndex" in command.context, false);
+
+  assert.throws(
+    () => decodeCommand({
+      protocolVersion: 1,
+      type: "prompt",
+      requestId: "r",
+      promptId: "p",
+      bookId: "b",
+      text: "hello",
+      context: { chapterHref: 3 },
+    }),
+    ProtocolDecodeError,
+  );
+});
+
 test("command decoder rejects missing correlation and oversized prompts", () => {
   assert.throws(
     () => decodeCommand({ protocolVersion: 1, type: "prompt", requestId: "r", bookId: "b", text: "x" }),

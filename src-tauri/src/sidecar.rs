@@ -1007,7 +1007,7 @@ pub fn get_agent_snapshot(
 pub fn agent_prompt(
     prompt: String,
     selection: Option<String>,
-    chapter_index: Option<u32>,
+    chapter_href: Option<String>,
     book_id: String,
     request_id: Option<String>,
     prompt_id: Option<String>,
@@ -1015,10 +1015,11 @@ pub fn agent_prompt(
 ) -> Result<CommandReceipt, String> {
     let request_id = normalize_request_id(request_id, "prompt-request");
     let prompt_id = prompt_id.unwrap_or_else(|| new_id("prompt"));
-    let context = if selection.is_some() || chapter_index.is_some() {
+    let chapter_href = chapter_href.filter(|value| !value.is_empty());
+    let context = if selection.is_some() || chapter_href.is_some() {
         Some(PromptContext {
             selection,
-            chapter_index,
+            chapter_href,
         })
     } else {
         None
@@ -1041,7 +1042,7 @@ pub fn agent_edit_prompt(
     message_index: u32,
     prompt: String,
     selection: Option<String>,
-    chapter_index: Option<u32>,
+    chapter_href: Option<String>,
     book_id: String,
     request_id: Option<String>,
     prompt_id: Option<String>,
@@ -1049,10 +1050,11 @@ pub fn agent_edit_prompt(
 ) -> Result<CommandReceipt, String> {
     let request_id = normalize_request_id(request_id, "edit-prompt-request");
     let prompt_id = prompt_id.unwrap_or_else(|| new_id("prompt"));
-    let context = if selection.is_some() || chapter_index.is_some() {
+    let chapter_href = chapter_href.filter(|value| !value.is_empty());
+    let context = if selection.is_some() || chapter_href.is_some() {
         Some(PromptContext {
             selection,
-            chapter_index,
+            chapter_href,
         })
     } else {
         None

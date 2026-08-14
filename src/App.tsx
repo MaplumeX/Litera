@@ -70,7 +70,12 @@ function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [fileData, setFileData] = useState<FileData | null>(null);
   const [currentBook, setCurrentBook] = useState<BookRecord | null>(null);
-  const [progress, setProgress] = useState<{ index: number; fraction: number; label?: string }>({
+  const [progress, setProgress] = useState<{
+    index: number;
+    fraction: number;
+    label?: string;
+    chapterHref?: string;
+  }>({
     index: 0,
     fraction: 0,
   });
@@ -245,6 +250,10 @@ function App() {
       // Build a partial BookRecord for passing lastFraction + settings to ReaderView.
       // The full record is fetched from list_books; this context stays lightweight.
       lastKnownFractionRef.current = context.lastFraction;
+      setProgress({
+        index: 0,
+        fraction: context.lastFraction ?? 0,
+      });
       setCurrentBook({
         id: context.bookId,
         title: context.title,
@@ -299,14 +308,15 @@ function App() {
     setView("library");
     setFileData(null);
     setCurrentBook(null);
+    setProgress({ index: 0, fraction: 0 });
     setToc([]);
     setTocVisible(false);
   }, [fileData?.bookId, flushReadingState]);
 
   const handleRelocate = useCallback(
-    (index: number, fraction: number, label?: string) => {
+    (index: number, fraction: number, label?: string, chapterHref?: string) => {
       lastKnownFractionRef.current = fraction;
-      setProgress({ index, fraction, label });
+      setProgress({ index, fraction, label, chapterHref });
       // Persist reading position.
       if (fileData?.bookId) {
         persistFraction.schedule(fileData.bookId, fraction);
@@ -322,7 +332,7 @@ function App() {
       return;
     }
     if (chatRef.current) {
-      chatRef.current.fillInput(capture.text, capture.chapterIndex);
+      chatRef.current.fillInput(capture.text, capture.chapterHref);
     } else {
       pendingCaptureRef.current = capture;
     }
@@ -348,7 +358,7 @@ function App() {
     const pending = pendingCaptureRef.current;
     if (!pending) return;
     pendingCaptureRef.current = null;
-    chatRef.current?.fillInput(pending.text, pending.chapterIndex);
+    chatRef.current?.fillInput(pending.text, pending.chapterHref);
   }, [chatCollapsed]);
 
   const handleBookReady = useCallback((bookToc: TocItem[]) => {
@@ -563,7 +573,7 @@ function App() {
             <div className={chatCollapsed ? "hidden h-full" : "h-full"}>
               <ChatPanel
                 ref={chatRef}
-                currentChapterIndex={progress.index}
+                currentChapterHref={progress.chapterHref}
                 bookId={fileData?.bookId ?? ""}
               />
             </div>

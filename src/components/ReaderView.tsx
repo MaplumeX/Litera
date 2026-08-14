@@ -82,12 +82,12 @@ function bindPointerPaging(
 interface RelocateDetail {
   fraction?: number;
   index?: number;
-  tocItem?: { label?: string; fraction?: number };
+  tocItem?: { label?: string; href?: string; fraction?: number };
 }
 
 export interface SelectionCapture {
   text: string;
-  chapterIndex: number;
+  chapterHref?: string;
 }
 
 export interface TocItem {
@@ -109,7 +109,7 @@ interface ReaderViewProps {
   /** Bytes of an opened EPUB file, or null when no file is loaded. */
   fileData: { bytes: Uint8Array<ArrayBuffer>; name: string } | null;
   /** Called when the reader relocates (page turn / scroll). */
-  onRelocate?: (index: number, fraction: number, label?: string) => void;
+  onRelocate?: (index: number, fraction: number, label?: string, chapterHref?: string) => void;
   /** Called when the user clicks the ask-agent button on a selection. */
   onSelectionCapture?: (capture: SelectionCapture) => void;
   /** Last reading fraction to restore (0-1), from library persistence. */
@@ -123,7 +123,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
     const { t } = useT();
     const containerRef = useRef<HTMLDivElement>(null);
     const viewRef = useRef<HTMLElement | null>(null);
-    const currentChapterRef = useRef(0);
+    const currentChapterHrefRef = useRef<string | undefined>(undefined);
     // Keep latest callbacks in refs so the open-file effect doesn't re-run
     // when parent recreates them (e.g. onBookReady changing with styleState).
     const onRelocateRef = useRef(onRelocate);
@@ -149,10 +149,12 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       const handleRelocate = (e: Event) => {
         const detail = (e as CustomEvent<RelocateDetail>).detail;
         const index = detail.index ?? 0;
-        currentChapterRef.current = index;
+        const view = el as unknown as { book?: { sections?: { id?: string }[] } };
+        const chapterHref = detail.tocItem?.href || view.book?.sections?.[index]?.id || undefined;
+        currentChapterHrefRef.current = chapterHref;
         const fraction = detail.fraction ?? 0;
         const label = detail.tocItem?.label;
-        onRelocateRef.current?.(index, fraction, label);
+        onRelocateRef.current?.(index, fraction, label, chapterHref);
       };
       el.addEventListener("relocate", handleRelocate as EventListener);
 
@@ -258,6 +260,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
 
     // Open file when fileData changes.
     useEffect(() => {
+      currentChapterHrefRef.current = undefined;
       if (!fileData || !viewRef.current) return;
       const view = viewRef.current as unknown as {
         open: (file: File) => Promise<void>;
@@ -322,7 +325,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       if (!selectionPos) return;
       const capture: SelectionCapture = {
         text: selectionPos.text,
-        chapterIndex: currentChapterRef.current,
+        chapterHref: currentChapterHrefRef.current,
       };
       onSelectionCapture?.(capture);
       setSelectionPos(null);

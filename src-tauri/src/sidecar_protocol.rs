@@ -122,7 +122,7 @@ pub struct PromptContext {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub selection: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub chapter_index: Option<u32>,
+    pub chapter_href: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -461,6 +461,11 @@ impl CommandEnvelope {
                 {
                     validate_text("context.selection", selection, MAX_SELECTION_LENGTH)?;
                 }
+                if let Some(chapter_href) =
+                    context.as_ref().and_then(|value| value.chapter_href.as_ref())
+                {
+                    validate_text("context.chapterHref", chapter_href, 4096)?;
+                }
                 Ok(())
             }
             SidecarCommand::Abort {
@@ -782,6 +787,24 @@ mod tests {
             };
             assert_eq!(encoded, fixture.message);
         }
+    }
+
+    #[test]
+    fn prompt_context_accepts_chapter_href_and_rejects_chapter_index() {
+        let with_href = r#"{"protocolVersion":1,"type":"prompt","requestId":"r","promptId":"p","bookId":"b","text":"hello","context":{"chapterHref":"OEBPS/ch1.xhtml"}}"#;
+        let decoded = CommandEnvelope::decode_line(with_href).expect("chapterHref context");
+        match decoded.command {
+            super::SidecarCommand::Prompt { context, .. } => {
+                assert_eq!(
+                    context.and_then(|value| value.chapter_href),
+                    Some("OEBPS/ch1.xhtml".to_string())
+                );
+            }
+            other => panic!("expected prompt, got {other:?}"),
+        }
+
+        let with_index = r#"{"protocolVersion":1,"type":"prompt","requestId":"r","promptId":"p","bookId":"b","text":"hello","context":{"chapterIndex":3}}"#;
+        assert!(CommandEnvelope::decode_line(with_index).is_err());
     }
 
     #[test]

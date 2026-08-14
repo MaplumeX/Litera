@@ -230,6 +230,56 @@ describe("useAgentBridge", () => {
     harness.unlisten();
   });
 
+  it("prompt() sends chapterHref and never chapterIndex", async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "get_agent_snapshot") {
+        return Promise.resolve(
+          makeSnapshot({ status: "bookReady", bookId: "book-a", sessionId: "session-1" }),
+        );
+      }
+      return Promise.resolve({ requestId: `${cmd}-receipt` } as CommandReceipt);
+    });
+    const { result, harness } = await renderBridge("book-a");
+    await waitFor(() => expect(result.current.state.status).toBe("bookReady"));
+
+    await act(async () => {
+      await result.current.prompt(
+        "hello",
+        { chapterHref: "OEBPS/ch1.xhtml" },
+        { role: "user", content: "hello", chapterHref: "OEBPS/ch1.xhtml" },
+      );
+    });
+
+    const promptCall = invokeMock.mock.calls.find((c) => c[0] === "agent_prompt");
+    expect(promptCall?.[1]).toEqual(expect.objectContaining({
+      chapterHref: "OEBPS/ch1.xhtml",
+    }));
+    expect(promptCall?.[1]).not.toHaveProperty("chapterIndex");
+    harness.unlisten();
+  });
+
+  it("prompt() omits an empty chapterHref instead of sending a blank locator", async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "get_agent_snapshot") {
+        return Promise.resolve(
+          makeSnapshot({ status: "bookReady", bookId: "book-a", sessionId: "session-1" }),
+        );
+      }
+      return Promise.resolve({ requestId: `${cmd}-receipt` } as CommandReceipt);
+    });
+    const { result, harness } = await renderBridge("book-a");
+    await waitFor(() => expect(result.current.state.status).toBe("bookReady"));
+
+    await act(async () => {
+      await result.current.prompt("hello", { chapterHref: "" }, { role: "user", content: "hello" });
+    });
+
+    const promptCall = invokeMock.mock.calls.find((c) => c[0] === "agent_prompt");
+    expect(promptCall?.[1]).toEqual(expect.objectContaining({ chapterHref: null }));
+    expect(promptCall?.[1]).not.toHaveProperty("chapterIndex");
+    harness.unlisten();
+  });
+
   it("T7: session_rewound replaces messages then appends the pending edited user message", async () => {
     invokeMock.mockImplementation((cmd: string) => {
       if (cmd === "get_agent_snapshot") {
@@ -245,13 +295,18 @@ describe("useAgentBridge", () => {
       await result.current.editPrompt(
         2,
         "rewritten",
-        { selection: "quoted", chapterIndex: 1 },
-        { role: "user", content: "rewritten", selection: "quoted", chapterIndex: 1 },
+        { selection: "quoted", chapterHref: "OEBPS/ch1.xhtml" },
+        { role: "user", content: "rewritten", selection: "quoted", chapterHref: "OEBPS/ch1.xhtml" },
       );
     });
 
     const editCall = invokeMock.mock.calls.find((c) => c[0] === "agent_edit_prompt");
     expect(editCall).toBeDefined();
+    expect(editCall?.[1]).toEqual(expect.objectContaining({
+      selection: "quoted",
+      chapterHref: "OEBPS/ch1.xhtml",
+    }));
+    expect(editCall?.[1]).not.toHaveProperty("chapterIndex");
     const promptId = (editCall?.[1] as { promptId: string }).promptId;
 
     harness.emit(
@@ -273,7 +328,7 @@ describe("useAgentBridge", () => {
     expect(result.current.state.messages).toEqual([
       { role: "user", content: "q1" },
       { role: "assistant", content: "a1" },
-      { role: "user", content: "rewritten", selection: "quoted", chapterIndex: 1 },
+      { role: "user", content: "rewritten", selection: "quoted", chapterHref: "OEBPS/ch1.xhtml" },
     ]);
     expect(result.current.state.promptId).toBe(promptId);
     harness.unlisten();

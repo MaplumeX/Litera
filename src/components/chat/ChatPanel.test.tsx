@@ -59,7 +59,7 @@ afterEach(() => {
 });
 
 function openSessionList() {
-  const view = render(<ChatPanel currentChapterIndex={0} bookId="book-1" />);
+  const view = render(<ChatPanel currentChapterHref="OEBPS/ch1.xhtml" bookId="book-1" />);
   fireEvent.click(view.getByRole("button", { name: "会话列表" }));
   return view;
 }

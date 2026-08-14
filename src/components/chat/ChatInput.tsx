@@ -6,7 +6,7 @@ import { useT } from "@/lib/i18n";
 
 export interface PendingSelection {
   text: string;
-  chapterIndex: number;
+  chapterHref?: string;
 }
 
 interface ChatInputProps {

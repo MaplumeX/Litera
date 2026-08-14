@@ -20,16 +20,16 @@ import { TypingIndicator } from "./TypingIndicator";
 import { useT } from "@/lib/i18n";
 
 export interface ChatPanelHandle {
-  fillInput: (text: string, chapterIndex: number) => void;
+  fillInput: (text: string, chapterHref?: string) => void;
 }
 
 interface ChatPanelProps {
-  currentChapterIndex: number;
+  currentChapterHref?: string;
   bookId: string;
 }
 
 export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
-  function ChatPanel({ currentChapterIndex, bookId }, ref) {
+  function ChatPanel({ currentChapterHref, bookId }, ref) {
     const { t } = useT();
     const bridge = useAgentBridge(bookId);
     const { state } = bridge;
@@ -46,7 +46,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     const [input, setInput] = useState("");
     const [pendingSelection, setPendingSelection] = useState<{
       text: string;
-      chapterIndex: number;
+      chapterHref?: string;
     } | null>(null);
     const [showSessionList, setShowSessionList] = useState(false);
     const [showConfig, setShowConfig] = useState(false);
@@ -61,7 +61,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const autoSwitchRef = useRef<string | null>(null);
-    const lastSentRef = useRef<{ text: string; selection?: string; chapterIndex: number } | null>(null);
+    const lastSentRef = useRef<{ text: string; selection?: string; chapterHref?: string } | null>(null);
     const abortedRef = useRef(false);
 
     const isStreaming = submitting || state.status === "prompting";
@@ -114,7 +114,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       abortedRef.current = false;
       setInput(last.text);
       if (last.selection) {
-        setPendingSelection({ text: last.selection, chapterIndex: last.chapterIndex });
+        setPendingSelection({ text: last.selection, chapterHref: last.chapterHref });
       }
       setRetryHighlight(true);
       const timer = setTimeout(() => setRetryHighlight(false), 2000);
@@ -127,8 +127,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       setEditingIndex(null);
       setEditDraft("");
       const selection = pendingSelection?.text;
-      const chapterIndex = pendingSelection?.chapterIndex ?? currentChapterIndex;
-      lastSentRef.current = { text, selection, chapterIndex };
+      const chapterHref = pendingSelection?.chapterHref ?? currentChapterHref;
+      lastSentRef.current = { text, selection, chapterHref };
       setInput("");
       setPendingSelection(null);
       setInvokeError(null);
@@ -136,14 +136,14 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       try {
         await prompt(
           text,
-          { selection, chapterIndex },
-          { role: "user", content: text, selection, chapterIndex },
+          { selection, chapterHref },
+          { role: "user", content: text, selection, chapterHref },
         );
       } catch (error) {
         setInvokeError(String(error));
         setSubmitting(false);
       }
-    }, [bookId, currentChapterIndex, input, isStreaming, pendingSelection, prompt]);
+    }, [bookId, currentChapterHref, input, isStreaming, pendingSelection, prompt]);
 
     const handleAbort = useCallback(async () => {
       setInvokeError(null);
@@ -189,11 +189,11 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       const original = state.messages[editingIndex];
       if (!original || original.role !== "user") return;
       const selection = original.selection;
-      const chapterIndex = original.chapterIndex;
+      const chapterHref = original.chapterHref;
       lastSentRef.current = {
         text,
         selection,
-        chapterIndex: chapterIndex ?? currentChapterIndex,
+        chapterHref: chapterHref ?? currentChapterHref,
       };
       const index = editingIndex;
       setEditingIndex(null);
@@ -203,8 +203,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         await editPrompt(
           index,
           text,
-          { selection, chapterIndex },
-          { role: "user", content: text, selection, chapterIndex },
+          { selection, chapterHref },
+          { role: "user", content: text, selection, chapterHref },
         );
         setEditDraft("");
       } catch (error) {
@@ -212,7 +212,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         setSubmitting(false);
         setEditingIndex(index);
       }
-    }, [bookId, currentChapterIndex, editDraft, editPrompt, editingIndex, isStreaming, state.messages]);
+    }, [bookId, currentChapterHref, editDraft, editPrompt, editingIndex, isStreaming, state.messages]);
 
     const handleRenameSave = useCallback(async (sessionId: string) => {
       const title = editingTitle.trim();
@@ -229,8 +229,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       }
     }, [editingTitle, renameSession]);
 
-    const fillInput = useCallback((text: string, chapterIndex: number) => {
-      setPendingSelection({ text, chapterIndex });
+    const fillInput = useCallback((text: string, chapterHref?: string) => {
+      setPendingSelection({ text, chapterHref });
       setInput("");
       inputRef.current?.focus();
     }, []);

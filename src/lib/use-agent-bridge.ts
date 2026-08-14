@@ -98,7 +98,7 @@ export function useAgentBridge(bookId: string) {
 
   const prompt = useCallback(async (
     text: string,
-    context: { selection?: string; chapterIndex?: number },
+    context: { selection?: string; chapterHref?: string },
     message: AgentMessage,
   ) => {
     const currentBookId = bookIdRef.current;
@@ -112,7 +112,7 @@ export function useAgentBridge(bookId: string) {
       await invoke<CommandReceipt>("agent_prompt", {
         prompt: text,
         selection: context.selection ?? null,
-        chapterIndex: context.chapterIndex ?? null,
+        chapterHref: context.chapterHref || null,
         bookId: currentBookId,
         requestId,
         promptId,
@@ -127,7 +127,7 @@ export function useAgentBridge(bookId: string) {
   const editPrompt = useCallback(async (
     messageIndex: number,
     text: string,
-    context: { selection?: string; chapterIndex?: number },
+    context: { selection?: string; chapterHref?: string },
     message: AgentMessage,
   ) => {
     const currentBookId = bookIdRef.current;
@@ -142,7 +142,7 @@ export function useAgentBridge(bookId: string) {
         messageIndex,
         prompt: text,
         selection: context.selection ?? null,
-        chapterIndex: context.chapterIndex ?? null,
+        chapterHref: context.chapterHref || null,
         bookId: currentBookId,
         requestId,
         promptId,

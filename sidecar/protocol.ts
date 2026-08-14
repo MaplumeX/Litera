@@ -7,7 +7,7 @@ export const MAX_SESSION_TITLE_LENGTH = 128;
 
 export interface PromptContext {
   selection?: string;
-  chapterIndex?: number;
+  chapterHref?: string;
 }
 
 export type SidecarCommand =
@@ -119,10 +119,8 @@ function decodeContext(value: unknown): PromptContext | undefined {
   if (value === undefined) return undefined;
   const input = record(value);
   const selection = optionalString(input.selection, "context.selection", MAX_SELECTION_LENGTH);
-  const chapterIndex = input.chapterIndex === undefined
-    ? undefined
-    : finiteInteger(input.chapterIndex, "context.chapterIndex");
-  return { selection, chapterIndex };
+  const chapterHref = optionalString(input.chapterHref, "context.chapterHref", 4096);
+  return { selection, chapterHref };
 }
 
 function assertEnvelope(input: Record<string, unknown>): string {

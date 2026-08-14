@@ -49,7 +49,7 @@ export interface AgentMessage {
   role: "user" | "assistant";
   content: string;
   selection?: string;
-  chapterIndex?: number;
+  chapterHref?: string;
   toolCalls?: AgentToolCall[];
 }
 
