@@ -29,8 +29,8 @@ npx shadcn@latest add <component-name>
 
 - `button.tsx` — all toolbar/action buttons (icon variants via lucide)
 - `dialog.tsx` — modal overlays (used by `AgentConfigDialog` and `SettingsDialog`)
-- `alert-dialog.tsx` — destructive confirms (library delete / overwrite)
-- `select.tsx` — dropdown selectors (used by `AgentConfigDialog` provider picker)
+- `alert-dialog.tsx` — destructive confirms (library delete / overwrite / custom provider delete)
+- `select.tsx` — dropdown selectors (used by `AgentConfigForm` provider picker)
 - `slider.tsx` — continuous typography controls on `SettingsDialog`
 - `popover.tsx` + `command.tsx` — searchable combobox (reader font picker)
 - `input.tsx` — text/password inputs
@@ -39,6 +39,14 @@ npx shadcn@latest add <component-name>
 **Rule**: New modals and form fields must use these shadcn components, not native `<select>`/`<input>`/`<label>`/hand-written overlay divs. Add more via `npx shadcn@latest add <name>` when needed. `alert-dialog.tsx` may match the existing `dialog.tsx` Radix style if the CLI add fails; do not use `window.confirm()` / `window.alert()`.
 
 **Select grouping**: use `SelectGroup` + `SelectLabel` + `SelectSeparator` for grouped options; do not emulate separators with disabled `<option>` values. Special pseudo-options (e.g. "add new…") are regular `SelectItem`s with sentinel string values handled in `onValueChange`.
+
+### Convention: LLM provider dropdown is draft-only
+
+**What**: `AgentConfigForm` splits 「当前使用」and 「这个提供商」. Changing the provider Select only updates local draft state. Disk writes and `restart_sidecar` happen on 「保存并应用」 (`save_agent_config` for built-in, optional `update_custom_provider` + `switch_provider` for custom). 「添加自定义」is a button, not a Select sentinel. Custom provider delete uses `AlertDialog`. 「刷新模型」is custom/add-form only and calls `list_remote_models`; it must not write agent JSON or restart the sidecar.
+
+**Why**: Select-on-change used to switch the live provider and kill the sidecar mid-chat. Built-in and custom also used two different UIs (inline fields vs read-only card).
+
+**Don't**: Put add-custom back in the Select. Don't call `switch_provider` from `onValueChange`. Don't fetch `/models` from the WebView.
 
 ### Icon Buttons (lucide-react)
 
