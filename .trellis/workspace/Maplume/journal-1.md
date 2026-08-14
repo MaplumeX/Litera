@@ -918,3 +918,39 @@ SettingsDialog shell is now a fixed 768x640 box (capped at 85vh / calc(100%-2rem
 ### Status
 
 [OK] **Completed**
+
+
+## Session 42: Unify reader and agent chapter coordinates
+
+**Date**: 2026-08-14
+**Task**: Unify reader and agent chapter coordinates
+**Branch**: `main`
+
+### Summary
+
+TOC-owned chapter list plus chapterHref locator so reader, snapshot, and book tools share one index.
+
+### Main Changes
+
+- Sidecar assigns spine files to flattened TOC hrefs; FTS and tools use the owned list
+- Prompts send chapterHref from foliate tocItem.href or section.id; aside names title + chapterNumber
+- Recorded the PromptContext and ownership contract in backend/frontend specs
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f1caf6a` | (see git log) |
+| `542f16c` | (see git log) |
+
+### Testing
+
+- [OK] sidecar npm test (34); vitest agent-bridge/reducer/ChatPanel; tsc; cargo test sidecar_protocol
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Optional follow-up: inject viewport visible_text (reading_cursor), still out of this task
