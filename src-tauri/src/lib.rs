@@ -1,4 +1,6 @@
 use tauri::Manager;
+#[cfg(any(target_os = "macos", windows, target_os = "linux"))]
+use tauri_plugin_window_state::{Builder as WindowStateBuilder, StateFlags};
 
 mod agent_config;
 mod error;
@@ -28,9 +30,17 @@ pub fn run() {
     let mut builder = tauri::Builder::default();
     #[cfg(any(target_os = "macos", windows, target_os = "linux"))]
     {
-        builder = builder.plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
-            open_paths::handle_second_instance(app, args, cwd);
-        }));
+        builder = builder
+            .plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
+                open_paths::handle_second_instance(app, args, cwd);
+            }))
+            .plugin(
+                WindowStateBuilder::default()
+                    .with_state_flags(
+                        StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED,
+                    )
+                    .build(),
+            );
     }
 
     builder
@@ -97,6 +107,11 @@ pub fn run() {
             };
             app.manage(supervisor);
             open_paths::enqueue_current_process_args(app.handle());
+
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
             Ok(())
         })
         .on_window_event(|window, event| {
