@@ -198,7 +198,7 @@ export function SettingsDialog({
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
-      <DialogContent className="flex max-h-[85vh] gap-0 overflow-hidden p-0 sm:max-w-3xl">
+      <DialogContent className="flex h-[40rem] w-[768px] max-h-[85vh] gap-0 overflow-hidden p-0 sm:max-w-[calc(100%-2rem)]">
         <aside className="flex w-48 shrink-0 flex-col border-r">
           <DialogHeader className="gap-0 p-0 text-left">
             <DialogTitle className="px-4 py-3 text-sm font-semibold">

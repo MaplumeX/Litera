@@ -95,6 +95,31 @@ describe("SettingsDialog", () => {
     expect(queryByRole("dialog")).toBeNull();
   });
 
+  it("locks the dialog shell to a fixed size", () => {
+    const { getByRole } = render(
+      <SettingsDialog
+        open
+        onClose={noop}
+        bookTitle={null}
+        hasBook={false}
+        styleState={styleState}
+        onTypographyChange={noop}
+        onRestoreDefault={noop}
+        overriddenKeys={[]}
+        theme="light"
+        onThemeChange={noop}
+      />,
+    );
+
+    const dialog = getByRole("dialog");
+    expect(dialog.className).toContain("w-[768px]");
+    expect(dialog.className).toContain("h-[40rem]");
+    expect(dialog.className).toContain("max-h-[85vh]");
+    expect(dialog.className).toContain("sm:max-w-[calc(100%-2rem)]");
+    expect(dialog.className).not.toContain("sm:max-w-3xl");
+    expect(dialog.className).not.toContain("sm:max-w-lg");
+  });
+
   it("switches left-nav sections and enables fonts without a book", () => {
     const { getByRole, getByText, queryByText } = render(
       <SettingsDialog
