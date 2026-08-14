@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Plus, Trash2 } from "lucide-react";
+import { CheckIcon, ChevronsUpDown, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
@@ -11,6 +11,15 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -25,6 +34,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAgentConfig } from "@/lib/use-agent-config";
 import { invokeErrorMessage } from "@/lib/app-error";
+import { cn } from "@/lib/utils";
 import {
   AGENT_PROVIDERS,
   findProviderExample,
@@ -81,7 +91,6 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
   const [customName, setCustomName] = useState("");
   const [customBaseUrl, setCustomBaseUrl] = useState("");
   const [customModels, setCustomModels] = useState<string[]>([]);
-  const [modelDraft, setModelDraft] = useState("");
 
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -93,7 +102,7 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
   const [newBaseUrl, setNewBaseUrl] = useState("");
   const [newApiKey, setNewApiKey] = useState("");
   const [newModels, setNewModels] = useState<string[]>([]);
-  const [newModelDraft, setNewModelDraft] = useState("");
+  const [newModel, setNewModel] = useState("");
 
   useEffect(() => {
     if (!active) {
@@ -115,7 +124,6 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
     const currentProvider = snapshot.provider ?? AGENT_PROVIDERS[0].id;
     setProvider(currentProvider);
     setApiKey("");
-    setModelDraft("");
     if (isCustomProviderId(currentProvider)) {
       const cp = snapshot.customProviders.find((entry) => entry.id === currentProvider);
       if (cp) {
@@ -170,7 +178,6 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
     setRefreshError(null);
     setProvider(value);
     setApiKey("");
-    setModelDraft("");
     if (isCustomProviderId(value)) {
       const cp = snapshot?.customProviders.find((entry) => entry.id === value);
       if (cp) {
@@ -191,35 +198,16 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
     }
   };
 
-  const addModelId = (
-    draft: string,
+  const selectCatalogModel = (
+    id: string,
     models: string[],
     setModels: (next: string[]) => void,
-    setDraft: (next: string) => void,
     setCurrent: (next: string) => void,
   ) => {
-    const id = draft.trim();
-    if (!id) return;
     if (!models.includes(id)) {
       setModels([...models, id]);
     }
     setCurrent(id);
-    setDraft("");
-  };
-
-  const removeModelId = (
-    id: string,
-    models: string[],
-    setModels: (next: string[]) => void,
-    current: string,
-    setCurrent: (next: string) => void,
-  ) => {
-    if (models.length <= 1) return;
-    const next = models.filter((item) => item !== id);
-    setModels(next);
-    if (current === id) {
-      setCurrent(next[0] ?? "");
-    }
   };
 
   const handleRefresh = async (opts: {
@@ -302,7 +290,6 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
       setCustomName("");
       setCustomBaseUrl("");
       setCustomModels([]);
-      setModelDraft("");
       setSuccessMessage(t("agent.deletedCustom"));
     } catch {
       // error state is surfaced from the hook
@@ -321,7 +308,7 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
       setNewBaseUrl("");
       setNewApiKey("");
       setNewModels([]);
-      setNewModelDraft("");
+      setNewModel("");
       setRefreshError(null);
       setSuccessMessage(t("agent.added"));
     } catch {
@@ -373,37 +360,37 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
               className="w-full"
             />
           </Field>
-          <ModelListEditor
-            models={newModels}
-            draft={newModelDraft}
-            onDraftChange={setNewModelDraft}
-            onAdd={() =>
-              addModelId(newModelDraft, newModels, setNewModels, setNewModelDraft, () => {})
-            }
-            onRemove={(id) =>
-              removeModelId(id, newModels, setNewModels, "", () => {})
-            }
-            allowEmpty
-            disabled={saving}
-            t={t}
-          />
-          <RefreshRow
-            disabled={saving || refreshing || !canRefreshAdd}
-            refreshing={refreshing}
-            error={refreshError}
-            onRefresh={() =>
-              void handleRefresh({
-                baseUrl: newBaseUrl,
-                draftKey: newApiKey,
-                hasSavedKey: false,
-                currentModels: newModels,
-                currentModel: "",
-                setModels: setNewModels,
-                setCurrent: () => {},
-              })
-            }
-            t={t}
-          />
+          <Field label={t("agent.model")}>
+            <div className="flex items-start gap-2">
+              <div className="min-w-0 flex-1">
+                <ModelCombobox
+                  models={newModels}
+                  value={newModel}
+                  disabled={saving}
+                  onSelect={(id) =>
+                    selectCatalogModel(id, newModels, setNewModels, setNewModel)
+                  }
+                />
+              </div>
+              <RefreshRow
+                disabled={saving || refreshing || !canRefreshAdd}
+                refreshing={refreshing}
+                error={refreshError}
+                onRefresh={() =>
+                  void handleRefresh({
+                    baseUrl: newBaseUrl,
+                    draftKey: newApiKey,
+                    hasSavedKey: false,
+                    currentModels: newModels,
+                    currentModel: newModel,
+                    setModels: setNewModels,
+                    setCurrent: setNewModel,
+                  })
+                }
+                t={t}
+              />
+            </div>
+          </Field>
           <div className="flex justify-end gap-2">
             <Button
               size="sm"
@@ -466,22 +453,36 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
             </Field>
             <Field label={t("agent.model")}>
               {isCustom ? (
-                <Select
-                  value={model}
-                  onValueChange={setModel}
-                  disabled={saving || customModels.length === 0}
-                >
-                  <SelectTrigger className="w-full" disabled={saving || customModels.length === 0}>
-                    <SelectValue placeholder={t("agent.enterModelId")} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {customModels.map((id) => (
-                      <SelectItem key={id} value={id}>
-                        {id}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <div className="flex items-start gap-2">
+                  <div className="min-w-0 flex-1">
+                    <ModelCombobox
+                      models={customModels}
+                      value={model}
+                      disabled={saving}
+                      onSelect={(id) =>
+                        selectCatalogModel(id, customModels, setCustomModels, setModel)
+                      }
+                    />
+                  </div>
+                  <RefreshRow
+                    disabled={saving || refreshing || !canRefreshCustom}
+                    refreshing={refreshing}
+                    error={refreshError}
+                    onRefresh={() =>
+                      void handleRefresh({
+                        baseUrl: customBaseUrl,
+                        draftKey: apiKey,
+                        providerId: selectedCustom.id,
+                        hasSavedKey: selectedCustom.hasApiKey,
+                        currentModels: customModels,
+                        currentModel: model,
+                        setModels: setCustomModels,
+                        setCurrent: setModel,
+                      })
+                    }
+                    t={t}
+                  />
+                </div>
               ) : (
                 <Input
                   type="text"
@@ -525,37 +526,6 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
                     className="w-full"
                   />
                 </Field>
-                <ModelListEditor
-                  models={customModels}
-                  draft={modelDraft}
-                  onDraftChange={setModelDraft}
-                  onAdd={() =>
-                    addModelId(modelDraft, customModels, setCustomModels, setModelDraft, setModel)
-                  }
-                  onRemove={(id) =>
-                    removeModelId(id, customModels, setCustomModels, model, setModel)
-                  }
-                  disabled={saving}
-                  t={t}
-                />
-                <RefreshRow
-                  disabled={saving || refreshing || !canRefreshCustom}
-                  refreshing={refreshing}
-                  error={refreshError}
-                  onRefresh={() =>
-                    void handleRefresh({
-                      baseUrl: customBaseUrl,
-                      draftKey: apiKey,
-                      providerId: selectedCustom.id,
-                      hasSavedKey: selectedCustom.hasApiKey,
-                      currentModels: customModels,
-                      currentModel: model,
-                      setModels: setCustomModels,
-                      setCurrent: setModel,
-                    })
-                  }
-                  t={t}
-                />
                 <Button
                   size="sm"
                   variant="outline"
@@ -654,74 +624,87 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-function ModelListEditor({
+function ModelCombobox({
   models,
-  draft,
-  onDraftChange,
-  onAdd,
-  onRemove,
-  allowEmpty = false,
-  disabled,
-  t,
+  value,
+  onSelect,
+  disabled = false,
 }: {
   models: string[];
-  draft: string;
-  onDraftChange: (value: string) => void;
-  onAdd: () => void;
-  onRemove: (id: string) => void;
-  allowEmpty?: boolean;
-  disabled: boolean;
-  t: (key: MessageKey) => string;
+  value: string;
+  onSelect: (id: string) => void;
+  disabled?: boolean;
 }) {
+  const { t } = useT();
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const trimmed = query.trim();
+  const canCreate = trimmed !== "" && !models.includes(trimmed);
+
+  const pick = (id: string) => {
+    onSelect(id);
+    setOpen(false);
+    setQuery("");
+  };
+
   return (
-    <div className="space-y-2">
-      <Label className="mb-1 block text-xs font-medium text-muted-foreground">
-        {t("agent.model")}
-      </Label>
-      <ul className="space-y-1">
-        {models.map((id) => (
-          <li key={id} className="flex items-center gap-2">
-            <span className="min-w-0 flex-1 truncate font-mono text-xs">{id}</span>
-            <Button
-              type="button"
-              size="icon-xs"
-              variant="ghost"
-              onClick={() => onRemove(id)}
-              disabled={disabled || (!allowEmpty && models.length <= 1)}
-              title={!allowEmpty && models.length <= 1 ? t("agent.cannotDeleteLast") : undefined}
-              aria-label={t("agent.removeModel")}
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </Button>
-          </li>
-        ))}
-      </ul>
-      <div className="flex gap-2">
-        <Input
-          type="text"
-          value={draft}
-          onChange={(event) => onDraftChange(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              event.preventDefault();
-              onAdd();
-            }
-          }}
-          placeholder={t("agent.addModelPlaceholder")}
-          className="w-full"
-          disabled={disabled}
-        />
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        if (!next) setQuery("");
+      }}
+      modal={false}
+    >
+      <PopoverTrigger asChild>
         <Button
           type="button"
-          size="sm"
           variant="outline"
-          onClick={onAdd}
-          disabled={disabled || !draft.trim()}
+          size="sm"
+          role="combobox"
+          aria-expanded={open}
+          aria-label={t("agent.model")}
+          disabled={disabled}
+          className="w-full justify-between font-normal"
         >
-          {t("agent.addModel")}
+          <span className={cn("min-w-0 truncate", !value && "text-muted-foreground")}>
+            {value || t("agent.enterModelId")}
+          </span>
+          <ChevronsUpDown className="size-4 shrink-0 opacity-50" />
         </Button>
-      </div>
-    </div>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-[var(--radix-popover-trigger-width)] p-0">
+        <Command>
+          <CommandInput
+            placeholder={t("agent.modelSearch")}
+            value={query}
+            onValueChange={setQuery}
+          />
+          <CommandList>
+            <CommandEmpty>{t("agent.modelEmpty")}</CommandEmpty>
+            <CommandGroup>
+              {models.map((id) => (
+                <CommandItem key={id} value={id} onSelect={() => pick(id)}>
+                  <CheckIcon
+                    className={cn("size-4", value === id ? "opacity-100" : "opacity-0")}
+                  />
+                  <span className="min-w-0 truncate font-mono text-xs">{id}</span>
+                </CommandItem>
+              ))}
+              {canCreate && (
+                <CommandItem
+                  value={trimmed}
+                  keywords={[trimmed]}
+                  onSelect={() => pick(trimmed)}
+                >
+                  {t("agent.useModelId", { id: trimmed })}
+                </CommandItem>
+              )}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
   );
 }
 
