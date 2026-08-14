@@ -77,6 +77,26 @@ describe("normalizeSettings", () => {
       pagePadding: 0.75,
     });
   });
+
+  it("keeps a valid named font family", () => {
+    expect(normalizeSettings({ fontFamily: "Noto Sans" })).toMatchObject({
+      fontFamily: "Noto Sans",
+    });
+    expect(
+      normalizeSettings({}, { fontFamily: "Source Han Serif" }),
+    ).toMatchObject({
+      fontFamily: "Source Han Serif",
+    });
+  });
+
+  it("falls back to serif for illegal font names", () => {
+    expect(normalizeSettings({ fontFamily: "bad;font" })).toMatchObject({
+      fontFamily: "serif",
+    });
+    expect(normalizeSettings({ fontFamily: "" })).toMatchObject({
+      fontFamily: "serif",
+    });
+  });
 });
 
 describe("generateStylesCss", () => {
@@ -93,7 +113,8 @@ describe("generateStylesCss", () => {
       paragraphSpacing: 1.1,
       firstLineIndent: 2,
     });
-    expect(css).toContain("font-family: serif");
+    expect(css).toContain("font-family: serif;");
+    expect(css).not.toContain("font-family: serif,");
     expect(css).toContain("font-size: 16px !important");
     expect(css).toContain("line-height: 2");
     expect(css).toContain("letter-spacing: 0.02em");
@@ -103,6 +124,39 @@ describe("generateStylesCss", () => {
     expect(css).toContain("text-align: justify");
     expect(css).toContain("margin-block-end: 1.1em !important");
     expect(css).toContain("text-indent: 2em !important");
+  });
+
+  it("quotes named fonts and appends a serif fallback", () => {
+    const css = generateStylesCss({
+      fontSize: 16,
+      fontFamily: "Noto Sans",
+      theme: "light",
+      lineHeight: 1.7,
+      contentWidth: 42,
+      pagePadding: 1.75,
+      textAlign: "start",
+      letterSpacing: 0,
+      paragraphSpacing: 1,
+      firstLineIndent: 0,
+    });
+    expect(css).toContain('font-family: "Noto Sans", serif');
+    expect(css).not.toContain("font-family: Noto Sans;");
+  });
+
+  it("escapes quotes and backslashes in named fonts", () => {
+    const css = generateStylesCss({
+      fontSize: 16,
+      fontFamily: 'Foo\\Bar "Q"',
+      theme: "light",
+      lineHeight: 1.7,
+      contentWidth: 42,
+      pagePadding: 1.75,
+      textAlign: "start",
+      letterSpacing: 0,
+      paragraphSpacing: 1,
+      firstLineIndent: 0,
+    });
+    expect(css).toContain('font-family: "Foo\\\\Bar \\"Q\\"", serif');
   });
 });
 

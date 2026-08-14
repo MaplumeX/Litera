@@ -102,8 +102,30 @@ export function isTextAlign(value: string | undefined): value is TextAlignValue 
   return TEXT_ALIGNS.some((item) => item.value === value);
 }
 
-export function isFontFamily(value: string | undefined): boolean {
+const MAX_FONT_FAMILY_CHARS = 128;
+
+export function isGenericFontFamily(
+  value: string,
+): value is (typeof FONT_FAMILIES)[number]["value"] {
   return FONT_FAMILIES.some((item) => item.value === value);
+}
+
+export function isFontFamily(value: string | undefined): boolean {
+  if (value == null) return false;
+  if (isGenericFontFamily(value)) return true;
+  const trimmed = value.trim();
+  if (!trimmed || [...trimmed].length > MAX_FONT_FAMILY_CHARS) return false;
+  for (const ch of value) {
+    const code = ch.codePointAt(0) ?? 0;
+    if (code < 0x20 || ch === ";" || ch === "{" || ch === "}") return false;
+  }
+  return true;
+}
+
+/** Quote a named family and append `, serif` so a missing face degrades in CSS. */
+export function cssFontFamily(value: string): string {
+  if (isGenericFontFamily(value)) return value;
+  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}", serif`;
 }
 
 export function normalizeTextAlign(value?: string): TextAlignValue {
@@ -255,7 +277,7 @@ a { color: #8a5a2b !important; }`,
 
 /** Combine font + typography + theme into a single CSS string for `view.renderer.setStyles`. */
 export function generateStylesCss(state: ReaderStyleState): string {
-  const fontCss = `html, body { font-family: ${state.fontFamily}; font-size: ${state.fontSize}px !important; line-height: ${state.lineHeight}; letter-spacing: ${state.letterSpacing}em; max-width: ${state.contentWidth}em; margin-inline: auto; padding-inline: ${state.pagePadding}rem; text-align: ${state.textAlign}; }
+  const fontCss = `html, body { font-family: ${cssFontFamily(state.fontFamily)}; font-size: ${state.fontSize}px !important; line-height: ${state.lineHeight}; letter-spacing: ${state.letterSpacing}em; max-width: ${state.contentWidth}em; margin-inline: auto; padding-inline: ${state.pagePadding}rem; text-align: ${state.textAlign}; }
 p { margin-block-end: ${state.paragraphSpacing}em !important; text-indent: ${state.firstLineIndent}em !important; }`;
   const themeCss = THEME_CSS[state.theme] ?? "";
   return themeCss ? `${fontCss}\n${themeCss}` : fontCss;

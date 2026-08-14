@@ -1,4 +1,6 @@
-import { useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { CheckIcon, ChevronsUpDown } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -6,6 +8,17 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  CommandSeparator,
+} from "@/components/ui/command";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Slider } from "@/components/ui/slider";
 import { AgentConfigForm } from "@/components/AgentConfigForm";
 import { cn } from "@/lib/utils";
@@ -14,7 +27,9 @@ import {
   TEXT_ALIGNS,
   THEMES,
   TYPOGRAPHY_RANGES,
+  cssFontFamily,
   formatTypographyValue,
+  isGenericFontFamily,
   type ContinuousKey,
   type ReaderStyleState,
   type TypographyKey,
@@ -73,10 +88,12 @@ function PresetRow({
   label,
   restore,
   children,
+  contentClassName,
 }: {
   label: string;
   restore?: { show: boolean; onClick: () => void; label: string };
   children: ReactNode;
+  contentClassName?: string;
 }) {
   return (
     <div>
@@ -92,7 +109,7 @@ function PresetRow({
           </button>
         )}
       </div>
-      <div className="flex gap-1">{children}</div>
+      <div className={cn("flex gap-1", contentClassName)}>{children}</div>
     </div>
   );
 }
@@ -141,6 +158,144 @@ function SliderRow({
         }}
       />
     </div>
+  );
+}
+
+function FontFamilyPicker({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const { t } = useT();
+  const [open, setOpen] = useState(false);
+  const [systemFonts, setSystemFonts] = useState<string[]>([]);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    let disposed = false;
+    void invoke<string[]>("list_system_fonts")
+      .then((fonts) => {
+        if (!disposed) setSystemFonts(fonts);
+      })
+      .catch((error) => {
+        console.error("Failed to list system fonts:", error);
+      })
+      .finally(() => {
+        if (!disposed) setLoaded(true);
+      });
+    return () => {
+      disposed = true;
+    };
+  }, []);
+
+  const listedSystem = systemFonts.filter((name) => !isGenericFontFamily(name));
+  const missing = loaded && !isGenericFontFamily(value) && !listedSystem.includes(value);
+  const selectedLabel = isGenericFontFamily(value)
+    ? t(FONT_LABEL_KEYS[value])
+    : value;
+
+  return (
+    <Popover open={open} onOpenChange={setOpen} modal={false}>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          role="combobox"
+          aria-expanded={open}
+          className="w-full justify-between font-normal"
+        >
+          <span className="min-w-0 truncate" style={{ fontFamily: cssFontFamily(value) }}>
+            {selectedLabel}
+          </span>
+          <span className="flex shrink-0 items-center gap-1.5">
+            {missing && (
+              <span className="text-xs text-muted-foreground">
+                {t("settings.font.unavailable")}
+              </span>
+            )}
+            <ChevronsUpDown className="size-4 opacity-50" />
+          </span>
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        align="start"
+        className="w-[var(--radix-popover-trigger-width)] p-0"
+      >
+        <Command>
+          <CommandInput placeholder={t("settings.font.search")} />
+          <CommandList>
+            <CommandEmpty>{t("settings.font.empty")}</CommandEmpty>
+            <CommandGroup>
+              {FONT_FAMILIES.map((fam) => {
+                const label = t(FONT_LABEL_KEYS[fam.value]);
+                return (
+                  <CommandItem
+                    key={fam.value}
+                    value={`${fam.value} ${label}`}
+                    keywords={[fam.value, label]}
+                    onSelect={() => {
+                      onChange(fam.value);
+                      setOpen(false);
+                    }}
+                  >
+                    <CheckIcon
+                      className={cn(
+                        "size-4",
+                        value === fam.value ? "opacity-100" : "opacity-0",
+                      )}
+                    />
+                    <span style={{ fontFamily: fam.css }}>{label}</span>
+                  </CommandItem>
+                );
+              })}
+            </CommandGroup>
+            {(missing || listedSystem.length > 0) && <CommandSeparator />}
+            <CommandGroup>
+              {missing && (
+                <CommandItem
+                  value={value}
+                  onSelect={() => {
+                    onChange(value);
+                    setOpen(false);
+                  }}
+                >
+                  <CheckIcon className="size-4" />
+                  <span className="min-w-0 truncate" style={{ fontFamily: cssFontFamily(value) }}>
+                    {value}
+                  </span>
+                  <span className="ml-auto text-xs text-muted-foreground">
+                    {t("settings.font.unavailable")}
+                  </span>
+                </CommandItem>
+              )}
+              {listedSystem.map((name) => (
+                <CommandItem
+                  key={name}
+                  value={name}
+                  onSelect={() => {
+                    onChange(name);
+                    setOpen(false);
+                  }}
+                >
+                  <CheckIcon
+                    className={cn(
+                      "size-4",
+                      value === name ? "opacity-100" : "opacity-0",
+                    )}
+                  />
+                  <span className="min-w-0 truncate" style={{ fontFamily: cssFontFamily(name) }}>
+                    {name}
+                  </span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -246,22 +401,17 @@ export function SettingsDialog({
 
               <PresetRow
                 label={t("settings.font")}
+                contentClassName="w-full"
                 restore={{
                   show: canRestore("fontFamily"),
                   onClick: () => onRestoreDefault("fontFamily"),
                   label: restoreLabel,
                 }}
               >
-                {FONT_FAMILIES.map((fam) => (
-                  <ChoiceButton
-                    key={fam.value}
-                    active={styleState.fontFamily === fam.value}
-                    style={{ fontFamily: fam.css }}
-                    onClick={() => onTypographyChange("fontFamily", fam.value)}
-                  >
-                    {t(FONT_LABEL_KEYS[fam.value])}
-                  </ChoiceButton>
-                ))}
+                <FontFamilyPicker
+                  value={styleState.fontFamily}
+                  onChange={(name) => onTypographyChange("fontFamily", name)}
+                />
               </PresetRow>
 
               {SLIDER_ROWS.slice(1).map((row) => (

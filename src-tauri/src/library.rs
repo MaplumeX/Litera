@@ -25,7 +25,8 @@ const PAGE_PADDING_RANGE: (f64, f64) = (0.5, 4.0);
 const LETTER_SPACING_RANGE: (f64, f64) = (-0.05, 0.2);
 const PARAGRAPH_SPACING_RANGE: (f64, f64) = (0.0, 2.0);
 const FIRST_LINE_INDENT_RANGE: (f64, f64) = (0.0, 3.0);
-const VALID_FONT_FAMILIES: [&str; 3] = ["serif", "sans-serif", "monospace"];
+const GENERIC_FONT_FAMILIES: [&str; 3] = ["serif", "sans-serif", "monospace"];
+const MAX_FONT_FAMILY_CHARS: usize = 128;
 const VALID_THEMES: [&str; 3] = ["light", "dark", "sepia"];
 const VALID_PAGE_MARGINS: [&str; 3] = ["narrow", "normal", "wide"];
 const VALID_TEXT_ALIGNS: [&str; 2] = ["start", "justify"];
@@ -118,6 +119,22 @@ pub(crate) fn split_page_margin(value: &str) -> Option<(f64, f64)> {
 
 pub(crate) fn in_typography_range(value: f64, min: f64, max: f64) -> bool {
     value.is_finite() && value >= min && value <= max
+}
+
+/// Accept the three CSS generics, or a named family that cannot break CSS / JSON.
+/// Named fonts are not required to be installed — missing faces fall back in CSS.
+pub(crate) fn is_valid_font_family(value: &str) -> bool {
+    if GENERIC_FONT_FAMILIES.contains(&value) {
+        return true;
+    }
+    let trimmed = value.trim();
+    if trimmed.is_empty() || trimmed.chars().count() > MAX_FONT_FAMILY_CHARS {
+        return false;
+    }
+    !value.chars().any(|ch| {
+        let code = ch as u32;
+        code < 0x20 || ch == ';' || ch == '{' || ch == '}'
+    })
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -1395,7 +1412,7 @@ fn validate_settings(settings: &ReadingSettings) -> AppResult<()> {
         }
     }
     if let Some(font_family) = &settings.font_family {
-        if !VALID_FONT_FAMILIES.contains(&font_family.as_str()) {
+        if !is_valid_font_family(font_family) {
             return Err(AppError::invalid_input("Unsupported fontFamily"));
         }
     }
@@ -2529,6 +2546,53 @@ mod tests {
         assert!(settings.line_height.is_none());
         assert_eq!(settings.content_width, Some(36.0));
         assert_eq!(settings.page_padding, Some(1.25));
+    }
+
+    #[test]
+    fn reading_settings_accepts_named_font_family() {
+        let (_directory, store) = test_store();
+        let id = import_test_book(&store, Path::new("/source/named-font.epub"));
+        store
+            .update_reading_state(
+                &id,
+                None,
+                Some(ReadingSettings {
+                    font_family: Some("Noto Serif CJK SC".to_string()),
+                    ..ReadingSettings::default()
+                }),
+            )
+            .expect("persist named font");
+        let settings = store
+            .list_books()
+            .expect("list")
+            .remove(0)
+            .settings
+            .expect("settings");
+        assert_eq!(settings.font_family.as_deref(), Some("Noto Serif CJK SC"));
+    }
+
+    #[test]
+    fn reading_settings_rejects_invalid_font_family() {
+        let (_directory, store) = test_store();
+        let id = import_test_book(&store, Path::new("/source/bad-font.epub"));
+        for value in [
+            String::new(),
+            "   ".to_string(),
+            "bad;font".to_string(),
+            "a".repeat(129),
+        ] {
+            let error = store
+                .update_reading_state(
+                    &id,
+                    None,
+                    Some(ReadingSettings {
+                        font_family: Some(value),
+                        ..ReadingSettings::default()
+                    }),
+                )
+                .expect_err("invalid font");
+            assert_eq!(error.code, AppErrorCode::InvalidInput);
+        }
     }
 
     #[test]

@@ -138,6 +138,7 @@ pub fn run() {
             agent_config::switch_provider,
             preferences::get_preferences,
             preferences::save_preferences,
+            preferences::list_system_fonts,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

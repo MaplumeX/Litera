@@ -5,13 +5,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::{AppError, AppResult};
 use crate::library::{
-    atomic_write, deserialize_optional_line_height, in_typography_range, split_page_margin,
-    sync_parent_directory,
+    atomic_write, deserialize_optional_line_height, in_typography_range, is_valid_font_family,
+    split_page_margin, sync_parent_directory,
 };
 
 const PREFERENCES_SCHEMA_VERSION: u32 = 1;
 const VALID_THEMES: [&str; 3] = ["light", "dark", "sepia"];
-const VALID_FONT_FAMILIES: [&str; 3] = ["serif", "sans-serif", "monospace"];
 const VALID_TEXT_ALIGNS: [&str; 2] = ["start", "justify"];
 const FONT_SIZE_RANGE: (f64, f64) = (12.0, 32.0);
 const LINE_HEIGHT_RANGE: (f64, f64) = (1.2, 2.4);
@@ -192,7 +191,7 @@ impl PreferencesData {
     fn is_supported(&self) -> bool {
         self.schema_version == PREFERENCES_SCHEMA_VERSION
             && VALID_THEMES.contains(&self.theme.as_str())
-            && VALID_FONT_FAMILIES.contains(&self.font_family.as_str())
+            && is_valid_font_family(&self.font_family)
             && VALID_TEXT_ALIGNS.contains(&self.text_align.as_str())
     }
 }
@@ -433,7 +432,7 @@ fn validate_patch(patch: &PreferencesPatch) -> AppResult<()> {
         }
     }
     if let Some(font_family) = &patch.font_family {
-        if !VALID_FONT_FAMILIES.contains(&font_family.as_str()) {
+        if !is_valid_font_family(font_family) {
             return Err(AppError::invalid_input("Unsupported fontFamily"));
         }
     }
@@ -540,6 +539,23 @@ pub async fn save_preferences(
     })
     .await
     .map_err(|e| AppError::storage_io(format!("Preferences write worker failed: {e}")))?
+}
+
+fn collect_system_font_families() -> AppResult<Vec<String>> {
+    let mut families = font_kit::source::SystemSource::new()
+        .all_families()
+        .map_err(|error| AppError::storage_io(format!("Failed to list system fonts: {error}")))?;
+    families.retain(|name| is_valid_font_family(name));
+    families.sort();
+    families.dedup();
+    Ok(families)
+}
+
+#[tauri::command]
+pub async fn list_system_fonts() -> AppResult<Vec<String>> {
+    tauri::async_runtime::spawn_blocking(collect_system_font_families)
+        .await
+        .map_err(|e| AppError::storage_io(format!("Font listing worker failed: {e}")))?
 }
 
 #[cfg(test)]
@@ -852,5 +868,85 @@ mod tests {
             .save(PreferencesPatch::default())
             .expect_err("empty patch");
         assert_eq!(error.code, crate::error::AppErrorCode::InvalidInput);
+    }
+
+    #[test]
+    fn save_named_font_family() {
+        let (_directory, store) = test_store();
+        store
+            .save(PreferencesPatch {
+                font_family: Some("Source Han Serif".to_string()),
+                ..PreferencesPatch::default()
+            })
+            .expect("save named font");
+        assert_eq!(store.get().expect("get").font_family, "Source Han Serif");
+    }
+
+    #[test]
+    fn save_rejects_invalid_font_family() {
+        let (_directory, store) = test_store();
+        for value in [
+            String::new(),
+            "   ".to_string(),
+            "bad;font".to_string(),
+            "foo{bar}".to_string(),
+            "a".repeat(129),
+            "\u{0007}Bell".to_string(),
+        ] {
+            let error = store
+                .save(PreferencesPatch {
+                    font_family: Some(value),
+                    ..PreferencesPatch::default()
+                })
+                .expect_err("invalid font");
+            assert_eq!(error.code, crate::error::AppErrorCode::InvalidInput);
+        }
+        assert_eq!(store.get().expect("get").font_family, "serif");
+    }
+
+    #[test]
+    fn named_font_family_is_not_treated_as_corrupt() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join("preferences.json");
+        std::fs::write(
+            &path,
+            br#"{"schemaVersion":1,"theme":"sepia","fontFamily":"Noto Sans CJK SC"}"#,
+        )
+        .expect("write named font");
+
+        let store =
+            PreferencesStore::initialize(directory.path().to_path_buf()).expect("init named font");
+        let prefs = store.get().expect("get");
+        assert_eq!(prefs.theme, "sepia");
+        assert_eq!(prefs.font_family, "Noto Sans CJK SC");
+
+        let value: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).expect("read")).expect("parse");
+        assert_eq!(value["theme"], "sepia");
+        assert_eq!(value["fontFamily"], "Noto Sans CJK SC");
+        assert!(value.get("lineHeight").is_none());
+    }
+
+    #[test]
+    fn old_generic_font_families_still_load() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join("preferences.json");
+        std::fs::write(
+            &path,
+            br#"{"schemaVersion":1,"theme":"dark","fontFamily":"monospace"}"#,
+        )
+        .expect("write generic font");
+
+        let store =
+            PreferencesStore::initialize(directory.path().to_path_buf()).expect("init generic");
+        let prefs = store.get().expect("get");
+        assert_eq!(prefs.theme, "dark");
+        assert_eq!(prefs.font_family, "monospace");
+
+        let value: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).expect("read")).expect("parse");
+        assert_eq!(value["fontFamily"], "monospace");
+        assert_eq!(value["theme"], "dark");
+        assert!(value.get("fontSize").is_none());
     }
 }

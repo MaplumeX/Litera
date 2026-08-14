@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, render } from "@testing-library/react";
+import { act, cleanup, render, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SettingsDialog } from "./SettingsDialog";
 import type { ReaderStyleState } from "@/lib/reader-styles";
@@ -12,6 +12,13 @@ class ResizeObserverStub {
 }
 
 vi.stubGlobal("ResizeObserver", ResizeObserverStub);
+Element.prototype.scrollIntoView = vi.fn();
+
+const invokeMock = vi.fn();
+
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: (cmd: string, args?: unknown) => invokeMock(cmd, args),
+}));
 
 vi.mock("@/lib/use-agent-config", () => ({
   useAgentConfig: () => ({
@@ -49,9 +56,17 @@ const styleState: ReaderStyleState = {
 
 const noop = () => {};
 
+invokeMock.mockImplementation((cmd: string) => {
+  if (cmd === "list_system_fonts") {
+    return Promise.resolve(["Noto Sans CJK SC", "Source Han Serif"]);
+  }
+  return Promise.reject(new Error(`unexpected invoke: ${cmd}`));
+});
+
 afterEach(() => {
   cleanup();
   setLocale("zh-CN");
+  invokeMock.mockClear();
 });
 
 describe("SettingsDialog", () => {
@@ -139,7 +154,8 @@ describe("SettingsDialog", () => {
     expect(getByText("正在编辑默认排版")).toBeTruthy();
     expect(getByRole("slider", { name: "字体大小" })).toBeTruthy();
     expect(getByText("16px")).toBeTruthy();
-    expect(getByRole("button", { name: "衬线" })).toHaveProperty("disabled", false);
+    expect(getByRole("combobox")).toHaveProperty("disabled", false);
+    expect(getByText("衬线")).toBeTruthy();
     expect(queryByText("打开书籍后生效")).toBeNull();
     expect(queryByText("恢复默认")).toBeNull();
 
@@ -245,5 +261,82 @@ describe("SettingsDialog", () => {
     expect(getByText("Language")).toBeTruthy();
     expect(getByRole("button", { name: "Appearance" })).toBeTruthy();
     expect(document.documentElement.lang).toBe("en");
+  });
+
+  it("opens a searchable font combobox with generics at the top", async () => {
+    const { getByRole, getByPlaceholderText } = render(
+      <SettingsDialog
+        open
+        onClose={noop}
+        bookTitle={null}
+        hasBook={false}
+        styleState={styleState}
+        onTypographyChange={noop}
+        onRestoreDefault={noop}
+        overriddenKeys={[]}
+        theme="light"
+        onThemeChange={noop}
+      />,
+    );
+
+    act(() => {
+      getByRole("combobox").click();
+    });
+
+    expect(getByPlaceholderText("搜索字体…")).toBeTruthy();
+    const serif = await waitFor(() => getByRole("option", { name: "衬线" }));
+    const named = await waitFor(() => getByRole("option", { name: "Noto Sans CJK SC" }));
+    expect(getByRole("option", { name: "无衬线" })).toBeTruthy();
+    expect(getByRole("option", { name: "等宽" })).toBeTruthy();
+    expect(
+      serif.compareDocumentPosition(named) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it("choosing a named font calls onTypographyChange", async () => {
+    const onChange = vi.fn();
+    const { getByRole } = render(
+      <SettingsDialog
+        open
+        onClose={noop}
+        bookTitle={null}
+        hasBook={false}
+        styleState={styleState}
+        onTypographyChange={onChange}
+        onRestoreDefault={noop}
+        overriddenKeys={[]}
+        theme="light"
+        onThemeChange={noop}
+      />,
+    );
+
+    act(() => {
+      getByRole("combobox").click();
+    });
+    const option = await waitFor(() => getByRole("option", { name: /Noto Sans CJK SC/ }));
+    act(() => {
+      option.click();
+    });
+    expect(onChange).toHaveBeenCalledWith("fontFamily", "Noto Sans CJK SC");
+  });
+
+  it("keeps a missing saved font selected and marks it unavailable", async () => {
+    const { getByRole, findByText } = render(
+      <SettingsDialog
+        open
+        onClose={noop}
+        bookTitle={null}
+        hasBook={false}
+        styleState={{ ...styleState, fontFamily: "MissingFont" }}
+        onTypographyChange={noop}
+        onRestoreDefault={noop}
+        overriddenKeys={[]}
+        theme="light"
+        onThemeChange={noop}
+      />,
+    );
+
+    expect(await findByText("不可用")).toBeTruthy();
+    expect(getByRole("combobox").textContent).toContain("MissingFont");
   });
 });
