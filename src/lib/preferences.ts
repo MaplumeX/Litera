@@ -126,12 +126,22 @@ export function usePreferences() {
 }
 
 /**
- * Derive the CSS class for the root container from the global theme.
- * "light" → empty string (default :root), "dark" → "dark", "sepia" → "sepia".
+ * Resolve the effective light/dark theme from the global preference.
+ * "system" follows the OS `prefers-color-scheme`; anything else falls back
+ * to light unless it is exactly "dark".
+ */
+export function resolveTheme(theme: string, systemDark: boolean): "light" | "dark" {
+  if (theme === "system") return systemDark ? "dark" : "light";
+  return theme === "dark" ? "dark" : "light";
+}
+
+/**
+ * Derive the CSS class for the root container from the resolved theme.
+ * Only light/dark reach this after resolution: "light" → empty string
+ * (default :root), "dark" → "dark".
  */
 export function themeToClassName(theme: string): string {
-  if (theme === "dark" || theme === "sepia") return theme;
-  return "";
+  return theme === "dark" ? "dark" : "";
 }
 
 /**

@@ -26,7 +26,7 @@ import {
   TYPOGRAPHY_KEYS,
   type TypographyKey,
 } from "@/lib/reader-styles";
-import { usePreferences, themeToClassName, type AppPreferences } from "@/lib/preferences";
+import { usePreferences, resolveTheme, themeToClassName, type AppPreferences } from "@/lib/preferences";
 import type { BookOpenContext, BookRecord, ReadingSettings } from "@/types/library";
 import { useDebouncedCallback } from "@/lib/use-debounced-callback";
 import { invokeErrorMessage } from "@/lib/app-error";
@@ -91,6 +91,21 @@ function App() {
     updatePreferences,
     flush: flushPreferences,
   } = usePreferences();
+  // OS color scheme, followed live when the global theme is "system".
+  const [systemDark, setSystemDark] = useState(
+    () => window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false,
+  );
+  useEffect(() => {
+    const media = window.matchMedia?.("(prefers-color-scheme: dark)");
+    if (!media) return;
+    const onChange = (event: MediaQueryListEvent) => setSystemDark(event.matches);
+    media.addEventListener("change", onChange);
+    return () => media.removeEventListener("change", onChange);
+  }, []);
+  const resolvedTheme = useMemo(
+    () => resolveTheme(globalTheme, systemDark),
+    [globalTheme, systemDark],
+  );
   const styleState = useMemo(
     () => normalizeSettings(currentBook?.settings, preferences),
     [currentBook?.settings, preferences],
@@ -106,8 +121,9 @@ function App() {
   // on every relocate or ReaderView's [fileData, initialFraction] effect re-opens.
   const lastKnownFractionRef = useRef<number | undefined>(undefined);
   // Track latest style state so handleBookReady can apply it after renderer mounts.
+  // The ref holds the resolved (light/dark) theme for reader CSS injection.
   const styleStateRef = useRef(styleState);
-  styleStateRef.current = styleState;
+  styleStateRef.current = { ...styleState, theme: resolvedTheme };
 
   const reportPersistenceError = useCallback((error: unknown) => {
     console.error("Failed to persist reading state:", error);
@@ -191,16 +207,16 @@ function App() {
   // Apply theme class to <html> so CSS variables cascade to portaled dialogs.
   useEffect(() => {
     const root = document.documentElement;
-    root.classList.remove("dark", "sepia");
-    const cls = themeToClassName(globalTheme);
+    root.classList.remove("dark");
+    const cls = themeToClassName(resolvedTheme);
     if (cls) root.classList.add(cls);
-  }, [globalTheme]);
+  }, [resolvedTheme]);
 
   // Apply styles + persist whenever style state changes.
   useEffect(() => {
-    const css = generateStylesCss(styleState);
+    const css = generateStylesCss({ ...styleState, theme: resolvedTheme });
     readerRef.current?.setStyles(css);
-  }, [styleState]);
+  }, [styleState, resolvedTheme]);
 
   // Escape closes the TOC overlay. Page turning lives in ReaderView
   // (chapter iframe + host); do not handle ArrowLeft/ArrowRight here.

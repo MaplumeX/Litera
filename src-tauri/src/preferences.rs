@@ -10,7 +10,7 @@ use crate::library::{
 };
 
 const PREFERENCES_SCHEMA_VERSION: u32 = 1;
-const VALID_THEMES: [&str; 3] = ["light", "dark", "sepia"];
+const VALID_THEMES: [&str; 3] = ["light", "dark", "system"];
 const VALID_TEXT_ALIGNS: [&str; 2] = ["start", "justify"];
 const FONT_SIZE_RANGE: (f64, f64) = (12.0, 32.0);
 const LINE_HEIGHT_RANGE: (f64, f64) = (1.2, 2.4);
@@ -111,7 +111,13 @@ impl From<PreferencesDataRaw> for PreferencesData {
         let split = raw.page_margin.as_deref().and_then(split_page_margin);
         Self {
             schema_version: raw.schema_version,
-            theme: raw.theme,
+            // Migrate legacy "sepia" to "light" on read; the on-disk file
+            // keeps "sepia" until the next write (migrate on read, no rewrite).
+            theme: if raw.theme == "sepia" {
+                "light".to_string()
+            } else {
+                raw.theme
+            },
             font_size: clamp_or_default(
                 raw.font_size,
                 FONT_SIZE_RANGE.0,
@@ -596,8 +602,8 @@ mod tests {
     #[test]
     fn get_theme_returns_persisted_value() {
         let (_directory, store) = test_store();
-        store.save_theme("sepia").expect("save");
-        assert_eq!(store.get_theme().expect("get"), "sepia");
+        store.save_theme("system").expect("save");
+        assert_eq!(store.get_theme().expect("get"), "system");
     }
 
     #[test]
@@ -686,7 +692,7 @@ mod tests {
         let store =
             PreferencesStore::initialize(directory.path().to_path_buf()).expect("init old file");
         let prefs = store.get().expect("get");
-        assert_eq!(prefs.theme, "sepia");
+        assert_eq!(prefs.theme, "light");
         assert_eq!(prefs.font_size, 16.0);
         assert_eq!(prefs.font_family, "serif");
         assert_eq!(prefs.line_height, 1.7);
@@ -720,7 +726,7 @@ mod tests {
         let store =
             PreferencesStore::initialize(directory.path().to_path_buf()).expect("init old file");
         let prefs = store.get().expect("get");
-        assert_eq!(prefs.theme, "sepia");
+        assert_eq!(prefs.theme, "light");
         assert_eq!(prefs.line_height, 1.7);
         assert_eq!(prefs.content_width, 52.0);
         assert_eq!(prefs.page_padding, 2.5);
@@ -728,6 +734,7 @@ mod tests {
 
         let raw = std::fs::read_to_string(&path).expect("read");
         let value: serde_json::Value = serde_json::from_str(&raw).expect("parse");
+        assert_eq!(value["theme"], "sepia");
         assert_eq!(value["lineHeight"], "normal");
         assert_eq!(value["pageMargin"], "wide");
         assert!(value.get("contentWidth").is_none());
@@ -768,7 +775,7 @@ mod tests {
     #[test]
     fn save_partial_typography_does_not_drop_theme() {
         let (_directory, store) = test_store();
-        store.save_theme("sepia").expect("save theme");
+        store.save_theme("system").expect("save theme");
         store
             .save(PreferencesPatch {
                 line_height: Some(2.0),
@@ -777,7 +784,7 @@ mod tests {
             .expect("save line height");
 
         let prefs = store.get().expect("get");
-        assert_eq!(prefs.theme, "sepia");
+        assert_eq!(prefs.theme, "system");
         assert_eq!(prefs.line_height, 2.0);
         assert_eq!(prefs.content_width, 42.0);
         assert_eq!(prefs.text_align, "start");
@@ -917,7 +924,7 @@ mod tests {
         let store =
             PreferencesStore::initialize(directory.path().to_path_buf()).expect("init named font");
         let prefs = store.get().expect("get");
-        assert_eq!(prefs.theme, "sepia");
+        assert_eq!(prefs.theme, "light");
         assert_eq!(prefs.font_family, "Noto Sans CJK SC");
 
         let value: serde_json::Value =

@@ -47,7 +47,7 @@ const SECTIONS: { id: SettingsSection; labelKey: MessageKey }[] = [
 const THEME_LABEL_KEYS: Record<(typeof THEMES)[number], MessageKey> = {
   light: "settings.theme.light",
   dark: "settings.theme.dark",
-  sepia: "settings.theme.sepia",
+  system: "settings.theme.system",
 };
 
 const FONT_LABEL_KEYS: Record<(typeof FONT_FAMILIES)[number]["value"], MessageKey> = {

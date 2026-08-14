@@ -2,7 +2,7 @@
 export interface ReadingSettings {
   fontSize?: number;
   fontFamily?: string;
-  theme?: string; // "light" | "dark" | "sepia" — accepted for old files, not written
+  theme?: string; // legacy "light" | "dark" | "sepia" — accepted for old files, not written
   lineHeight?: number | string; // number, or leftover "compact" | "normal" | "relaxed"
   pageMargin?: string; // leftover "narrow" | "normal" | "wide"
   contentWidth?: number;

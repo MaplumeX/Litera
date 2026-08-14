@@ -25,12 +25,12 @@ describe("normalizeSettings", () => {
     expect(
       normalizeSettings(
         { fontSize: 18, fontFamily: "monospace", lineHeight: "compact" },
-        { lineHeight: 2.0, contentWidth: 52, theme: "sepia", fontSize: 14, fontFamily: "sans-serif" },
+        { lineHeight: 2.0, contentWidth: 52, theme: "system", fontSize: 14, fontFamily: "sans-serif" },
       ),
     ).toEqual({
       fontSize: 18,
       fontFamily: "monospace",
-      theme: "sepia",
+      theme: "system",
       lineHeight: 1.4,
       contentWidth: 52,
       pagePadding: 1.75,

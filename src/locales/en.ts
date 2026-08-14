@@ -60,7 +60,7 @@ export const en: { [K in MessageKey]: string } = {
   "settings.language": "Language",
   "settings.theme.light": "Light",
   "settings.theme.dark": "Dark",
-  "settings.theme.sepia": "Sepia",
+  "settings.theme.system": "System",
   "settings.font.serif": "Serif",
   "settings.font.sans": "Sans",
   "settings.font.mono": "Mono",

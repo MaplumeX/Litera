@@ -5,7 +5,7 @@ export const FONT_FAMILIES = [
   { value: "sans-serif", label: "无衬线", css: "sans-serif" },
   { value: "monospace", label: "等宽", css: "monospace" },
 ] as const;
-export const THEMES = ["light", "dark", "sepia"] as const;
+export const THEMES = ["light", "dark", "system"] as const;
 export const TEXT_ALIGNS = [
   { value: "start", label: "左齐" },
   { value: "justify", label: "两端" },
@@ -271,8 +271,6 @@ const THEME_CSS: Record<string, string> = {
   dark: `html, body { background: #1a1a1a !important; color: #e0e0e0 !important; }
 a { color: #6db4ff !important; }
 img { filter: brightness(0.8) !important; }`,
-  sepia: `html, body { background: #f4edd8 !important; color: #5b4636 !important; }
-a { color: #8a5a2b !important; }`,
 };
 
 /** Combine font + typography + theme into a single CSS string for `view.renderer.setStyles`. */

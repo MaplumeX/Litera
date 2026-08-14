@@ -58,7 +58,7 @@ export const zhCN = {
   "settings.language": "语言",
   "settings.theme.light": "白天",
   "settings.theme.dark": "夜间",
-  "settings.theme.sepia": "护眼",
+  "settings.theme.system": "跟随系统",
   "settings.font.serif": "衬线",
   "settings.font.sans": "无衬线",
   "settings.font.mono": "等宽",
