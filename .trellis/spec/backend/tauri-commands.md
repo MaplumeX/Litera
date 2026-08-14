@@ -90,7 +90,7 @@ interface BookRecord {
 interface ReadingSettings {
   fontSize?: number;           // px, 12–32
   fontFamily?: string;         // generic or named family; see is_valid_font_family
-  theme?: string;              // "light" | "dark" | "sepia" — accepted for old files, not written
+  theme?: string;              // "light" | "dark" | "sepia" — legacy per-book value, accepted for old files, never written
   lineHeight?: number;         // 1.2–2.4; leftover "compact"|"normal"|"relaxed" dual-read as 1.4/1.7/2.0
   pageMargin?: string;         // leftover "narrow"|"normal"|"wide"; read-only, never written
   contentWidth?: number;       // em, 28–60
@@ -281,7 +281,7 @@ async fn save_preferences(
 
 ```typescript
 interface PreferencesResponse {
-  theme: string;             // "light" | "dark" | "sepia"
+  theme: string;             // "light" | "dark" | "system"
   fontSize: number;          // px, 12–32
   fontFamily: string;        // generic or named family; see is_valid_font_family
   lineHeight: number;        // 1.2–2.4
@@ -323,16 +323,17 @@ Book-level overrides of the typography keys live on `ReadingSettings` via `updat
 ### 4. Validation & Error Matrix
 
 - empty patch → `InvalidInput` ("At least one preference field is required")
-- `theme` not in `light|dark|sepia` → `InvalidInput` ("Unsupported theme")
+- `theme` not in `light|dark|system` → `InvalidInput` ("Unsupported theme")
 - `fontFamily` fails `is_valid_font_family` → `InvalidInput` ("Unsupported fontFamily")
 - continuous number not finite or outside its PRD range → `InvalidInput`
 - `textAlign` not in `start|justify` → `InvalidInput` ("Unsupported textAlign")
 - unreadable / unparseable file on read after init → `StorageIo` / `StorageCorrupt`
 - unsupported schema or invalid stored theme/fontFamily/textAlign on init → overwrite with defaults (theme becomes `light`). A **named** `fontFamily` that passes `is_valid_font_family` is supported; do not treat it as corrupt.
+- legacy stored `theme: "sepia"` migrates to `light` **on read** (`From<PreferencesDataRaw>` maps it); the file keeps `"sepia"` until the next write. This keeps in-memory data valid so `is_supported()` never triggers the whole-file reset for legacy sepia files. `save_preferences` rejects `"sepia"` on write.
 
 ### 5. Good / Base / Bad Cases
 
-- Good: existing `{"schemaVersion":1,"theme":"sepia"}` loads as sepia + typography defaults; file bytes unchanged.
+- Good: existing `{"schemaVersion":1,"theme":"sepia"}` loads as `light` in memory + typography defaults; file bytes unchanged until the next write.
 - Good: `save_preferences({ theme: "dark" })` keeps stored typography numbers / enums.
 - Good: leftover `lineHeight: "normal"` + `pageMargin: "wide"` loads as 1.7 / 52 / 2.5 without rewrite.
 - Good: stored `fontFamily: "Noto Serif CJK SC"` loads; `ensure_file` does not rewrite the file.
@@ -344,6 +345,7 @@ Book-level overrides of the typography keys live on `ReadingSettings` via `updat
 ### 6. Tests Required
 
 - theme-only file loads; theme preserved; file not rewritten
+- legacy `theme: "sepia"` loads as `light` in memory; file keeps `"sepia"` until next write
 - old enum file migrates on read without rewrite
 - theme save does not drop typography keys
 - numbers persist; written file omits `pageMargin`
