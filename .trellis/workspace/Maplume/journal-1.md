@@ -1298,3 +1298,24 @@ Replaced pi-coding-agent sidecar architecture with embedded pi-ai/pi-agent-core,
 ### Status
 
 [OK] **Completed**
+
+
+## Session 57: Implement context compaction for agent sessions
+
+**Date**: 2026-08-15
+**Task**: Implement context compaction for agent sessions
+**Branch**: `main`
+
+### Summary
+
+Ported pi coding agent's context compaction design to Litera's embedded agent runtime: new src/agent/compaction/ module (token estimation, cut point detection, LLM summary generation), maybeCompact() integration in embedded-runtime (threshold + overflow trigger, debounce, silent degradation), replaced 12-turn hard truncation. 207 tests pass, tsc clean, build succeeds.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ff3d80b` | (see git log) |
+
+### Status
+
+[OK] **Completed**
