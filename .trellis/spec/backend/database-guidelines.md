@@ -67,9 +67,11 @@ fn update_reading_state(&self, book_id: &str, fraction: Option<f64>, settings: O
 
 ### bookId Generation
 
-`bookId` is a `DefaultHasher` hash of the **source file path** (not the app data copy path). Same source file maps to the same record. Re-import is not a no-op: it stages exact bytes under a unique `importId`, then commits EPUB + extracted metadata/cover through the recovery protocol described in `tauri-commands.md`.
+`bookId` is a `DefaultHasher` hash of the **source file path** (not the app data copy path). Same source file maps to the same record.
 
-Content identity is `contentHash`, not `bookId`. Duplicate detection compares SHA-256 of incoming bytes to existing `contentHash` values. Books missing a hash are hashed from the stored EPUB on the next open (`get_book_open_context`) or the next import classification — not at startup.
+Content identity is `contentHash`, not `bookId`. After backfill, any existing `contentHash` that equals the incoming SHA-256 is `duplicate` — including the same-path record. Same-path unchanged does not stage and does not rewrite `library.json`. Same-path with a **different** hash still stages under a unique `importId` and commits through the recovery protocol in `tauri-commands.md`.
+
+Books missing a hash are hashed from the stored EPUB on the next open (`get_book_open_context`) or the next import classification — not at startup. Classify only after that backfill, or a hash-less same-path reopen looks like `overwrite`.
 
 `list_books` sorts by `lastOpenedAt` descending (unset last), then `importedAt` descending.
 
@@ -144,7 +146,7 @@ const { session: s } = await createAgentSession({ sessionManager, customTools, r
 
 **Wrong**: replace path-hash `bookId` with SHA-256 of bytes so duplicates share an id.
 
-**Correct**: keep path-hash `bookId` (sessions, trash, `contentVersion` stay stable). Store SHA-256 as `contentHash` and classify imports as `duplicate` / `overwrite` / `new`.
+**Correct**: keep path-hash `bookId` (sessions, trash, `contentVersion` stay stable). Store SHA-256 as `contentHash`. Same hash (any path, including self) is `duplicate`; same path + different hash is `overwrite`; otherwise `new`.
 
 ### Hashing the wrong path for bookId
 

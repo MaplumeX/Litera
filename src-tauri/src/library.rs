@@ -370,9 +370,11 @@ impl LibraryStore {
             self.write_library(&library)?;
         }
 
-        if let Some(existing) = library.books.iter().find(|book| {
-            book.id != book_id && book.content_hash.as_deref() == Some(incoming_hash.as_str())
-        }) {
+        if let Some(existing) = library
+            .books
+            .iter()
+            .find(|book| book.content_hash.as_deref() == Some(incoming_hash.as_str()))
+        {
             return Ok(ImportBookResult {
                 status: ImportStatus::Duplicate,
                 book_id: existing.id.clone(),
@@ -2891,6 +2893,46 @@ mod tests {
             after.content_hash.as_deref(),
             Some(sha256_hex(b"version-two").as_str())
         );
+    }
+
+    #[test]
+    fn same_path_unchanged_reimport_is_duplicate_and_does_not_stage() {
+        let (directory, store) = test_store();
+        let source = Path::new("/source/unchanged.epub");
+        let id = import_test_book(&store, source);
+        store
+            .update_reading_state(&id, Some(0.42), None)
+            .expect("progress");
+        store.mark_book_opened(&id).expect("opened");
+        let before = store.list_books().expect("before").remove(0);
+        let book_dir = directory.path().join("books").join(&id);
+        let committed_epub = book_dir.join("book.epub");
+        let committed_bytes = fs::read(&committed_epub).expect("committed epub");
+
+        let result = store
+            .import_bytes(source, "book.epub".to_string(), b"version-one".to_vec())
+            .expect("reimport unchanged");
+
+        assert_eq!(result.status, ImportStatus::Duplicate);
+        assert_eq!(result.book_id, id);
+        assert_eq!(result.title, "Version One");
+        assert!(result.import_id.is_none());
+        let imports_dir = book_dir.join(".imports");
+        let staged = fs::read_dir(&imports_dir)
+            .map(|entries| entries.collect::<Result<Vec<_>, _>>().expect("imports"))
+            .unwrap_or_default();
+        assert!(staged.is_empty(), "unchanged reimport must not stage");
+
+        let after = store.list_books().expect("after").remove(0);
+        assert_eq!(after.title, before.title);
+        assert_eq!(after.last_fraction, Some(0.42));
+        assert_eq!(after.last_opened_at, before.last_opened_at);
+        assert_eq!(after.content_hash, before.content_hash);
+        assert_eq!(
+            fs::read(&committed_epub).expect("epub unchanged"),
+            committed_bytes
+        );
+        assert_eq!(committed_bytes, b"version-one");
     }
 
     #[test]
