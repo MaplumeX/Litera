@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import type { AnnotationsFile, BookOpenContext } from "@/types/library";
 import type { ReaderViewHandle } from "@/components/ReaderView";
 
@@ -117,11 +118,12 @@ vi.mock("@/components/ReaderView", async () => {
 
 vi.mock("react-resizable-panels", async () => {
   const React = await import("react");
+  const layoutMocks = { defaultLayout: undefined as unknown, onLayoutChanged: () => {} };
   return {
     Group: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
     Panel: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
     Separator: () => null,
-    usePanelRef: () => ({
+    usePanelRef: vi.fn(() => ({
       current: {
         collapse: () => {},
         expand: () => {},
@@ -129,7 +131,8 @@ vi.mock("react-resizable-panels", async () => {
         getSize: () => ({ asPercentage: 0 }),
         resize: () => {},
       },
-    }),
+    })),
+    useDefaultLayout: vi.fn(() => layoutMocks),
   };
 });
 
@@ -194,6 +197,19 @@ beforeEach(() => {
   windowApi.minimize.mockClear();
   windowApi.toggleMaximize.mockClear();
   setupInvoke();
+  vi.mocked(useDefaultLayout).mockReturnValue({
+    defaultLayout: undefined,
+    onLayoutChanged: () => {},
+  });
+  vi.mocked(usePanelRef).mockReturnValue({
+    current: {
+      collapse: () => {},
+      expand: () => {},
+      isCollapsed: () => true,
+      getSize: () => ({ asPercentage: 0 }),
+      resize: () => {},
+    },
+  });
   vi.stubGlobal(
     "matchMedia",
     vi.fn().mockReturnValue({
@@ -347,6 +363,29 @@ describe("reader annotation chrome", () => {
           }),
         }),
       );
+    });
+  });
+
+  it("restores a previously saved chat panel width on expand", async () => {
+    const resize = vi.fn();
+    const saved = { reader: 65, chat: 35 };
+    vi.mocked(useDefaultLayout).mockReturnValue({
+      defaultLayout: saved,
+      onLayoutChanged: () => {},
+    });
+    vi.mocked(usePanelRef).mockReturnValue({
+      current: {
+        collapse: () => {},
+        expand: () => {},
+        isCollapsed: () => true,
+        getSize: () => ({ asPercentage: 0 }),
+        resize,
+      },
+    });
+    const screen = await openReader();
+    fireEvent.click(screen.getByText("fake-ask"));
+    await waitFor(() => {
+      expect(resize).toHaveBeenCalledWith("35%");
     });
   });
 });

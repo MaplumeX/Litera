@@ -54,6 +54,8 @@ Each component owns its own UI state:
 
 Reader chrome flags (`tocVisible`, `annotationsVisible`, `chatCollapsed`) live only in `App` `useState`. They survive book switches in the same process. Do not write them to `save_preferences` or `library.json`. Restart returns to TOC / 标注 closed + chat collapsed. Clear `toc` and the annotations snapshot when leaving a book. `tocVisible` and `annotationsVisible` are exclusive: opening one closes the other. Annotation lists load via `get_annotations` when a book opens and save as a full `save_annotations` snapshot. Do not enable save until that load succeeds; a corrupt file must stay corrupt, not be replaced by `[]`.
 
+**Exception — chat panel width**: the reader/chat split width IS persisted, via `useDefaultLayout({ id: "reader-chat", onlySaveAfterUserInteractions: true })` from `react-resizable-panels` (localStorage key `react-resizable-panels:reader-chat`). The collapse state itself is not persisted. `onlySaveAfterUserInteractions` is required so imperative `collapse()`/`expand()`/`resize()` layout commits are never written to storage. Two gotchas when restoring the saved width in the expand effect: (1) `panel.resize()` interprets a numeric argument as **pixels**, so pass a percentage string (e.g. `` panel.resize(`${savedWidth}%`) ``); (2) the old "resize to 22 when <= 18" fallback must only run when there is no saved width, otherwise it overwrites saved widths in the 18–22% range.
+
 ### 3. Ref state (non-rendering)
 
 Values that should NOT trigger re-renders but need to be read by effects or event handlers:

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { Group, Panel, Separator, usePanelRef } from "react-resizable-panels";
+import { Group, Panel, Separator, useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { Button } from "@/components/ui/button";
 import {
   WindowControls,
@@ -140,6 +140,12 @@ function App() {
   const readerRef = useRef<ReaderViewHandle>(null);
   const chatRef = useRef<ChatPanelHandle>(null);
   const chatPanelRef = usePanelRef();
+  // Persist the drag-adjusted chat panel width across restarts; only user
+  // interactions are saved so imperative collapse/expand never overwrite it.
+  const { defaultLayout: savedChatLayout, onLayoutChanged } = useDefaultLayout({
+    id: "reader-chat",
+    onlySaveAfterUserInteractions: true,
+  });
   const pendingCaptureRef = useRef<SelectionCapture | null>(null);
   const closingRef = useRef(false);
   const openBookControllerRef = useRef(createLatestSerializedTaskController());
@@ -437,11 +443,16 @@ function App() {
       return;
     }
     panel.expand();
-    // First expand has no saved size, so the library opens at minSize (18).
-    if (panel.isCollapsed() || panel.getSize().asPercentage <= 18) {
+    const savedWidth = savedChatLayout?.chat;
+    if (savedWidth !== undefined && savedWidth > 0) {
+      // Restore the user's saved width, which may be below the 22% default.
+      // Pass a percentage string: numeric values are interpreted as pixels.
+      panel.resize(`${savedWidth}%`);
+    } else if (panel.isCollapsed() || panel.getSize().asPercentage <= 18) {
+      // First expand has no saved size, so the library opens at minSize (18).
       panel.resize("22");
     }
-  }, [view, chatCollapsed, chatPanelRef]);
+  }, [view, chatCollapsed, chatPanelRef, savedChatLayout]);
 
   useLayoutEffect(() => {
     if (chatCollapsed) return;
@@ -709,9 +720,13 @@ function App() {
       {/* Reader + Chat panel split */}
       <div className="relative flex flex-1 overflow-hidden">
         <Group
+          id="reader-chat"
           orientation="horizontal"
           className="h-full w-full"
-          defaultLayout={chatCollapsed ? { reader: 100, chat: 0 } : { reader: 78, chat: 22 }}
+          defaultLayout={
+            chatCollapsed ? { reader: 100, chat: 0 } : (savedChatLayout ?? { reader: 78, chat: 22 })
+          }
+          onLayoutChanged={onLayoutChanged}
         >
           <Panel id="reader" defaultSize="78" minSize="40">
             <div className="relative h-full w-full overflow-hidden">
