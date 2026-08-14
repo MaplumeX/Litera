@@ -976,3 +976,25 @@ Added a searchable system-font picker for reader body text. fontFamily is now a 
 ### Status
 
 [OK] **Completed**
+
+
+## Session 44: Select-then-apply LLM provider settings
+
+**Date**: 2026-08-14
+**Task**: Select-then-apply LLM provider settings
+**Branch**: `main`
+
+### Summary
+
+Reworked LLM settings into draft-then-apply: one form for built-in and custom, custom providers keep a full model list, and custom OpenAI-compatible endpoints can refresh models via Rust GET /models. Selecting a provider no longer writes settings or restarts the sidecar.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f839fc2` | (see git log) |
+| `d9aa65e` | (see git log) |
+
+### Status
+
+[OK] **Completed**
