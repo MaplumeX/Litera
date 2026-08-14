@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Must not restyle left nav, sliders, font combobox, or AI form"}
+{"file": ".trellis/spec/frontend/directory-structure.md", "reason": "New control stays under settings/, not src/components/ui/"}
+{"file": ".trellis/spec/frontend/i18n.md", "reason": "Locale must not land in preferences.json"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "General frontend quality bar"}

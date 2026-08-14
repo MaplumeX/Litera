@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "SettingsDialog shell, shadcn ownership, and which controls already exist"}
+{"file": ".trellis/spec/frontend/directory-structure.md", "reason": "settings/ vs ui/ — do not drop a local control into shadcn-owned ui/"}
+{"file": ".trellis/spec/frontend/i18n.md", "reason": "Language row must keep setLocale / localStorage; do not write preferences.json"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Three exclusive rows share one control; do not add a second primitive"}
