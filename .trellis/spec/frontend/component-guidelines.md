@@ -285,8 +285,30 @@ See `src/lib/book-utils.ts` for the full implementation.
 > - edit `src/foliate-js/` (git submodule)
 > - use a cooldown that **extends on every event** — macOS trackpad inertia keeps that lock alive and the next intentional swipe feels dead
 > - ignore `deltaMode` and treat every delta as pixels — line-mode notches never reach a pixel threshold
+> - hit-test iframe clicks with `doc.defaultView.innerWidth` or raw `clientX` (see next gotcha)
 
 Helpers live in `src/lib/reader-paging.ts`. Implementation: `src/components/ReaderView.tsx`.
+
+### Gotcha: iframe click X is chapter-strip local, not the visible page
+
+> **Warning**: In paginated mode foliate's paginator expands the chapter iframe to `pageCount * pageSize`. `#container` then `scrollLeft`s to show one spread. `window.innerWidth` is the **whole strip**. `document.documentElement.clientWidth` is **one spread** (`html` is sized to `pageSize`). `PointerEvent.clientX` is measured from the left of the strip.
+>
+> Using `hitFromClientX(clientX, innerWidth)` looks fine on a 1-page section and wrong on a long one: early pages all hit **left**, middle pages **middle** (no turn), late pages all **right**. Host gutter clicks (relative to `foliate-view` `clientWidth`) are a different coordinate space and stay correct.
+>
+> **Wrong**:
+> ```ts
+> hitFromClientX(ev.clientX, doc.defaultView.innerWidth)
+> hitFromClientX(ev.clientX, doc.documentElement.clientWidth) // width fixed, X still strip-local
+> hitFromClientX(hostLocalX, host.clientWidth)                // wide window: text sits in the middle third
+> ```
+>
+> **Correct**:
+> ```ts
+> const pageWidth = doc.documentElement.clientWidth
+> hitFromClientX(pageLocalX(ev.clientX, pageWidth), pageWidth)
+> ```
+>
+> `pageLocalX` is positive modulo (`((x % w) + w) % w`); `pageWidth <= 0` returns `0` so `hitFromClientX` yields `"middle"`. Click zones are the visible spread, not the full reader chrome. Do not query `#container` from outside — `Paginator` uses a closed shadow root.
 
 ### Display app-data images via convertFileSrc
 
