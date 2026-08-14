@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Confirm capabilities are granted in JSON not Rust; window-state flags and hidden-then-show launch are unchanged"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Window buttons must match existing toolbar Button/lucide/aria-label rules"}
+{"file": ".trellis/spec/frontend/i18n.md", "reason": "zh-CN and en catalogs must stay key-parity; no preferences.json locale or chrome fields"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "No new sidecar protocol or Rust command unless design requires it"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Close path must still flush reading state; geometry stays in window-state file"}
+{"file": ".trellis/tasks/08-14-remove-native-shell/prd.md", "reason": "Verify AC1–AC8: platform chrome, drag vs controls, flush-on-close, no extra titlebar"}
+{"file": ".trellis/tasks/08-14-remove-native-shell/design.md", "reason": "Custom close must call close(); drag attribute not on interactive controls; chrome applied before show()"}

@@ -37,6 +37,7 @@ These guides help you **ask the right questions before coding**.
 - [ ] You are adding an event kind, JSONL record, RPC payload, or config field
 - [ ] You want to persist a new user preference next to theme — `preferences.json` uses `deny_unknown_fields`; a new key resets old builds (UI locale uses `localStorage`, see frontend `i18n.md`)
 - [ ] You want to remember window size/position/maximized — use `tauri-plugin-window-state`, not `preferences.json` (see frontend `quality-guidelines.md` "main window size / position / maximized")
+- [ ] You want to change the OS title bar / traffic lights / window buttons — merge into existing headers; apply Overlay vs `set_decorations(false)` in `lib.rs` **before** `show()`; custom close must `close()` not `destroy()` (see frontend `quality-guidelines.md` "main window chrome")
 - [ ] You want to store a named `fontFamily` — `is_supported` must use `is_valid_font_family`, not a three-value enum, or `ensure_file` resets theme + typography (see backend `tauri-commands.md` "reader system font family")
 - [ ] UI / command code starts casting raw payload fields directly
 - [ ] OS / argv / deep-link input can arrive twice or before the WebView mounts (drain a queue; see backend `tauri-commands.md` "OS EPUB open")

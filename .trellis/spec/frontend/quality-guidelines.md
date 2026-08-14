@@ -134,3 +134,89 @@ WindowStateBuilder::default()
 ```
 
 Do not run `npm run tauri add window-state`: it adds the unused JS package, grants `window-state:default`, and registers `StateFlags::all()`.
+
+## Scenario: main window chrome (no OS title bar)
+
+### 1. Scope / Trigger
+
+- Trigger: the single `main` window must not show an OS title bar. macOS keeps native traffic lights; Windows / Linux draw min / max / close on the existing library and reader headers.
+- Do not add a second titlebar row. Do not persist chrome in `preferences.json`.
+
+### 2. Signatures
+
+No new `#[tauri::command]`. Chrome is applied in `src-tauri/src/lib.rs` `setup` on the existing `main` window **before** `show()` / `set_focus()`.
+
+```rust
+if let Some(window) = app.get_webview_window("main") {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = window.set_title_bar_style(tauri::TitleBarStyle::Overlay);
+        let _ = window.set_title("");
+    }
+    #[cfg(any(windows, target_os = "linux"))]
+    {
+        let _ = window.set_decorations(false);
+    }
+    let _ = window.show();
+    let _ = window.set_focus();
+}
+```
+
+Frontend: `src/lib/platform.ts` (`detectDesktopOs` / `usesCustomWindowControls` from `navigator.userAgent`). `WindowControls` calls `getCurrentWindow().minimize()` / `toggleMaximize()` / `close()`.
+
+### 3. Contracts
+
+- Shared `tauri.conf.json` stays `"visible": false` and does **not** set `"decorations": false` (that would drop macOS traffic lights).
+- macOS: Overlay + empty title. Tauri 2.11.5 `WebviewWindow` has no post-create `set_traffic_light_position`; pad the header `pl-[72px]` instead. Do not draw custom traffic lights.
+- Windows / Linux: `set_decorations(false)` while hidden, then `show()`.
+- Capabilities in `src-tauri/capabilities/default.json`: keep `core:window:allow-destroy`; also grant `allow-start-dragging`, `allow-minimize`, `allow-toggle-maximize`, `allow-close`.
+- Custom close must call `close()`, never `destroy()`. `App.tsx` `onCloseRequested` still `preventDefault` → flush ≤2s → `destroy()`.
+- `data-tauri-drag-region` is **not inherited**. Mark only the title node and the flex spacer. Buttons and search must not have it.
+- Double-click a drag node (`buttons === 1`, `detail === 2`) → `toggleMaximize()`. The attribute alone does not maximize.
+- Platform `tauri.*.conf.json` `windows` arrays can replace the shared `windows[0]`. Prefer Rust setup. If JSON is required, copy the full window object.
+- Do not add `@tauri-apps/plugin-os`.
+
+### 4. Validation & Error Matrix
+
+- `set_title_bar_style` / `set_decorations` / `show` / `set_focus` fail → ignored; setup must not return `Err`.
+- Custom close via `destroy()` → flush skipped (reading progress can be lost).
+- Shared `"decorations": false` → macOS loses traffic lights.
+- Chrome applied after `show()` → native title bar flashes.
+
+### 5. Good/Base/Bad Cases
+
+- Good: launch hidden → Overlay or undecorated → show. macOS traffic lights usable; Win/Linux custom buttons on both headers.
+- Base: drag title / spacer moves the window; search and toolbar buttons still click.
+- Bad: `data-tauri-drag-region` on the header root, or close via `destroy()`.
+
+### 6. Tests Required
+
+- `platform.ts`: Mac / Win / Linux / unknown UA.
+- `WindowControls`: hidden on Mac UA; visible on Win/Linux; buttons call minimize / toggleMaximize / `close` (not `destroy`).
+- Library + reader: `h-12`; Mac `pl-[72px]` and no custom buttons; title + spacer have drag + `select-none`; search/actions do not; spacer double-click → `toggleMaximize`.
+- Pin Windows UA in chrome tests; do not depend on jsdom's host UA.
+- `npm test` + `npm run build`. Live OS chrome is manual (`npm run tauri dev`).
+
+### 7. Wrong vs Correct
+
+#### Wrong
+```json
+{ "decorations": false, "visible": false }
+```
+```tsx
+onClick={() => void getCurrentWindow().destroy()}
+<header data-tauri-drag-region>
+```
+
+#### Correct
+```rust
+// decorations only on Win/Linux, still hidden
+#[cfg(any(windows, target_os = "linux"))]
+{ let _ = window.set_decorations(false); }
+let _ = window.show();
+```
+```tsx
+onClick={() => void getCurrentWindow().close()}
+<span data-tauri-drag-region className="select-none">{title}</span>
+<div data-tauri-drag-region className="min-w-0 flex-1" />
+```

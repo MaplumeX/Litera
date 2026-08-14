@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 53
+- **Total Sessions**: 54
 - **Last Active**: 2026-08-14
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1219 | Active |
+| `journal-1.md` | ~1257 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 54 | 2026-08-14 | Remove native window shell | `bc7e8ae` | `fix/remove-native-shell` |
 | 53 | 2026-08-14 | Reader bookmarks and highlights | `02419cb` | `feat/reader-gap-analysis` |
 | 52 | 2026-08-14 | Reader progress scrubber | `7ec411a`, `94d58ad` | `feat/reader-gap-analysis` |
 | 51 | 2026-08-14 | Remember window size | `383fc0f`, `2be28f8` | `fix/app-not-remember-window-size` |

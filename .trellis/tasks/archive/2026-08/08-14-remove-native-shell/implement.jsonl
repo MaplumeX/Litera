@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Capabilities live in default.json; window-state flags and visible:false + app show() must stay"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Toolbar icon buttons use Button icon-sm + lucide + aria-label; do not add a second chrome row"}
+{"file": ".trellis/spec/frontend/i18n.md", "reason": "Window control labels go in zh-CN/en catalogs via useT(); do not persist locale or chrome in preferences.json"}
+{"file": ".trellis/spec/frontend/directory-structure.md", "reason": "New chrome helper/component live under src/lib and src/components; capabilities stay in src-tauri/capabilities"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "Window setup belongs in lib.rs; do not invent a new command module for chrome"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Do not persist window chrome or geometry in preferences.json (deny_unknown_fields)"}
+{"file": ".trellis/tasks/08-14-remove-native-shell/design.md", "reason": "Platform split, close() vs destroy(), drag-region rules, apply chrome before show()"}
+{"file": ".trellis/tasks/08-14-remove-native-shell/prd.md", "reason": "Acceptance: Overlay traffic lights on macOS, custom buttons on Win/Linux, merged toolbars"}

@@ -3,6 +3,11 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Group, Panel, Separator, usePanelRef } from "react-resizable-panels";
 import { Button } from "@/components/ui/button";
+import {
+  WindowControls,
+  onTitlebarDragMouseDown,
+  titlebarClassName,
+} from "@/components/WindowControls";
 import { Bookmark, ChevronLeft, List, Type, MessageSquare } from "lucide-react";
 import {
   ReaderView,
@@ -627,7 +632,7 @@ function App() {
         actionDisabled={bookImport.importing}
       />
       {/* Top toolbar */}
-      <header className="flex items-center gap-3 border-b px-4 py-2">
+      <header className={titlebarClassName()}>
         <Button
           size="icon-sm"
           variant="ghost"
@@ -636,7 +641,18 @@ function App() {
         >
           <ChevronLeft />
         </Button>
-        <h1 className="min-w-0 flex-1 truncate text-lg font-bold">{bookTitle}</h1>
+        <h1
+          className="min-w-0 shrink truncate select-none text-lg font-bold"
+          data-tauri-drag-region
+          onMouseDown={onTitlebarDragMouseDown}
+        >
+          {bookTitle}
+        </h1>
+        <div
+          className="min-h-0 min-w-0 flex-1 select-none self-stretch"
+          data-tauri-drag-region
+          onMouseDown={onTitlebarDragMouseDown}
+        />
         <div className="flex items-center gap-1">
           <Button
             size="icon-sm"
@@ -678,6 +694,7 @@ function App() {
             <MessageSquare />
           </Button>
         </div>
+        <WindowControls />
       </header>
       <ReaderProgressBar
         fraction={progress.fraction}

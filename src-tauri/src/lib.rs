@@ -109,6 +109,16 @@ pub fn run() {
             open_paths::enqueue_current_process_args(app.handle());
 
             if let Some(window) = app.get_webview_window("main") {
+                // Apply chrome while hidden so the native title bar never flashes.
+                #[cfg(target_os = "macos")]
+                {
+                    let _ = window.set_title_bar_style(tauri::TitleBarStyle::Overlay);
+                    let _ = window.set_title("");
+                }
+                #[cfg(any(windows, target_os = "linux"))]
+                {
+                    let _ = window.set_decorations(false);
+                }
                 let _ = window.show();
                 let _ = window.set_focus();
             }

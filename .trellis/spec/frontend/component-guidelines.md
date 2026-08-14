@@ -85,10 +85,26 @@ import { ChevronLeft, List, Settings } from "lucide-react"
 
 **Layout**:
 ```
-header:   [←]  book title (h1, truncate)     [TOC][标注][Aa][chat]
+header:   [mac inset?] [←]  book title (drag)  [spacer drag]  [TOC][标注][Aa][chat]  [Win/Linux window buttons]
 progress: ================= chapter · 42% =================  (scrubber)
 body:     [TOC or 标注 overlay]  Reader  |  Chat (collapsed = 0 width, still mounted)
 ```
+
+### Convention: window chrome merges into existing headers
+
+**What**: There is no second titlebar. Library and reader headers are `h-12` via `titlebarClassName()`. macOS keeps system traffic lights and adds `pl-[72px]`; Windows / Linux render `WindowControls` on the far right.
+
+**Why**: A dedicated titlebar steals reading height. Shared `"decorations": false` would drop macOS traffic lights.
+
+**Rules**:
+- Use `titlebarClassName()` / `onTitlebarDragMouseDown` / `WindowControls` from `src/components/WindowControls.tsx`. Do not fork a second chrome row.
+- `data-tauri-drag-region` + `select-none` only on the title and the flex spacer. Never on the header root, search, or buttons.
+- Custom close calls `close()`, not `destroy()`.
+- Window buttons are `Button` `icon-sm` `ghost` + lucide (`Minus` / `Square` / `X`) with `useT()` aria-labels (`window.minimize` / `window.maximize` / `window.close`).
+- Detect OS with `src/lib/platform.ts` (`navigator.userAgent`). Do not add `@tauri-apps/plugin-os`.
+- Maximize button stays `Square` / "maximize"; do not add `isMaximized` restore-icon state unless a later task asks.
+
+**Related**: frontend `quality-guidelines.md` "main window chrome (no OS title bar)".
 
 ### Convention: chat locator is a chapter href, not a spine index
 
