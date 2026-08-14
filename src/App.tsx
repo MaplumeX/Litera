@@ -16,6 +16,7 @@ import {
   BookImportConfirmDialog,
   BookImportNotices,
 } from "@/components/BookImportFeedback";
+import { ReaderProgressBar } from "@/components/ReaderProgressBar";
 import { TocSidebar } from "@/components/TocSidebar";
 import { SettingsDialog } from "@/components/settings/SettingsDialog";
 import {
@@ -117,6 +118,8 @@ function App() {
   const pendingCaptureRef = useRef<SelectionCapture | null>(null);
   const closingRef = useRef(false);
   const openBookControllerRef = useRef(createLatestSerializedTaskController());
+  // Drag can fire goToFraction faster than foliate finishes; keep latest-wins.
+  const seekControllerRef = useRef(createLatestSerializedTaskController());
   // Latest fraction for open-book / relocate; do not write it into currentBook
   // on every relocate or ReaderView's [fileData, initialFraction] effect re-opens.
   const lastKnownFractionRef = useRef<number | undefined>(undefined);
@@ -436,6 +439,7 @@ function App() {
     setTocVisible(false);
   }, []);
 
+  const chapterLabel = progress.label ?? `Chapter ${progress.index + 1}`;
   const bookTitle = currentBook?.title || fileData?.name || "";
   const editingBook = view === "reader" && Boolean(currentBook || fileData);
   const overriddenKeys: TypographyKey[] = editingBook
@@ -535,6 +539,15 @@ function App() {
           </Button>
         </div>
       </header>
+      <ReaderProgressBar
+        fraction={progress.fraction}
+        chapterLabel={chapterLabel}
+        onSeek={(frac) => {
+          void seekControllerRef.current.run(async () => {
+            await readerRef.current?.goToFraction(frac);
+          });
+        }}
+      />
 
       {/* Reader + Chat panel split */}
       <div className="relative flex flex-1 overflow-hidden">

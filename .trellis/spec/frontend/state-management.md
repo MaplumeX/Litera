@@ -37,9 +37,9 @@ const [tocVisible, setTocVisible] = useState(false);
 These are the closest thing to "global state". They're passed down as props:
 - `fileData` → `ReaderView` (triggers book open effect)
 - `onRelocate`, `onSelectionCapture`, `onBookReady` → `ReaderView` (callbacks)
-- `currentChapterIndex`, `bookId` → `ChatPanel` (context for prompts)
+- `progress.chapterHref`, `bookId` → `ChatPanel` (context for prompts)
 
-`progress` is relocate state, not reader chrome. Do not delete it when removing a progress bar: `progress.index` is `ChatPanel`'s `currentChapterIndex`, and `fraction` is persisted as `lastFraction`. Visible percent belongs on `BookCard`.
+`progress` is relocate state for chat + persist. The always-visible scrubber under the header reads `label` / `fraction` from it and seeks via `goToFraction`; it does not own a second copy of the fraction. Relocate updates the bar. `progress.chapterHref` goes to `ChatPanel`; `fraction` persists as `lastFraction`. Do not put percent in the header icon cluster. `BookCard` still shows library-card progress from `lastFraction`.
 
 ### 2. Local component state
 

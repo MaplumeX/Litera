@@ -79,13 +79,14 @@ import { ChevronLeft, List, Settings } from "lucide-react"
 
 ### Convention: reader chrome is reading-first
 
-**What**: The reader view is book-title + overlay TOC + on-demand chat. Chat starts collapsed. TOC is never a third column. There is no dedicated reader progress chrome.
+**What**: The reader view is book-title + always-visible progress scrubber + overlay TOC + on-demand chat. Chat starts collapsed. TOC is never a third column.
 
-**Why**: A fixed TOC column and a default 35% chat pane make the book a side panel. Toggling chat by remounting `ReaderView` / `ChatPanel` reopens the EPUB and breaks `fillInput`. A permanent progress row under the header also steals chrome from the book; chapter identity belongs in TOC, and `lastFraction` is shown on library cards.
+**Why**: A fixed TOC column and a default 35% chat pane make the book a side panel. Toggling chat by remounting `ReaderView` / `ChatPanel` reopens the EPUB and breaks `fillInput`. The scrubber under the header shows chapter + percent and jumps via `goToFraction`. Percent does not live in the header icon cluster; library cards still show `lastFraction`.
 
 **Layout**:
 ```
 header:   [←]  book title (h1, truncate)     [TOC][Aa][chat]
+progress: ================= chapter · 42% =================  (scrubber)
 body:     [TOC overlay]  Reader  |  Chat (collapsed = 0 width, still mounted)
 ```
 
@@ -104,7 +105,7 @@ body:     [TOC overlay]  Reader  |  Chat (collapsed = 0 width, still mounted)
 
 **Rules**:
 - Reader header title is the book name. Do not put the `Litera` brand in the reader toolbar.
-- Do not add a full-width progress bar, hairline, header percentage, or footer page numbers on the reader page. `App` still keeps `progress` state: `index` goes to `ChatPanel` as `currentChapterIndex`; `fraction` persists as `lastFraction`. Visible progress lives on `BookCard`, not in reader chrome.
+- Progress is an always-visible full-width scrubber under the header (chapter label + percent + fill). Click/drag maps pointer x / width to 0–1 and calls `readerRef.goToFraction`. Drag can outrun foliate: wrap seeks in `createLatestSerializedTaskController` (latest-wins). Do not put percent in the header icon cluster, and do not add hover-only bars, remaining-time, or footer page numbers. `App` still keeps `progress` as relocate state: `chapterHref` goes to `ChatPanel`; `fraction` persists as `lastFraction`. Library-card percent stays on `BookCard`.
 - TOC is an absolute left drawer over `ReaderView` (backdrop / Esc / chapter click close). Do not insert a `w-56 shrink-0` column beside the reader. `App` may listen for `Escape` to close TOC; do not handle `ArrowLeft` / `ArrowRight` in `App` (ReaderView owns paging on the chapter iframe).
 - Mount exactly one `ReaderView`. Keep `ChatPanel` mounted when collapsed (`hidden` + panel collapse). Do not branch two copies of `ReaderView`.
 - Chat open size is ~22%. Do not bind `Panel` `defaultSize` / `minSize` to `chatCollapsed` — that re-registers the panel and resets the layout.
