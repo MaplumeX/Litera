@@ -1064,3 +1064,27 @@ Removed the sepia (eye-care) theme and replaced it with a system-following theme
 ### Status
 
 [OK] **Completed**
+
+
+## Session 48: Three-platform GitHub Release v0.1.0
+
+**Date**: 2026-08-14
+**Task**: Three-platform GitHub Release v0.1.0
+**Branch**: `main`
+
+### Summary
+
+Landed a tag-driven GitHub Release pipeline (Linux AppImage+deb, macOS Apple Silicon dmg, Windows NSIS), version lockstep script, ad-hoc macOS signing, CHANGELOG/README, and release spec. First v0.1.0 draft shipped after fixing missing foliate-js submodule checkout. Draft is at GitHub Releases; not auto-published.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f6b0d3f` | (see git log) |
+| `66423c1` | (see git log) |
+| `698f0fc` | (see git log) |
+| `a945ba1` | (see git log) |
+
+### Status
+
+[OK] **Completed**

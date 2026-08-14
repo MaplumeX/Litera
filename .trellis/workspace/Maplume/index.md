@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 47
+- **Total Sessions**: 48
 - **Last Active**: 2026-08-14
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1066 | Active |
+| `journal-1.md` | ~1090 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 48 | 2026-08-14 | Three-platform GitHub Release v0.1.0 | `f6b0d3f`, `66423c1`, `698f0fc`, `a945ba1` | `main` |
 | 47 | 2026-08-14 | Replace sepia theme with system-following theme | `4edd42b`, `4e4fd9a` | `main` |
 | 46 | 2026-08-14 | Unify custom LLM model picker | `a4976d1`, `6785b18` | `main` |
 | 45 | 2026-08-14 | Settings segmented control | `2c7a3d6`, `d0089a1` | `main` |
