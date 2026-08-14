@@ -15,8 +15,13 @@ use tempfile::NamedTempFile;
 use crate::error::{AppError, AppResult};
 
 const SCHEMA_VERSION: u32 = 1;
+const ANNOTATIONS_SCHEMA_VERSION: u32 = 1;
 const MAX_TITLE_BYTES: usize = 4 * 1024;
 const MAX_AUTHOR_BYTES: usize = 4 * 1024;
+const MAX_CFI_BYTES: usize = 8 * 1024;
+const MAX_EXCERPT_BYTES: usize = 4 * 1024;
+const MAX_LABEL_BYTES: usize = 4 * 1024;
+const MAX_ANNOTATION_ID_BYTES: usize = 128;
 const MAX_COVER_BYTES: usize = 20 * 1024 * 1024;
 const FONT_SIZE_RANGE: (f64, f64) = (12.0, 32.0);
 const LINE_HEIGHT_RANGE: (f64, f64) = (1.2, 2.4);
@@ -203,6 +208,46 @@ pub struct BookOpenContext {
     #[serde(rename = "lastFraction", skip_serializing_if = "Option::is_none")]
     pub last_fraction: Option<f64>,
     pub settings: Option<ReadingSettings>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BookmarkRecord {
+    pub id: String,
+    pub cfi: String,
+    pub fraction: f64,
+    pub created_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct HighlightRecord {
+    pub id: String,
+    pub cfi: String,
+    pub excerpt: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AnnotationsFile {
+    pub schema_version: u32,
+    #[serde(default)]
+    pub bookmarks: Vec<BookmarkRecord>,
+    #[serde(default)]
+    pub highlights: Vec<HighlightRecord>,
+}
+
+impl AnnotationsFile {
+    fn empty() -> Self {
+        Self {
+            schema_version: ANNOTATIONS_SCHEMA_VERSION,
+            bookmarks: Vec::new(),
+            highlights: Vec::new(),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -848,6 +893,57 @@ impl LibraryStore {
         self.write_library(&library)
     }
 
+    fn annotations_path(&self, book_id: &str) -> AppResult<PathBuf> {
+        Ok(self.book_dir(book_id)?.join("annotations.json"))
+    }
+
+    fn require_existing_book(&self, book_id: &str) -> AppResult<()> {
+        let library = self.read_library()?;
+        library
+            .books
+            .iter()
+            .find(|book| book.id == book_id)
+            .ok_or_else(|| AppError::book_not_found(book_id))?;
+        Ok(())
+    }
+
+    pub fn get_annotations(&self, book_id: &str) -> AppResult<AnnotationsFile> {
+        validate_book_id(book_id)?;
+        let _guard = self.transaction()?;
+        self.require_existing_book(book_id)?;
+        let path = self.annotations_path(book_id)?;
+        let bytes = match fs::read(&path) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(AnnotationsFile::empty());
+            }
+            Err(error) => {
+                return Err(AppError::storage_io(format!(
+                    "Failed to read annotations.json: {error}"
+                )));
+            }
+        };
+        let data: AnnotationsFile = serde_json::from_slice(&bytes).map_err(|error| {
+            AppError::storage_corrupt(format!("Failed to parse annotations.json: {error}"))
+        })?;
+        validate_annotations(&data).map_err(|error| {
+            AppError::storage_corrupt(format!("Invalid annotations.json: {error}"))
+        })?;
+        Ok(data)
+    }
+
+    pub fn save_annotations(&self, book_id: &str, data: AnnotationsFile) -> AppResult<()> {
+        validate_book_id(book_id)?;
+        validate_annotations(&data)?;
+        let _guard = self.transaction()?;
+        self.require_existing_book(book_id)?;
+        let path = self.annotations_path(book_id)?;
+        let json = serde_json::to_vec_pretty(&data).map_err(|error| {
+            AppError::storage_io(format!("Failed to serialize annotations: {error}"))
+        })?;
+        recoverable_atomic_write(&path, &json, "annotations.json")
+    }
+
     #[cfg(test)]
     fn fail_next_library_write(&self) {
         self.fail_next_library_write
@@ -1405,6 +1501,91 @@ fn validate_text(name: &str, value: &str, max_bytes: usize, allow_empty: bool) -
     Ok(())
 }
 
+fn validate_annotation_id(id: &str) -> AppResult<()> {
+    if id.is_empty()
+        || id.len() > MAX_ANNOTATION_ID_BYTES
+        || !id
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
+    {
+        return Err(AppError::invalid_input(
+            "annotation id must contain 1-128 ASCII letters, digits, '-' or '_'",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_cfi(cfi: &str) -> AppResult<()> {
+    if cfi.is_empty() || cfi.len() > MAX_CFI_BYTES {
+        return Err(AppError::invalid_input(format!(
+            "cfi must be non-empty and at most {MAX_CFI_BYTES} bytes"
+        )));
+    }
+    if !cfi.starts_with("epubcfi(") || cfi.starts_with("foliate-search:") {
+        return Err(AppError::invalid_input(
+            "cfi must be an epubcfi(...) locator",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_created_at(value: &str) -> AppResult<()> {
+    chrono::DateTime::parse_from_rfc3339(value)
+        .map(|_| ())
+        .map_err(|_| AppError::invalid_input("createdAt must be RFC3339"))
+}
+
+fn validate_annotations(data: &AnnotationsFile) -> AppResult<()> {
+    if data.schema_version != ANNOTATIONS_SCHEMA_VERSION {
+        return Err(AppError::invalid_input(
+            "Unsupported annotations schemaVersion",
+        ));
+    }
+
+    let mut ids = HashSet::new();
+    let mut bookmark_cfis = HashSet::new();
+    for bookmark in &data.bookmarks {
+        validate_annotation_id(&bookmark.id)?;
+        if !ids.insert(bookmark.id.as_str()) {
+            return Err(AppError::invalid_input(format!(
+                "Duplicate annotation id: {}",
+                bookmark.id
+            )));
+        }
+        validate_cfi(&bookmark.cfi)?;
+        if !bookmark_cfis.insert(bookmark.cfi.as_str()) {
+            return Err(AppError::invalid_input("Duplicate bookmark cfi"));
+        }
+        if !bookmark.fraction.is_finite() || !(0.0..=1.0).contains(&bookmark.fraction) {
+            return Err(AppError::invalid_input(
+                "bookmark fraction must be a finite number between 0 and 1",
+            ));
+        }
+        validate_created_at(&bookmark.created_at)?;
+        if let Some(label) = &bookmark.label {
+            validate_text("label", label, MAX_LABEL_BYTES, true)?;
+        }
+    }
+
+    let mut highlight_cfis = HashSet::new();
+    for highlight in &data.highlights {
+        validate_annotation_id(&highlight.id)?;
+        if !ids.insert(highlight.id.as_str()) {
+            return Err(AppError::invalid_input(format!(
+                "Duplicate annotation id: {}",
+                highlight.id
+            )));
+        }
+        validate_cfi(&highlight.cfi)?;
+        if !highlight_cfis.insert(highlight.cfi.as_str()) {
+            return Err(AppError::invalid_input("Duplicate highlight cfi"));
+        }
+        validate_text("excerpt", &highlight.excerpt, MAX_EXCERPT_BYTES, false)?;
+        validate_created_at(&highlight.created_at)?;
+    }
+    Ok(())
+}
+
 fn validate_settings(settings: &ReadingSettings) -> AppResult<()> {
     if let Some(font_size) = settings.font_size {
         if !in_typography_range(font_size, FONT_SIZE_RANGE.0, FONT_SIZE_RANGE.1) {
@@ -1956,6 +2137,25 @@ pub async fn update_reading_state(
 ) -> AppResult<()> {
     let store = store.inner().clone();
     run_blocking(move || store.update_reading_state(&book_id, last_fraction, settings)).await
+}
+
+#[tauri::command]
+pub async fn get_annotations(
+    store: tauri::State<'_, LibraryStore>,
+    book_id: String,
+) -> AppResult<AnnotationsFile> {
+    let store = store.inner().clone();
+    run_blocking(move || store.get_annotations(&book_id)).await
+}
+
+#[tauri::command]
+pub async fn save_annotations(
+    store: tauri::State<'_, LibraryStore>,
+    book_id: String,
+    data: AnnotationsFile,
+) -> AppResult<()> {
+    let store = store.inner().clone();
+    run_blocking(move || store.save_annotations(&book_id, data)).await
 }
 
 #[cfg(test)]
@@ -3128,5 +3328,175 @@ mod tests {
             assert_eq!(error.code, AppErrorCode::InvalidInput);
             assert!(store.list_books().expect("list").is_empty());
         }
+    }
+
+    fn sample_annotations() -> AnnotationsFile {
+        AnnotationsFile {
+            schema_version: ANNOTATIONS_SCHEMA_VERSION,
+            bookmarks: vec![BookmarkRecord {
+                id: "b_01hxyz".into(),
+                cfi: "epubcfi(/6/8!/4/2,/1:0,/1:80)".into(),
+                fraction: 0.42,
+                created_at: "2026-08-14T12:00:00+00:00".into(),
+                label: Some("Chapter 3".into()),
+            }],
+            highlights: vec![HighlightRecord {
+                id: "h_01hxyz".into(),
+                cfi: "epubcfi(/6/8!/4/2,/1:12,/1:48)".into(),
+                excerpt: "selected sentence".into(),
+                created_at: "2026-08-14T12:01:00+00:00".into(),
+            }],
+        }
+    }
+
+    #[test]
+    fn missing_annotations_file_returns_empty_lists() {
+        let (_directory, store) = test_store();
+        let id = import_test_book(&store, Path::new("/source/annotations-missing.epub"));
+        let data = store.get_annotations(&id).expect("missing is empty");
+        assert_eq!(data.schema_version, ANNOTATIONS_SCHEMA_VERSION);
+        assert!(data.bookmarks.is_empty());
+        assert!(data.highlights.is_empty());
+    }
+
+    #[test]
+    fn annotations_round_trip() {
+        let (directory, store) = test_store();
+        let id = import_test_book(&store, Path::new("/source/annotations-roundtrip.epub"));
+        let data = sample_annotations();
+        store.save_annotations(&id, data.clone()).expect("save");
+        let loaded = store.get_annotations(&id).expect("load");
+        assert_eq!(loaded, data);
+        assert!(directory
+            .path()
+            .join("books")
+            .join(&id)
+            .join("annotations.json")
+            .is_file());
+        let books = store.list_books().expect("list");
+        let record = serde_json::to_value(&books[0]).expect("book json");
+        assert!(record.get("bookmarks").is_none());
+        assert!(record.get("highlights").is_none());
+        assert!(record.get("annotations").is_none());
+    }
+
+    #[test]
+    fn corrupt_annotations_file_is_storage_corrupt() {
+        let (directory, store) = test_store();
+        let id = import_test_book(&store, Path::new("/source/annotations-corrupt.epub"));
+        let path = directory
+            .path()
+            .join("books")
+            .join(&id)
+            .join("annotations.json");
+        fs::write(&path, br#"{"schemaVersion":1,"bookmarks":["#).expect("corrupt");
+        let error = store.get_annotations(&id).expect_err("corrupt");
+        assert_eq!(error.code, AppErrorCode::StorageCorrupt);
+        assert_eq!(
+            fs::read(&path).expect("file kept"),
+            br#"{"schemaVersion":1,"bookmarks":["#
+        );
+    }
+
+    #[test]
+    fn unknown_annotations_field_is_storage_corrupt() {
+        let (directory, store) = test_store();
+        let id = import_test_book(&store, Path::new("/source/annotations-unknown.epub"));
+        let path = directory
+            .path()
+            .join("books")
+            .join(&id)
+            .join("annotations.json");
+        fs::write(
+            &path,
+            br#"{"schemaVersion":1,"bookmarks":[],"highlights":[],"notes":[]}"#,
+        )
+        .expect("unknown field");
+        let error = store.get_annotations(&id).expect_err("unknown field");
+        assert_eq!(error.code, AppErrorCode::StorageCorrupt);
+    }
+
+    #[test]
+    fn unsupported_annotations_schema_is_storage_corrupt() {
+        let (directory, store) = test_store();
+        let id = import_test_book(&store, Path::new("/source/annotations-schema.epub"));
+        let path = directory
+            .path()
+            .join("books")
+            .join(&id)
+            .join("annotations.json");
+        fs::write(
+            &path,
+            br#"{"schemaVersion":2,"bookmarks":[],"highlights":[]}"#,
+        )
+        .expect("v2");
+        let error = store.get_annotations(&id).expect_err("unsupported schema");
+        assert_eq!(error.code, AppErrorCode::StorageCorrupt);
+    }
+
+    #[test]
+    fn save_annotations_rejects_fraction_out_of_bounds() {
+        let (_directory, store) = test_store();
+        let id = import_test_book(&store, Path::new("/source/annotations-fraction.epub"));
+        let mut data = sample_annotations();
+        data.bookmarks[0].fraction = 1.5;
+        let error = store.save_annotations(&id, data).expect_err("fraction");
+        assert_eq!(error.code, AppErrorCode::InvalidInput);
+        let loaded = store.get_annotations(&id).expect("still empty");
+        assert!(loaded.bookmarks.is_empty());
+    }
+
+    #[test]
+    fn overwrite_keeps_annotations_file() {
+        let (directory, store) = test_store();
+        let source = Path::new("/source/annotations-overwrite.epub");
+        let id = import_test_book(&store, source);
+        store
+            .save_annotations(&id, sample_annotations())
+            .expect("save");
+
+        let result = store
+            .import_bytes(source, "book.epub".to_string(), b"version-two".to_vec())
+            .expect("reimport");
+        store
+            .save_book_metadata(
+                &id,
+                "Version Two".to_string(),
+                "Author Two".to_string(),
+                Some(vec![9, 9, 9]),
+                staged_import_id(&result),
+            )
+            .expect("commit overwrite");
+
+        let loaded = store.get_annotations(&id).expect("kept");
+        assert_eq!(loaded, sample_annotations());
+        assert!(directory
+            .path()
+            .join("books")
+            .join(&id)
+            .join("annotations.json")
+            .is_file());
+    }
+
+    #[test]
+    fn delete_book_removes_annotations_directory() {
+        let (directory, store) = test_store();
+        let id = import_test_book(&store, Path::new("/source/annotations-delete.epub"));
+        store
+            .save_annotations(&id, sample_annotations())
+            .expect("save");
+        let annotations_path = directory
+            .path()
+            .join("books")
+            .join(&id)
+            .join("annotations.json");
+        assert!(annotations_path.is_file());
+
+        store.delete_book(&id).expect("delete");
+
+        assert!(!annotations_path.exists());
+        assert!(store.list_books().expect("list").is_empty());
+        let error = store.get_annotations(&id).expect_err("book gone");
+        assert_eq!(error.code, AppErrorCode::BookNotFound);
     }
 }

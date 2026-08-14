@@ -3,11 +3,12 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Group, Panel, Separator, usePanelRef } from "react-resizable-panels";
 import { Button } from "@/components/ui/button";
-import { ChevronLeft, List, Type, MessageSquare } from "lucide-react";
+import { Bookmark, ChevronLeft, List, Type, MessageSquare } from "lucide-react";
 import {
   ReaderView,
   type ReaderViewHandle,
   type SelectionCapture,
+  type SelectionCfi,
   type TocItem,
 } from "@/components/ReaderView";
 import { ChatPanel, type ChatPanelHandle } from "@/components/chat/ChatPanel";
@@ -18,6 +19,16 @@ import {
 } from "@/components/BookImportFeedback";
 import { ReaderProgressBar } from "@/components/ReaderProgressBar";
 import { TocSidebar } from "@/components/TocSidebar";
+import { AnnotationsSidebar } from "@/components/AnnotationsSidebar";
+import {
+  appendBookmark,
+  appendHighlight,
+  createBookmark,
+  createHighlight,
+  emptyAnnotations,
+  removeBookmark,
+  removeHighlight,
+} from "@/lib/annotations";
 import { SettingsDialog } from "@/components/settings/SettingsDialog";
 import {
   bookSettingsSnapshot,
@@ -28,7 +39,14 @@ import {
   type TypographyKey,
 } from "@/lib/reader-styles";
 import { usePreferences, resolveTheme, themeToClassName, type AppPreferences } from "@/lib/preferences";
-import type { BookOpenContext, BookRecord, ReadingSettings } from "@/types/library";
+import type {
+  AnnotationsFile,
+  BookOpenContext,
+  BookmarkRecord,
+  BookRecord,
+  HighlightRecord,
+  ReadingSettings,
+} from "@/types/library";
 import { useDebouncedCallback } from "@/lib/use-debounced-callback";
 import { invokeErrorMessage } from "@/lib/app-error";
 import { epubBytesFromIpc } from "@/lib/ipc-bytes";
@@ -82,6 +100,8 @@ function App() {
   });
   const [chatCollapsed, setChatCollapsed] = useState(true);
   const [tocVisible, setTocVisible] = useState(false);
+  const [annotationsVisible, setAnnotationsVisible] = useState(false);
+  const [annotations, setAnnotations] = useState<AnnotationsFile>(emptyAnnotations);
   const [toc, setToc] = useState<TocItem[]>([]);
   const [persistenceError, setPersistenceError] = useState<string | null>(null);
   const [openingBookId, setOpeningBookId] = useState<string | null>(null);
@@ -123,6 +143,9 @@ function App() {
   // Latest fraction for open-book / relocate; do not write it into currentBook
   // on every relocate or ReaderView's [fileData, initialFraction] effect re-opens.
   const lastKnownFractionRef = useRef<number | undefined>(undefined);
+  // Do not save until get_annotations succeeds; a failed/in-flight load
+  // must not replace books/<id>/annotations.json with an empty snapshot.
+  const annotationsWritableRef = useRef(false);
   // Track latest style state so handleBookReady can apply it after renderer mounts.
   // The ref holds the resolved (light/dark) theme for reader CSS injection.
   const styleStateRef = useRef(styleState);
@@ -221,10 +244,10 @@ function App() {
     readerRef.current?.setStyles(css);
   }, [styleState, resolvedTheme]);
 
-  // Escape closes the TOC overlay. Page turning lives in ReaderView
+  // Escape closes overlay drawers. Page turning lives in ReaderView
   // (chapter iframe + host); do not handle ArrowLeft/ArrowRight here.
   useEffect(() => {
-    if (view !== "reader" || !tocVisible) return;
+    if (view !== "reader" || (!tocVisible && !annotationsVisible)) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
       if (
@@ -236,11 +259,39 @@ function App() {
       if (e.key === "Escape") {
         e.preventDefault();
         setTocVisible(false);
+        setAnnotationsVisible(false);
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [view, tocVisible]);
+  }, [view, tocVisible, annotationsVisible]);
+
+  const persistAnnotations = useCallback(
+    async (bookId: string, next: AnnotationsFile) => {
+      try {
+        await invoke("save_annotations", { bookId, data: next });
+      } catch (error) {
+        reportPersistenceError(error);
+        throw error;
+      }
+    },
+    [reportPersistenceError],
+  );
+
+  const commitAnnotations = useCallback(
+    async (next: AnnotationsFile) => {
+      const bookId = fileData?.bookId;
+      if (!bookId || !annotationsWritableRef.current) return;
+      const previous = annotations;
+      setAnnotations(next);
+      try {
+        await persistAnnotations(bookId, next);
+      } catch {
+        setAnnotations(previous);
+      }
+    },
+    [annotations, fileData?.bookId, persistAnnotations],
+  );
 
   const handleOpenBook = useCallback(async (bookId: string) => {
     // `open_book_bytes` also switches the sidecar, so it is intentionally
@@ -283,15 +334,27 @@ function App() {
         lastFraction: context.lastFraction,
         settings: context.settings,
       });
+      setAnnotations(emptyAnnotations());
+      annotationsWritableRef.current = false;
 
       setView("reader");
+      try {
+        const data = await invoke<AnnotationsFile>("get_annotations", {
+          bookId: context.bookId,
+        });
+        if (!request.isLatest()) return;
+        setAnnotations(data);
+        annotationsWritableRef.current = true;
+      } catch (error) {
+        if (request.isLatest()) reportPersistenceError(error);
+      }
     } catch (err) {
       console.error("open_book_bytes error:", err);
       alert(t("reader.openFailed", { message: invokeErrorMessage(err) }));
     } finally {
       if (request.isLatest()) setOpeningBookId(null);
     }
-  }, [flushReadingState]);
+  }, [flushReadingState, reportPersistenceError, t]);
 
   useOpenPaths({
     importPaths: bookImport.importFromPaths,
@@ -330,6 +393,9 @@ function App() {
     setProgress({ index: 0, fraction: 0 });
     setToc([]);
     setTocVisible(false);
+    setAnnotationsVisible(false);
+    setAnnotations(emptyAnnotations());
+    annotationsWritableRef.current = false;
   }, [fileData?.bookId, flushReadingState]);
 
   const handleRelocate = useCallback(
@@ -439,6 +505,66 @@ function App() {
     setTocVisible(false);
   }, []);
 
+  const closeOverlays = useCallback(() => {
+    setTocVisible(false);
+    setAnnotationsVisible(false);
+  }, []);
+
+  const jumpToAnnotation = useCallback(async (cfi: string, fraction?: number) => {
+    const ok = await readerRef.current?.goToCfi(cfi);
+    if (!ok && fraction != null) {
+      await readerRef.current?.goToFraction(fraction);
+    }
+    closeOverlays();
+  }, [closeOverlays]);
+
+  const handleAddBookmark = useCallback(() => {
+    const location = readerRef.current?.getLocation();
+    if (!location?.cfi) return;
+    const next = appendBookmark(annotations, createBookmark(location));
+    if (next === annotations) return;
+    void commitAnnotations(next);
+  }, [annotations, commitAnnotations]);
+
+  const handleDeleteBookmark = useCallback(
+    (id: string) => {
+      void commitAnnotations(removeBookmark(annotations, id));
+    },
+    [annotations, commitAnnotations],
+  );
+
+  const handleJumpBookmark = useCallback(
+    (bookmark: BookmarkRecord) => {
+      void jumpToAnnotation(bookmark.cfi, bookmark.fraction);
+    },
+    [jumpToAnnotation],
+  );
+
+  const handleAddHighlight = useCallback(
+    (selection: SelectionCfi) => {
+      const next = appendHighlight(annotations, createHighlight(selection));
+      if (next === annotations) return;
+      void commitAnnotations(next);
+    },
+    [annotations, commitAnnotations],
+  );
+
+  const handleDeleteHighlight = useCallback(
+    (id: string) => {
+      const { next, removed } = removeHighlight(annotations, id);
+      if (removed) readerRef.current?.removeHighlight(removed.cfi);
+      void commitAnnotations(next);
+    },
+    [annotations, commitAnnotations],
+  );
+
+  const handleJumpHighlight = useCallback(
+    (highlight: HighlightRecord) => {
+      void jumpToAnnotation(highlight.cfi);
+    },
+    [jumpToAnnotation],
+  );
+
   const chapterLabel = progress.label ?? `Chapter ${progress.index + 1}`;
   const bookTitle = currentBook?.title || fileData?.name || "";
   const editingBook = view === "reader" && Boolean(currentBook || fileData);
@@ -515,10 +641,24 @@ function App() {
           <Button
             size="icon-sm"
             variant={tocVisible ? "secondary" : "ghost"}
-            onClick={() => setTocVisible((v) => !v)}
+            onClick={() => {
+              setTocVisible((v) => !v);
+              setAnnotationsVisible(false);
+            }}
             aria-label={t("reader.toc")}
           >
             <List />
+          </Button>
+          <Button
+            size="icon-sm"
+            variant={annotationsVisible ? "secondary" : "ghost"}
+            onClick={() => {
+              setAnnotationsVisible((v) => !v);
+              setTocVisible(false);
+            }}
+            aria-label={t("reader.annotations")}
+          >
+            <Bookmark />
           </Button>
           {/* Font + theme controls */}
           <Button
@@ -564,6 +704,8 @@ function App() {
                   fileData={fileData}
                   onRelocate={handleRelocate}
                   onSelectionCapture={handleSelectionCapture}
+                  onHighlight={handleAddHighlight}
+                  highlights={annotations.highlights}
                   initialFraction={currentBook?.lastFraction}
                   onBookReady={handleBookReady}
                 />
@@ -578,6 +720,27 @@ function App() {
                   />
                   <div className="absolute inset-y-0 left-0 z-30 w-56 overflow-hidden border-r bg-background shadow-md">
                     <TocSidebar toc={toc} onGoTo={handleTocGoTo} />
+                  </div>
+                </>
+              )}
+              {annotationsVisible && (
+                <>
+                  <button
+                    type="button"
+                    className="absolute inset-0 z-20 bg-background/50"
+                    aria-label={t("reader.closeAnnotations")}
+                    onClick={() => setAnnotationsVisible(false)}
+                  />
+                  <div className="absolute inset-y-0 left-0 z-30 w-56 overflow-hidden border-r bg-background shadow-md">
+                    <AnnotationsSidebar
+                      bookmarks={annotations.bookmarks}
+                      highlights={annotations.highlights}
+                      onAddBookmark={handleAddBookmark}
+                      onJumpBookmark={handleJumpBookmark}
+                      onDeleteBookmark={handleDeleteBookmark}
+                      onJumpHighlight={handleJumpHighlight}
+                      onDeleteHighlight={handleDeleteHighlight}
+                    />
                   </div>
                 </>
               )}

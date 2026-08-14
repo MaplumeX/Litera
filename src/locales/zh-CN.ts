@@ -16,6 +16,9 @@ export const zhCN = {
   "reader.showChat": "显示对话",
   "reader.hideChat": "隐藏对话",
   "reader.closeToc": "关闭目录",
+  "reader.annotations": "标注",
+  "reader.closeAnnotations": "关闭标注",
+  "reader.highlight": "高亮",
   "reader.askAgent": "问 agent",
 
   "library.searchPlaceholder": "搜索书名或作者…",
@@ -77,6 +80,15 @@ export const zhCN = {
 
   "toc.title": "目录",
   "toc.empty": "无目录",
+
+  "annotations.title": "标注",
+  "annotations.bookmarks": "书签",
+  "annotations.highlights": "高亮",
+  "annotations.addBookmark": "添加书签",
+  "annotations.emptyBookmarks": "还没有书签",
+  "annotations.emptyHighlights": "还没有高亮",
+  "annotations.deleteBookmark": "删除书签",
+  "annotations.deleteHighlight": "删除高亮",
 
   "chat.title": "阅读助手",
   "chat.sessions": "会话列表",

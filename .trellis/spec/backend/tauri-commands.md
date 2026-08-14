@@ -66,6 +66,13 @@ async fn delete_book(store: State<'_, LibraryStore>, book_id: String) -> AppResu
 // Update reading position/settings (called on relocate debounce + settings change debounce)
 #[tauri::command]
 async fn update_reading_state(store: State<'_, LibraryStore>, book_id: String, last_fraction: Option<f64>, settings: Option<ReadingSettings>) -> AppResult<()>
+
+// Per-book bookmarks + highlights (not BookRecord / library.json)
+#[tauri::command]
+async fn get_annotations(store: State<'_, LibraryStore>, book_id: String) -> AppResult<AnnotationsFile>
+
+#[tauri::command]
+async fn save_annotations(store: State<'_, LibraryStore>, book_id: String, data: AnnotationsFile) -> AppResult<()>
 ```
 
 ### Contracts
@@ -117,6 +124,27 @@ interface BookOpenContext {
   lastFraction?: number;
   settings?: ReadingSettings;
 }
+
+interface BookmarkRecord {
+  id: string;
+  cfi: string;
+  fraction: number;       // 0..=1; jump fallback after overwrite
+  createdAt: string;      // RFC3339
+  label?: string;         // toc label at pin time
+}
+
+interface HighlightRecord {
+  id: string;
+  cfi: string;
+  excerpt: string;
+  createdAt: string;
+}
+
+interface AnnotationsFile {
+  schemaVersion: number;  // 1; own version, not library.json
+  bookmarks: BookmarkRecord[];
+  highlights: HighlightRecord[];
+}
 ```
 
 **Raw byte boundary**: `read_import_bytes`, `read_book_bytes`, and `open_book_bytes` return `tauri::ipc::Response::new(Vec<u8>)`. Frontend callers use `invoke<ArrayBuffer>()` and create a `Uint8Array` view; EPUB payloads are never JSON `number[]`.
@@ -130,6 +158,7 @@ interface BookOpenContext {
 ├── books/<bookId>/
 │   ├── book.epub
 │   ├── cover.png
+│   ├── annotations.json # optional; bookmarks + highlights snapshot
 │   ├── .imports/        # uncommitted exact import bytes
 │   └── .transactions/   # crash-recovery journals (temporary)
 ├── books/.trash/        # recoverable staged deletions
@@ -146,7 +175,9 @@ interface BookOpenContext {
 
 Do not filter `book.id != incoming_id` when matching `contentHash`. That made same-path unchanged look like `overwrite` and popped a replace dialog on every OS reopen of the same file.
 
-`save_book_metadata` writes `contentHash` from the staged bytes. An overwrite must keep `lastFraction`, `settings`, and `lastOpenedAt`. Same-path unchanged is a no-op on `library.json` and the committed EPUB.
+`save_book_metadata` writes `contentHash` from the staged bytes. An overwrite must keep `lastFraction`, `settings`, and `lastOpenedAt`. Same-path unchanged is a no-op on `library.json` and the committed EPUB. Overwrite also leaves `books/<id>/annotations.json` in place.
+
+**Annotations**: `get_annotations` / `save_annotations` read and replace `books/<bookId>/annotations.json` under the `LibraryStore` gate. Missing file → `{ schemaVersion: 1, bookmarks: [], highlights: [] }`, not corrupt. Invalid JSON / unknown fields / unsupported `schemaVersion` → `StorageCorrupt`. `save_annotations` is a full snapshot replace (same contract as `settings`). Validate unique ids, non-empty `epubcfi(...)` locators, bookmark `fraction` in `0..=1`, and excerpt/label byte caps. Frontend must not `save_annotations` until `get_annotations` for that book succeeded — a failed load must not be treated as empty and written back. Cap highlight excerpts to the same UTF-8 byte limit on the client before save. Do not add annotation fields to `BookRecord`. Do not add WebView `fs` permission.
 
 **list_books order**: `lastOpenedAt` descending (missing last), then `importedAt` descending. Frontend search filters; it does not re-sort.
 

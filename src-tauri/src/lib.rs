@@ -119,6 +119,8 @@ pub fn run() {
             library::open_book_bytes,
             library::delete_book,
             library::update_reading_state,
+            library::get_annotations,
+            library::save_annotations,
             sidecar::get_agent_snapshot,
             sidecar::agent_prompt,
             sidecar::agent_edit_prompt,

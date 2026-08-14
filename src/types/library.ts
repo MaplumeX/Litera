@@ -47,3 +47,26 @@ export interface BookOpenContext {
   lastFraction?: number;
   settings?: ReadingSettings;
 }
+
+/** A page bookmark stored in books/<id>/annotations.json — not on BookRecord. */
+export interface BookmarkRecord {
+  id: string;
+  cfi: string;
+  fraction: number;
+  createdAt: string;
+  label?: string;
+}
+
+/** A single-color highlight stored in books/<id>/annotations.json — not on BookRecord. */
+export interface HighlightRecord {
+  id: string;
+  cfi: string;
+  excerpt: string;
+  createdAt: string;
+}
+
+export interface AnnotationsFile {
+  schemaVersion: number;
+  bookmarks: BookmarkRecord[];
+  highlights: HighlightRecord[];
+}

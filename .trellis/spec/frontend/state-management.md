@@ -32,6 +32,7 @@ const styleState = normalizeSettings(currentBook?.settings, preferences);
 const [toc, setToc] = useState<TocItem[]>([]);
 const [chatCollapsed, setChatCollapsed] = useState(true);
 const [tocVisible, setTocVisible] = useState(false);
+const [annotationsVisible, setAnnotationsVisible] = useState(false);
 ```
 
 These are the closest thing to "global state". They're passed down as props:
@@ -51,7 +52,7 @@ Each component owns its own UI state:
 
 `App` `settingsOpen` owns `SettingsDialog` (library gear + reader Aa). `view` does not become `"settings"`; the library/reader tree stays mounted under the dialog. Do not lift ChatPanel LLM settings into that dialog.
 
-Reader chrome flags (`tocVisible`, `chatCollapsed`) live only in `App` `useState`. They survive back-to-library and book switches in the same process. `handleBackToLibrary` must not reset them. Do not write them to `save_preferences`. Restart returns to TOC closed + chat collapsed. Clear `toc` data when leaving a book; only the open/closed flags persist in memory.
+Reader chrome flags (`tocVisible`, `annotationsVisible`, `chatCollapsed`) live only in `App` `useState`. They survive book switches in the same process. Do not write them to `save_preferences` or `library.json`. Restart returns to TOC / 标注 closed + chat collapsed. Clear `toc` and the annotations snapshot when leaving a book. `tocVisible` and `annotationsVisible` are exclusive: opening one closes the other. Annotation lists load via `get_annotations` when a book opens and save as a full `save_annotations` snapshot. Do not enable save until that load succeeds; a corrupt file must stay corrupt, not be replaced by `[]`.
 
 ### 3. Ref state (non-rendering)
 
