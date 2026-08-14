@@ -1,0 +1,9 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/backend/tauri-commands.md", "reason": "Agent config command contracts to update (models array, update vs switch)"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "InvalidInput for empty models / missing custom id"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "shadcn Select/AlertDialog; no window.confirm; no sentinel add item"}
+{"file": ".trellis/spec/frontend/i18n.md", "reason": "All new chrome strings in zh-CN and en catalogs"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "Rust serde camelCase must match CustomProviderEntry.models"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "auth/settings/models.json plus TS types plus form apply path"}
+{"file": ".trellis/tasks/08-14-provider-settings-select-apply/research/current-vs-typical.md", "reason": "Why select-then-apply; what not to rebuild"}
+{"file": ".trellis/tasks/08-14-provider-settings-select-apply/research/remote-model-catalog.md", "reason": "How to fetch OpenAI-compatible /models without sidecar protocol"}

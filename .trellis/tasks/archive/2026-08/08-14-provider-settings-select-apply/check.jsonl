@@ -1,0 +1,7 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/backend/tauri-commands.md", "reason": "Verify update no longer writes settings; snapshot models array"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "AlertDialog for delete; Select has no add sentinel"}
+{"file": ".trellis/spec/frontend/i18n.md", "reason": "No hardcoded Chinese/English in the form"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "TS/Rust CustomProviderEntry stay aligned"}
+{"file": ".trellis/tasks/08-14-provider-settings-select-apply/research/current-vs-typical.md", "reason": "Select must not write or restart"}
+{"file": ".trellis/tasks/08-14-provider-settings-select-apply/research/remote-model-catalog.md", "reason": "Refresh is custom-only; parser + no sidecar protocol"}
