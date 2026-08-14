@@ -10,11 +10,16 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: (cmd: string, args?: unknown) => invokeMock(cmd, args),
 }));
 
+const windowApi = {
+  onCloseRequested: vi.fn(async () => () => {}),
+  destroy: vi.fn(async () => {}),
+  close: vi.fn(async () => {}),
+  minimize: vi.fn(async () => {}),
+  toggleMaximize: vi.fn(async () => {}),
+};
+
 vi.mock("@tauri-apps/api/window", () => ({
-  getCurrentWindow: () => ({
-    onCloseRequested: async () => () => {},
-    destroy: async () => {},
-  }),
+  getCurrentWindow: () => windowApi,
 }));
 
 vi.mock("@/lib/use-open-paths", () => ({
@@ -183,6 +188,11 @@ async function openReader() {
 beforeEach(() => {
   invokeMock.mockReset();
   fillInput.mockReset();
+  windowApi.onCloseRequested.mockClear();
+  windowApi.destroy.mockClear();
+  windowApi.close.mockClear();
+  windowApi.minimize.mockClear();
+  windowApi.toggleMaximize.mockClear();
   setupInvoke();
   vi.stubGlobal(
     "matchMedia",
@@ -197,6 +207,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe("reader annotation chrome", () => {
@@ -278,6 +289,42 @@ describe("reader annotation chrome", () => {
       expect(screen.getByLabelText("隐藏对话")).toBeTruthy();
       expect(fillInput).toHaveBeenCalledWith("quoted", undefined);
     });
+  });
+
+  it("marks title and spacer as drag regions and closes via close()", async () => {
+    vi.spyOn(window.navigator, "userAgent", "get").mockReturnValue(
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    );
+    const screen = await openReader();
+    const header = screen.container.querySelector("header");
+    expect(header).toBeTruthy();
+    expect(header!.hasAttribute("data-tauri-drag-region")).toBe(false);
+    expect(header!.querySelectorAll("[data-tauri-drag-region]")).toHaveLength(2);
+    for (const name of ["返回书库", "目录", "标注", "字体与主题", "显示对话", "关闭窗口"]) {
+      expect(screen.getByRole("button", { name }).hasAttribute("data-tauri-drag-region")).toBe(
+        false,
+      );
+    }
+    fireEvent.click(screen.getByRole("button", { name: "关闭窗口" }));
+    expect(windowApi.close).toHaveBeenCalledTimes(1);
+    expect(windowApi.destroy).not.toHaveBeenCalled();
+
+    const spacer = header!.querySelectorAll("[data-tauri-drag-region]")[1];
+    fireEvent.mouseDown(spacer, { buttons: 1, detail: 2 });
+    expect(windowApi.toggleMaximize).toHaveBeenCalledTimes(1);
+  });
+
+  it("insets the macOS reader header and hides custom window buttons", async () => {
+    vi.spyOn(window.navigator, "userAgent", "get").mockReturnValue(
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)",
+    );
+    const screen = await openReader();
+    const header = screen.container.querySelector("header");
+    expect(header?.className).toContain("pl-[72px]");
+    expect(screen.queryByRole("button", { name: "最小化" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "最大化" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "关闭窗口" })).toBeNull();
+    expect(screen.getByRole("button", { name: "返回书库" })).toBeTruthy();
   });
 
   it("saves a highlight from the selection action", async () => {

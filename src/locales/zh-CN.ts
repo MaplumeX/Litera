@@ -6,6 +6,10 @@ export const zhCN = {
   "common.confirm": "确定",
   "common.listJoin": "、",
 
+  "window.minimize": "最小化",
+  "window.maximize": "最大化",
+  "window.close": "关闭窗口",
+
   "reader.persistFailed": "阅读状态保存失败：{message}",
   "reader.openFailed": "打开书籍失败: {message}",
   "reader.openFileFailed": "打开文件失败：{message}",

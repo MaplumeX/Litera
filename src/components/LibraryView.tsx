@@ -3,6 +3,11 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import type { BookRecord } from "@/types/library";
 import { Button } from "@/components/ui/button";
+import {
+  WindowControls,
+  onTitlebarDragMouseDown,
+  titlebarClassName,
+} from "@/components/WindowControls";
 import { Plus, Settings } from "lucide-react";
 import { BookCard } from "@/components/BookCard";
 import {
@@ -178,9 +183,20 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Toolbar */}
-      <header className="flex items-center gap-3 border-b px-4 py-3">
-        <h1 className="text-lg font-bold">Litera</h1>
-        <div className="ml-auto flex items-center gap-2">
+      <header className={titlebarClassName()}>
+        <h1
+          className="select-none text-lg font-bold"
+          data-tauri-drag-region
+          onMouseDown={onTitlebarDragMouseDown}
+        >
+          Litera
+        </h1>
+        <div
+          className="min-h-0 min-w-0 flex-1 select-none self-stretch"
+          data-tauri-drag-region
+          onMouseDown={onTitlebarDragMouseDown}
+        />
+        <div className="flex items-center gap-2">
           <input
             type="text"
             placeholder={t("library.searchPlaceholder")}
@@ -240,6 +256,7 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
             </>
           )}
         </div>
+        <WindowControls />
       </header>
 
       {loadError && (

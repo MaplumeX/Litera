@@ -8,6 +8,10 @@ export const en: { [K in MessageKey]: string } = {
   "common.confirm": "OK",
   "common.listJoin": ", ",
 
+  "window.minimize": "Minimize",
+  "window.maximize": "Maximize",
+  "window.close": "Close window",
+
   "reader.persistFailed": "Failed to save reading progress: {message}",
   "reader.openFailed": "Failed to open book: {message}",
   "reader.openFileFailed": "Failed to open file: {message}",
