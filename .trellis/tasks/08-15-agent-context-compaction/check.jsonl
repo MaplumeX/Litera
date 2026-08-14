@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "检查:模型流量走 guarded fetch、错误信息不含凭据、CSP 不被破坏"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "检查:compaction.ts 类型贴近使用处、无 any、strict 通过"}

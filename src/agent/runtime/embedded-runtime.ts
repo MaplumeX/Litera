@@ -1,10 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 import { Agent, type AgentEvent as PiEvent, type AgentMessage as PiMessage, type AgentTool, type StreamFn } from "@earendil-works/pi-agent-core";
+import { isContextOverflow, type AssistantMessage } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { BookWorkerClient, chapterAside, formatBookSnapshot, type BookContentPort } from "@/agent/book/book-content";
+import { DEFAULT_COMPACTION_SETTINGS, estimateContextTokens, findLastValidUsage, generateSummary, prepareCompaction, shouldCompact } from "@/agent/compaction/compaction";
 import { createGuardedNativeFetch } from "@/agent/transport/native-fetch";
 import { resolveRuntimeModel } from "@/agent/runtime/model-resolution";
-import { activeBranch, convertPiContextToLlm, newEntry, piContextMessages, visibleMessages, windowCompleteTurns, type DecodedPiSession, type PiSessionEntry } from "@/agent/sessions/pi-session";
+import { activeBranch, convertPiContextToLlm, newEntry, piContextMessages, visibleMessages, type DecodedPiSession, type PiSessionEntry } from "@/agent/sessions/pi-session";
 import { tauriSessionPort, type SessionPort } from "@/agent/sessions/session-port";
 import type { AgentEvent, AgentMessage as UiMessage } from "@/types/agent";
 
@@ -62,7 +64,10 @@ export class LiteraAgentRuntime {
       const readingContext=[chapterAside(toc,context.chapterHref),context.selection?`Selected text: ${context.selection}`:""].filter(Boolean).join("\n\n");
       const agent=await this.ensureAgent(config,session,promptBookId);
       if(configAtStart!==this.configRevision||this.bookId!==promptBookId)throw new Error("Agent context changed");
-      this.agent=agent;const before=agent.state.messages.length;
+      this.agent=agent;
+      await this.maybeCompact(agent,session,promptBookId);
+      if(configAtStart!==this.configRevision||this.bookId!==promptBookId)throw new Error("Agent context changed");
+      const before=agent.state.messages.length;
       const pendingEntries:PiSessionEntry[]=[];let pendingParent=session.leafId;
       const lastModel=[...activeBranch(session)].reverse().find((entry)=>entry.type==="model_change");
       if(lastModel?.provider!==config.provider||lastModel?.modelId!==config.model){const change=newEntry("model_change",pendingParent,{provider:config.provider,modelId:config.model});pendingEntries.push(change);pendingParent=change.id;}
@@ -79,11 +84,48 @@ export class LiteraAgentRuntime {
       await agent.prompt([...promptMessages,user]);
       const completed=agent.state.messages.slice(before+promptMessages.length+1);const entries:PiSessionEntry[]=[];let parent=session.leafId;for(const message of completed){const persisted=message.role==="assistant"&&message.stopReason==="error"?{...message,errorMessage:"模型请求失败"}:message;const entry=newEntry("message",parent,{message:persisted});entries.push(entry);parent=entry.id;}
       if(entries.length){session.leafId=await this.sessions.append(promptBookId,session.header.id,session.leafId,entries);session.entries.push(...entries);}
+      await this.maybeCompact(agent,session,promptBookId);
       const aborted=completed.some((message)=>message.role==="assistant"&&message.stopReason==="aborted");this.emit(aborted?{type:"prompt_aborted",bookId:promptBookId,sessionId:session.header.id,promptId,requestId}:{type:"prompt_end",bookId:promptBookId,sessionId:session.header.id,promptId});
     }catch{const safeError=new Error("模型请求失败，请检查配置后重试");this.emit({type:"error",scope:"prompt",message:safeError.message,recoverable:true,bookId:promptBookId,sessionId:session?.header.id,promptId});throw safeError;}finally{unsubscribe?.();if(this.promptId===promptId)this.promptId=null;}
   }
 
-  private async ensureAgent(config:RuntimeConfig,session:DecodedPiSession,bookId:string){if(this.agent)return this.agent;const resolvedModel=await resolveRuntimeModel(config);const nativeFetch=createGuardedNativeFetch({baseUrl:resolvedModel.baseUrl});const providerStream=await this.loadStream(resolvedModel.api);const stream:StreamFn=(requestModel,requestContext,options)=>providerStream(requestModel,requestContext,{...options,fetch:nativeFetch,maxRetries:0});const tools=await this.tools(bookId);return new Agent({initialState:{systemPrompt:SYSTEM_PROMPT,model:resolvedModel,thinkingLevel:"off",messages:windowCompleteTurns(piContextMessages(session),12),tools},streamFn:stream,convertToLlm:convertPiContextToLlm,getApiKey:()=>config.apiKey,transport:"sse"});}
+  private async ensureAgent(config:RuntimeConfig,session:DecodedPiSession,bookId:string){if(this.agent)return this.agent;const resolvedModel=await resolveRuntimeModel(config);const nativeFetch=createGuardedNativeFetch({baseUrl:resolvedModel.baseUrl});const providerStream=await this.loadStream(resolvedModel.api);const stream:StreamFn=(requestModel,requestContext,options)=>providerStream(requestModel,requestContext,{...options,fetch:nativeFetch,maxRetries:0});const tools=await this.tools(bookId);return new Agent({initialState:{systemPrompt:SYSTEM_PROMPT,model:resolvedModel,thinkingLevel:"off",messages:piContextMessages(session),tools},streamFn:stream,convertToLlm:convertPiContextToLlm,getApiKey:()=>config.apiKey,transport:"sse"});}
+
+  /**
+   * Compact the session context when it approaches the model context window.
+   *
+   * Runs inside the prompt flow (promptId still held), so it cannot race a
+   * concurrent prompt. Failures are swallowed: compaction must never block the
+   * user's prompt result.
+   */
+  private async maybeCompact(agent:Agent,session:DecodedPiSession,bookId:string):Promise<boolean>{
+    try{
+      const settings=DEFAULT_COMPACTION_SETTINGS;
+      const contextWindow=agent.state.model.contextWindow??0;
+      if(contextWindow<=0)return false;
+      const messages=agent.state.messages;
+      const lastUsage=findLastValidUsage(messages);
+      const branch=activeBranch(session);
+      let latestCompactionTimestamp=0;
+      for(let index=branch.length-1;index>=0;index-=1){if(branch[index].type==="compaction"){latestCompactionTimestamp=Date.parse(branch[index].timestamp)||0;break;}}
+      // Debounce: a usage older than the latest compaction would falsely retrigger
+      // compaction right after one just finished.
+      if(lastUsage&&latestCompactionTimestamp>0&&lastUsage.timestamp<=latestCompactionTimestamp)return false;
+      const lastAssistant=messages[messages.length-1] as unknown as AssistantMessage|undefined;
+      const overflow=lastAssistant?.role==="assistant"&&isContextOverflow(lastAssistant,contextWindow);
+      const contextTokens=lastUsage?lastUsage.usage.totalTokens||lastUsage.usage.input+lastUsage.usage.output+lastUsage.usage.cacheRead+lastUsage.usage.cacheWrite:estimateContextTokens(messages).tokens;
+      if(!overflow&&!shouldCompact(contextTokens,contextWindow,settings))return false;
+      const preparation=prepareCompaction(branch,settings);
+      if(!preparation)return false;
+      const apiKey=await agent.getApiKey?.(agent.state.model.provider);
+      const summary=await generateSummary(preparation.messagesToSummarize,agent.state.model,settings.reserveTokens,apiKey??"",undefined,agent.streamFunction,preparation.previousSummary);
+      const entry=newEntry("compaction",session.leafId,{summary,firstKeptEntryId:preparation.firstKeptEntryId,tokensBefore:preparation.tokensBefore});
+      const leaf=await this.sessions.append(bookId,session.header.id,session.leafId,[entry]);
+      session.entries.push(entry);session.leafId=leaf;
+      agent.state.messages=piContextMessages(session);
+      return true;
+    }catch{return false;}
+  }
   private async bookCall<T>(bookId:string,call:()=>Promise<T>):Promise<T>{if(this.bookId!==bookId)throw new Error("电子书上下文已切换");const value=await call();if(this.bookId!==bookId)throw new Error("电子书上下文已切换");return value;}
   private async tools(bookId:string):Promise<AgentTool[]>{const empty=Type.Object({});const read=Type.Object({chapterIndex:Type.Number(),part:Type.Optional(Type.Number())});const search=Type.Object({queries:Type.Array(Type.String())});return [
     {name:"get_book_metadata",label:"Book Metadata",description:"Get book metadata",parameters:empty,execute:async()=>result(JSON.stringify(await this.bookCall(bookId,()=>this.book.metadata())))},

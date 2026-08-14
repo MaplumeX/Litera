@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "TS 类型约定:strict 模式、无运行时校验库、类型贴近使用处——compaction.ts 新模块需遵循"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "CSP 与原生传输约束:模型流量必须走 createGuardedNativeFetch,摘要请求复用 agent.streamFunction 即满足"}
+{"file": ".trellis/spec/frontend/directory-structure.md", "reason": "src/ 目录布局与 @/ 路径别名,新模块 src/agent/compaction/ 的放置约定"}

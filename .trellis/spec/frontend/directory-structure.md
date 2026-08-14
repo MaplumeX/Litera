@@ -31,6 +31,11 @@ litera/
 │   ├── tauri.conf.json     # Tauri config (CSP, window, bundle)
 │   └── Cargo.toml
 ├── src/agent/              # embedded Agent runtime, book worker, Pi session adapter
+│   ├── compaction/        # context compaction: token estimation, cut point, LLM summary
+│   ├── runtime/           # LiteraAgentRuntime (prompt flow, compaction trigger)
+│   ├── sessions/          # Pi session decode/encode, compaction-aware context building
+│   ├── book/              # EPUB worker client, book content port
+│   └── transport/         # guarded native fetch for model traffic
 ├── vite.config.ts          # Vite + Tailwind plugin + path aliases
 ├── tsconfig.json           # TS config with @/* path alias
 └── components.json         # shadcn/ui config
