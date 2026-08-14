@@ -1,0 +1,5 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend guideline index for quality check"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Verify paging still follows iframe-doc binding, no overlay, no submodule edits"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Quality bar for the frontend change"}
+{"file": ".trellis/tasks/08-14-fix-click-paging-hit/research/foliate-iframe-geometry.md", "reason": "Check that the fix maps onto the visible page, not innerWidth or host full width"}

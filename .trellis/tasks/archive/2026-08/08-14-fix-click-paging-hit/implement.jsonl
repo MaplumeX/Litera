@@ -1,0 +1,5 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend guideline index; locate component + quality docs"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Iframe paging contract: bind per chapter doc, no overlay, no scrolled flow, no foliate-js edits"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "New helper belongs in existing reader-paging.ts; do not add a second hit-test module"}
+{"file": ".trellis/tasks/08-14-fix-click-paging-hit/research/foliate-iframe-geometry.md", "reason": "Why innerWidth is the chapter strip and how to map clientX onto the visible page"}
