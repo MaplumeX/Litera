@@ -1,0 +1,10 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend guideline index for sidecar + protocol work"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Sidecar stdout is JSONL-only; MAX_JSONL_BYTES forbids shipping full-book extract"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "In-memory FTS5 must stay the search backend and rebuild on owned-list texts"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Tools return errorResult; protocol decode failures stay recoverable errors"}
+{"file": ".trellis/spec/backend/tauri-commands.md", "reason": "prompt/edit_prompt invoke must match PromptContext camelCase"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "chapterHref crosses ReaderView → Rust → sidecar decoder"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "PromptContext and AgentMessage must stay aligned with Rust serde"}
+{"file": ".trellis/tasks/08-14-unify-book-chapter-coords/prd.md", "reason": "Locked requirements R1–R6 and AC1–AC5"}
+{"file": ".trellis/tasks/08-14-unify-book-chapter-coords/design.md", "reason": "TOC-owned chapter model and href locator contract"}
+{"file": ".trellis/tasks/08-14-unify-book-chapter-coords/research/chapter-ownership.md", "reason": "ReadAware extract v2 mapping and why bodies stay in sidecar"}

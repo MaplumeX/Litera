@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Protocol remains JSONL; no stdout leaks from new ownership code"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "FTS5 still in-memory and rebuilt from the owned chapter list"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Missing chapter / unknown href must not throw out of tool execute"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Reader href, PromptContext, aside, and read_chapter index stay one system"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "No leftover spine chapterIndex on the live prompt path"}
+{"file": ".trellis/tasks/08-14-unify-book-chapter-coords/prd.md", "reason": "Verify AC1–AC5 and that viewport text / foliate extract stayed out"}
+{"file": ".trellis/tasks/08-14-unify-book-chapter-coords/design.md", "reason": "Owned list, href lookup, snapshot still hides hrefs"}
+{"file": ".trellis/tasks/archive/2026-08/08-13-book-tools-readaware/prd.md", "reason": "Do not regress windowing, multi-query search, or chapterNumber"}
