@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1208 | Active |
+| `journal-1.md` | ~1219 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -31,6 +31,7 @@
 |---|------|-------|---------|--------|
 | 53 | 2026-08-14 | Reader bookmarks and highlights | `02419cb` | `feat/reader-gap-analysis` |
 | 52 | 2026-08-14 | Reader progress scrubber | `7ec411a`, `94d58ad` | `feat/reader-gap-analysis` |
+| 51 | 2026-08-14 | Remember window size | `383fc0f`, `2be28f8` | `fix/app-not-remember-window-size` |
 | 51 | 2026-08-14 | Fix click page-turn hit testing | `4f28460`, `92a49bf` | `fix/click-scroll-prev-next-recognition` |
 | 50 | 2026-08-14 | Same-path unchanged reimport no overwrite | `5e5561e`, `50aeda1` | `fix/same-position-reopen-overwrite-prompt` |
 | 49 | 2026-08-14 | Replace Tauri app icon | `1eba5b6` | `main` |
