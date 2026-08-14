@@ -1088,3 +1088,33 @@ Landed a tag-driven GitHub Release pipeline (Linux AppImage+deb, macOS Apple Sil
 ### Status
 
 [OK] **Completed**
+
+
+## Session 49: Replace Tauri app icon
+
+**Date**: 2026-08-14
+**Task**: Replace Tauri app icon
+**Branch**: `main`
+
+### Summary
+
+Replaced the default Tauri icon with a flat stacked-page mark and regenerated the desktop icon set.
+
+### Main Changes
+
+- Chose a flat three-page + bookmark mark as the app icon
+- Added src-tauri/app-icon.png and regenerated png/icns/ico sizes
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1eba5b6` | (see git log) |
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Relaunch the app to see the new dock/taskbar icon
