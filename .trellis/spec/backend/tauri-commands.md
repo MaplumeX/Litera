@@ -139,12 +139,14 @@ interface BookOpenContext {
 
 **bookId generation**: `DefaultHasher` hash of the **source file path** (not the app data copy path). Same source file maps to the same record. Content identity is a separate SHA-256 of EPUB bytes (`contentHash`). Do not change `bookId` to a content hash.
 
-**Import classification** (before or instead of staging):
-- `duplicate` — another book already has this `contentHash`. Do not stage. Return that book's `bookId` + `title`.
-- `overwrite` — same path `bookId` exists. Stage pending bytes only. Frontend must confirm, then `save_book_metadata`, or `discard_import`.
-- `new` — stage and insert the record as before.
+**Import classification** (after `backfill_missing_content_hashes`, before creating `importId` / writing `.imports`):
+- `duplicate` — any existing book's `contentHash` equals the incoming SHA-256, including the same-path record. Do not stage. Return that book's `bookId` + `title`. `importId` is absent.
+- `overwrite` — same path `bookId` exists **and** the incoming hash differs (or is still missing after backfill). Stage pending bytes only. Frontend must confirm, then `save_book_metadata`, or `discard_import`.
+- `new` — no matching `bookId` and no matching `contentHash`. Stage and insert the record as before.
 
-`save_book_metadata` writes `contentHash` from the staged bytes. An overwrite must keep `lastFraction`, `settings`, and `lastOpenedAt`.
+Do not filter `book.id != incoming_id` when matching `contentHash`. That made same-path unchanged look like `overwrite` and popped a replace dialog on every OS reopen of the same file.
+
+`save_book_metadata` writes `contentHash` from the staged bytes. An overwrite must keep `lastFraction`, `settings`, and `lastOpenedAt`. Same-path unchanged is a no-op on `library.json` and the committed EPUB.
 
 **list_books order**: `lastOpenedAt` descending (missing last), then `importedAt` descending. Frontend search filters; it does not re-sort.
 
@@ -204,12 +206,14 @@ Do not set `exportedType`. EPUB is a public type.
 | Same path in one queue | Insert once |
 | argv then Opened same path within 5s | Second take ignored after first success |
 | Overwrite cancelled | No library change; recent-path entry cleared; rest of batch continues |
+| Same path, same `contentHash` | `duplicate` — no confirm; OS-open still opens that book |
 
 ### 5. Good/Base/Bad Cases
 
 - **Good**: cold-start a new `.epub` → imported and reader opens that book.
+- **Good**: cold-start the same unchanged `.epub` already in the library → `duplicate`, no overwrite dialog, reader opens that book.
 - **Base**: app already running → existing window focuses, imports, opens last success; no second process.
-- **Bad**: emit path lists and also leave them in the queue → cold start double-imports and hits overwrite.
+- **Bad**: emit path lists and also leave them in the queue → cold start processes the same path twice.
 
 ### 6. Tests Required
 
@@ -532,9 +536,11 @@ interface CustomProviderEntry {
 - **Good**: Import epub with cover → grid shows cover, title, author; reopen app → book persists
 - **Base**: Import epub without cover → grid shows placeholder (first char of title)
 - **Bad**: Re-import same file, then metadata extraction fails → old EPUB/title/author/cover remain active; staged bytes never partially replace them
-- **Good**: Same path re-import → `overwrite`; user confirms → progress/sessions kept
+- **Good**: Same path, same bytes → `duplicate`; no pending file; title / progress / committed EPUB unchanged
+- **Good**: Same path, different bytes → `overwrite`; user confirms → progress/sessions kept
 - **Good**: Different path, same bytes → `duplicate`; library count unchanged
 - **Bad**: Classify a whole picker batch, then confirm overwrite, then treat a later file with the new bytes as `new` (hash not committed yet)
+- **Bad**: Compare hashes before backfill — a record missing `contentHash` is treated as `overwrite` even when the stored EPUB matches
 
 ### Tests Required
 
@@ -544,7 +550,7 @@ interface CustomProviderEntry {
 - **Crash recovery**: leave a prepared import journal and a staged deletion on disk, reinitialize `LibraryStore`, and assert the uncommitted import is rolled back while the referenced deleted directory is restored.
 - **Path safety**: reject traversal-like IDs, forged stored paths, duplicate IDs, symlink book/session directories, and non-regular EPUB/cover files before mutation. Replace `.trash` with a symlink after initialization and assert delete fails while the canonical book and outside directory remain unchanged.
 - **Frontend lifecycle**: assert debounce keeps the latest call, `flush()` waits and propagates failures, and repeated `cancel()` is safe under StrictMode cleanup.
-- **Import status**: same-path import returns `overwrite` and does not replace EPUB until `save_book_metadata`; cancel + `discard_import` leaves the previous version; same-bytes different path returns `duplicate` with no new record.
+- **Import status**: same-path same-bytes returns `duplicate` with no `importId` and no `.imports` file; same-path different-bytes returns `overwrite` and does not replace EPUB until `save_book_metadata`; cancel + `discard_import` leaves the previous version; same-bytes different path returns `duplicate` with no new record.
 - **Open title / sort**: `get_book_open_context.title` equals the stored title; after a successful `open_book_bytes`, that book sorts first in `list_books`.
 - **Delete sessions**: `delete_book` removes `sessions/<bookId>/`; missing dir still succeeds.
 - **Agent config models array**: `get_agent_config` returns every `models[].id`; `update_custom_provider` with two ids writes both and leaves `settings.json` unchanged even when that provider is active.
@@ -562,6 +568,19 @@ interface CustomProviderEntry {
 - All synchronous dialog and filesystem work runs inside `spawn_blocking`; library commands are async.
 
 ### Wrong vs Correct
+
+#### Wrong — same-path hash match still requires overwrite
+```rust
+// Skips the book that owns this path, so unchanged reopen is overwrite
+book.id != book_id && book.content_hash.as_deref() == Some(incoming_hash.as_str())
+```
+
+#### Correct — any contentHash match is duplicate, including self
+```rust
+// After backfill_missing_content_hashes
+book.content_hash.as_deref() == Some(incoming_hash.as_str())
+// same path + different hash still falls through to overwrite
+```
 
 #### Wrong — bookId from app data copy path
 ```rust

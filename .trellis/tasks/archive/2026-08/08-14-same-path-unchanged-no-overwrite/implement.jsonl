@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend layer index before changing LibraryStore import classification"}
+{"file": ".trellis/spec/backend/tauri-commands.md", "reason": "ImportStatus contract: duplicate vs overwrite vs new; do not add a fourth status"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "bookId is source-path hash; contentHash is SHA-256; backfill before classify"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Classification miss must stay a normal status, not a new AppError"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "ImportBookResult camelCase and ImportStatus union stay unchanged"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Same classification must hold for picker, drag-drop, and OS open"}
+{"file": ".trellis/tasks/08-14-same-path-unchanged-no-overwrite/prd.md", "reason": "R1–R6 and AC1–AC6"}
+{"file": ".trellis/tasks/08-14-same-path-unchanged-no-overwrite/design.md", "reason": "Classification matrix and early-return before staging"}

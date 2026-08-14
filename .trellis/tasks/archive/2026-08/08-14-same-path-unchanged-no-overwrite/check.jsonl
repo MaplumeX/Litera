@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/backend/tauri-commands.md", "reason": "overwrite only when same path and content differs; duplicate includes same-path same-hash"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "Unchanged same-path reimport must not rewrite library.json or stage .imports"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "No protocol or sidecar change in this task"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "No new ImportStatus; frontend still handles duplicate as today"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "OS open, picker, and drag-drop must share the same outcome"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Must reuse duplicate, not add unchanged/no-op status"}
+{"file": ".trellis/tasks/08-14-same-path-unchanged-no-overwrite/prd.md", "reason": "Verify AC1–AC6 and that a fourth status stayed out"}
+{"file": ".trellis/tasks/08-14-same-path-unchanged-no-overwrite/design.md", "reason": "Early return before staging; backfill still runs first"}

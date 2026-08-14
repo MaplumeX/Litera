@@ -1118,3 +1118,25 @@ Replaced the default Tauri icon with a flat stacked-page mark and regenerated th
 ### Next Steps
 
 - Relaunch the app to see the new dock/taskbar icon
+
+
+## Session 50: Same-path unchanged reimport no overwrite
+
+**Date**: 2026-08-14
+**Task**: Same-path unchanged reimport no overwrite
+**Branch**: `fix/same-position-reopen-overwrite-prompt`
+
+### Summary
+
+Same-path reimport of unchanged EPUB bytes is now duplicate: no overwrite dialog on close/reopen of the same file. Content change still confirms overwrite. Specs updated.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5e5561e` | (see git log) |
+| `50aeda1` | (see git log) |
+
+### Status
+
+[OK] **Completed**
