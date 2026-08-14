@@ -1,0 +1,29 @@
+{
+  "id": "reader-annotate-and-progress",
+  "name": "reader-annotate-and-progress",
+  "title": "Reader bookmarks, highlights, and progress jump",
+  "description": "",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "Maplume",
+  "assignee": "Maplume",
+  "createdAt": "2026-08-14",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "08-14-reader-progress-scrubber",
+    "08-14-reader-bookmarks-highlights"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

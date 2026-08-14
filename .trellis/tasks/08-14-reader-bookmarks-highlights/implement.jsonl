@@ -1,0 +1,12 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend layer index"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "TOC overlay pattern to copy; selection/ask-agent"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "Process-only drawer flags"}
+{"file": ".trellis/spec/frontend/i18n.md", "reason": "New annotation strings"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "TS types must match Rust serde"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "Per-book file; do not bump library schema"}
+{"file": ".trellis/spec/backend/tauri-commands.md", "reason": "Command style; overwrite/delete keep/trash dir"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Missing vs corrupt annotations file"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "IPC + file + renderer locators"}
+{"file": ".trellis/tasks/08-14-reader-annotate-and-progress/research/foliate-annotations.md", "reason": "CFI and overlay restore"}
+{"file": ".trellis/tasks/08-14-reader-annotate-and-progress/research/annotation-persistence.md", "reason": "annotations.json contract"}

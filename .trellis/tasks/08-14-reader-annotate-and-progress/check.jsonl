@@ -1,0 +1,9 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Reader chrome and overlay rules"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "progress and drawer state"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "CSP / frontend quality"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "Do not grow library.json BookRecord"}
+{"file": ".trellis/spec/backend/tauri-commands.md", "reason": "New command contracts and overwrite/delete"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "StorageCorrupt vs missing annotations file"}
+{"file": ".trellis/tasks/08-14-reader-annotate-and-progress/research/foliate-annotations.md", "reason": "Highlight restore contract"}
+{"file": ".trellis/tasks/08-14-reader-annotate-and-progress/research/annotation-persistence.md", "reason": "Persistence must stay off BookRecord"}

@@ -1,0 +1,5 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend layer index"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Must update: currently forbids reader progress chrome"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "progress is relocate state; bar is new chrome"}
+{"file": ".trellis/spec/frontend/i18n.md", "reason": "Any new progress strings go through catalogs"}
