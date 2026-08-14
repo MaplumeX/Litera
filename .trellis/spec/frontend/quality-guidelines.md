@@ -6,6 +6,23 @@
 
 ## CSP Configuration (Tauri 2)
 
+### Native model transport and EPUB worker
+
+Embedded model traffic uses `createGuardedNativeFetch`, never WebView `fetch`.
+It accepts HTTP(S) only, requires the request origin to equal the active
+Rust-resolved provider origin, rejects redirects, and emits credential-free
+errors. The broader Tauri HTTP capability is not the authorization boundary.
+
+Built-in model API/base URL/context limits come from the exact pinned Pi model
+catalog, not a provider-wide guessed `openai-completions` shape. Custom
+OpenAI-compatible models use the Rust-returned metadata. Provider exceptions,
+malformed request URLs, and native transport errors must be converted to
+credential-free messages before reaching reducer state or logs.
+
+EPUB extraction, TOC ownership, chapter windowing, and search run in a Vite
+module worker. A book switch terminates the old worker and rejects pending calls.
+Keep `script-src 'self'`; EPUB scripts and `blob:` script execution are not used.
+
 ### Convention: foliate.js CSP Requirements
 
 **What**: `src-tauri/tauri.conf.json` must configure CSP to block EPUB-embedded scripts while allowing `blob:` URLs for foliate.js rendering.
@@ -70,7 +87,7 @@ pub fn run() {
 
 `tauri-plugin-single-instance` has no JS API and needs no capability. It **must be the first plugin**. File associations live in `tauri.conf.json` `bundle.fileAssociations`, not capabilities. Catching `RunEvent::Opened` requires `build().run(|app, event|)`, not `Builder::run`.
 
-Rust-only plugins already in this repo (single-instance, dialog, shell sidecar, window-state) are **not** granted in `capabilities/default.json`. Live desktop `cfg` is `#[cfg(any(target_os = "macos", windows, target_os = "linux"))]`, not the `#[cfg(desktop)]` snippet above.
+Rust-only plugins already in this repo (single-instance, dialog, window-state) are **not** granted in `capabilities/default.json`. Live desktop `cfg` is `#[cfg(any(target_os = "macos", windows, target_os = "linux"))]`, not the `#[cfg(desktop)]` snippet above.
 
 ## Scenario: main window size / position / maximized
 

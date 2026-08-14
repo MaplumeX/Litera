@@ -1,6 +1,6 @@
 # Database Guidelines
 
-> Persistence patterns for the Litera backend. This project has **no traditional database** — persistence is file-based (JSON/JSONL) and full-text search uses an in-memory SQLite FTS5 index.
+> Persistence patterns for the Litera backend. This project has **no traditional database** — persistence is file-based (JSON/JSONL), while book search is rebuilt in a browser worker.
 
 ---
 
@@ -10,13 +10,30 @@ Litera uses two distinct persistence mechanisms, neither of which is a relationa
 
 1. **Library storage** — `library.json` in the Tauri app data directory. Rust reads/writes it directly via `serde_json`. No ORM, no migrations, no query builder.
 2. **Preferences storage** — `preferences.json` next to `library.json`. Theme plus typography defaults. Same atomic write helper; separate `PreferencesStore` gate. See `tauri-commands.md` Preferences Commands.
-3. **Session storage** — JSONL session files managed by the sidecar's `SessionManager` (from `@earendil-works/pi-coding-agent`), under `<app_data>/sessions/<bookId>/`.
-4. **Full-text search** — In-memory SQLite FTS5 (WASM via `fts5-sql-bundle`), rebuilt on each book open. Not persisted to disk.
+3. **Session storage** — Pi v3 JSONL session files managed by Rust under `<app_data>/sessions/<bookId>/`.
+4. **Book search** — an in-memory index in the browser EPUB worker, rebuilt on each book open and never persisted.
 
 Reference files:
 - `src-tauri/src/library.rs` — `LibraryStore`, strict reads, atomic writes, recovery transactions
-- `sidecar/book.ts` — `loadBook()`, FTS5 index construction
-- `sidecar/index.ts` — `SessionManager` usage
+- `src-tauri/src/pi_sessions.rs` — Pi v3 session validation, migration, append, and deletion
+- `src/agent/book/` — EPUB extraction, chapter ownership, and browser-worker search
+
+### Pi v3 session store
+
+The embedded runtime uses `src-tauri/src/pi_sessions.rs` against the
+`<app_data>/sessions/<bookId>/` directory. It preserves Pi session v3 JSONL as
+an append-only tree. Normal v3 interaction never rewrites history; v1/v2 loads
+create a `.pre-v3.bak` before atomically applying Pi's published migrations.
+
+Rust validates paths, real files/directories, header version, timestamps,
+ids/parents, byte caps, and expected leaves. The frontend owns message payload
+decoding and branch projection.
+
+A non-empty final JSON value without its newline terminator is still a complete
+entry: append recovery adds the missing newline and preserves it. Only an
+unparseable final fragment may be truncated, and all preceding lines must first
+remain valid. Header-only lookup must not parse or silently discard corrupt
+later rows; loading the identified file reports `StorageCorrupt`.
 
 ---
 
@@ -63,7 +80,7 @@ fn update_reading_state(&self, book_id: &str, fraction: Option<f64>, settings: O
 │   └── .transactions/        # persistent rollback journals
 ├── books/.trash/             # staged/committed recoverable deletions
 ├── backup/legacy-*/          # recoverable legacy artifacts
-└── sessions/<bookId>/        # sidecar-managed JSONL session files
+└── sessions/<bookId>/        # Rust-managed Pi v3 JSONL session files
 ```
 
 **Per-book annotations**: `books/<bookId>/annotations.json` holds bookmarks and single-color highlights. It has its own `schemaVersion: 1` and is **not** part of `library.json` / `BookRecord`. Do not bump the library schema for marks. Missing file = empty lists. Present but invalid JSON / unsupported schema / unknown fields = `StorageCorrupt`. Overwrite leaves the file in place; `delete_book` removes the whole directory. Do not require this file in `validate_library_files`.
@@ -89,57 +106,34 @@ let book_id = {
 
 ### Don't: use a real ORM or migration framework
 
-This project deliberately uses a simple JSON file for library data. Do not introduce SQLite, Diesel, or SeaORM for the library store — it would add complexity for a dataset that is a single small JSON file. The in-memory FTS5 database in the sidecar is the only SQLite usage, and it is ephemeral.
+This project deliberately uses a simple JSON file for library data. Do not introduce SQLite, Diesel, or SeaORM for the library store — it would add complexity for a dataset that is a single small JSON file.
 
 ---
 
-## Full-Text Search (In-Memory SQLite FTS5)
+## Browser Book Search
 
-### Pattern: rebuild FTS5 index on each book open
+The EPUB worker extracts TOC-owned chapter text and serves deterministic exact
+and partial searches. Results retain the owned chapter index, href, and honest
+part offset used by reader navigation. The index lives only in worker memory;
+opening another book or terminating the worker discards it.
 
-The sidecar builds an in-memory SQLite FTS5 virtual table every time a book is opened. It is not persisted — closing the app or opening a new book discards it.
-
-```typescript
-// sidecar/book.ts
-const db = new sqlStatic.Database();
-db.run("CREATE VIRTUAL TABLE chapters USING fts5(content, tokenize='trigram')");
-for (const [index, text] of chapterTexts) {
-    db.run("INSERT INTO chapters (rowid, content) VALUES (?, ?)", [index + 1, text]);
-}
-```
-
-### Conventions
-
-- **Trigram tokenizer**: `tokenize='trigram'` — queries of 3+ characters work best.
-- **rowid = owned chapter index + 1**: FTS5 rowid is 1-based. `chapterTexts` keys are TOC-owned chapter indices (not raw spine file order). Convert on read: `chapterIndex: row.rowid - 1`. Ownership lives in `sidecar/chapter-ownership.ts`; see quality-guidelines "Scenario: reader/agent chapter coordinates".
-- **FTS is a candidate finder, not the excerpt source**: `searchInBook(queries)` runs exact `indexOf` first. When a query has no exact hit, `MATCH` an escaped quoted phrase (`escapeFtsPhrase`) to collect chapter rowids, then token-AND fallback. Snippets come from `snippetAround` (160-char radius) so `part = floor(offset / 12000)` is honest. Do not restore `snippet(chapters, …)` — it has no usable chapter offset.
-- **Close previous DB on book reload**: `if (currentBook?.fts) currentBook.fts.close()` before resetting state.
-
-### Don't: persist the FTS5 index to disk
-
-The FTS5 index is intentionally ephemeral. EPUBs are small enough that rebuilding is fast. Do not add disk persistence for the search index.
+Do not persist a duplicate search database. EPUB bytes remain the source of
+truth, and rebuilding keeps search aligned with the exact open content version.
 
 ---
 
-## Session Storage (Sidecar JSONL)
+## Pi Session Storage
 
-### Pattern: SessionManager from pi-coding-agent
-
-Session files are JSONL and managed by `SessionManager` from `@earendil-works/pi-coding-agent`. The sidecar does not implement session storage itself — it delegates to the SDK.
-
-```typescript
-// sidecar/index.ts
-const sessionManager = SessionManager.create(process.cwd(), sessionDir, { id: sessionId });
-const { session: s } = await createAgentSession({ sessionManager, customTools, resourceLoader });
-```
-
-### Conventions
-
-- **Sessions scoped per book**: `<sessionsDir>/<bookId>/<sessionId>.jsonl`.
-- **`sessionsDir` passed from Rust**: `notify_sidecar_book_opened()` sends the Tauri app data dir + `/sessions` as `sessionsDir`.
-- **Lazy load from disk**: `loadSessionFromDisk()` reads a session JSONL when a `switch_session` request arrives for a session not in memory.
-- **Best-effort deletion**: `unlink(managed.filePath)` — ignore errors if the file is already gone.
-- **Deleting a book deletes its session directory**: after `library.json` commit, `delete_book` removes `<app_data>/sessions/<bookId>/`. Missing directory is success. Failure after the book record is gone is `StorageIo` without rolling the book back.
+- Sessions are scoped to `<app_data>/sessions/<bookId>/<sessionId>.jsonl`.
+- Rust validates identifiers, containment, symlinks, file types, sizes, Pi v3
+  headers, timestamps, entry ids, and parent links before returning content.
+- Appends are optimistic: callers provide the expected leaf id and stale writers
+  fail instead of silently forking or overwriting history.
+- Pi v1/v2 migration creates a `.pre-v3.bak` before atomically replacing the
+  source. Normal v3 use is append-only.
+- Deleting a book also deletes its session directory. A missing directory is
+  success; a post-commit removal failure is `StorageIo` and does not restore the
+  deleted library record.
 
 ---
 

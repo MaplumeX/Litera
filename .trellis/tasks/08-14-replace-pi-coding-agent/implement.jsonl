@@ -1,0 +1,9 @@
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Agent flow crosses WebView runtime, Tauri commands, Rust storage, provider network, and release layers"}
+{"file":".trellis/spec/backend/tauri-commands.md","reason":"Own the new runtime-config/session commands and remove old sidecar command contracts safely"}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"Preserve controlled app-data roots, per-book sessions, migration, and book-delete semantics"}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Keep structured Rust errors and visible recoverable frontend Agent failures"}
+{"file":".trellis/spec/backend/release.md","reason":"Remove sidecar build/version/release coupling without breaking the desktop matrix"}
+{"file":".trellis/spec/frontend/hook-guidelines.md","reason":"Replace the sidecar subscription with a lifecycle-safe local runtime controller"}
+{"file":".trellis/spec/frontend/state-management.md","reason":"Preserve reducer-backed chat behavior while changing the event source and persistence owner"}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"Preserve EPUB script CSP and apply Tauri plugin/capability rules"}
+{"file":".trellis/tasks/08-14-replace-pi-coding-agent/research/architecture-evidence.md","reason":"Repository and upstream evidence for the selected embedded-runtime boundaries"}

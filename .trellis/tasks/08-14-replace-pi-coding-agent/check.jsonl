@@ -1,0 +1,9 @@
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Review end-to-end formats, validation ownership, and error paths after the migration"}
+{"file":".trellis/spec/backend/tauri-commands.md","reason":"Check TypeScript/Rust command signatures, serialization, and removal of stale sidecar commands"}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"Audit session round trips, atomic persistence, migration idempotence, and deletion"}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Audit corrupt storage, provider/tool failures, aborts, and user-visible recovery"}
+{"file":".trellis/spec/backend/release.md","reason":"Check version script and release workflow after removing external binaries"}
+{"file":".trellis/spec/frontend/hook-guidelines.md","reason":"Check StrictMode cleanup, book/session supersession, abort, and stale async completion"}
+{"file":".trellis/spec/frontend/state-management.md","reason":"Check session CRUD/edit/history hydration and no duplicated source of truth"}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"Audit CSP, credential boundary, native HTTP permission, and EPUB script isolation"}
+{"file":".trellis/tasks/08-14-replace-pi-coding-agent/design.md","reason":"Review implementation against the approved architecture, migration, and rollback contracts"}

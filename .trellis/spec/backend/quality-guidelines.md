@@ -1,356 +1,40 @@
 # Quality Guidelines
 
-> Code standards for the Litera Rust backend + Node.js sidecar.
-
----
-
-## Sidecar stdio JSON Lines Protocol
-
-### Convention: sidecar stdout MUST only emit JSON lines
-
-**What**: The sidecar process communicates with Rust via stdout. Every line must be a valid JSON object. No non-JSON output on stdout.
-
-**Why**: Tauri shell events deliver arbitrary stdout byte chunks. Rust's `JsonLineFramer` reassembles newline-delimited frames before parsing JSON. Non-JSON lines (e.g., from `console.log`) still break the protocol.
-
-**Correct**:
-```typescript
-// sidecar/index.ts
-function send(obj: object) {
-  process.stdout.write(JSON.stringify(obj) + "\n")
-}
-send({ type: "text_delta", delta: "hello" })
-```
-
-**Wrong**:
-```typescript
-// NEVER do this in sidecar
-console.log("processing prompt")  // breaks Rust JSON parser
-console.error("debug info")       // use process.stderr for diagnostics
-```
-
-**Rule**: Use `process.stdout.write(JSON.stringify(obj) + "\n")` for all protocol output. Use `process.stderr.write()` for diagnostics (Rust logs stderr separately).
-
-### Convention: sidecar is a long-running process
-
-**What**: the packaged `litera-sidecar-$TARGET_TRIPLE[.exe]` blocks waiting for stdin input. It does not require a system Node.js runtime.
-
-**Why**: The sidecar is a stdio server. It reads stdin line-by-line and processes prompts.
-
-**Implication for testing**: do not launch the executable without a harness. `npm run smoke:sidecar` spawns it with pipes, removes Node from `PATH`, waits for `ready`, sends `ping`, and requires `pong` after a real FTS5 WASM query.
-
-## Sidecar Process Management (Rust)
-
-### Convention: resolve through Tauri, spawn in setup, kill on window destroy
-
-```rust
-// Spawn in tauri::Builder::default().setup()
-let (events, child) = app
-    .shell()
-    .sidecar("litera-sidecar")?
-    .set_raw_out(true)
-    .spawn()?;
-
-// Kill on window destroy
-.on_window_event(|window, event| {
-    if let WindowEvent::Destroyed = event {
-        // kill sidecar child
-    }
-})
-```
-
-The WebView capability file does not grant shell execute/spawn permissions. The fixed external-binary name is selected only by Rust.
-
-### Convention: frame raw chunks and serialize writes through one owner
-
-```rust
-tauri::async_runtime::spawn(async move {
-    while let Some(event) = events.recv().await {
-        match event {
-            CommandEvent::Stdout(chunk) => {
-                for line in stdout_framer.push(&chunk) {
-                    let event = EventEnvelope::decode_line(&line)?;
-                    event_bridge.try_send(event)?;
-                }
-            }
-            // stderr, Error, and Terminated are handled explicitly
-            _ => {}
-        }
-    }
-});
-```
-
-`CommandChild` is owned by a background writer thread. Command handlers enqueue complete JSONL byte frames; they never perform `ChildStdin::write_all` or `flush` while holding Tauri state on the main thread.
-
-### Convention: terminal events update transport status
-
-- stdin write failure, invalid stdout, bridge overflow, ready timeout, `CommandEvent::Error`, and unexpected `CommandEvent::Terminated` become `ProcessEnded` for exactly one process generation.
-- The supervisor first updates its snapshot and emits `prompt_interrupted`/`supervisor_status`, then performs bounded recovery. Exhaustion becomes `unavailable`; `restart_sidecar` starts a fresh recovery budget.
-- Intentional window shutdown marks the actor as stopping before sending the dedicated kill signal, so the expected termination cannot start another recovery loop.
-- Old-generation events remain harmless even if a terminated process reports late output; the actor rejects them before updating the snapshot.
-
-### Convention: use the versioned typed agent envelope
-
-- Every command contains `protocolVersion: 1`, `requestId`, and the relevant `bookId`, `sessionId`, or `promptId` correlation.
-- Every sidecar event contains `protocolVersion: 1` and a positive process-local `seq`. Rust rejects duplicate or regressing `seq` values, then adds the process `generation` and global monotonic `version` before emitting the single `agent_event` channel.
-- Decode `unknown` JSON exactly once in `sidecar/protocol.ts` and `src-tauri/src/sidecar_protocol.rs`. Consumers must not read raw JSON fields independently.
-- JSONL commands/events, identifiers, prompt text, selection text, and stdout framing have explicit size limits. Validation happens before a Tauri command returns a receipt.
-
-### Convention: sidecar agent config is injected, never host-borrowed
-
-- The sidecar MUST NOT read `~/.pi/agent` or `process.env.HOME` to locate LLM provider/auth/models config. The Rust supervisor owns a Litera-specific agent config directory (`<app_data_dir>/agent/`) and injects it via the `configure` command after every `ready` event, before any `open_book`.
-- Rust resolves and `create_dir_all`s the agent dir once at supervisor startup and stores it on `SupervisorActor.agent_dir`; it re-sends `configure` on every `ready` (including restarts) so a freshly spawned sidecar always receives it before replay.
-- The sidecar stores the injected path in a module-level `agentDir` variable. `handleOpenBook` rejects if `agentDir` is unset. `makeResourceLoader` and every `createAgentSession` call MUST pass `agentDir` explicitly — the pi SDK's `createAgentSession` falls back to `getDefaultAgentDir()` (~/.pi/agent) when `agentDir` is omitted even if a `resourceLoader` is supplied, so omitting it silently re-couples Litera to the host pi install.
-- `configure` is fire-and-forget (no confirmation event); delivery ordering is guaranteed because Rust writes `configure` and any subsequent `open_book` to the same stdin writer synchronously.
-
-### Convention: supervisor queues and recovery are bounded
-
-- Tauri commands use a bounded supervisor queue; the supervisor uses a bounded child-writer queue. Full queues fail immediately with an operation-correlated error. `open_book_bytes` additionally waits on a one-shot actor completion from a blocking worker and returns EPUB bytes only after the child-writer queue accepts `open_book`. Process kill uses a separate capacity-one channel, and the child owner checks it before every normal write, so shutdown/restart never waits behind a full writer queue.
-- The async stdout reader never blocks a Tauri runtime worker on `SyncSender::send`: it uses a bounded event bridge serviced by a dedicated thread. Overflow is terminal and causes a deterministic restart.
-- Node respects stdout backpressure with its own frame/byte-bounded queue. If the Rust reader remains stalled and that queue fills, the sidecar terminates so the supervisor can recover instead of allowing Node's writable buffer to grow without bound.
-- Any malformed, unknown, or otherwise invalid stdout protocol line is terminal for that process generation: Rust emits `ProcessEnded`, kills the child, and enters bounded restart instead of logging and continuing with an untrustworthy stream.
-- Each process start receives a new generation and a ready watchdog aligned with the packaged smoke budget. Consecutive failures consume one bounded restart budget; receiving `ready` alone does not reset that budget.
-- Recovery replays only the last controlled book descriptor and persisted active session. It never replays an interrupted prompt, and replay is enabled only after a process failure/manual restart, not on the first start.
-- EPUB/FTS work lives in `BookWorker`. Its RPC requests are serialized, bounded, and carry `bookId` plus book generation; tools capture that pair when their session is created so an aborted old prompt cannot read a newer book. Each `open_book` replaces the worker before starting its load, and `close_book` detaches it; superseded workers terminate asynchronously so a slow A load cannot delay B or close.
-
-### Convention: inject reading context as a nextTurn aside, never mutate the user message
-
-**What**: When a prompt carries reading context (`selection`, `chapterHref`), the sidecar MUST deliver that context to the model via `session.sendCustomMessage(..., { triggerTurn: false, deliverAs: "nextTurn" })` before calling `session.prompt(text)`. If `session.messages` does not already contain a `bookSnapshot` custom message, `handlePrompt` MUST also queue a one-time book snapshot aside (`customType: "bookSnapshot"`, same `nextTurn` options) before the reading-context aside and before `session.prompt(text)`. The user message passed to `prompt()` is always the raw user input. The live locator is a chapter href, never a raw spine `chapterIndex`.
-
-**Why**: `session.prompt()` stores its argument verbatim as a `user` role message in session history. `serializeMessages` → `extractUserText` returns that stored text to the frontend for display. Concatenating context wrappers (`（当前在第 N 章）`, `用户选中的文本：`, `用户问题：`) or book metadata/TOC into the prompt string pollutes the persisted user message, so the chat panel shows LM-facing metadata as if the user typed it. The snapshot persists as a custom message so later turns and reloaded sessions do not enqueue a second copy.
-
-**Correct**:
-```typescript
-// sidecar/index.ts handlePrompt
-if (!sessionHasBookSnapshot(managed.session.messages)) {
-  try {
-    const [meta, toc] = await Promise.all([
-      worker.metadata(managed.bookId, managed.generation),
-      worker.toc(managed.bookId, managed.generation),
-    ]);
-    await managed.session.sendCustomMessage(
-      { customType: "bookSnapshot", content: formatBookSnapshot(meta, toc), display: false, details: undefined },
-      { triggerTurn: false, deliverAs: "nextTurn" },
-    );
-  } catch (error) {
-    process.stderr.write(`[book-snapshot] failed to queue aside: ${error instanceof Error ? error.message : String(error)}\n`);
-  }
-}
-const context = command.context;
-if (context) {
-  const asideParts: string[] = [];
-  if (context.selection) asideParts.push(`用户选中的文本：\n"${context.selection}"`);
-  else if (context.chapterHref) {
-    const aside = formatChapterAside(findChapterByHref(toc, context.chapterHref));
-    if (aside) asideParts.push(aside);
-  }
-  if (asideParts.length) {
-    await managed.session.sendCustomMessage(
-      { customType: "readingContext", content: asideParts.join("\n"), display: false, details: undefined },
-      { triggerTurn: false, deliverAs: "nextTurn" },
-    );
-  }
-}
-void managed.session.prompt(command.text).then(/* ... */);
-```
-
-**Wrong**:
-```typescript
-// NEVER concatenate context or the book snapshot into the user text
-const fullPrompt = `（当前在第 ${ctx.chapterIndex} 章）\n\n用户问题：${text}`; // spine integer + pollutes history
-session.prompt(fullPrompt);  // pollutes stored user message
-```
-
-**Rule**: Context asides must not include a `用户问题：` label — the user text is delivered separately by `prompt()`. The reading-context aside contains only the context (selected text, or a resolved chapter title + `chapterNumber`; never a raw spine integer or href). Resolve `chapterHref` through the owned TOC; if the href is missing or unmatched, omit the chapter line. The book snapshot aside is idempotent (skip when any message has `role === "custom"` and `customType === "bookSnapshot"`), includes a compact TOC truncated at 200 entries or 4000 formatted characters, and must not block `prompt()` on fetch or enqueue failure (one-line `process.stderr.write` only; stdout stays JSONL). TOC lines are `{chapterNumber} [index {chapterIndex}]: {title}` (`chapterNumber = index + 1`). Do not put hrefs in the snapshot, `get_toc` JSON, or the aside, or tell the model to call `get_toc` for hrefs.
-
-### Convention: book-reading tools are structured, windowed, and multi-query
-
-**What**: `get_toc`, `read_chapter`, and `search_in_book` follow the ReadAware book-text contracts, minus spoiler / `bookId` / shelf search. Results are JSON text via `okResult`. Failures are `errorResult`, never thrown from `execute`.
-
-**Why**: Spoken "chapter N" must not be mentally decremented; EPUB chapters can exceed one model window; a single FTS wording miss must not cost a full LLM round trip.
-
-**Contracts**:
-- `get_toc()` → `[{ chapterIndex, chapterNumber, title, chars }]`. Strip `href` at the tool layer. `chars` is stored text length (0 if missing).
-- `read_chapter({ chapterIndex, part? })` → `{ chapterIndex, chapterNumber, part, totalParts, text }`. Window size `CHAPTER_PART_CHARS` (12000). Default `part` 0; out-of-range clamps. Worker still returns full chapter text; `windowChapterText` slices in the tool.
-- `search_in_book({ queries })` → up to 16 hits `{ chapterIndex, chapterTitle?, part, match, snippet }`. Trim/dedupe/cap queries at 12 in execute (do not fail the schema). Exact hits first, then `partial`. `part = floor(offset / 12000)`. Worker RPC takes `queries: string[]` in one call.
-- No `confirmSpoiler`, `throughChapterIndex`, or tool-level `bookId`. Tools stay bound to the session's book generation.
-
-**Wrong**:
-```typescript
-return okResult(await worker().readChapter(bookId, generation, index)); // unbounded chapter
-searchInBook(query: string); // one wording, unbounded FTS snippet() hits
-```
-
-**Correct**:
-```typescript
-const text = await worker().readChapter(bookId, generation, chapterIndex);
-return okResult(JSON.stringify({ chapterIndex, chapterNumber: chapterIndex + 1, ...windowChapterText(text, part ?? 0) }));
-```
-
-**Related**: FTS candidate pipeline in `database-guidelines.md`. Search merge lives in `sidecar/book-text.ts`; chapter identity lives in `sidecar/chapter-ownership.ts`. Both stay WASM-free for unit tests.
-
-## Scenario: reader/agent chapter coordinates
-
-### 1. Scope / Trigger
-
-- Trigger: any change to EPUB chapter identity, `PromptContext`, reading-context aside, `get_toc` / `read_chapter` / `search_in_book` indices, or the reader locator sent with a prompt.
-- Prevents the reader (foliate spine / TOC href) and the sidecar tools from numbering different objects as "chapter N".
-
-### 2. Signatures
-
-```typescript
-// sidecar/protocol.ts + src-tauri PromptContext (deny_unknown_fields)
-interface PromptContext {
-  selection?: string;     // max MAX_SELECTION_LENGTH
-  chapterHref?: string;   // max 4096; empty string = absent
-}
-
-// sidecar/chapter-ownership.ts — internal, never sent to the model
-interface OwnedChapter {
-  index: number;
-  label: string;
-  hrefs: string[];
-  text: string;
-}
-```
-
-```rust
-fn agent_prompt(..., selection: Option<String>, chapter_href: Option<String>, ...)
-fn agent_edit_prompt(..., selection: Option<String>, chapter_href: Option<String>, ...)
-```
-
-### 3. Contracts
-
-- Sidecar builds one owned list on `open_book`: resolve each TOC href onto a spine file (nav/ncx directory as base); first TOC entry to claim a file wins; unclaimed files join the previous owner; empty/unresolvable TOC → one chapter per non-empty spine file; drop chapters with empty text.
-- `metadata.totalChapters`, snapshot TOC, `get_toc`, `read_chapter`, `search_in_book`, and FTS `rowid` all use that owned index. `chapterNumber = chapterIndex + 1`.
-- `hrefs` (TOC href + owned spine hrefs) stay internal. Snapshot, `get_toc` JSON, and the aside never include hrefs.
-- Live locator is `chapterHref` from the reader: `relocate.tocItem.href` if truthy, else `book.sections[index].id`. Do not send a spine `chapterIndex`.
-- Aside with no selection: `findChapterByHref` → `（当前在「{title}」，第 {N} 章）` or untitled `（当前在第 {N} 章）`. Missing/unmatched href: omit the chapter line.
-- Clear the locator when `fileData` / the open book changes. Do not ship the previous book's href.
-- Do not send full chapter bodies over JSONL (`MAX_JSONL_BYTES` is 1 MiB).
-
-### 4. Validation & Error Matrix
-
-| Condition | Result |
-|---|---|
-| `PromptContext.chapterIndex` present | Rust `deny_unknown_fields` rejects the command before a receipt |
-| `chapterHref` empty / whitespace | Treat as absent; do not fail the prompt |
-| `chapterHref` unmatched | Prompt proceeds; aside omits the chapter line |
-| Cover / unlabeled spine file | Not its own owned chapter unless TOC is empty |
-| Chapter split across two XHTML files | One `read_chapter` target; text is both files concatenated |
-| Unknown href after switching books | Impossible if the frontend cleared the locator; unmatched href still omits the line |
-
-### 5. Good/Base/Bad Cases
-
-- **Good**: fixture with cover + a two-file chapter → `totalChapters === 2`; `read_chapter(0)` is the labeled chapter, not the cover.
-- **Base**: empty nav → one chapter per non-empty spine file; section `id` still resolves.
-- **Bad**: print `（当前在第 ${relocate.index} 章）` or zip TOC titles onto spine files by order.
-
-### 6. Tests Required
-
-- Pure: `canonicalHref` / `hrefMatches` (no `part0010.html` ↔ `0.html`); ownership for cover + split file; empty TOC fallback; aside formatter.
-- `loadBook` integration: owned `totalChapters`, `read_chapter(0)` text, search `chapterIndex` on the same list.
-- Protocol: accept `chapterHref`; reject `chapterIndex` on Rust; `agent_prompt` JSON has `chapterHref` and no `chapterIndex`.
-- Frontend: capture `tocItem.href ?? section.id`; clear locator on book change; empty href falls back to section id.
-
-### 7. Wrong vs Correct
-
-#### Wrong
-
-```typescript
-asideParts.push(`（当前在第 ${context.chapterIndex} 章）`); // spine integer
-chapterTexts.set(spineIndex, htmlToText(html));
-toc.find((entry) => entry.index === spineIndex); // sequential nav index ≠ spine
-```
-
-#### Correct
-
-```typescript
-const chapter = findChapterByHref(owned, context.chapterHref);
-const aside = formatChapterAside(chapter);
-if (aside) asideParts.push(aside);
-// FTS rowid = owned.index + 1; get_toc / read_chapter share owned.index
-```
-
-### Convention: rewind a user turn with `navigateTree`, never `branch()` alone
-
-**What**: Chat edit-and-resend is `edit_prompt`, not an optional field on `prompt`. After locating the visible user entry on `getBranch()`, call `session.navigateTree(id)` (parent `readingContext` custom message if present). Then emit `session_rewound` and reuse `startPrompt`.
-
-**Why**: `SessionManager.branch()` only moves `leafId`. `AgentSession.messages` is `agent.state.messages`; they desync unless `navigateTree` rebuilds context. `getUserMessagesForForking()` walks the whole JSONL, including abandoned branches, so it cannot map the visible chat list.
-
-**Rule**: `getBranch()` already returns root → leaf (oldest first), matching `serializeMessages` / frontend `messageIndex`. Do not reverse it. Reversing makes index `0` the newest entry (usually assistant) and `edit_prompt` throws `Edit target must be a user message on the current branch`.
-
-**Related**: `tauri-commands.md` scenario `agent_edit_prompt`.
-
-### Don't: block the main thread on sidecar I/O
-
-**Problem**: Reading sidecar stdout synchronously in a command handler.
-
-**Why it's bad**: Blocks the Tauri event loop, freezing the UI.
-
-**Instead**: consume shell events on Tauri's async runtime, frame stdout chunks there, and enqueue stdin writes to the dedicated child owner.
-
-## Scenario: Packaged External Sidecar
-
-### 1. Scope / Trigger
-
-Apply this contract whenever the sidecar entry, dependencies, WASM assets, target matrix, or Tauri bundle configuration changes. It prevents development-only source paths or a system Node installation from becoming hidden release requirements.
-
-### 2. Signatures
-
-```text
-npm run build:sidecar              # build the native host executable
-npm run smoke:sidecar              # empty-PATH ready/ping/FTS5 probe
-node sidecar/scripts/build.mjs --target <rust-triple>
-bundle.externalBin = ["binaries/litera-sidecar"]
-app.shell().sidecar("litera-sidecar")
-```
-
-### 3. Contracts
-
-- Build output is `src-tauri/binaries/litera-sidecar-$TARGET_TRIPLE[.exe]`; generated binaries, `sidecar/dist`, and the pkg cache remain untracked.
-- esbuild emits the CommonJS entry and copies `sql-wasm.wasm`; `@yao-pkg/pkg` embeds both into a self-contained executable. Keep pkg compression disabled because compressed source snapshots fail to read the WASM with the pinned pkg version.
-- An explicit target comes from `--target`, `TAURI_TARGET_TRIPLE`, `TAURI_ENV_TARGET_TRIPLE`, or `CARGO_BUILD_TARGET`. A requested non-host target fails and must be built on that native OS/architecture runner.
-- Rust alone resolves the fixed external binary. WebView capabilities do not grant shell execute/spawn permissions.
-
-### 4. Validation & Error Matrix
-
-| Condition | Required result |
-|-----------|-----------------|
-| Unsupported Rust triple | Build fails with the supported target list |
-| Explicit target differs from native host | Build fails; no relabeled host artifact |
-| pkg/esbuild/WASM dependency missing | Locked `npm ci` is attempted, then failure propagates |
-| Output missing or implausibly small | Build fails before Tauri packaging |
-| Executable needs system Node or cannot load FTS5 | Empty-PATH smoke fails |
-| Child write/error/termination | Transport becomes `Stopped(reason)` and later commands reject |
-
-### 5. Good/Base/Bad Cases
-
-- **Good**: fresh checkout root build creates the triple-suffixed executable, Tauri copies it into the release output, and empty-PATH FTS5 smoke passes.
-- **Base**: local `npm run dev` rebuilds the native sidecar through `predev` and uses the same JSONL protocol as production.
-- **Bad**: production resolves `sidecar/dist/index.js` with `CARGO_MANIFEST_DIR` or calls `Command::new("node")`.
-
-### 6. Tests Required
-
-- Unit-test every supported Rust triple to pkg target/suffix mapping and rejection of unsupported targets.
-- Simulate missing generated `dist` and `binaries` directories, then assert the standard root build recreates them.
-- Run empty-PATH smoke and require `ready`, `pong`, and a real FTS5 WASM query.
-- Run `tauri build --no-bundle` and assert the copied release sidecar matches the generated executable.
-- Scan tracked/generated release inputs for compile-machine source paths, legacy system-Node launch code, and accidentally tracked large binaries.
-
-### 7. Wrong vs Correct
-
-#### Wrong
-
-```rust
-Command::new("node").arg(source_tree.join("sidecar/dist/index.js"));
-```
-
-#### Correct
-
-```rust
-let (events, child) = app
-    .shell()
-    .sidecar("litera-sidecar")?
-    .set_raw_out(true)
-    .spawn()?;
-```
+## Embedded Agent boundary
+
+- `LiteraAgentRuntime` is the only Agent loop. One active book worker, session,
+  and prompt are allowed at a time.
+- Provider imports must remain browser-compatible and pinned to the matching
+  `pi-ai` / `pi-agent-core` version.
+- The raw user message is appended before the network call. Completed assistant
+  and tool-result messages are appended only after settlement.
+- Abort persists the terminal aborted assistant message when Pi settles.
+
+## Book tools and coordinates
+
+- `chapterIndex` always indexes the TOC-owned chapter projection, never raw spine
+  files. The reader sends `chapterHref`; the runtime resolves ownership.
+- `read_chapter` is bounded by 12,000-character parts. Search accepts multiple
+  query variants, prefers exact hits, and returns deterministic bounded snippets.
+- EPUB parsing, ownership, indexing, and search run in the module worker. A book
+  switch terminates the old worker and rejects pending calls.
+
+## Session integrity
+
+- Pi v3 JSONL remains append-only during normal interaction.
+- Rust validates real paths, ids, timestamps, parents, byte caps, and expected
+  leaves. Stale writers fail rather than silently forking.
+- Only an invalid trailing fragment may be truncated. Earlier corruption is an
+  error. v1/v2 migrations require a backup and atomic replacement.
+
+## Network and credentials
+
+- Model requests use `createGuardedNativeFetch`, require the configured HTTP(S)
+  origin, and reject redirects.
+- API keys exist only in Rust-owned config files and request memory. Never put
+  them in local storage, sessions, logs, errors, or snapshots.
+
+## Required gates
+
+Run frontend tests/type-check/build, Rust tests, `tauri build --no-bundle`, and
+the stale-reference audit before release.

@@ -42,11 +42,11 @@ npx shadcn@latest add <component-name>
 
 ### Convention: LLM provider dropdown is draft-only
 
-**What**: `AgentConfigForm` splits 「当前使用」and 「这个提供商」. Changing the provider Select only updates local draft state. Disk writes and `restart_sidecar` happen on 「保存并应用」 (`save_agent_config` for built-in, optional `update_custom_provider` + `switch_provider` for custom). 「添加自定义」is a button, not a Select sentinel. Custom provider delete uses `AlertDialog`.
+**What**: `AgentConfigForm` splits 「当前使用」and 「这个提供商」. Changing the provider Select only updates local draft state. Disk writes and embedded-runtime cache invalidation happen on 「保存并应用」 (`save_agent_config` for built-in, optional `update_custom_provider` + `switch_provider` for custom). 「添加自定义」is a button, not a Select sentinel. Custom provider delete uses `AlertDialog`.
 
-Custom (and the add form) model field is a local searchable combobox (`Popover` + `Command`, `modal={false}`): pick from the draft catalog, type a new id via 「使用 {id}」 (append + select), refresh beside the box. Refresh is custom/add-form only and calls `list_remote_models`; it must not write agent JSON or restart the sidecar. The catalog only grows — no per-model delete, no second `ModelListEditor` under 「这个提供商」. Built-in model stays a plain text input with no refresh and no catalog.
+Custom (and the add form) model field is a local searchable combobox (`Popover` + `Command`, `modal={false}`): pick from the draft catalog, type a new id via 「使用 {id}」 (append + select), refresh beside the box. Refresh is custom/add-form only and calls `list_remote_models`; it must not write agent JSON or invalidate the active runtime. The catalog only grows — no per-model delete, no second `ModelListEditor` under 「这个提供商」. Built-in model stays a plain text input with no refresh and no catalog.
 
-**Why**: Select-on-change used to switch the live provider and kill the sidecar mid-chat. Splitting pick / type / refresh across two sections made custom model changes unlike typical LLM apps. Built-in brands have no reliable `/models` catalog, so they stay free-text.
+**Why**: Select-on-change used to switch the live provider mid-chat. Splitting pick / type / refresh across two sections made custom model changes unlike typical LLM apps. Built-in brands have no reliable `/models` catalog, so they stay free-text.
 
 **Don't**: Put add-custom back in the Select. Don't call `switch_provider` from `onValueChange`. Don't fetch `/models` from the WebView. Don't add a model-list editor or per-id delete. Don't share the model combobox module with the font picker (create-new vs fixed list). Don't show refresh on built-in providers.
 
@@ -115,7 +115,7 @@ body:     [TOC or 标注 overlay]  Reader  |  Chat (collapsed = 0 width, still m
 **Rules**:
 - Do not send `chapterIndex` on the live prompt path (`PromptContext` is `deny_unknown_fields`).
 - Clear `chapterHref` when the open book / `fileData` changes; a leftover href from book A must not go to book B.
-- The reader TOC sidebar may stay foliate's nested tree. Only the agent locator and sidecar owned list share `chapterHref` / owned `chapterIndex`.
+- The reader TOC sidebar may stay foliate's nested tree. Only the agent locator and worker-owned list share `chapterHref` / owned `chapterIndex`.
 
 **Related**: backend quality-guidelines "Scenario: reader/agent chapter coordinates".
 

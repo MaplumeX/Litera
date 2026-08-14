@@ -6,6 +6,107 @@
 
 ## Overview
 
+## Embedded Agent Command Family
+
+### 1. Scope / Trigger
+
+These commands are the only privileged boundary used by the embedded WebView
+Agent. Rust resolves active credentials and owns Pi v3 JSONL filesystem access;
+the WebView owns orchestration, streaming, branch projection, and EPUB tools.
+
+### 2. Signatures
+
+```rust
+async fn get_agent_runtime_config(app: AppHandle) -> AppResult<AgentRuntimeConfig>
+async fn create_agent_session(app: AppHandle, book_id: String) -> AppResult<LoadedPiSession>
+async fn list_agent_sessions(app: AppHandle, book_id: String) -> AppResult<Vec<PiSessionSummary>>
+async fn load_agent_session(app: AppHandle, book_id: String, session_id: String) -> AppResult<LoadedPiSession>
+async fn append_agent_session_entries(
+    app: AppHandle,
+    book_id: String,
+    session_id: String,
+    expected_leaf_id: Option<String>,
+    entries: Vec<Value>,
+) -> AppResult<Option<String>>
+async fn delete_agent_session(app: AppHandle, book_id: String, session_id: String) -> AppResult<()>
+```
+
+`AgentRuntimeConfig` contains `provider`, `model`, `api`, `baseUrl`, and the
+active `apiKey`. `LoadedPiSession` contains the v3 `header`, raw `entries`, and
+`leafId`. Session summaries contain only id, derived title, and timestamps.
+
+### 3. Contracts
+
+- `get_agent_runtime_config` resolves the exact active model API and HTTP(S)
+  base URL. The plaintext key exists only for that request and must never enter
+  logs, reducer state, JSONL, browser storage, or surfaced errors.
+- Session files live at `<app_data>/sessions/<bookId>/*.jsonl`. Rust validates
+  real directories/files, containment, ids, headers, timestamps, parent links,
+  line/file/batch caps, and performs all blocking work via `spawn_blocking`.
+- Creation writes a Pi v3 header immediately. Load migrates v1/v2 only after a
+  `.pre-v3.bak` backup and atomically replaces the source. Normal v3 interaction
+  is append-only.
+- Append is optimistic. `expectedLeafId` must match the durable leaf (including
+  `null` for a header-only session); the returned value is the new durable leaf.
+  Rewinding chooses a branch parent in the frontend but does not change the
+  expected durable leaf used for the append race check.
+- A valid final JSON value without a newline is preserved and receives the
+  delimiter before append. Only an invalid final fragment may be truncated, and
+  corruption before it is always `StorageCorrupt`.
+
+### 4. Validation & Error Matrix
+
+| Condition | Error / result |
+|-----------|----------------|
+| Missing active provider, model, key, or invalid base URL | `InvalidInput` with credential-free text |
+| Invalid/traversal id, unknown session, duplicate session id | `InvalidInput` |
+| Symlink/non-regular session path, bad schema/header/parent/timestamp, earlier corruption | `StorageCorrupt` |
+| File/lock/worker/read/write/sync/rename failure | `StorageIo` |
+| `expectedLeafId` differs from the durable leaf | `InvalidInput` stale-leaf failure; no bytes appended |
+| Entry, batch, line, or file exceeds its cap | `InvalidInput`; no partial append |
+| Missing book session directory during list | empty list |
+
+### 5. Good/Base/Bad Cases
+
+- **Good**: two prompts append against the current leaf and reload as the same
+  Pi v3 tree after restart.
+- **Good**: a v2 file loads once, keeps a `.pre-v3.bak`, and thereafter remains
+  append-only v3.
+- **Base**: a newly created header-only session is visible before its first
+  message and uses `expectedLeafId: null`.
+- **Bad**: an old concurrent prompt appends after another writer advanced the
+  file; Rust rejects it instead of creating a silent fork.
+- **Bad**: a model error containing a request URL or authorization material is
+  forwarded to reducer state; transport/runtime code must redact it first.
+
+### 6. Tests Required
+
+- Create/list/load/append/delete and v1/v2-to-v3 backup migration.
+- Valid no-newline recovery, invalid-tail truncation, and earlier-corruption
+  rejection.
+- Traversal, symlink, non-file, size/line/batch caps, bad parents/timestamps, and
+  duplicate/unknown session handling.
+- Concurrent stale-leaf rejection and edit/rewind separation between durable
+  expected leaf and branch parent.
+- Built-in/custom runtime config resolution, API selection, cache invalidation,
+  native transport origin/redirect guards, and credential redaction.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```ts
+// The visible branch parent is not necessarily the current durable file leaf.
+await appendEntries({ expectedLeafId: editedMessage.parentId, entries });
+```
+
+#### Correct
+
+```ts
+// Race against the durable leaf, while entries may parent from the rewound branch.
+await appendEntries({ expectedLeafId: session.leafId, entries });
+```
+
 Litera uses Tauri v2 commands as the IPC bridge between the React WebView and the Rust backend. This document records the executable contracts for each command family.
 
 ---
@@ -55,7 +156,7 @@ async fn get_book_open_context(store: State<'_, LibraryStore>, book_id: String) 
 #[tauri::command]
 async fn read_book_bytes(store: State<'_, LibraryStore>, book_id: String, content_version: String) -> AppResult<tauri::ipc::Response>
 
-// Read the exact active version as Raw IPC and notify the sidecar after success
+// Read the exact active version as Raw IPC and update lastOpenedAt best-effort
 #[tauri::command]
 async fn open_book_bytes(app: AppHandle, store: State<'_, LibraryStore>, book_id: String, content_version: String) -> AppResult<tauri::ipc::Response>
 
@@ -163,7 +264,7 @@ interface AnnotationsFile {
 │   └── .transactions/   # crash-recovery journals (temporary)
 ├── books/.trash/        # recoverable staged deletions
 ├── backup/legacy-*/     # legacy reset backups; never silently discarded
-└── sessions/<bookId>/   # sidecar-managed content under a LibraryStore-validated root
+└── sessions/<bookId>/   # Rust-managed Pi v3 content under a validated root
 ```
 
 **bookId generation**: `DefaultHasher` hash of the **source file path** (not the app data copy path). Same source file maps to the same record. Content identity is a separate SHA-256 of EPUB bytes (`contentHash`). Do not change `bookId` to a content hash.
@@ -181,7 +282,7 @@ Do not filter `book.id != incoming_id` when matching `contentHash`. That made sa
 
 **list_books order**: `lastOpenedAt` descending (missing last), then `importedAt` descending. Frontend search filters; it does not re-sort.
 
-**Open context / last opened**: `get_book_open_context` returns `title` and backfills a missing `contentHash` from the stored EPUB under the store lock. `open_book_bytes` notifies the sidecar first; writing `lastOpenedAt` after that is best-effort (log on failure, do not fail the open).
+**Open context / last opened**: `get_book_open_context` returns `title` and backfills a missing `contentHash` from the stored EPUB under the store lock. After reading the validated bytes, `open_book_bytes` writes `lastOpenedAt` best-effort (log on failure, do not fail the open).
 
 **Repeat-import transaction**: `import_book` / `import_paths` read EPUB bytes and stage them without replacing the current EPUB until `save_book_metadata(importId)`. A parse/save failure leaves the previous complete version active. Startup restores a prepared transaction when `contentVersion` did not commit, and keeps the new version when it did.
 
@@ -486,7 +587,7 @@ font-family: ${cssFontFamily(state.fontFamily)};
 
 ### Agent Config Commands
 
-**Scope / Trigger**: LLM provider / API key / default model configuration for the sidecar agent. Read/write the Litera-owned `<app_data>/agent/` directory (see quality-guidelines "sidecar agent config is injected").
+**Scope / Trigger**: LLM provider / API key / default model configuration for the embedded agent. Read/write the Litera-owned `<app_data>/agent/` directory.
 
 ```rust
 #[tauri::command]
@@ -532,18 +633,18 @@ interface CustomProviderEntry {
 **Contracts**:
 - `get_agent_config` reads `<app_data>/agent/auth.json` + `settings.json` + `models.json` and returns a masked snapshot (no plaintext key). Custom rows include the full `models` id list (empty ids skipped).
 - `save_agent_config` merge-writes: preserves other provider entries in `auth.json` and other fields in `settings.json`. Uses the shared `atomic_write` pattern (temp file + persist + sync_parent_dir). Reserved for **built-in** providers (frontend-hardcoded list). `api_key` may be empty **only when `auth.json` already has a key for that provider** — the existing key is kept and auth.json is untouched; otherwise `InvalidInput`.
-- Frontend calls `restart_sidecar` after `save_agent_config` / `switch_provider` so the sidecar re-reads config on next `configure` + session creation. `update_custom_provider` does **not** restart the sidecar; apply follows with `switch_provider` (one restart).
+- Frontend invalidates the cached embedded runtime after config mutations so the next prompt resolves fresh credentials and model configuration.
 - The API key MUST NOT appear in logs, journal, or non-`auth.json` files.
-- Provider/model selection for built-in providers is a frontend-hardcoded list of common api_key providers (`src/types/agent-config.ts`); model id is free-text. This avoids coupling the UI to the pi-ai built-in catalog (which only exists inside the sidecar Node process).
+- Provider/model selection for built-in providers is a frontend-hardcoded list of common API-key providers (`src/types/agent-config.ts`); model id is free-text.
 
 **Custom OpenAI-compatible providers** (`add_custom_provider` / `update_custom_provider` / `delete_custom_provider` / `switch_provider` / `list_remote_models`):
 - `add_custom_provider` generates a `custom-<8hex>` id, writes a provider entry to `<app_data>/agent/models.json` (`{ name, baseUrl, api: "openai-completions", models: [{ id }, ...] }`, **no apiKey** in models.json), and writes the key to `auth.json[<customId>]`. `models` must be non-empty with no blank ids. Does **not** write `settings.json`. Returns the masked entry so the frontend can update its list without a re-fetch.
 - `update_custom_provider` edits an existing custom provider: rewrites name/baseUrl/`models` in models.json (preserving the `api` field), upserts `auth.json[<customId>]` **only when `api_key` is non-empty** (empty keeps the existing key). Does **not** write `settings.json`. Activation is exclusively `switch_provider` / `save_agent_config`. Returns the updated masked entry. Rejects ids not starting with `custom-`, unknown ids, empty `models`, or blank model ids (`InvalidInput`).
 - `delete_custom_provider` rejects any `provider_id` not starting with `custom-` (guards built-in provider credentials from accidental erasure), removes the models.json + auth.json entries, and clears `defaultProvider`/`defaultModel` in settings.json when the deleted provider was active.
 - `switch_provider` merge-writes only `settings.json` (`defaultProvider` + `defaultModel` + `defaultThinkingLevel: "medium"`); it never touches `auth.json`. Used for both built-in and custom providers when only the active selection changes (no key update).
-- `list_remote_models` is custom OpenAI-compatible only. `GET {trim_end_matches(baseUrl, '/')}/models` with `Authorization: Bearer`, `Accept: application/json`, ~10s timeout, ~1 MiB body cap. If `api_key` is empty and `provider_id` is `custom-*`, read the key from `auth.json`; otherwise empty key is `InvalidInput`. Parse `data[].id` or a top-level string array; drop blanks; de-dupe preserving order. Empty parsed list, HTTP failure, timeout, or oversize body → `InvalidInput` (never include the key). Does not write agent JSON or restart the sidecar.
+- `list_remote_models` is custom OpenAI-compatible only. `GET {trim_end_matches(baseUrl, '/')}/models` with `Authorization: Bearer`, `Accept: application/json`, ~10s timeout, ~1 MiB body cap. If `api_key` is empty and `provider_id` is `custom-*`, read the key from `auth.json`; otherwise empty key is `InvalidInput`. Parse `data[].id` or a top-level string array; drop blanks; de-dupe preserving order. Empty parsed list, HTTP failure, timeout, or oversize body → `InvalidInput` (never include the key). It does not write agent JSON or mutate the active runtime.
 - `api` is fixed to `"openai-completions"` and never exposed in the UI.
-- The sidecar reads `models.json` via pi-coding-agent's `ModelConfig.load`; the sidecar/protocol layer is unaware of custom providers.
+- The embedded runtime receives a normalized provider configuration from `get_agent_runtime_config`; API keys remain Rust-owned outside that request boundary.
 
 ### Validation & Error Matrix
 
@@ -593,7 +694,7 @@ interface CustomProviderEntry {
 - Every `library.json` read/modify/write and every related file transition is inside the shared `LibraryStore` gate.
 - `library.json` writes use a same-directory temporary file, flush + `sync_all`, atomic persist, and parent-directory sync. Post-persist failures restore the prior complete bytes.
 - Stored `filePath` must equal `<appData>/books/<bookId>/book.epub`; non-empty `coverPath` must equal `<appData>/books/<bookId>/cover.png`. Commands derive operational paths again from the trusted root and never follow stored paths.
-- `books`, `.trash`, `sessions`, book directories, `.imports`, and `.transactions` must be real directories, not symlinks. EPUB/cover/transaction files must be regular files. Fresh initialization and legacy reset both create the real `sessions` root before the sidecar starts.
+- `books`, `.trash`, `sessions`, book directories, `.imports`, and `.transactions` must be real directories, not symlinks. EPUB/cover/transaction files must be regular files. Fresh initialization and legacy reset both create the real `sessions` root before agent use.
 - Delete revalidates `.trash` immediately before renaming the book directory into it, then commits metadata. A write failure renames it back; startup also restores an interrupted pre-commit staged deletion. Committed trash is retained for an explicit future retention policy.
 - Startup moves an unregistered real book directory (for example, a crash during first import before `library.json` commit) into `.trash/orphan-*`; it rejects unregistered files and symlinks instead of following them.
 - All synchronous dialog and filesystem work runs inside `spawn_blocking`; library commands are async.
@@ -635,13 +736,13 @@ let book_id = {
 
 #### Wrong — fail the open if lastOpenedAt cannot be written
 ```rust
-notify_sidecar_book_opened(...)?;
-store.mark_book_opened(&book_id)?; // sidecar already switched; UI would stay on library
+let bytes = store.read_book_bytes(...)?;
+store.mark_book_opened(&book_id)?; // a shelf-sort metadata error hides valid bytes
 ```
 
-#### Correct — lastOpenedAt is best-effort after sidecar accept
+#### Correct — lastOpenedAt is best-effort after a valid byte read
 ```rust
-notify_sidecar_book_opened(...)?;
+let bytes = store.read_book_bytes(...)?;
 if let Err(error) = store.mark_book_opened(&book_id) {
     eprintln!("[library] Book opened but lastOpenedAt was not saved: {error}");
 }
@@ -649,14 +750,14 @@ if let Err(error) = store.mark_book_opened(&book_id) {
 
 #### Wrong — switch provider on dropdown change
 ```ts
-// Selecting a custom provider immediately writes settings + restarts the sidecar
+// Selecting a custom provider immediately writes live settings
 onValueChange={(id) => { void switchProvider(id, model); }}
 ```
 
 #### Correct — dropdown is draft; one apply writes
 ```ts
-// Select only updates form state. Apply calls update (no restart) then switch_provider
-// (one restart), or save_agent_config for built-ins.
+// Select only updates form state. Apply updates the provider definition and then
+// switches it, or calls save_agent_config for built-ins; runtime cache invalidates once.
 onValueChange={(id) => { setProvider(id); }}
 ```
 
@@ -695,158 +796,12 @@ The legacy `open_file` command is removed. `import_book` is the only file-dialog
 
 ---
 
-## Sidecar Communication Commands
+## Capability Boundary
 
-### 1. Scope / Trigger
-
-Apply this contract whenever an Agent command, sidecar protocol field, supervisor state, or reader/Agent book transition changes. It prevents a Tauri invoke receipt, Node state, and React UI from describing different active operations.
-
-### 2. Signatures
-
-```rust
-fn get_agent_snapshot(State<SidecarSupervisor>) -> Result<AgentSnapshot, String>
-fn agent_prompt(prompt, selection?, chapter_href?, book_id, request_id?, prompt_id?, State<SidecarSupervisor>) -> Result<CommandReceipt, String>
-fn agent_edit_prompt(message_index, prompt, selection?, chapter_href?, book_id, request_id?, prompt_id?, State<SidecarSupervisor>) -> Result<CommandReceipt, String>
-fn agent_abort(prompt_id?, request_id?, State<SidecarSupervisor>) -> Result<CommandReceipt, String>
-fn list_sessions(book_id, request_id?, State<SidecarSupervisor>) -> Result<CommandReceipt, String>
-fn new_session(book_id, request_id?, State<SidecarSupervisor>) -> Result<CommandReceipt, String>
-fn switch_session(book_id, session_id, request_id?, State<SidecarSupervisor>) -> Result<CommandReceipt, String>
-fn delete_session(book_id, session_id, request_id?, State<SidecarSupervisor>) -> Result<CommandReceipt, String>
-fn close_book(book_id?, request_id?, State<SidecarSupervisor>) -> Result<CommandReceipt, String>
-fn restart_sidecar(State<SidecarSupervisor>) -> Result<(), String>
-```
-
-### 3. Contracts
-
-- Agent commands enqueue a validated `protocolVersion: 1` discriminated union. They never write or flush child stdin on the Tauri command thread.
-- `CommandReceipt` is `{ requestId, promptId? }`. A receipt for normal Agent commands means the bounded supervisor queue accepted the command; correlated `agent_event` success/error completes the operation.
-- `get_agent_snapshot` is an immediate clone of `{ version, generation, status, bookId?, sessionId?, promptId?, error? }`. React registers the single `agent_event` listener before reading it.
-- `open_book_bytes` is stricter: after the version-bound Raw EPUB read, a blocking worker waits for the supervisor actor to accept `open_book` into the child-writer queue. Only then may EPUB bytes return.
-- Replay state is committed only after writer-queue acceptance. A book-specific `close_book` clears replay state only when its ID matches the replay book.
-
-### Convention: sidecar book_opened notification
-
-`open_book_bytes` notifies the supervisor with the controlled EPUB path + bookId + sessionsDir only after the version-bound read succeeds. Runtime callers never supply a filesystem path. Resolving the sessions directory, supervisor enqueue, actor processing, or child-writer enqueue failure returns a visible `AppError`; EPUB bytes are not returned, so Reader and Agent cannot half-switch. The WebView can only close a current book; it cannot submit arbitrary paths.
-
-### 4. Validation & Error Matrix
-
-| Condition | Required result |
-|-----------|-----------------|
-| Unsupported protocol version, empty/oversized ID, prompt, selection, path, or JSONL frame | Reject before returning a receipt |
-| Supervisor or child-writer queue full/disconnected | Return an invoke error or emit the command-correlated transport error; never block the Tauri command thread |
-| `open_book` child-writer enqueue fails | `open_book_bytes` returns `StorageIo`; Reader does not switch |
-| Invalid/unknown sidecar stdout event | Terminate that generation and enter bounded recovery |
-| Duplicate/regressing `seq` or old process generation | Drop before snapshot/UI mutation |
-| Prompt/book correlation does not match current state | Advance the global event version but do not mutate operation state |
-| Sidecar restarts during a prompt | Emit interruption, recover book/session only, never replay the prompt |
-
-### 5. Good/Base/Bad Cases
-
-- **Good**: open B while A is active → B writer enqueue is confirmed, A generation is invalidated, B worker loads, and only `book_ready(B)` enables input.
-- **Base**: enqueue a prompt → invoke returns its IDs; `prompt_started` establishes session correlation and deltas/end update only that prompt.
-- **Bad**: update replay book before writer enqueue, return EPUB bytes, then discover the writer queue was full; Reader would show B while Agent still serves A.
-
-### 6. Tests Required
-
-- Rust protocol fixture round-trip plus invalid version/seq/nested ID/frame-size rejection.
-- Supervisor tests for command correlation, confirmed open writer result, full writer kill preemption, invalid stdout termination, restart budget, and stale snapshot errors.
-- Node tests for bounded dispatcher/output backpressure, abort tombstones, superseding workers, and real A/B EPUB generation isolation.
-- React reducer tests for reverse list responses, stale book/prompt errors, prompt/session correlation, toolCallId matching, first-prompt session creation, `session_rewound` same-book replace / cross-book ignore, and listen/snapshot cleanup order.
-- Empty-PATH sidecar smoke and `tauri build --no-bundle` remain release gates.
-
-### 7. Wrong vs Correct
-
-#### Wrong
-
-```rust
-supervisor.send(open_book_b)?;
-Ok(raw_response(bytes_b))
-```
-
-### Capability Boundary
-
-- The WebView capability contains only `core:default`; it cannot invoke shell spawn/execute, native dialog, or opener commands.
-- Rust owns both privileged integrations: the fixed external sidecar is resolved internally, and `import_book` opens the native EPUB picker through the Rust dialog plugin.
-- Do not add `shell:*`, `dialog:*`, or `opener:*` WebView permissions unless a reviewed frontend feature actually invokes them and narrows their scope.
-
-#### Correct
-
-```rust
-run_blocking(move || supervisor.send_confirmed(open_book_b)).await?;
-Ok(raw_response(bytes_b))
-```
-
-## Scenario: edit a visible user message (`agent_edit_prompt`)
-
-### 1. Scope / Trigger
-
-Editing a chat user message must rewind the **current session file** and resend. Do not add an optional index to `prompt`. Do not `fork()` a new session file. Do not create a session from this command.
-
-### 2. Signatures
-
-```rust
-fn agent_edit_prompt(
-    message_index: u32,
-    prompt: String,
-    selection: Option<String>,
-    chapter_href: Option<String>,
-    book_id: String,
-    request_id: Option<String>,
-    prompt_id: Option<String>,
-    supervisor: State<SidecarSupervisor>,
-) -> Result<CommandReceipt, String>
-```
-
-Sidecar command: `{ type: "edit_prompt", requestId, promptId, bookId, messageIndex, text, context? }`.
-Sidecar event: `{ type: "session_rewound", requestId?, bookId, sessionId, promptId, messages }`.
-
-### 3. Contracts
-
-- `messageIndex` is the index in the **visible** user+assistant list (`serializeMessages` / current `getBranch()`), not `getEntries()` and not `getUserMessagesForForking()`. `getBranch()` is already chronological (root → leaf); do not reverse before indexing.
-- `session_rewound.messages` is the truncated visible list **before** the new user message. Frontend reducer replaces `messages` without clearing this turn's `promptId`; `use-agent-bridge` then dispatches `user_message`.
-- Rewind uses `AgentSession.navigateTree(targetId)`, which syncs `agent.state.messages`. Bare `sessionManager.branch()` does not.
-- If the target user entry's parent is `customType: "readingContext"`, navigate that parent so the old aside leaves the path. Keep `bookSnapshot`.
-- After rewind, reuse `startPrompt` (snapshot aside if missing, then reading-context aside, then `session.prompt(text)`). Never concatenate context into `text`.
-- Requires an existing current session for this book. Rejects when another prompt is active.
-
-### 4. Validation & Error Matrix
-
-| Condition | Required result |
-|-----------|-----------------|
-| No current session / session not this book | Invoke/sidecar error; no rewind |
-| `messageIndex` missing, not user, or off the current branch | Error; history unchanged |
-| Another prompt is active / sidecar `isStreaming` | Error; do not `navigateTree` |
-| Empty or oversized `text` / selection | Reject in protocol decode before a receipt |
-| `navigateTree` returns `cancelled` | Error; do not emit `session_rewound` |
-
-### 5. Good/Base/Bad Cases
-
-- **Good**: edit user message 0 of `[user, assistant, user, assistant]` → leaf moves to before that user (and its readingContext) → UI shows `[]` then the new user → stream.
-- **Base**: edit the last user message → later assistant disappears; new prompt starts.
-- **Bad**: `sessionManager.branch(userId)` only → JSONL leaf moves but `session.messages` still has the old tail; next `prompt()` desyncs file and model context.
-
-### 6. Tests Required
-
-- Shared `protocol/agent-protocol.jsonl` fixtures for `edit_prompt` and `session_rewound`.
-- Reducer: same-book `session_rewound` replaces messages and keeps `promptId`; other book ignored.
-- Bridge: `editPrompt` does not invoke when status !== `bookReady`; `session_rewound` then appends the pending user message.
-
-### 7. Wrong vs Correct
-
-#### Wrong
-
-```typescript
-managed.session.sessionManager.branch(userEntry.id);
-await managed.session.prompt(text); // agent.state.messages still has the old tail
-```
-
-#### Correct
-
-```typescript
-const navigateId = isReadingContextParent(managed, target.parentId) && target.parentId
-  ? target.parentId
-  : target.id;
-await managed.session.navigateTree(navigateId);
-sendEvent({ type: "session_rewound", messages: serializeMessages(managed.session.messages), ... });
-await startPrompt(managed, prompt, text, context);
-```
+- The WebView capability contains only `core:default`; it cannot invoke shell
+  spawn/execute, native dialog, or opener commands.
+- Rust owns native file dialogs and OS-open integration. The embedded Agent runs
+  in the WebView and receives only normalized book data plus request-scoped
+  provider configuration.
+- Do not add `shell:*`, `dialog:*`, or `opener:*` WebView permissions unless a
+  reviewed frontend feature actually invokes them with a narrow scope.

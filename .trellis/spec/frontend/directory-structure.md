@@ -30,7 +30,7 @@ litera/
 │   │   └── default.json
 │   ├── tauri.conf.json     # Tauri config (CSP, window, bundle)
 │   └── Cargo.toml
-├── sidecar/                # pi agent Node.js sidecar (Child 3+)
+├── src/agent/              # embedded Agent runtime, book worker, Pi session adapter
 ├── vite.config.ts          # Vite + Tailwind plugin + path aliases
 ├── tsconfig.json           # TS config with @/* path alias
 └── components.json         # shadcn/ui config
