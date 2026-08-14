@@ -29,6 +29,8 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v7
+        with:
+          submodules: true
 
       - name: Install Linux dependencies
         if: matrix.platform == 'ubuntu-22.04'
@@ -67,6 +69,8 @@ jobs:
         run: |
           npm test -- --run
           npm --prefix sidecar test
+          npx tsc --noEmit
+          npx vite build
 
       - name: Build and smoke sidecar
         run: |

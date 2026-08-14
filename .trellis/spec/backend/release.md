@@ -35,6 +35,7 @@ Sidecar:
 - Output: gitignored `src-tauri/binaries/litera-sidecar-<host-triple>[.exe]`.
 - Requested triple must equal `rustc --print host-tuple`. Linux/Windows CI args are `--bundles` only. macOS CI may pass `--target aarch64-apple-darwin` because `macos-latest` is that host.
 - CI rebuilds with `npm run build:sidecar` then `npm run smoke:sidecar`. Never commit or download a prebuilt sidecar.
+- `actions/checkout` must set `submodules: true`. `src/foliate-js` is a git submodule; a default checkout leaves `ReaderView` unable to resolve `../foliate-js/view.js`, and `vite build` fails.
 
 Release job:
 
@@ -85,6 +86,7 @@ Signing / Linux sysroot:
 #### Wrong
 
 ```yaml
+- uses: actions/checkout@v7
 args: --target x86_64-apple-darwin   # on macos-latest ARM
 tagName: app-v__VERSION__
 # apt without libfontconfig1-dev libfreetype6-dev
@@ -93,6 +95,9 @@ tagName: app-v__VERSION__
 #### Correct
 
 ```yaml
+- uses: actions/checkout@v7
+  with:
+    submodules: true
 # macos-latest only
 args: --target aarch64-apple-darwin --bundles dmg
 tagName: ${{ github.ref_name }}

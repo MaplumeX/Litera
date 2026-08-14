@@ -68,4 +68,4 @@ Linux x64、macOS Apple Silicon、Windows x64。安装包未做付费代码签�
 
 重跑失败的 tag 构建：在对应 Actions run 上 Re-run，或对同一 commit 使用 `workflow_dispatch`（会挂到当前版本对应的 `v*` Release 上）。不要让 tauri-action 另造 `app-v__VERSION__` tag。
 
-本地开发：`npm install` 后 `npm run tauri dev`。`predev` / `prebuild` 会在本机编 sidecar，不要把 `src-tauri/binaries/` 提交进仓库。
+本地开发：克隆时带上 submodule（`git clone --recurse-submodules`，或已有仓库里 `git submodule update --init`），然后 `npm install` 和 `npm run tauri dev`。`predev` / `prebuild` 会在本机编 sidecar，不要把 `src-tauri/binaries/` 提交进仓库。`src/foliate-js` 不在主仓库树里，漏掉 submodule 时 `vite build` 会找不到 `view.js`。
