@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 46
+- **Total Sessions**: 47
 - **Last Active**: 2026-08-14
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1044 | Active |
+| `journal-1.md` | ~1066 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 47 | 2026-08-14 | Replace sepia theme with system-following theme | `4edd42b`, `4e4fd9a` | `main` |
 | 46 | 2026-08-14 | Unify custom LLM model picker | `a4976d1`, `6785b18` | `main` |
 | 45 | 2026-08-14 | Settings segmented control | `2c7a3d6`, `d0089a1` | `main` |
 | 44 | 2026-08-14 | Select-then-apply LLM provider settings | `f839fc2`, `d9aa65e` | `main` |

@@ -1042,3 +1042,25 @@ Unified custom-provider model UX: pick, type-to-add, and refresh live in one com
 ### Status
 
 [OK] **Completed**
+
+
+## Session 47: Replace sepia theme with system-following theme
+
+**Date**: 2026-08-14
+**Task**: Replace sepia theme with system-following theme
+**Branch**: `main`
+
+### Summary
+
+Removed the sepia (eye-care) theme and replaced it with a system-following theme (light/dark/system). Backend: VALID_THEMES now light/dark/system with sepia->light migrate-on-read in preferences.rs so legacy files never trigger the whole-file reset; library.rs keeps sepia for legacy per-book validation. Frontend: resolveTheme() + matchMedia listener in App.tsx applies the resolved theme to the html class and reader CSS live; THEMES, THEME_CSS, SettingsDialog labels, both locale catalogs, index.css .sepia block, and tests updated. cargo test 120 passed, vitest 122 passed, tsc clean. Spec updated in tauri-commands.md.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4edd42b` | (see git log) |
+| `4e4fd9a` | (see git log) |
+
+### Status
+
+[OK] **Completed**
