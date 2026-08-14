@@ -1,0 +1,9 @@
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend checklist before editing SettingsDialog and reader CSS"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Settings dialog shell, shadcn-only form controls, setStyles convention"}
+{"file": ".trellis/spec/frontend/i18n.md", "reason": "New font picker strings go in zh-CN/en catalogs, not preferences.json"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "Rust serde camelCase contract for list_system_fonts and fontFamily"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend checklist before changing preferences/library commands"}
+{"file": ".trellis/spec/backend/tauri-commands.md", "reason": "New list_system_fonts IPC and existing save_preferences / update_reading_state"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "InvalidInput vs storage errors for font names and enumeration"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "fontFamily string must stay valid across TS, Rust validate, and CSS inject"}
+{"file": ".trellis/tasks/08-14-reader-font-choice/research/system-font-enumeration.md", "reason": "font-kit listing, CSS quoting, is_supported must not reset prefs"}

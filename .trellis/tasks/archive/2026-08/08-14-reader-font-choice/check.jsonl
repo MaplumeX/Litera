@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/frontend/index.md", "reason": "Quality check index for SettingsDialog and reader CSS"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Dialog size, shadcn controls, setStyles"}
+{"file": ".trellis/spec/frontend/i18n.md", "reason": "New strings must be in both catalogs"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Quality check for preferences/library validation"}
+{"file": ".trellis/spec/backend/tauri-commands.md", "reason": "IPC contract for list_system_fonts and fontFamily persist"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Named font must not wipe preferences.json on relaunch"}
+{"file": ".trellis/tasks/08-14-reader-font-choice/research/system-font-enumeration.md", "reason": "Validator and CSS quoting acceptance"}
