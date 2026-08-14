@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 40
-- **Last Active**: 2026-08-13
+- **Total Sessions**: 41
+- **Last Active**: 2026-08-14
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~898 | Active |
+| `journal-1.md` | ~920 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 41 | 2026-08-14 | Lock settings dialog to a fixed size | `6209a62`, `5fc7650` | `main` |
 | 40 | 2026-08-13 | Settings as centered dialog | `c3fd23b`, `2441097` | `main` |
 | 39 | 2026-08-13 | Add zh-CN/en UI i18n | `fed35d0`, `5c0db39` | `main` |
 | 38 | 2026-08-13 | Improve new session UX | `d664cec`, `3619bae` | `main` |

@@ -896,3 +896,25 @@ Replaced the full-screen settings root view with a centered SettingsDialog overl
 ### Status
 
 [OK] **Completed**
+
+
+## Session 41: Lock settings dialog to a fixed size
+
+**Date**: 2026-08-14
+**Task**: Lock settings dialog to a fixed size
+**Branch**: `main`
+
+### Summary
+
+SettingsDialog shell is now a fixed 768x640 box (capped at 85vh / calc(100%-2rem)) so switching typography/appearance/AI no longer resizes the overlay. Spec records the size contract and the shadcn sm:max-w-lg override gotcha.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6209a62` | (see git log) |
+| `5fc7650` | (see git log) |
+
+### Status
+
+[OK] **Completed**
