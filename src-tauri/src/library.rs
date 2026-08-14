@@ -253,7 +253,6 @@ impl AnnotationsFile {
 #[derive(Debug)]
 pub(crate) struct BookContent {
     pub bytes: Vec<u8>,
-    pub path: PathBuf,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -756,10 +755,7 @@ impl LibraryStore {
             return Err(AppError::storage_corrupt("EPUB file is empty"));
         }
 
-        Ok(BookContent {
-            bytes,
-            path: epub_path,
-        })
+        Ok(BookContent { bytes })
     }
 
     pub fn delete_book(&self, book_id: &str) -> AppResult<()> {
@@ -2099,23 +2095,16 @@ pub async fn read_book_bytes(
 
 #[tauri::command]
 pub async fn open_book_bytes(
-    app: tauri::AppHandle,
     store: tauri::State<'_, LibraryStore>,
     book_id: String,
     content_version: String,
 ) -> AppResult<tauri::ipc::Response> {
-    let notification_book_id = book_id.clone();
     let opened_book_id = book_id.clone();
     let store = store.inner().clone();
     let opened_store = store.clone();
     let content = run_blocking(move || store.read_book_content(&book_id, &content_version)).await?;
-    let notification_path = content.path.to_string_lossy().into_owned();
-    run_blocking(move || {
-        crate::notify_sidecar_book_opened(&app, &notification_path, &notification_book_id)
-    })
-    .await?;
-    // Sidecar already accepted the open. A lastOpenedAt write failure must not
-    // fail the command or the Reader would stay closed while the Agent has the book.
+    // Opening the reader must not fail only because the shelf timestamp could
+    // not be updated; the EPUB bytes are already validated and available.
     if let Err(error) = run_blocking(move || opened_store.mark_book_opened(&opened_book_id)).await {
         eprintln!("[library] Book opened but lastOpenedAt was not saved: {error}");
     }
@@ -2218,7 +2207,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn v1_sessions_symlink_is_rejected_before_sidecar_use() {
+    fn v1_sessions_symlink_is_rejected_before_agent_use() {
         use std::os::unix::fs::symlink;
 
         let directory = tempfile::tempdir().expect("temporary directory");

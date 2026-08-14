@@ -172,7 +172,6 @@ function setupInvoke() {
     if (cmd === "get_annotations") return Promise.resolve(emptyFile);
     if (cmd === "save_annotations") return Promise.resolve(undefined);
     if (cmd === "update_reading_state") return Promise.resolve(undefined);
-    if (cmd === "close_book") return Promise.resolve(undefined);
     return Promise.resolve(undefined);
   });
 }

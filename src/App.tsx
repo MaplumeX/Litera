@@ -17,6 +17,7 @@ import {
   type TocItem,
 } from "@/components/ReaderView";
 import { ChatPanel, type ChatPanelHandle } from "@/components/chat/ChatPanel";
+import { embeddedAgentRuntime } from "@/agent/runtime/embedded-runtime";
 import { LibraryView } from "@/components/LibraryView";
 import {
   BookImportConfirmDialog,
@@ -224,6 +225,7 @@ function App() {
           if (timeout) clearTimeout(timeout);
         }
         try {
+          embeddedAgentRuntime.closeBook();
           await getCurrentWindow().destroy();
         } catch (error) {
           reportPersistenceError(error);
@@ -305,9 +307,8 @@ function App() {
   );
 
   const handleOpenBook = useCallback(async (bookId: string) => {
-    // `open_book_bytes` also switches the sidecar, so it is intentionally
-    // serialized. A later click supersedes the older UI result without letting
-    // two side-effecting opens complete out of order.
+    // Serialize opens so a later click can supersede an older UI result without
+    // letting two book workers complete out of order.
     const request = openBookControllerRef.current.run(async () => {
       await flushReadingState();
       const context = await invoke<BookOpenContext>("get_book_open_context", { bookId });
@@ -315,6 +316,7 @@ function App() {
         bookId,
         contentVersion: context.contentVersion,
       });
+      await embeddedAgentRuntime.openBook(bookId, buffer.slice(0));
       return { context, buffer };
     });
     setOpeningBookId(bookId);
@@ -385,19 +387,7 @@ function App() {
     } catch {
       return;
     }
-    const closingBookId = fileData?.bookId;
-    if (closingBookId) {
-      try {
-        await invoke("close_book", {
-          bookId: closingBookId,
-          requestId: `close-book-${crypto.randomUUID()}`,
-        });
-      } catch (error) {
-        console.error("close_book error:", error);
-        alert(t("reader.closeAgentFailed", { message: invokeErrorMessage(error) }));
-        return;
-      }
-    }
+    embeddedAgentRuntime.closeBook();
     setView("library");
     setFileData(null);
     setCurrentBook(null);
@@ -407,7 +397,7 @@ function App() {
     setAnnotationsVisible(false);
     setAnnotations(emptyAnnotations());
     annotationsWritableRef.current = false;
-  }, [fileData?.bookId, flushReadingState]);
+  }, [flushReadingState]);
 
   const handleRelocate = useCallback(
     (index: number, fraction: number, label?: string, chapterHref?: string) => {

@@ -221,9 +221,7 @@ describe("AgentConfigForm", () => {
       within(view.getByRole("alertdialog")).getByRole("button", { name: "删除" }).click();
     });
 
-    expect(hook.deleteCustomProvider).toHaveBeenCalledWith("custom-abc12345", {
-      restart: true,
-    });
+    expect(hook.deleteCustomProvider).toHaveBeenCalledWith("custom-abc12345");
   });
 
   it("merges refreshed remote model ids into the custom draft list", async () => {

@@ -3,14 +3,12 @@ import type {
   AgentEvent,
   AgentMessage,
   AgentSessionSummary,
-  AgentSnapshot,
   AgentStatus,
 } from "@/types/agent";
 import { t } from "@/lib/i18n";
 
 export interface AgentState {
   version: number;
-  generation: number;
   status: AgentStatus;
   activeBookId: string | null;
   sessionId: string | null;
@@ -23,7 +21,6 @@ export interface AgentState {
 
 export type AgentAction =
   | { type: "book_changed"; bookId: string | null }
-  | { type: "hydrate"; snapshot: AgentSnapshot }
   | { type: "event"; event: AgentEvent }
   | { type: "session_list_requested"; requestId: string }
   | { type: "prompt_queued"; bookId: string; promptId: string }
@@ -34,8 +31,7 @@ export type AgentAction =
 export function createAgentState(bookId: string | null = null): AgentState {
   return {
     version: 0,
-    generation: 0,
-    status: "starting",
+    status: bookId ? "loadingBook" : "idle",
     activeBookId: bookId,
     sessionId: null,
     promptId: null,
@@ -81,40 +77,11 @@ function updateLastAssistant(
   return [...messages, update({ role: "assistant", content: "" })];
 }
 
-function stateForNewGeneration(state: AgentState, generation: number): AgentState {
-  if (generation <= state.generation) return state;
-  return {
-    ...state,
-    generation,
-    status: "starting",
-    sessionId: null,
-    promptId: null,
-    error: state.promptId
-      ? {
-          scope: "prompt",
-          message: "Sidecar restarted while generating. You can retry the prompt.",
-          recoverable: true,
-          bookId: state.activeBookId ?? undefined,
-          sessionId: state.sessionId ?? undefined,
-          promptId: state.promptId,
-        }
-      : null,
-  };
-}
-
 function applyEvent(state: AgentState, event: AgentEvent): AgentState {
-  if (event.version <= state.version || event.generation < state.generation) return state;
-  const base = {
-    ...stateForNewGeneration(state, event.generation),
-    version: event.version,
-    generation: event.generation,
-  };
+  if (event.version <= state.version) return state;
+  const base = { ...state, version: event.version };
 
   switch (event.type) {
-    case "ready":
-      return { ...base, status: base.activeBookId ? base.status : "ready", error: null };
-    case "pong":
-      return base;
     case "book_loading":
       return matchesBook(base, event.bookId)
         ? { ...base, status: "loadingBook", sessionId: null, promptId: null, messages: [], sessions: [], error: null }
@@ -123,7 +90,7 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
       return matchesBook(base, event.bookId) ? { ...base, status: "bookReady", error: null } : base;
     case "book_closed":
       return matchesBook(base, event.bookId)
-        ? { ...base, status: "ready", sessionId: null, promptId: null, messages: [], sessions: [], error: null }
+        ? { ...base, status: "idle", sessionId: null, promptId: null, messages: [], sessions: [], error: null }
         : base;
     case "prompt_started":
       return matchesBook(base, event.bookId)
@@ -228,7 +195,7 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
       const matchesActivePrompt = !!event.promptId && event.promptId === base.promptId;
       return {
         ...base,
-        status: matchesActivePrompt ? "bookReady" : base.status,
+        status: matchesActivePrompt ? "bookReady" : event.scope === "book" ? "error" : base.status,
         promptId: matchesActivePrompt ? null : base.promptId,
         error: {
           scope: event.scope,
@@ -241,29 +208,6 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
         },
       };
     }
-    case "supervisor_status":
-      return {
-        ...base,
-        status: event.status,
-        error: event.message
-          ? { scope: "transport", message: event.message, recoverable: true }
-          : base.error,
-      };
-    case "prompt_interrupted":
-      if (!matchesPrompt(base, event)) return base;
-      return {
-        ...base,
-        status: "restarting",
-        promptId: null,
-        error: {
-          scope: "prompt",
-          message: event.message,
-          recoverable: true,
-          bookId: event.bookId,
-          sessionId: event.sessionId,
-          promptId: event.promptId,
-        },
-      };
   }
 }
 
@@ -273,23 +217,8 @@ export function agentReducer(state: AgentState, action: AgentAction): AgentState
       return {
         ...createAgentState(action.bookId),
         version: state.version,
-        generation: state.generation,
-        status: action.bookId ? "loadingBook" : state.status === "unavailable" ? "unavailable" : "ready",
+        status: action.bookId ? "loadingBook" : "idle",
       };
-    case "hydrate": {
-      const snapshot = action.snapshot;
-      if (snapshot.version < state.version || snapshot.generation < state.generation) return state;
-      const sameBook = !snapshot.bookId || snapshot.bookId === state.activeBookId;
-      return {
-        ...stateForNewGeneration(state, snapshot.generation),
-        version: snapshot.version,
-        generation: snapshot.generation,
-        status: sameBook ? snapshot.status : state.status,
-        sessionId: sameBook ? snapshot.sessionId ?? null : state.sessionId,
-        promptId: sameBook ? snapshot.promptId ?? null : state.promptId,
-        error: sameBook ? snapshot.error ?? null : state.error,
-      };
-    }
     case "event":
       return applyEvent(state, action.event);
     case "session_list_requested":
@@ -301,7 +230,7 @@ export function agentReducer(state: AgentState, action: AgentAction): AgentState
       if (state.promptId !== action.promptId) return state;
       return {
         ...state,
-        status: state.activeBookId ? "bookReady" : "ready",
+        status: state.activeBookId ? "bookReady" : "idle",
         promptId: null,
         error: {
           scope: "prompt",

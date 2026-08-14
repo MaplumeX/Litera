@@ -1,13 +1,9 @@
-export const AGENT_PROTOCOL_VERSION = 1 as const;
-
 export type AgentStatus =
-  | "starting"
-  | "ready"
+  | "idle"
   | "loadingBook"
   | "bookReady"
   | "prompting"
-  | "restarting"
-  | "unavailable";
+  | "error";
 
 export interface AgentError {
   scope: string;
@@ -17,17 +13,6 @@ export interface AgentError {
   bookId?: string;
   sessionId?: string;
   promptId?: string;
-}
-
-export interface AgentSnapshot {
-  protocolVersion: 1;
-  version: number;
-  generation: number;
-  status: AgentStatus;
-  bookId?: string;
-  sessionId?: string;
-  promptId?: string;
-  error?: AgentError;
 }
 
 export interface AgentSessionSummary {
@@ -54,10 +39,7 @@ export interface AgentMessage {
 }
 
 type EventEnvelope = {
-  protocolVersion: 1;
   version: number;
-  generation: number;
-  seq: number;
 };
 
 type RequestCorrelation = { requestId?: string };
@@ -65,8 +47,6 @@ type BookCorrelation = { bookId: string };
 type PromptCorrelation = BookCorrelation & { sessionId: string; promptId: string };
 
 export type AgentEvent = EventEnvelope & (
-  | { type: "ready" }
-  | ({ type: "pong"; fts5: boolean } & RequestCorrelation)
   | ({ type: "book_loading" } & BookCorrelation & RequestCorrelation)
   | ({ type: "book_ready" } & BookCorrelation & RequestCorrelation)
   | ({ type: "book_closed"; bookId?: string } & RequestCorrelation)
@@ -83,6 +63,4 @@ export type AgentEvent = EventEnvelope & (
   | ({ type: "session_renamed"; title: string } & BookCorrelation & { sessionId: string } & RequestCorrelation)
   | ({ type: "sessions_list"; sessions: AgentSessionSummary[] } & BookCorrelation & RequestCorrelation)
   | ({ type: "error" } & AgentError)
-  | { type: "supervisor_status"; status: AgentStatus; message?: string }
-  | ({ type: "prompt_interrupted"; message: string } & PromptCorrelation)
 );

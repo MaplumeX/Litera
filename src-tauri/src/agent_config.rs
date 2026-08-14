@@ -2,6 +2,7 @@ use std::fs;
 use std::path::Path;
 
 use serde::Serialize;
+use serde_json::Value;
 use tauri::Manager;
 
 use crate::error::{AppError, AppResult};
@@ -30,6 +31,26 @@ pub struct CustomProviderEntry {
     pub base_url: String,
     pub models: Vec<String>,
     pub has_api_key: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentRuntimeConfig {
+    pub provider: String,
+    pub model: String,
+    pub api: String,
+    pub base_url: String,
+    pub api_key: String,
+}
+
+#[tauri::command]
+pub async fn get_agent_runtime_config(app: tauri::AppHandle) -> AppResult<AgentRuntimeConfig> {
+    let agent_dir = resolve_agent_dir(&app)?;
+    tauri::async_runtime::spawn_blocking(move || read_runtime_config(&agent_dir))
+        .await
+        .map_err(|error| {
+            AppError::storage_io(format!("Agent runtime config worker failed: {error}"))
+        })?
 }
 
 #[tauri::command]
@@ -257,6 +278,100 @@ fn read_snapshot(agent_dir: &Path) -> AppResult<AgentConfigSnapshot> {
     })
 }
 
+fn read_runtime_config(agent_dir: &Path) -> AppResult<AgentRuntimeConfig> {
+    let settings = read_json_or_empty(&agent_dir.join("settings.json"), "settings.json")?;
+    let auth = read_json_or_empty(&agent_dir.join("auth.json"), "auth.json")?;
+    let provider = settings
+        .get("defaultProvider")
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| AppError::invalid_input("Agent provider is not configured"))?
+        .to_string();
+    let model = settings
+        .get("defaultModel")
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| AppError::invalid_input("Agent model is not configured"))?
+        .to_string();
+    let api_key = auth
+        .get(&provider)
+        .and_then(|entry| entry.get("key"))
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| AppError::invalid_input("Agent API key is not configured"))?
+        .to_string();
+    let (api, base_url) = if provider.starts_with("custom-") {
+        let models = read_json_or_empty(&agent_dir.join("models.json"), "models.json")?;
+        let definition = models
+            .get("providers")
+            .and_then(|providers| providers.get(&provider))
+            .ok_or_else(|| AppError::invalid_input("Custom provider definition is missing"))?;
+        let base = definition
+            .get("baseUrl")
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| AppError::invalid_input("Custom provider base URL is missing"))?;
+        let model_is_declared = definition
+            .get("models")
+            .and_then(Value::as_array)
+            .is_some_and(|models| {
+                models
+                    .iter()
+                    .any(|entry| entry.get("id").and_then(Value::as_str) == Some(model.as_str()))
+            });
+        if !model_is_declared {
+            return Err(AppError::invalid_input(
+                "Configured model is not declared by the custom provider",
+            ));
+        }
+        (
+            definition
+                .get("api")
+                .and_then(Value::as_str)
+                .unwrap_or("openai-completions")
+                .to_string(),
+            base.to_string(),
+        )
+    } else {
+        let pair = match provider.as_str() {
+            "anthropic" => ("anthropic-messages", "https://api.anthropic.com"),
+            "openai" => ("openai-responses", "https://api.openai.com/v1"),
+            "deepseek" => ("openai-completions", "https://api.deepseek.com"),
+            "google" => (
+                "google-generative-ai",
+                "https://generativelanguage.googleapis.com/v1beta",
+            ),
+            "openrouter" => ("openai-completions", "https://openrouter.ai/api/v1"),
+            "groq" => ("openai-completions", "https://api.groq.com/openai/v1"),
+            "mistral" => ("mistral-conversations", "https://api.mistral.ai"),
+            "xai" if model == "grok-4.5" => ("openai-responses", "https://api.x.ai/v1"),
+            "xai" => ("openai-completions", "https://api.x.ai/v1"),
+            "together" => ("openai-completions", "https://api.together.ai/v1"),
+            "fireworks" if model.contains("kimi-k3") || model.contains("glm-5p2") => (
+                "openai-completions",
+                "https://api.fireworks.ai/inference/v1",
+            ),
+            "fireworks" => ("anthropic-messages", "https://api.fireworks.ai/inference"),
+            _ => return Err(AppError::invalid_input("Unsupported built-in provider")),
+        };
+        (pair.0.to_string(), pair.1.to_string())
+    };
+    let parsed = reqwest::Url::parse(&base_url)
+        .map_err(|_| AppError::invalid_input("Provider base URL is invalid"))?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err(AppError::invalid_input(
+            "Provider base URL must use HTTP(S)",
+        ));
+    }
+    Ok(AgentRuntimeConfig {
+        provider,
+        model,
+        api,
+        base_url,
+        api_key,
+    })
+}
+
 /// Read models.json and extract custom provider entries.
 ///
 /// models.json structure: `{ "providers": { "<customId>": { "name", "baseUrl", "api", "models": [{ "id" }] } } }`
@@ -435,9 +550,7 @@ async fn fetch_remote_models(url: &str, api_key: &str) -> AppResult<Vec<String>>
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .build()
-        .map_err(|error| {
-            AppError::invalid_input(format!("Failed to build HTTP client: {error}"))
-        })?;
+        .map_err(|_| AppError::invalid_input("Failed to initialize model discovery"))?;
 
     let mut response = client
         .get(url)
@@ -445,7 +558,10 @@ async fn fetch_remote_models(url: &str, api_key: &str) -> AppResult<Vec<String>>
         .header(reqwest::header::ACCEPT, "application/json")
         .send()
         .await
-        .map_err(|error| AppError::invalid_input(format!("Failed to fetch models: {error}")))?;
+        // reqwest errors may echo the full user-controlled URL.  That URL can
+        // contain credentials or secret query parameters, so keep the UI error
+        // deliberately generic just like the embedded model transport.
+        .map_err(|_| AppError::invalid_input("Failed to fetch models"))?;
 
     let status = response.status();
     if !status.is_success() {
@@ -456,9 +572,11 @@ async fn fetch_remote_models(url: &str, api_key: &str) -> AppResult<Vec<String>>
     }
 
     let mut body = Vec::new();
-    while let Some(chunk) = response.chunk().await.map_err(|error| {
-        AppError::invalid_input(format!("Failed to read models response: {error}"))
-    })? {
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|_| AppError::invalid_input("Failed to read models response"))?
+    {
         if body.len().saturating_add(chunk.len()) > MAX_MODELS_BODY {
             return Err(AppError::invalid_input("Models response exceeded 1 MiB"));
         }
@@ -802,6 +920,72 @@ mod tests {
         assert_eq!(snapshot.provider.as_deref(), Some("anthropic"));
         assert_eq!(snapshot.model.as_deref(), Some("claude-opus-4-5"));
         assert!(snapshot.has_api_key);
+    }
+
+    #[test]
+    fn runtime_config_resolves_builtin_provider_without_exposing_key_in_errors() {
+        let dir = temp_agent_dir();
+        save_config(dir.path(), "anthropic", "secret-key", "claude-opus-4-5").expect("save config");
+        let runtime = read_runtime_config(dir.path()).expect("runtime config");
+        assert_eq!(runtime.provider, "anthropic");
+        assert_eq!(runtime.model, "claude-opus-4-5");
+        assert_eq!(runtime.api, "anthropic-messages");
+        assert_eq!(runtime.base_url, "https://api.anthropic.com");
+        assert_eq!(runtime.api_key, "secret-key");
+
+        save_config(dir.path(), "unsupported", "do-not-leak", "model").expect("save invalid");
+        let error = read_runtime_config(dir.path()).expect_err("unsupported provider");
+        assert!(!error.message.contains("do-not-leak"));
+    }
+
+    #[test]
+    fn runtime_config_uses_the_pinned_pi_api_and_origin_for_builtin_models() {
+        let dir = temp_agent_dir();
+        save_config(dir.path(), "openai", "secret", "gpt-5").expect("save openai");
+        let openai = read_runtime_config(dir.path()).expect("openai runtime");
+        assert_eq!(openai.api, "openai-responses");
+        assert_eq!(openai.base_url, "https://api.openai.com/v1");
+
+        save_config(dir.path(), "mistral", "secret", "codestral-latest").expect("save mistral");
+        let mistral = read_runtime_config(dir.path()).expect("mistral runtime");
+        assert_eq!(mistral.api, "mistral-conversations");
+        assert_eq!(mistral.base_url, "https://api.mistral.ai");
+
+        save_config(dir.path(), "together", "secret", "Qwen/Qwen3.6-Plus").expect("save together");
+        let together = read_runtime_config(dir.path()).expect("together runtime");
+        assert_eq!(together.base_url, "https://api.together.ai/v1");
+    }
+
+    #[test]
+    fn runtime_config_resolves_custom_openai_provider_and_rejects_non_http_url() {
+        let dir = temp_agent_dir();
+        let provider = add_custom_provider_impl(
+            dir.path(),
+            "Local",
+            "http://localhost:11434/v1",
+            "local-secret",
+            &ids(&["qwen"]),
+        )
+        .expect("add custom provider");
+        switch_provider_impl(dir.path(), &provider.id, "qwen").expect("switch provider");
+        let runtime = read_runtime_config(dir.path()).expect("runtime config");
+        assert_eq!(runtime.provider, provider.id);
+        assert_eq!(runtime.api, "openai-completions");
+        assert_eq!(runtime.base_url, "http://localhost:11434/v1");
+        assert_eq!(runtime.api_key, "local-secret");
+
+        let models_path = dir.path().join("models.json");
+        let mut models: serde_json::Value =
+            serde_json::from_slice(&fs::read(&models_path).expect("read models")).expect("parse");
+        models["providers"][&provider.id]["baseUrl"] =
+            serde_json::Value::String("file:///tmp/model".to_string());
+        fs::write(
+            &models_path,
+            serde_json::to_vec(&models).expect("serialize"),
+        )
+        .expect("write");
+        let error = read_runtime_config(dir.path()).expect_err("non-http endpoint");
+        assert_eq!(error.code, AppErrorCode::InvalidInput);
     }
 
     #[test]

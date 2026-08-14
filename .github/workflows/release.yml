@@ -57,9 +57,7 @@ jobs:
           workspaces: ./src-tauri -> target
 
       - name: Install JS dependencies
-        run: |
-          npm ci
-          npm ci --prefix sidecar
+        run: npm ci
 
       - name: Check version lockstep
         id: version
@@ -68,14 +66,9 @@ jobs:
       - name: Test
         run: |
           npm test -- --run
-          npm --prefix sidecar test
           npx tsc --noEmit
           npx vite build
-
-      - name: Build and smoke sidecar
-        run: |
-          npm run build:sidecar
-          npm run smoke:sidecar
+          cargo test --locked --manifest-path src-tauri/Cargo.toml
 
       - uses: tauri-apps/tauri-action@v1
         env:

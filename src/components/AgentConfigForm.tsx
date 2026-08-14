@@ -279,10 +279,9 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
   const handleDeleteConfirm = async () => {
     if (!selectedCustom) return;
     const deletedId = selectedCustom.id;
-    const wasActive = snapshot?.provider === deletedId;
     setSuccessMessage(null);
     try {
-      await deleteCustomProvider(deletedId, { restart: wasActive });
+      await deleteCustomProvider(deletedId);
       setDeleteOpen(false);
       setProvider(AGENT_PROVIDERS[0].id);
       setModel("");

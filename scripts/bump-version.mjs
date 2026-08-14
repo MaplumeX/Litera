@@ -6,11 +6,9 @@ const VERSION_RE = /^\d+\.\d+\.\d+$/;
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const files = {
   rootPkg: join(root, "package.json"),
-  sidecarPkg: join(root, "sidecar", "package.json"),
   tauri: join(root, "src-tauri", "tauri.conf.json"),
   cargo: join(root, "src-tauri", "Cargo.toml"),
   rootLock: join(root, "package-lock.json"),
-  sidecarLock: join(root, "sidecar", "package-lock.json"),
 };
 
 const arg = process.argv[2];
@@ -48,7 +46,6 @@ function readCargoPackageVersion(path) {
 function collectVersions() {
   return {
     [files.rootPkg]: readJsonVersion(files.rootPkg),
-    [files.sidecarPkg]: readJsonVersion(files.sidecarPkg),
     [files.tauri]: readJsonVersion(files.tauri),
     [files.cargo]: readCargoPackageVersion(files.cargo),
   };
@@ -82,7 +79,7 @@ function assertLockstep(expected) {
       `Version lockstep failed (expected ${expected}):\n${mismatches.join("\n")}`,
     );
   }
-  for (const lock of [files.rootLock, files.sidecarLock]) {
+  for (const lock of [files.rootLock]) {
     for (const version of lockfileVersions(lock)) {
       if (version !== expected) {
         throw new Error(`${lock} root version is ${version}, expected ${expected}`);
@@ -175,11 +172,9 @@ function replaceLockfileRootVersion(path, version) {
 
 function writeVersions(version) {
   replaceJsonVersion(files.rootPkg, version);
-  replaceJsonVersion(files.sidecarPkg, version);
   replaceJsonVersion(files.tauri, version);
   replaceCargoPackageVersion(files.cargo, version);
   replaceLockfileRootVersion(files.rootLock, version);
-  replaceLockfileRootVersion(files.sidecarLock, version);
   assertLockstep(version);
   process.stdout.write(`${version}\n`);
 }

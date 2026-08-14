@@ -34,12 +34,12 @@ export const AGENT_PROVIDERS: AgentProviderEntry[] = [
   { id: "openai", label: "OpenAI", exampleModel: "gpt-4o" },
   { id: "deepseek", label: "DeepSeek", exampleModel: "deepseek-v4-pro" },
   { id: "google", label: "Google", exampleModel: "gemini-2.5-pro" },
-  { id: "openrouter", label: "OpenRouter", exampleModel: "anthropic/claude-opus-4-5" },
-  { id: "groq", label: "Groq", exampleModel: "llama-4-70b-versatile" },
+  { id: "openrouter", label: "OpenRouter", exampleModel: "~anthropic/claude-opus-latest" },
+  { id: "groq", label: "Groq", exampleModel: "llama-3.3-70b-versatile" },
   { id: "mistral", label: "Mistral", exampleModel: "mistral-large-latest" },
-  { id: "xai", label: "xAI", exampleModel: "grok-4" },
-  { id: "together", label: "Together", exampleModel: "meta-llama/Llama-4-70b-chat-hf" },
-  { id: "fireworks", label: "Fireworks", exampleModel: "accounts/fireworks/models/llama-v4-70b-instruct-basic" },
+  { id: "xai", label: "xAI", exampleModel: "grok-4.3" },
+  { id: "together", label: "Together", exampleModel: "meta-llama/Llama-3.3-70B-Instruct-Turbo" },
+  { id: "fireworks", label: "Fireworks", exampleModel: "accounts/fireworks/models/deepseek-v4-pro" },
 ];
 
 /** Returns the example model id for a provider, or an empty string if unknown. */

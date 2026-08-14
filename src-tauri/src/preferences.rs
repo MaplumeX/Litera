@@ -333,7 +333,7 @@ impl PreferencesStore {
     }
 
     fn read_unlocked(&self) -> AppResult<PreferencesData> {
-        let bytes = std::fs::read(&self.preferences_path())
+        let bytes = std::fs::read(self.preferences_path())
             .map_err(|e| AppError::storage_io(format!("Failed to read preferences.json: {e}")))?;
         serde_json::from_slice(&bytes).map_err(|e| {
             AppError::storage_corrupt(format!("Failed to parse preferences.json: {e}"))
@@ -515,6 +515,7 @@ pub async fn get_preferences(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn save_preferences(
     store: tauri::State<'_, PreferencesStore>,
     theme: Option<String>,

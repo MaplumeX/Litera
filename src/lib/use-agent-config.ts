@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { AgentConfigSnapshot, CustomProviderEntry } from "@/types/agent-config";
 import { invokeErrorMessage } from "@/lib/app-error";
+import { embeddedAgentRuntime } from "@/agent/runtime/embedded-runtime";
 
 export function useAgentConfig() {
   const [snapshot, setSnapshot] = useState<AgentConfigSnapshot | null>(null);
@@ -27,7 +28,7 @@ export function useAgentConfig() {
     setError(null);
     try {
       await invoke("save_agent_config", { provider, apiKey, model });
-      await invoke("restart_sidecar");
+      embeddedAgentRuntime.invalidateConfig();
       await load();
     } catch (err) {
       setError(invokeErrorMessage(err));
@@ -48,6 +49,7 @@ export function useAgentConfig() {
           apiKey,
           models,
         });
+        embeddedAgentRuntime.invalidateConfig();
         await load();
         return entry;
       } catch (err) {
@@ -61,14 +63,12 @@ export function useAgentConfig() {
   );
 
   const deleteCustomProvider = useCallback(
-    async (id: string, options?: { restart?: boolean }) => {
+    async (id: string) => {
       setSaving(true);
       setError(null);
       try {
         await invoke("delete_custom_provider", { providerId: id });
-        if (options?.restart) {
-          await invoke("restart_sidecar");
-        }
+        embeddedAgentRuntime.invalidateConfig();
         await load();
       } catch (err) {
         setError(invokeErrorMessage(err));
@@ -92,6 +92,7 @@ export function useAgentConfig() {
           apiKey,
           models,
         });
+        embeddedAgentRuntime.invalidateConfig();
         await load();
         return entry;
       } catch (err) {
@@ -110,7 +111,7 @@ export function useAgentConfig() {
       setError(null);
       try {
         await invoke("switch_provider", { providerId, model });
-        await invoke("restart_sidecar");
+        embeddedAgentRuntime.invalidateConfig();
         await load();
       } catch (err) {
         setError(invokeErrorMessage(err));

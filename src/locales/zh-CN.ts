@@ -13,7 +13,6 @@ export const zhCN = {
   "reader.persistFailed": "阅读状态保存失败：{message}",
   "reader.openFailed": "打开书籍失败: {message}",
   "reader.openFileFailed": "打开文件失败：{message}",
-  "reader.closeAgentFailed": "关闭阅读助手失败: {message}",
   "reader.backToLibrary": "返回书库",
   "reader.toc": "目录",
   "reader.fontAndTheme": "字体与主题",
@@ -96,8 +95,6 @@ export const zhCN = {
 
   "chat.title": "阅读助手",
   "chat.sessions": "会话列表",
-  "chat.restoring": "正在恢复…",
-  "chat.restart": "重启助手",
   "chat.settings": "设置",
   "chat.ready": "已就绪",
   "chat.waitingBook": "等待书籍…",

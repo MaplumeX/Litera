@@ -16,7 +16,6 @@ vi.mock("@/lib/use-agent-bridge", () => ({
     prompt: vi.fn(),
     editPrompt: vi.fn(),
     renameSession: vi.fn(),
-    restart: vi.fn(),
     switchSession,
   }),
 }));
@@ -72,7 +71,7 @@ async function clickNewSession(view: ReturnType<typeof render>) {
 }
 
 describe("ChatPanel new session", () => {
-  it("reuses the current empty session without calling new_session", async () => {
+  it("reuses the current empty session without creating another one", async () => {
     bridgeState = readyState({ messages: [] });
     const view = openSessionList();
 

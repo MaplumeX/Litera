@@ -7,7 +7,7 @@ import {
   useState,
 } from "react";
 import { Button } from "@/components/ui/button";
-import { MessagesSquare, Settings, RefreshCw, AlertCircle } from "lucide-react";
+import { MessagesSquare, Settings, AlertCircle } from "lucide-react";
 import { useAgentBridge } from "@/lib/use-agent-bridge";
 import { useAgentConfig } from "@/lib/use-agent-config";
 import { AgentConfigDialog } from "@/components/AgentConfigDialog";
@@ -40,7 +40,6 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       prompt,
       editPrompt,
       renameSession,
-      restart,
       switchSession,
     } = bridge;
     const [input, setInput] = useState("");
@@ -155,15 +154,6 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       }
     }, [abort]);
 
-    const handleRestart = useCallback(async () => {
-      setInvokeError(null);
-      try {
-        await restart();
-      } catch (error) {
-        setInvokeError(String(error));
-      }
-    }, [restart]);
-
     const handleSuggestion = useCallback((text: string) => {
       setInput(text);
       inputRef.current?.focus();
@@ -252,37 +242,19 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
             </Button>
             <h2 className="text-sm font-semibold">{t("chat.title")}</h2>
           </div>
-          {state.status === "restarting" ? (
-            <span className="text-xs text-amber-600">{t("chat.restoring")}</span>
-          ) : state.status === "unavailable" ? (
-            <div className="flex items-center gap-2">
-              <Button size="icon-xs" variant="outline" onClick={() => void handleRestart()} aria-label={t("chat.restart")}>
-                <RefreshCw />
-              </Button>
-              <Button
-                size="icon-xs"
-                variant="ghost"
-                onClick={() => setShowConfig(true)}
-                aria-label={t("chat.settings")}
-              >
-                <Settings />
-              </Button>
-            </div>
-          ) : (
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] text-muted-foreground">
-                {bookReady ? t("chat.ready") : t("chat.waitingBook")}
-              </span>
-              <Button
-                size="icon-xs"
-                variant="ghost"
-                onClick={() => setShowConfig(true)}
-                aria-label={t("chat.settings")}
-              >
-                <Settings />
-              </Button>
-            </div>
-          )}
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-muted-foreground">
+              {bookReady ? t("chat.ready") : t("chat.waitingBook")}
+            </span>
+            <Button
+              size="icon-xs"
+              variant="ghost"
+              onClick={() => setShowConfig(true)}
+              aria-label={t("chat.settings")}
+            >
+              <Settings />
+            </Button>
+          </div>
         </div>
 
         {showSessionList && (

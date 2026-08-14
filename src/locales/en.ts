@@ -15,7 +15,6 @@ export const en: { [K in MessageKey]: string } = {
   "reader.persistFailed": "Failed to save reading progress: {message}",
   "reader.openFailed": "Failed to open book: {message}",
   "reader.openFileFailed": "Failed to open file: {message}",
-  "reader.closeAgentFailed": "Failed to close reading assistant: {message}",
   "reader.backToLibrary": "Back to library",
   "reader.toc": "Contents",
   "reader.fontAndTheme": "Fonts and theme",
@@ -98,8 +97,6 @@ export const en: { [K in MessageKey]: string } = {
 
   "chat.title": "Reading assistant",
   "chat.sessions": "Sessions",
-  "chat.restoring": "Restoring…",
-  "chat.restart": "Restart assistant",
   "chat.settings": "Settings",
   "chat.ready": "Ready",
   "chat.waitingBook": "Waiting for book…",
