@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-08-14
+
+首个公开版之后的小更新。
+
+### Added
+
+- **书签与高亮**：阅读页可添加书签和高亮，侧栏查看与跳转。
+- **进度条拖动**：阅读进度条可拖动跳转。
+- **窗口记忆**：关闭后再开，主窗口位置和大小会恢复。
+- **应用图标**：替换默认 Tauri 图标。
+
+### Fixed
+
+- 分页阅读时，点击左右页边翻页的命中区域不准。
+- 同一路径、内容未变的 EPUB 再导入会覆盖已有书。
+
 ## [0.1.0] - 2026-08-14
 
 Litera 的首个公开版本：带阅读助手的跨平台 EPUB 阅读器。
