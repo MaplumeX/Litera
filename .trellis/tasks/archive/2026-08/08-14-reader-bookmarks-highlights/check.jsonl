@@ -1,0 +1,9 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Overlay drawer; do not remount ReaderView"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "Rust/TS contract"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "No BookRecord fields"}
+{"file": ".trellis/spec/backend/tauri-commands.md", "reason": "New commands; overwrite/delete"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "StorageCorrupt vs empty"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Frontend quality"}
+{"file": ".trellis/tasks/08-14-reader-annotate-and-progress/research/foliate-annotations.md", "reason": "Must re-addAnnotation on create-overlay"}
+{"file": ".trellis/tasks/08-14-reader-annotate-and-progress/research/annotation-persistence.md", "reason": "File stays off library.json"}

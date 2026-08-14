@@ -58,12 +58,15 @@ fn update_reading_state(&self, book_id: &str, fraction: Option<f64>, settings: O
 ├── books/<bookId>/
 │   ├── book.epub             # active canonical epub
 │   ├── cover.png             # optional active cover
+│   ├── annotations.json      # optional bookmarks + highlights; not a BookRecord field
 │   ├── .imports/             # exact bytes awaiting metadata commit
 │   └── .transactions/        # persistent rollback journals
 ├── books/.trash/             # staged/committed recoverable deletions
 ├── backup/legacy-*/          # recoverable legacy artifacts
 └── sessions/<bookId>/        # sidecar-managed JSONL session files
 ```
+
+**Per-book annotations**: `books/<bookId>/annotations.json` holds bookmarks and single-color highlights. It has its own `schemaVersion: 1` and is **not** part of `library.json` / `BookRecord`. Do not bump the library schema for marks. Missing file = empty lists. Present but invalid JSON / unsupported schema / unknown fields = `StorageCorrupt`. Overwrite leaves the file in place; `delete_book` removes the whole directory. Do not require this file in `validate_library_files`.
 
 ### bookId Generation
 

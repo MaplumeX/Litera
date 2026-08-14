@@ -6,8 +6,6 @@ import {
   useRef,
   useState,
 } from "react";
-import { cn } from "@/lib/utils";
-import { useT } from "@/lib/i18n";
 import {
   consumeWheelDelta,
   hitFromClientX,
@@ -15,10 +13,15 @@ import {
   shouldIgnorePagingTarget,
   type WheelPagingState,
 } from "@/lib/reader-paging";
+import { SelectionToolbar } from "@/components/SelectionToolbar";
+import type { HighlightRecord } from "@/types/library";
 
 // foliate.js view.js defines the <foliate-view> custom element.
 // Importing the module registers it with the customElements registry.
 import "../foliate-js/view.js";
+import { Overlayer } from "../foliate-js/overlayer.js";
+
+const HIGHLIGHT_COLOR = "#fbbf24";
 
 const CLICK_SLOP_PX = 5;
 
@@ -83,7 +86,19 @@ function bindPointerPaging(
 interface RelocateDetail {
   fraction?: number;
   index?: number;
+  cfi?: string;
   tocItem?: { label?: string; href?: string; fraction?: number };
+}
+
+export interface ReaderLocation {
+  cfi: string;
+  fraction: number;
+  label?: string;
+}
+
+export interface SelectionCfi {
+  cfi: string;
+  excerpt: string;
 }
 
 export interface SelectionCapture {
@@ -102,8 +117,13 @@ export interface ReaderViewHandle {
   next: () => void;
   goToFraction: (frac: number) => void;
   goToTocItem: (href: string) => void;
+  goToCfi: (cfi: string) => Promise<boolean>;
   setStyles: (css: string) => void;
   getToc: () => TocItem[];
+  getLocation: () => ReaderLocation | null;
+  getSelectionCfi: () => SelectionCfi | null;
+  addHighlight: (cfi: string) => void;
+  removeHighlight: (cfi: string) => void;
 }
 
 interface ReaderViewProps {
@@ -113,18 +133,81 @@ interface ReaderViewProps {
   onRelocate?: (index: number, fraction: number, label?: string, chapterHref?: string) => void;
   /** Called when the user clicks the ask-agent button on a selection. */
   onSelectionCapture?: (capture: SelectionCapture) => void;
+  /** Called when the user clicks highlight on a selection. */
+  onHighlight?: (selection: SelectionCfi) => void;
+  /** Highlights to paint on create-overlay / after snapshot load. */
+  highlights?: HighlightRecord[];
   /** Last reading fraction to restore (0-1), from library persistence. */
   initialFraction?: number;
   /** Called after the book is opened and toc is available. */
   onBookReady?: (toc: TocItem[]) => void;
 }
 
+type FoliateAnnotator = {
+  getCFI?: (index: number, range?: Range) => string;
+  addAnnotation?: (annotation: { value: string }, remove?: boolean) => Promise<unknown>;
+  deleteAnnotation?: (annotation: { value: string }) => Promise<unknown>;
+  goTo?: (target: string) => Promise<unknown>;
+  renderer?: { getContents?: () => { index: number; doc?: Document }[] };
+};
+
+function selectionOverlayPos(doc: Document, range: Range): { x: number; y: number } | null {
+  const rect = range.getBoundingClientRect();
+  if (rect.width === 0 && rect.height === 0) return null;
+  const frame = doc.defaultView?.frameElement;
+  const offset = frame?.getBoundingClientRect() ?? { left: 0, top: 0 };
+  return {
+    x: offset.left + rect.left + rect.width / 2,
+    y: offset.top + rect.top,
+  };
+}
+
+function paintHighlight(view: FoliateAnnotator, cfi: string, remove = false) {
+  const task = remove
+    ? view.deleteAnnotation?.({ value: cfi })
+    : view.addAnnotation?.({ value: cfi });
+  void Promise.resolve(task).catch((err: unknown) =>
+    console.error(remove ? "deleteAnnotation error:" : "addAnnotation error:", err),
+  );
+}
+
+function readIframeSelection(view: FoliateAnnotator): SelectionCfi | null {
+  const contents = view.renderer?.getContents?.() ?? [];
+  for (const { index, doc } of contents) {
+    if (!doc) continue;
+    const sel = doc.getSelection();
+    if (!sel || sel.isCollapsed || sel.rangeCount === 0) continue;
+    const excerpt = sel.toString().trim();
+    if (!excerpt) continue;
+    const range = sel.getRangeAt(0);
+    const cfi = view.getCFI?.(index, range);
+    if (!cfi) continue;
+    return { cfi, excerpt };
+  }
+  return null;
+}
+
 export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
-  function ReaderView({ fileData, onRelocate, onSelectionCapture, initialFraction, onBookReady }, ref) {
-    const { t } = useT();
+  function ReaderView(
+    {
+      fileData,
+      onRelocate,
+      onSelectionCapture,
+      onHighlight,
+      highlights = [],
+      initialFraction,
+      onBookReady,
+    },
+    ref,
+  ) {
     const containerRef = useRef<HTMLDivElement>(null);
     const viewRef = useRef<HTMLElement | null>(null);
     const currentChapterHrefRef = useRef<string | undefined>(undefined);
+    const lastLocationRef = useRef<ReaderLocation | null>(null);
+    const lastSelectionDocRef = useRef<Document | null>(null);
+    const highlightsRef = useRef(highlights);
+    highlightsRef.current = highlights;
+    const paintedCfisRef = useRef(new Set<string>());
     // Keep latest callbacks in refs so the open-file effect doesn't re-run
     // when parent recreates them (e.g. onBookReady changing with styleState).
     const onRelocateRef = useRef(onRelocate);
@@ -155,9 +238,25 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         currentChapterHrefRef.current = chapterHref;
         const fraction = detail.fraction ?? 0;
         const label = detail.tocItem?.label;
+        if (detail.cfi) {
+          lastLocationRef.current = { cfi: detail.cfi, fraction, label };
+        }
         onRelocateRef.current?.(index, fraction, label, chapterHref);
       };
       el.addEventListener("relocate", handleRelocate as EventListener);
+
+      const handleCreateOverlay = () => {
+        const view = el as unknown as FoliateAnnotator;
+        for (const highlight of highlightsRef.current) {
+          paintHighlight(view, highlight.cfi);
+        }
+      };
+      const handleDrawAnnotation = (e: Event) => {
+        const detail = (e as CustomEvent<{ draw?: (fn: unknown, opts: { color: string }) => void }>).detail;
+        detail.draw?.(Overlayer.highlight, { color: HIGHLIGHT_COLOR });
+      };
+      el.addEventListener("create-overlay", handleCreateOverlay as EventListener);
+      el.addEventListener("draw-annotation", handleDrawAnnotation as EventListener);
 
       type FoliatePager = {
         goLeft?: () => void | Promise<void>;
@@ -222,6 +321,28 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       window.addEventListener("keydown", handleKeyDown);
 
       let unbindDoc: (() => void) | undefined;
+      const handleIframeSelection = (doc: Document) => {
+        const sel = doc.getSelection();
+        if (!sel || sel.isCollapsed || sel.rangeCount === 0) {
+          setSelectionPos(null);
+          lastSelectionDocRef.current = null;
+          return;
+        }
+        const text = sel.toString().trim();
+        if (!text) {
+          setSelectionPos(null);
+          lastSelectionDocRef.current = null;
+          return;
+        }
+        const range = sel.getRangeAt(0);
+        const pos = selectionOverlayPos(doc, range);
+        if (!pos) {
+          setSelectionPos(null);
+          return;
+        }
+        lastSelectionDocRef.current = doc;
+        setSelectionPos({ x: pos.x, y: pos.y, text });
+      };
       const handleLoad = (e: Event) => {
         unbindDoc?.();
         unbindDoc = undefined;
@@ -237,18 +358,23 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
           pageLeft,
           pageRight,
         );
+        const onSelectionChange = () => handleIframeSelection(doc);
         doc.addEventListener("keydown", handleKeyDown);
         doc.addEventListener("wheel", handleWheel, { passive: false });
+        doc.addEventListener("selectionchange", onSelectionChange);
         unbindDoc = () => {
           unbindPointer();
           doc.removeEventListener("keydown", handleKeyDown);
           doc.removeEventListener("wheel", handleWheel);
+          doc.removeEventListener("selectionchange", onSelectionChange);
         };
       };
       el.addEventListener("load", handleLoad as EventListener);
 
       return () => {
         el.removeEventListener("relocate", handleRelocate as EventListener);
+        el.removeEventListener("create-overlay", handleCreateOverlay as EventListener);
+        el.removeEventListener("draw-annotation", handleDrawAnnotation as EventListener);
         el.removeEventListener("load", handleLoad as EventListener);
         unbindDoc?.();
         unbindHostPointer();
@@ -264,6 +390,10 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
     // Open file when fileData changes.
     useEffect(() => {
       currentChapterHrefRef.current = undefined;
+      lastLocationRef.current = null;
+      lastSelectionDocRef.current = null;
+      paintedCfisRef.current = new Set();
+      setSelectionPos(null);
       if (!fileData || !viewRef.current) return;
       const view = viewRef.current as unknown as {
         open: (file: File) => Promise<void>;
@@ -294,34 +424,23 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [fileData, initialFraction]);
 
-    // Selection capture: listen for selectionchange inside the foliate-view.
     useEffect(() => {
-      if (!viewRef.current) return;
-      const view = viewRef.current;
+      const view = viewRef.current as unknown as FoliateAnnotator | null;
+      if (!view) return;
+      const next = new Set(highlights.map((item) => item.cfi));
+      for (const cfi of paintedCfisRef.current) {
+        if (!next.has(cfi)) paintHighlight(view, cfi, true);
+      }
+      for (const highlight of highlights) {
+        paintHighlight(view, highlight.cfi);
+      }
+      paintedCfisRef.current = next;
+    }, [highlights]);
 
-      const handleSelection = () => {
-        const sel = window.getSelection();
-        if (!sel || sel.isCollapsed || sel.rangeCount === 0) {
-          setSelectionPos(null);
-          return;
-        }
-        const text = sel.toString().trim();
-        if (!text) {
-          setSelectionPos(null);
-          return;
-        }
-        // Only show button if the selection is inside the foliate-view element.
-        const range = sel.getRangeAt(0);
-        if (!view.contains(range.commonAncestorContainer)) {
-          setSelectionPos(null);
-          return;
-        }
-        const rect = range.getBoundingClientRect();
-        setSelectionPos({ x: rect.left + rect.width / 2, y: rect.top, text });
-      };
-
-      document.addEventListener("selectionchange", handleSelection);
-      return () => document.removeEventListener("selectionchange", handleSelection);
+    const clearIframeSelection = useCallback(() => {
+      lastSelectionDocRef.current?.getSelection()?.removeAllRanges();
+      lastSelectionDocRef.current = null;
+      setSelectionPos(null);
     }, []);
 
     const handleAskAgent = useCallback(() => {
@@ -331,9 +450,18 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         chapterHref: currentChapterHrefRef.current,
       };
       onSelectionCapture?.(capture);
-      setSelectionPos(null);
-      window.getSelection()?.removeAllRanges();
-    }, [selectionPos, onSelectionCapture]);
+      clearIframeSelection();
+    }, [selectionPos, onSelectionCapture, clearIframeSelection]);
+
+    const handleHighlightSelection = useCallback(() => {
+      const view = viewRef.current as unknown as FoliateAnnotator | null;
+      if (!view) return;
+      const selection = readIframeSelection(view);
+      if (!selection) return;
+      paintHighlight(view, selection.cfi);
+      onHighlight?.(selection);
+      clearIframeSelection();
+    }, [onHighlight, clearIframeSelection]);
 
     const prev = useCallback(async () => {
       await (viewRef.current as unknown as { prev?: () => Promise<void> })?.prev?.();
@@ -351,6 +479,16 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         ?.goTo?.(href)
         .catch((err: unknown) => console.error("goTo error:", err));
     }, []);
+    const goToCfi = useCallback(async (cfi: string) => {
+      const view = viewRef.current as unknown as FoliateAnnotator | null;
+      try {
+        const resolved = await view?.goTo?.(cfi);
+        return resolved != null;
+      } catch (err: unknown) {
+        console.error("goToCfi error:", err);
+        return false;
+      }
+    }, []);
     const setStyles = useCallback((css: string) => {
       const view = viewRef.current as unknown as { renderer?: { setStyles?: (c: string) => void } };
       view?.renderer?.setStyles?.(css);
@@ -359,11 +497,48 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       const view = viewRef.current as unknown as { book?: { toc?: TocItem[] } };
       return view?.book?.toc ?? [];
     }, []);
+    const getLocation = useCallback(() => lastLocationRef.current, []);
+    const getSelectionCfi = useCallback(() => {
+      const view = viewRef.current as unknown as FoliateAnnotator | null;
+      return view ? readIframeSelection(view) : null;
+    }, []);
+    const addHighlight = useCallback((cfi: string) => {
+      const view = viewRef.current as unknown as FoliateAnnotator | null;
+      if (view) paintHighlight(view, cfi);
+    }, []);
+    const removeHighlight = useCallback((cfi: string) => {
+      const view = viewRef.current as unknown as FoliateAnnotator | null;
+      if (view) paintHighlight(view, cfi, true);
+    }, []);
 
     useImperativeHandle(
       ref,
-      () => ({ prev, next, goToFraction, goToTocItem, setStyles, getToc }),
-      [prev, next, goToFraction, goToTocItem, setStyles, getToc],
+      () => ({
+        prev,
+        next,
+        goToFraction,
+        goToTocItem,
+        goToCfi,
+        setStyles,
+        getToc,
+        getLocation,
+        getSelectionCfi,
+        addHighlight,
+        removeHighlight,
+      }),
+      [
+        prev,
+        next,
+        goToFraction,
+        goToTocItem,
+        goToCfi,
+        setStyles,
+        getToc,
+        getLocation,
+        getSelectionCfi,
+        addHighlight,
+        removeHighlight,
+      ],
     );
 
     return (
@@ -371,20 +546,12 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         <div ref={containerRef} className="h-full w-full" />
 
         {selectionPos && (
-          <button
-            onClick={handleAskAgent}
-            className={cn(
-              "fixed z-50 -translate-x-1/2 -translate-y-full",
-              "rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground shadow-lg",
-              "hover:bg-primary/90 transition-colors",
-            )}
-            style={{
-              left: `${selectionPos.x}px`,
-              top: `${selectionPos.y - 8}px`,
-            }}
-          >
-            {t("reader.askAgent")}
-          </button>
+          <SelectionToolbar
+            x={selectionPos.x}
+            y={selectionPos.y}
+            onHighlight={handleHighlightSelection}
+            onAskAgent={handleAskAgent}
+          />
         )}
       </div>
     );

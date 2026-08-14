@@ -18,6 +18,9 @@ export const en: { [K in MessageKey]: string } = {
   "reader.showChat": "Show chat",
   "reader.hideChat": "Hide chat",
   "reader.closeToc": "Close contents",
+  "reader.annotations": "Annotations",
+  "reader.closeAnnotations": "Close annotations",
+  "reader.highlight": "Highlight",
   "reader.askAgent": "Ask agent",
 
   "library.searchPlaceholder": "Search title or author…",
@@ -79,6 +82,15 @@ export const en: { [K in MessageKey]: string } = {
 
   "toc.title": "Contents",
   "toc.empty": "No contents",
+
+  "annotations.title": "Annotations",
+  "annotations.bookmarks": "Bookmarks",
+  "annotations.highlights": "Highlights",
+  "annotations.addBookmark": "Add bookmark",
+  "annotations.emptyBookmarks": "No bookmarks yet",
+  "annotations.emptyHighlights": "No highlights yet",
+  "annotations.deleteBookmark": "Delete bookmark",
+  "annotations.deleteHighlight": "Delete highlight",
 
   "chat.title": "Reading assistant",
   "chat.sessions": "Sessions",

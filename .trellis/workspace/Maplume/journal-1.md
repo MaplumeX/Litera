@@ -1174,3 +1174,46 @@ Persist main window size, position, and maximized state via tauri-plugin-window-
 
 [OK] **Completed**
 
+
+
+## Session 52: Reader progress scrubber
+
+**Date**: 2026-08-14
+**Task**: Reader progress scrubber
+**Branch**: `feat/reader-gap-analysis`
+
+### Summary
+
+Restored always-visible reader progress bar under the header as a click/drag scrubber (goToFraction, latest-wins). Updated frontend specs. Bookmarks/highlights child remains next.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7ec411a` | (see git log) |
+| `94d58ad` | (see git log) |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 53: Reader bookmarks and highlights
+
+**Date**: 2026-08-14
+**Task**: Reader bookmarks and highlights
+**Branch**: `feat/reader-gap-analysis`
+
+### Summary
+
+Added per-book bookmarks and single-color highlights in annotations.json, plus a TOC-like annotations drawer and selection highlight action. Progress scrubber sibling already shipped.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `02419cb` | (see git log) |
+
+### Status
+
+[OK] **Completed**

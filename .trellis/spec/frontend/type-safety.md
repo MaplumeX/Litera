@@ -9,7 +9,7 @@
 Litera's frontend uses TypeScript 5.8 with strict mode. Shared types live in `src/types/`, component-local types live in their component files. The critical type contract is between frontend TypeScript interfaces and Rust `#[serde(rename = "camelCase")]` structs.
 
 Reference files:
-- `src/types/library.ts` — shared domain types (`BookRecord`, `ReadingSettings`, `ImportBookResult`, `BookOpenContext`)
+- `src/types/library.ts` — shared domain types (`BookRecord`, `ReadingSettings`, `ImportBookResult`, `BookOpenContext`, `AnnotationsFile`)
 - `src/components/ReaderView.tsx` — `ReaderViewHandle`, `TocItem`, `SelectionCapture`, `RelocateDetail`
 - `src/components/ChatPanel.tsx` — `ChatMessage`, `ToolCall`, `SessionSummary`, `HistoryMessage`
 - `src/foliate-js.d.ts` — ambient declarations for foliate.js modules
@@ -36,6 +36,13 @@ export interface BookRecord {
   settings?: ReadingSettings;
   lastOpenedAt?: string;
   contentHash?: string;
+}
+
+// books/<id>/annotations.json — not fields on BookRecord
+interface AnnotationsFile {
+  schemaVersion: number;
+  bookmarks: BookmarkRecord[];
+  highlights: HighlightRecord[];
 }
 ```
 

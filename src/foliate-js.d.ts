@@ -19,10 +19,23 @@ declare module "*/foliate-js/view.js" {
     open(book: Book | File): Promise<void>;
     init(opts: Record<string, unknown>): Promise<void>;
     goToFraction(frac: number): Promise<void>;
+    goTo(target: string | number | { fraction: number }): Promise<unknown>;
+    getCFI(index: number, range?: Range): string;
+    addAnnotation(annotation: { value: string }, remove?: boolean): Promise<unknown>;
+    deleteAnnotation(annotation: { value: string }): Promise<unknown>;
     prev(): Promise<void>;
     next(): Promise<void>;
     goLeft(): Promise<void>;
     goRight(): Promise<void>;
     close?(): void;
+  }
+}
+
+declare module "*/foliate-js/overlayer.js" {
+  export class Overlayer {
+    static highlight(
+      rects: DOMRectList | ArrayLike<DOMRect>,
+      options?: { color?: string },
+    ): SVGElement;
   }
 }

@@ -1,0 +1,10 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend layer index"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Reader chrome, TOC overlay, progress-bar prohibition to reverse"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "progress state vs chrome; process-only drawer flags"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend layer index"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "library.json closed schema; books/<id>/ layout"}
+{"file": ".trellis/spec/backend/tauri-commands.md", "reason": "overwrite keeps progress; delete whole book dir"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "New persist surface + IPC + renderer"}
+{"file": ".trellis/tasks/08-14-reader-annotate-and-progress/research/foliate-annotations.md", "reason": "CFI, addAnnotation, create-overlay restore"}
+{"file": ".trellis/tasks/08-14-reader-annotate-and-progress/research/annotation-persistence.md", "reason": "annotations.json not BookRecord"}
