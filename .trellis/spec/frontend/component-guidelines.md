@@ -152,6 +152,20 @@ body:     [TOC overlay]  Reader  |  Chat (collapsed = 0 width, still mounted)
 
 > **Warning**: shadcn `DialogContent` defaults to `w-full max-w-[calc(100%-2rem)] sm:max-w-lg`. A later `max-w-[calc(100%-2rem)]` does **not** override `sm:max-w-lg`; use `sm:max-w-[calc(100%-2rem)]`. Tests that only `toContain("max-w-[calc(100%-2rem)]")` match the default class and miss a missing `sm:` override.
 
+### Convention: settings exclusive choices are a segmented control
+
+**What**: Theme, language, and text-align in `SettingsDialog` share a local `SegmentedControl` (`src/components/settings/SettingsDialog.tsx`). Layout is label above, control full width (`PresetRow`). The track is `bg-muted`; the selected segment is `bg-background shadow-xs`. The group is `role="radiogroup"`; each option is `role="radio"` with `aria-checked`. Arrow keys move focus; Space / Enter select.
+
+**Why**: Separate bordered `ChoiceButton`s read as three action buttons, not one exclusive choice. A filled `bg-primary` selected state looks like a CTA. `src/components/ui/` is shadcn-owned — do not drop this control there, and do not add `toggle-group` just for these three rows.
+
+**Don't**:
+- Rebuild these rows as independent `rounded border` buttons with `gap-1`.
+- Use `bg-primary text-primary-foreground` for the selected segment.
+- Change the left nav (排版 / 外观 / AI) into a segmented control — that is a category list.
+- Put `locale` on `preferences.json` when touching the language row (see `i18n.md`).
+
+**Tests**: Query these options as `radio`, not `button`. Assert the group name and the current value's `aria-checked`.
+
 ### Convention: library confirms and selection mode
 
 **What**: Library delete and same-path overwrite use `AlertDialog`. Import/delete failures use an in-page banner. Toolbar「选择」enters selection mode; cover clicks toggle checkboxes and must not open a book. There is no「继续阅读」banner — recency is `list_books` order.
@@ -299,7 +313,7 @@ readerRef.current?.setStyles(css)
 
 `font-family` must go through `cssFontFamily`: generics (`serif` / `sans-serif` / `monospace`) stay unquoted; named faces are quoted/escaped and followed by `, serif`. Do not interpolate a raw user-facing family name into the stylesheet.
 
-The Settings typography font control is a searchable combobox (`Popover` + `Command`), not three `ChoiceButton`s. Put the three generics first, then `list_system_fonts` families. If the saved name is missing from the list, keep it selected and mark it unavailable — do not rewrite the stored value. Set `modal={false}` on the popover so it can open inside `SettingsDialog` without a focus trap. App chrome fonts stay on the theme stylesheet; this picker only affects reader body CSS.
+The Settings typography font control is a searchable combobox (`Popover` + `Command`), not a segmented control. Theme / language / text-align stay on `SegmentedControl` (see "settings exclusive choices" above). Put the three generics first, then `list_system_fonts` families. If the saved name is missing from the list, keep it selected and mark it unavailable — do not rewrite the stored value. Set `modal={false}` on the popover so it can open inside `SettingsDialog` without a focus trap. App chrome fonts stay on the theme stylesheet; this picker only affects reader body CSS.
 
 **Caveat**: `view.renderer` is a non-official public field (not documented in foliate.js README). Submodule commit lock mitigates upgrade risk. Fixed-layout epub (foliate-fxl) may not support `setStyles` — MVP targets reflowable only.
 
