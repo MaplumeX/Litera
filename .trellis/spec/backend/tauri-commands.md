@@ -89,7 +89,7 @@ interface BookRecord {
 
 interface ReadingSettings {
   fontSize?: number;           // px, 12–32
-  fontFamily?: string;         // "serif" | "sans-serif" | "monospace"
+  fontFamily?: string;         // generic or named family; see is_valid_font_family
   theme?: string;              // "light" | "dark" | "sepia" — accepted for old files, not written
   lineHeight?: number;         // 1.2–2.4; leftover "compact"|"normal"|"relaxed" dual-read as 1.4/1.7/2.0
   pageMargin?: string;         // leftover "narrow"|"normal"|"wide"; read-only, never written
@@ -283,7 +283,7 @@ async fn save_preferences(
 interface PreferencesResponse {
   theme: string;             // "light" | "dark" | "sepia"
   fontSize: number;          // px, 12–32
-  fontFamily: string;        // "serif" | "sans-serif" | "monospace"
+  fontFamily: string;        // generic or named family; see is_valid_font_family
   lineHeight: number;        // 1.2–2.4
   contentWidth: number;      // em, 28–60
   pagePadding: number;       // rem, 0.5–4
@@ -324,20 +324,22 @@ Book-level overrides of the typography keys live on `ReadingSettings` via `updat
 
 - empty patch → `InvalidInput` ("At least one preference field is required")
 - `theme` not in `light|dark|sepia` → `InvalidInput` ("Unsupported theme")
-- `fontFamily` not in `serif|sans-serif|monospace` → `InvalidInput` ("Unsupported fontFamily")
+- `fontFamily` fails `is_valid_font_family` → `InvalidInput` ("Unsupported fontFamily")
 - continuous number not finite or outside its PRD range → `InvalidInput`
 - `textAlign` not in `start|justify` → `InvalidInput` ("Unsupported textAlign")
 - unreadable / unparseable file on read after init → `StorageIo` / `StorageCorrupt`
-- unsupported schema or invalid stored theme/fontFamily/textAlign on init → overwrite with defaults (theme becomes `light`)
+- unsupported schema or invalid stored theme/fontFamily/textAlign on init → overwrite with defaults (theme becomes `light`). A **named** `fontFamily` that passes `is_valid_font_family` is supported; do not treat it as corrupt.
 
 ### 5. Good / Base / Bad Cases
 
 - Good: existing `{"schemaVersion":1,"theme":"sepia"}` loads as sepia + typography defaults; file bytes unchanged.
 - Good: `save_preferences({ theme: "dark" })` keeps stored typography numbers / enums.
 - Good: leftover `lineHeight: "normal"` + `pageMargin: "wide"` loads as 1.7 / 52 / 2.5 without rewrite.
+- Good: stored `fontFamily: "Noto Serif CJK SC"` loads; `ensure_file` does not rewrite the file.
 - Base: missing file is created with light + builtin typography defaults. Never writes `pageMargin`.
 - Bad: `save_preferences({})` or all-None → `InvalidInput`.
 - Bad: `lineHeight: 3.0` → `InvalidInput`.
+- Bad: `fontFamily: "Foo; } body {"` → `InvalidInput`.
 
 ### 6. Tests Required
 
@@ -346,6 +348,8 @@ Book-level overrides of the typography keys live on `ReadingSettings` via `updat
 - theme save does not drop typography keys
 - numbers persist; written file omits `pageMargin`
 - out-of-range number rejected
+- named `fontFamily` accepted; `;` / empty / overlong rejected
+- `ensure_file` does not overwrite a v1 file whose `fontFamily` is a named face
 - unsupported schema overwritten with defaults
 
 ### 7. Wrong vs Correct
@@ -366,6 +370,81 @@ if let Some(theme) = patch.theme { data.theme = theme; }
 if let Some(line_height) = patch.line_height { data.line_height = line_height; }
 // ...
 self.write_unlocked(&data)?;
+```
+
+## Scenario: reader system font family
+
+### 1. Scope / Trigger
+
+- Trigger: settings typography lets the user pick an installed font family for reading body text.
+- Cross-layer: `font-kit` → `list_system_fonts` → Settings combobox → `fontFamily` on `save_preferences` / `update_reading_state` → `generateStylesCss` → `view.renderer.setStyles`.
+
+### 2. Signatures
+
+```rust
+pub(crate) fn is_valid_font_family(value: &str) -> bool
+
+#[tauri::command]
+async fn list_system_fonts() -> AppResult<Vec<String>>
+```
+
+`list_system_fonts` runs `SystemSource::all_families()` in `spawn_blocking`. Register it next to `get_preferences`.
+
+### 3. Contracts
+
+- Generics `serif` / `sans-serif` / `monospace` are always valid. Named families: trimmed 1–128 chars, no C0 controls, no `;` `{` `}`. Installation is **not** required on save.
+- `list_system_fonts` returns sorted unique family names that pass the validator. It does **not** include the three generics; the frontend prepends them.
+- Enumeration failure → `StorageIo`. Empty list is allowed.
+- `PreferencesData::is_supported` and `validate_settings` share `is_valid_font_family`. A named face must not look like a corrupt `preferences.json`.
+- CSS: generics stay unquoted. Named faces are quoted/escaped and followed by `, serif` so a missing face degrades without rewriting JSON.
+- Reader body only. App chrome `font-family` and CSP `font-src` stay unchanged (no `@font-face` file load).
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+|-----------|-----------------|
+| generic family | accept |
+| named family matching the rules, even if uninstalled | accept |
+| empty / whitespace-only / >128 chars / `;{}` / C0 | `InvalidInput` |
+| `font-kit` listing fails | `StorageIo`; generics still usable |
+| named family in an existing v1 file | load as-is; do not rewrite |
+
+### 5. Good/Base/Bad Cases
+
+- **Good**: pick `Noto Serif CJK SC` in the library → new books use it; CSS is `"Noto Serif CJK SC", serif`.
+- **Base**: no system fonts returned → combobox still has the three generics.
+- **Bad**: keep a 3-value `VALID_FONT_FAMILIES` check in `is_supported` → next launch treats a named face as corrupt and resets theme + typography.
+
+### 6. Tests Required
+
+- Rust: named font saves; injection/empty/overlong rejected; `ensure_file` does not overwrite a named-font prefs file; generics still load.
+- Frontend: `cssFontFamily` quotes and appends `, serif`; generics stay bare; `isFontFamily` keeps a valid named value.
+- Settings: combobox lists generics first; choosing a name calls `onTypographyChange`; missing current value stays selected and marked unavailable.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```rust
+const VALID_FONT_FAMILIES: [&str; 3] = ["serif", "sans-serif", "monospace"];
+fn is_supported(&self) -> bool {
+    VALID_FONT_FAMILIES.contains(&self.font_family.as_str())
+}
+// Saved "Noto Serif CJK SC" → ensure_file overwrites preferences.json
+```
+
+#### Correct
+
+```rust
+if !is_valid_font_family(&font_family) {
+    return Err(AppError::invalid_input("Unsupported fontFamily"));
+}
+```
+
+```ts
+font-family: ${cssFontFamily(state.fontFamily)};
+// generic → serif
+// named  → "Noto Serif CJK SC", serif
 ```
 
 ### Agent Config Commands

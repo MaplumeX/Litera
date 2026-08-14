@@ -32,6 +32,7 @@ npx shadcn@latest add <component-name>
 - `alert-dialog.tsx` — destructive confirms (library delete / overwrite)
 - `select.tsx` — dropdown selectors (used by `AgentConfigDialog` provider picker)
 - `slider.tsx` — continuous typography controls on `SettingsDialog`
+- `popover.tsx` + `command.tsx` — searchable combobox (reader font picker)
 - `input.tsx` — text/password inputs
 - `label.tsx` — form labels
 
@@ -287,6 +288,10 @@ readerRef.current?.setStyles(css)
 ```
 
 `generateStylesCss` writes `font-family`, `font-size`, `line-height`, `letter-spacing`, `max-width`, `padding-inline`, and `text-align` on `html, body`, plus `p { margin-block-end; text-indent }` with `!important` so EPUB chapter CSS does not win. Each `setStyles` call replaces the full stylesheet (not additive).
+
+`font-family` must go through `cssFontFamily`: generics (`serif` / `sans-serif` / `monospace`) stay unquoted; named faces are quoted/escaped and followed by `, serif`. Do not interpolate a raw user-facing family name into the stylesheet.
+
+The Settings typography font control is a searchable combobox (`Popover` + `Command`), not three `ChoiceButton`s. Put the three generics first, then `list_system_fonts` families. If the saved name is missing from the list, keep it selected and mark it unavailable — do not rewrite the stored value. Set `modal={false}` on the popover so it can open inside `SettingsDialog` without a focus trap. App chrome fonts stay on the theme stylesheet; this picker only affects reader body CSS.
 
 **Caveat**: `view.renderer` is a non-official public field (not documented in foliate.js README). Submodule commit lock mitigates upgrade risk. Fixed-layout epub (foliate-fxl) may not support `setStyles` — MVP targets reflowable only.
 
