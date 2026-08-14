@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "shadcn popover+command combobox; modal=false inside SettingsDialog; provider draft-only; refresh must not write or hit WebView /models"}
+{"file": ".trellis/spec/frontend/i18n.md", "reason": "New chrome strings must land in both zh-CN and en catalogs"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "Do not change CustomProviderEntry.models or invent a new wire shape"}
+{"file": ".trellis/spec/backend/tauri-commands.md", "reason": "Reuse list_remote_models as specified; do not add a frontend fetch"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Copy font-picker popover+command shell; do not share a component with the font picker"}
+{"file": ".trellis/tasks/archive/2026-08/08-14-provider-settings-select-apply/research/current-vs-typical.md", "reason": "Keep select-then-apply; this task only unifies the model control"}
+{"file": ".trellis/tasks/archive/2026-08/08-14-provider-settings-select-apply/research/remote-model-catalog.md", "reason": "Refresh stays custom-only, draft-only, Rust GET /models"}

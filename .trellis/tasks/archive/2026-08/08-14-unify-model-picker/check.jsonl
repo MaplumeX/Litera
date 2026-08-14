@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Combobox must follow shadcn popover+command; no window.confirm; no WebView /models; draft-only apply"}
+{"file": ".trellis/spec/frontend/i18n.md", "reason": "All new or changed chrome strings in both catalogs; no leftover untranslated keys"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "No CSP or plugin changes; catch stray frontend anti-patterns"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Flag a shared font+model combobox abstraction or a second ModelListEditor"}
+{"file": ".trellis/spec/backend/tauri-commands.md", "reason": "Check agent must not accept a new list_remote_models contract or frontend HTTP"}
