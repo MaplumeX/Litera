@@ -954,3 +954,25 @@ TOC-owned chapter list plus chapterHref locator so reader, snapshot, and book to
 ### Next Steps
 
 - Optional follow-up: inject viewport visible_text (reading_cursor), still out of this task
+
+
+## Session 43: Let readers pick a system font
+
+**Date**: 2026-08-14
+**Task**: Let readers pick a system font
+**Branch**: `main`
+
+### Summary
+
+Added a searchable system-font picker for reader body text. fontFamily is now a validated named family (not a 3-value enum) so preferences.json is not wiped on relaunch; missing faces fall back to serif in CSS and stay marked unavailable in settings.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `62edf1c` | (see git log) |
+| `9268375` | (see git log) |
+
+### Status
+
+[OK] **Completed**
