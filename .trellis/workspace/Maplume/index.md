@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 44
+- **Total Sessions**: 45
 - **Last Active**: 2026-08-14
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1000 | Active |
+| `journal-1.md` | ~1022 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 45 | 2026-08-14 | Settings segmented control | `2c7a3d6`, `d0089a1` | `main` |
 | 44 | 2026-08-14 | Select-then-apply LLM provider settings | `f839fc2`, `d9aa65e` | `main` |
 | 43 | 2026-08-14 | Let readers pick a system font | `62edf1c`, `9268375` | `main` |
 | 42 | 2026-08-14 | Unify reader and agent chapter coordinates | `f1caf6a`, `542f16c` | `main` |

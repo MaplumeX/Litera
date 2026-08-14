@@ -998,3 +998,25 @@ Reworked LLM settings into draft-then-apply: one form for built-in and custom, c
 ### Status
 
 [OK] **Completed**
+
+
+## Session 45: Settings segmented control
+
+**Date**: 2026-08-14
+**Task**: Settings segmented control
+**Branch**: `main`
+
+### Summary
+
+Replaced settings theme/language/align ChoiceButtons with a local radiogroup segmented control (label above, muted track). Recorded the convention in frontend component-guidelines. Tests 121 passed.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2c7a3d6` | (see git log) |
+| `d0089a1` | (see git log) |
+
+### Status
+
+[OK] **Completed**
