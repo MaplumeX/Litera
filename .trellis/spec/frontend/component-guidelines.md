@@ -126,6 +126,10 @@ body:     [TOC overlay]  Reader  |  Chat (collapsed = 0 width, still mounted)
 
 **Rule**: Do not add an `onOpenSettings` callback to `ChatPanel`. Chat settings stay local. General settings is a centered `SettingsDialog` overlay (`settingsOpen`); `view` stays `"library" | "reader"` so the current page stays mounted. Closing the dialog must not call `close_book` / `handleBackToLibrary`. Flush failure on close leaves the dialog open. Typography scope is `view === "reader"` (book override) vs library (global defaults).
 
+**Shell**: `SettingsDialog` `DialogContent` is a fixed box (`w-[768px] h-[40rem] max-h-[85vh] sm:max-w-[calc(100%-2rem)]`). Right pane scrolls (`min-h-0 flex-1 overflow-y-auto`). Do not size with max-only classes such as `sm:max-w-3xl` and no explicit height — typography is much taller than appearance, so the box jumps when switching sections.
+
+> **Warning**: shadcn `DialogContent` defaults to `w-full max-w-[calc(100%-2rem)] sm:max-w-lg`. A later `max-w-[calc(100%-2rem)]` does **not** override `sm:max-w-lg`; use `sm:max-w-[calc(100%-2rem)]`. Tests that only `toContain("max-w-[calc(100%-2rem)]")` match the default class and miss a missing `sm:` override.
+
 ### Convention: library confirms and selection mode
 
 **What**: Library delete and same-path overwrite use `AlertDialog`. Import/delete failures use an in-page banner. Toolbar「选择」enters selection mode; cover clicks toggle checkboxes and must not open a book. There is no「继续阅读」banner — recency is `list_books` order.
