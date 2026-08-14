@@ -32,7 +32,7 @@ npx shadcn@latest add <component-name>
 - `alert-dialog.tsx` — destructive confirms (library delete / overwrite / custom provider delete)
 - `select.tsx` — dropdown selectors (used by `AgentConfigForm` provider picker)
 - `slider.tsx` — continuous typography controls on `SettingsDialog`
-- `popover.tsx` + `command.tsx` — searchable combobox (reader font picker)
+- `popover.tsx` + `command.tsx` — searchable combobox (reader font picker; custom LLM model picker)
 - `input.tsx` — text/password inputs
 - `label.tsx` — form labels
 
@@ -42,11 +42,13 @@ npx shadcn@latest add <component-name>
 
 ### Convention: LLM provider dropdown is draft-only
 
-**What**: `AgentConfigForm` splits 「当前使用」and 「这个提供商」. Changing the provider Select only updates local draft state. Disk writes and `restart_sidecar` happen on 「保存并应用」 (`save_agent_config` for built-in, optional `update_custom_provider` + `switch_provider` for custom). 「添加自定义」is a button, not a Select sentinel. Custom provider delete uses `AlertDialog`. 「刷新模型」is custom/add-form only and calls `list_remote_models`; it must not write agent JSON or restart the sidecar.
+**What**: `AgentConfigForm` splits 「当前使用」and 「这个提供商」. Changing the provider Select only updates local draft state. Disk writes and `restart_sidecar` happen on 「保存并应用」 (`save_agent_config` for built-in, optional `update_custom_provider` + `switch_provider` for custom). 「添加自定义」is a button, not a Select sentinel. Custom provider delete uses `AlertDialog`.
 
-**Why**: Select-on-change used to switch the live provider and kill the sidecar mid-chat. Built-in and custom also used two different UIs (inline fields vs read-only card).
+Custom (and the add form) model field is a local searchable combobox (`Popover` + `Command`, `modal={false}`): pick from the draft catalog, type a new id via 「使用 {id}」 (append + select), refresh beside the box. Refresh is custom/add-form only and calls `list_remote_models`; it must not write agent JSON or restart the sidecar. The catalog only grows — no per-model delete, no second `ModelListEditor` under 「这个提供商」. Built-in model stays a plain text input with no refresh and no catalog.
 
-**Don't**: Put add-custom back in the Select. Don't call `switch_provider` from `onValueChange`. Don't fetch `/models` from the WebView.
+**Why**: Select-on-change used to switch the live provider and kill the sidecar mid-chat. Splitting pick / type / refresh across two sections made custom model changes unlike typical LLM apps. Built-in brands have no reliable `/models` catalog, so they stay free-text.
+
+**Don't**: Put add-custom back in the Select. Don't call `switch_provider` from `onValueChange`. Don't fetch `/models` from the WebView. Don't add a model-list editor or per-id delete. Don't share the model combobox module with the font picker (create-new vs fixed list). Don't show refresh on built-in providers.
 
 ### Icon Buttons (lucide-react)
 
