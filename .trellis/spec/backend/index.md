@@ -20,6 +20,7 @@ Litera's backend is a Tauri v2 Rust application (`src-tauri/`) with a Node.js si
 | [Tauri Commands](./tauri-commands.md) | IPC command contracts (WebView ↔ Rust ↔ sidecar) |
 | [Quality Guidelines](./quality-guidelines.md) | Sidecar stdio JSON lines protocol, process management |
 | [Logging Guidelines](./logging-guidelines.md) | `eprintln!` stderr, sidecar error protocol messages |
+| [Desktop Release](./release.md) | Version lockstep, tag-triggered GitHub Release, host-native sidecar, ad-hoc macOS signing |
 
 ---
 
