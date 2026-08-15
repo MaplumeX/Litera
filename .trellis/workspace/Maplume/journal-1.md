@@ -1461,3 +1461,26 @@ Planned and shipped a desktop-reader chrome pass: regrouped toolbar, inset book 
 ### Status
 
 [OK] **Completed**
+
+
+## Session 64: Tighten reader chrome hierarchy
+
+**Date**: 2026-08-16
+**Task**: Tighten reader chrome hierarchy
+**Branch**: `main`
+
+### Summary
+
+Planned and shipped a reader chrome optical pass: full-bleed book canvas, quieter header titles, one seam per edge (progress border-t, mode-aware side border-l, docked chat header without a second rule). Updated frontend chrome contracts.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0fcacfd` | (see git log) |
+| `6e59534` | (see git log) |
+| `1631a89` | (see git log) |
+
+### Status
+
+[OK] **Completed**
