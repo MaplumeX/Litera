@@ -1,0 +1,3 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "TOC is an overlay drawer; keep chrome reading-first; do not remount ReaderView or pin TOC as a column"}
+{"file": ".trellis/spec/frontend/hook-guidelines.md", "reason": "Ref-stable effects: scroll on mount and currentHref change without extra state"}
