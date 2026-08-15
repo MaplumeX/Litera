@@ -1393,3 +1393,25 @@ Replaced unconditional scrollIntoView in ChatPanel with stick-to-bottom logic: s
 ### Status
 
 [OK] **Completed**
+
+
+## Session 61: Agent reading mode
+
+**Date**: 2026-08-15
+**Task**: Agent reading mode
+**Branch**: `main`
+
+### Summary
+
+Designed and shipped a coexisting Agent reading mode: ChatGPT-like session rail + main chat + full side reader, with app default, toolbar toggle, and per-book lastReaderMode. Updated specs and archived the task.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `292bdc8` | (see git log) |
+| `e2ec221` | (see git log) |
+
+### Status
+
+[OK] **Completed**
