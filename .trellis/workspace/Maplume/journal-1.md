@@ -1321,6 +1321,15 @@ Ported pi coding agent's context compaction design to Litera's embedded agent ru
 [OK] **Completed**
 
 
+## Session 58: Make TOC sidebar width resizable
+
+**Date**: 2026-08-15
+**Task**: Make TOC sidebar width resizable
+**Branch**: `electric-hippo`
+
+### Summary
+
+TOC drawer now has a right-edge drag handle (pointer events, cursor-col-resize, hover feedback matching the chat Separator). Width persists to localStorage (toc-sidebar-width, default 224px, min 160px, clamped to reader container). New src/lib/toc-sidebar-width.ts helpers + 9 unit tests + 7 component tests; 223 tests pass, build passes. AnnotationsSidebar and chat panel untouched. Spec updated in component-guidelines.md.
 ## Session 58: Fix duplicate-open stacking foliate renderers
 
 **Date**: 2026-08-15
@@ -1335,6 +1344,7 @@ Ported pi coding agent's context compaction design to Litera's embedded agent ru
 
 | Hash | Message |
 |------|---------|
+| `a39fc6b` | (see git log) |
 | `b1d291d` | (see git log) |
 
 ### Status

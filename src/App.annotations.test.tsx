@@ -388,3 +388,109 @@ describe("reader annotation chrome", () => {
     });
   });
 });
+
+describe("reader TOC drawer resize", () => {
+  function mockDrawerRects(drawer: HTMLElement, container: HTMLElement) {
+    vi.spyOn(drawer, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
+      top: 0,
+      left: 0,
+      right: 224,
+      bottom: 600,
+      width: 224,
+      height: 600,
+      toJSON() {
+        return {};
+      },
+    });
+    vi.spyOn(container, "getBoundingClientRect").mockReturnValue({
+      x: 0,
+      y: 0,
+      top: 0,
+      left: 0,
+      right: 800,
+      bottom: 600,
+      width: 800,
+      height: 600,
+      toJSON() {
+        return {};
+      },
+    });
+  }
+
+  async function openToc() {
+    const screen = await openReader();
+    fireEvent.click(screen.getByLabelText("目录"));
+    const drawer = screen.container.querySelector(
+      ".absolute.inset-y-0.left-0.z-30",
+    ) as HTMLElement | null;
+    const container = drawer?.parentElement as HTMLElement | null;
+    expect(drawer).toBeTruthy();
+    expect(container).toBeTruthy();
+    mockDrawerRects(drawer!, container!);
+    return { screen, drawer: drawer!, container: container! };
+  }
+
+  it("shows a drag handle on the drawer's right edge", async () => {
+    const { screen } = await openToc();
+    const handle = screen.getByRole("separator", { orientation: "vertical" });
+    expect(handle.className).toContain("cursor-col-resize");
+    expect(handle.className).toContain("hover:bg-primary/30");
+  });
+
+  it("starts at the default 224px width when nothing is saved", async () => {
+    localStorage.removeItem("toc-sidebar-width");
+    const { drawer } = await openToc();
+    expect(drawer.style.width).toBe("224px");
+  });
+
+  it("restores a saved width on open", async () => {
+    localStorage.setItem("toc-sidebar-width", "300");
+    const { drawer } = await openToc();
+    expect(drawer.style.width).toBe("300px");
+  });
+
+  it("drags to resize the drawer and persists the width", async () => {
+    const { screen, drawer } = await openToc();
+    const handle = screen.getByRole("separator", { orientation: "vertical" });
+    fireEvent.pointerDown(handle, { clientX: 224, button: 0 });
+    fireEvent.pointerMove(handle, { clientX: 324, button: 0 });
+    fireEvent.pointerUp(handle, { clientX: 324, button: 0 });
+    expect(drawer.style.width).toBe("324px");
+    expect(localStorage.getItem("toc-sidebar-width")).toBe("324");
+  });
+
+  it("clamps the width to the minimum while dragging", async () => {
+    const { screen, drawer } = await openToc();
+    const handle = screen.getByRole("separator", { orientation: "vertical" });
+    fireEvent.pointerDown(handle, { clientX: 224, button: 0 });
+    fireEvent.pointerMove(handle, { clientX: 0, button: 0 });
+    expect(drawer.style.width).toBe("160px");
+  });
+
+  it("clamps the width to the container on drag", async () => {
+    const { screen, drawer } = await openToc();
+    const handle = screen.getByRole("separator", { orientation: "vertical" });
+    fireEvent.pointerDown(handle, { clientX: 224, button: 0 });
+    fireEvent.pointerMove(handle, { clientX: 2000, button: 0 });
+    expect(drawer.style.width).toBe("800px");
+  });
+
+  it("keeps the width after closing and reopening the drawer", async () => {
+    const { screen, drawer } = await openToc();
+    const handle = screen.getByRole("separator", { orientation: "vertical" });
+    fireEvent.pointerDown(handle, { clientX: 224, button: 0 });
+    fireEvent.pointerMove(handle, { clientX: 324, button: 0 });
+    fireEvent.pointerUp(handle, { clientX: 324, button: 0 });
+    expect(drawer.style.width).toBe("324px");
+
+    fireEvent.click(screen.getByLabelText("目录"));
+    expect(screen.queryByRole("separator", { orientation: "vertical" })).toBeNull();
+    fireEvent.click(screen.getByLabelText("目录"));
+    const reopened = screen.container.querySelector(
+      ".absolute.inset-y-0.left-0.z-30",
+    ) as HTMLElement | null;
+    expect(reopened?.style.width).toBe("324px");
+  });
+});

@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Group, Panel, Separator, useDefaultLayout, usePanelRef } from "react-resizable-panels";
@@ -60,6 +68,7 @@ import { createLatestSerializedTaskController } from "@/lib/latest-serialized-ta
 import { useBookImport } from "@/lib/use-book-import";
 import { useOpenPaths } from "@/lib/use-open-paths";
 import { useT } from "@/lib/i18n";
+import { clampTocWidth, loadTocWidth, saveTocWidth } from "@/lib/toc-sidebar-width";
 
 interface FileData {
   bytes: Uint8Array<ArrayBuffer>;
@@ -106,6 +115,7 @@ function App() {
   });
   const [chatCollapsed, setChatCollapsed] = useState(true);
   const [tocVisible, setTocVisible] = useState(false);
+  const [tocWidth, setTocWidth] = useState(loadTocWidth);
   const [annotationsVisible, setAnnotationsVisible] = useState(false);
   const [annotations, setAnnotations] = useState<AnnotationsFile>(emptyAnnotations);
   const [toc, setToc] = useState<TocItem[]>([]);
@@ -141,6 +151,12 @@ function App() {
   const readerRef = useRef<ReaderViewHandle>(null);
   const chatRef = useRef<ChatPanelHandle>(null);
   const chatPanelRef = usePanelRef();
+  const tocDrawerRef = useRef<HTMLDivElement>(null);
+  const tocResizeRef = useRef<{ startX: number; startWidth: number; maxWidth: number } | null>(
+    null,
+  );
+  const tocWidthRef = useRef(tocWidth);
+  tocWidthRef.current = tocWidth;
   // Persist the drag-adjusted chat panel width across restarts; only user
   // interactions are saved so imperative collapse/expand never overwrite it.
   const { defaultLayout: savedChatLayout, onLayoutChanged } = useDefaultLayout({
@@ -278,6 +294,18 @@ function App() {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [view, tocVisible, annotationsVisible]);
+
+  // A persisted width may exceed the current reader container (e.g. the window
+  // was resized smaller since the width was saved); clamp it back on open so
+  // the drawer and its resize handle never leave the container.
+  useEffect(() => {
+    if (!tocVisible) return;
+    const container = tocDrawerRef.current?.parentElement;
+    const maxWidth = container?.getBoundingClientRect().width;
+    if (maxWidth != null && maxWidth > 0 && tocWidthRef.current > maxWidth) {
+      setTocWidth(clampTocWidth(tocWidthRef.current, maxWidth));
+    }
+  }, [tocVisible]);
 
   const persistAnnotations = useCallback(
     async (bookId: string, next: AnnotationsFile) => {
@@ -511,6 +539,39 @@ function App() {
     setTocVisible(false);
   }, []);
 
+  const startTocResize = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    const drawer = tocDrawerRef.current;
+    if (!drawer) return;
+    const container = drawer.parentElement;
+    const maxWidth = container?.getBoundingClientRect().width ?? window.innerWidth;
+    tocResizeRef.current = {
+      startX: e.clientX,
+      startWidth: drawer.getBoundingClientRect().width,
+      maxWidth,
+    };
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+  }, []);
+
+  const onTocResizeMove = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
+    const state = tocResizeRef.current;
+    if (!state) return;
+    setTocWidth(clampTocWidth(state.startWidth + (e.clientX - state.startX), state.maxWidth));
+  }, []);
+
+  const endTocResize = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
+    const state = tocResizeRef.current;
+    if (!state) return;
+    tocResizeRef.current = null;
+    const next = clampTocWidth(state.startWidth + (e.clientX - state.startX), state.maxWidth);
+    setTocWidth(next);
+    saveTocWidth(next);
+  }, []);
+
+  const cancelTocResize = useCallback(() => {
+    tocResizeRef.current = null;
+  }, []);
+
   const closeOverlays = useCallback(() => {
     setTocVisible(false);
     setAnnotationsVisible(false);
@@ -740,9 +801,23 @@ function App() {
                     aria-label={t("reader.closeToc")}
                     onClick={() => setTocVisible(false)}
                   />
-                  <div className="absolute inset-y-0 left-0 z-30 w-56 overflow-hidden border-r bg-background shadow-md">
+                  <div
+                    ref={tocDrawerRef}
+                    className="absolute inset-y-0 left-0 z-30 overflow-hidden border-r bg-background shadow-md"
+                    style={{ width: tocWidth }}
+                  >
                     <TocSidebar toc={toc} onGoTo={handleTocGoTo} />
                   </div>
+                  <div
+                    className="absolute inset-y-0 z-40 w-1.5 cursor-col-resize touch-none select-none bg-transparent hover:bg-primary/30"
+                    style={{ left: tocWidth - 3 }}
+                    role="separator"
+                    aria-orientation="vertical"
+                    onPointerDown={startTocResize}
+                    onPointerMove={onTocResizeMove}
+                    onPointerUp={endTocResize}
+                    onPointerCancel={cancelTocResize}
+                  />
                 </>
               )}
               {annotationsVisible && (
