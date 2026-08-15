@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import type { AnnotationsFile, BookOpenContext } from "@/types/library";
 import type { ReaderViewHandle } from "@/components/ReaderView";
 
@@ -116,26 +115,6 @@ vi.mock("@/components/ReaderView", async () => {
   };
 });
 
-vi.mock("react-resizable-panels", async () => {
-  const React = await import("react");
-  const layoutMocks = { defaultLayout: undefined as unknown, onLayoutChanged: () => {} };
-  return {
-    Group: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-    Panel: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-    Separator: () => null,
-    usePanelRef: vi.fn(() => ({
-      current: {
-        collapse: () => {},
-        expand: () => {},
-        isCollapsed: () => true,
-        getSize: () => ({ asPercentage: 0 }),
-        resize: () => {},
-      },
-    })),
-    useDefaultLayout: vi.fn(() => layoutMocks),
-  };
-});
-
 vi.mock("@/components/chat/ChatPanel", async () => {
   const React = await import("react");
   return {
@@ -196,19 +175,9 @@ beforeEach(() => {
   windowApi.minimize.mockClear();
   windowApi.toggleMaximize.mockClear();
   setupInvoke();
-  vi.mocked(useDefaultLayout).mockReturnValue({
-    defaultLayout: undefined,
-    onLayoutChanged: () => {},
-  });
-  vi.mocked(usePanelRef).mockReturnValue({
-    current: {
-      collapse: () => {},
-      expand: () => {},
-      isCollapsed: () => true,
-      getSize: () => ({ asPercentage: 0 }),
-      resize: () => {},
-    },
-  });
+  localStorage.removeItem("litera.chat-panel-width");
+  localStorage.removeItem("litera.defaultReaderMode");
+  localStorage.removeItem("litera.agent-book-width");
   vi.stubGlobal(
     "matchMedia",
     vi.fn().mockReturnValue({
@@ -221,6 +190,9 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  localStorage.removeItem("litera.chat-panel-width");
+  localStorage.removeItem("litera.defaultReaderMode");
+  localStorage.removeItem("litera.agent-book-width");
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -315,7 +287,15 @@ describe("reader annotation chrome", () => {
     expect(header).toBeTruthy();
     expect(header!.hasAttribute("data-tauri-drag-region")).toBe(false);
     expect(header!.querySelectorAll("[data-tauri-drag-region]")).toHaveLength(2);
-    for (const name of ["返回书库", "目录", "标注", "字体与主题", "显示对话", "关闭窗口"]) {
+    for (const name of [
+      "返回书库",
+      "目录",
+      "标注",
+      "字体与主题",
+      "切换到 Agent 模式",
+      "显示对话",
+      "关闭窗口",
+    ]) {
       expect(screen.getByRole("button", { name }).hasAttribute("data-tauri-drag-region")).toBe(
         false,
       );
@@ -366,25 +346,11 @@ describe("reader annotation chrome", () => {
   });
 
   it("restores a previously saved chat panel width on expand", async () => {
-    const resize = vi.fn();
-    const saved = { reader: 65, chat: 35 };
-    vi.mocked(useDefaultLayout).mockReturnValue({
-      defaultLayout: saved,
-      onLayoutChanged: () => {},
-    });
-    vi.mocked(usePanelRef).mockReturnValue({
-      current: {
-        collapse: () => {},
-        expand: () => {},
-        isCollapsed: () => true,
-        getSize: () => ({ asPercentage: 0 }),
-        resize,
-      },
-    });
+    localStorage.setItem("litera.chat-panel-width", "35");
     const screen = await openReader();
     fireEvent.click(screen.getByText("fake-ask"));
     await waitFor(() => {
-      expect(resize).toHaveBeenCalledWith("35%");
+      expect(screen.getByTestId("reader-shell").style.gridTemplateColumns).toBe("1fr 35%");
     });
   });
 });

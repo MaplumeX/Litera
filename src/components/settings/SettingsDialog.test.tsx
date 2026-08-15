@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { SettingsDialog } from "./SettingsDialog";
 import type { ReaderStyleState } from "@/lib/reader-styles";
 import { setLocale } from "@/lib/i18n";
+import { DEFAULT_READER_MODE_KEY } from "@/lib/reader-mode";
 
 class ResizeObserverStub {
   observe() {}
@@ -67,6 +68,7 @@ invokeMock.mockImplementation((cmd: string) => {
 afterEach(() => {
   cleanup();
   setLocale("zh-CN");
+  localStorage.removeItem(DEFAULT_READER_MODE_KEY);
   invokeMock.mockClear();
 });
 
@@ -290,6 +292,7 @@ describe("SettingsDialog", () => {
 
     expect(getByRole("radiogroup", { name: "主题" })).toBeTruthy();
     expect(getByRole("radiogroup", { name: "语言" })).toBeTruthy();
+    expect(getByRole("radiogroup", { name: "默认阅读模式" })).toBeTruthy();
     expect(getByRole("radio", { name: "白天" }).getAttribute("aria-checked")).toBe("true");
     expect(getByRole("radio", { name: "夜间" }).getAttribute("aria-checked")).toBe("false");
     expect(getByRole("radio", { name: "中文" }).getAttribute("aria-checked")).toBe("true");
@@ -371,5 +374,34 @@ describe("SettingsDialog", () => {
 
     expect(await findByText("不可用")).toBeTruthy();
     expect(getByRole("combobox").textContent).toContain("MissingFont");
+  });
+
+  it("persists the default reader mode to localStorage only", () => {
+    const { getByRole } = render(
+      <SettingsDialog
+        open
+        onClose={noop}
+        bookTitle={null}
+        hasBook={false}
+        styleState={styleState}
+        onTypographyChange={noop}
+        onRestoreDefault={noop}
+        overriddenKeys={[]}
+        theme="light"
+        onThemeChange={noop}
+      />,
+    );
+
+    act(() => {
+      getByRole("button", { name: "外观" }).click();
+    });
+    expect(getByRole("radio", { name: "阅读" }).getAttribute("aria-checked")).toBe("true");
+    act(() => {
+      getByRole("radio", { name: "Agent" }).click();
+    });
+    expect(localStorage.getItem(DEFAULT_READER_MODE_KEY)).toBe("agent");
+    expect(getByRole("radio", { name: "Agent" }).getAttribute("aria-checked")).toBe("true");
+    expect(invokeMock.mock.calls.some((call) => call[0] === "save_preferences")).toBe(false);
+    expect(invokeMock.mock.calls.some((call) => call[0] === "update_reading_state")).toBe(false);
   });
 });

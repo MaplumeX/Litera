@@ -35,6 +35,11 @@ import {
   type TypographyKey,
 } from "@/lib/reader-styles";
 import { useT, type MessageKey } from "@/lib/i18n";
+import {
+  loadDefaultReaderMode,
+  saveDefaultReaderMode,
+  type ReaderMode,
+} from "@/lib/reader-mode";
 
 type SettingsSection = "typography" | "appearance" | "ai";
 
@@ -379,6 +384,11 @@ export function SettingsDialog({
 }: SettingsDialogProps) {
   const { t, locale, setLocale } = useT();
   const [section, setSection] = useState<SettingsSection>("typography");
+  const [defaultReaderMode, setDefaultReaderMode] = useState(loadDefaultReaderMode);
+
+  useEffect(() => {
+    if (open) setDefaultReaderMode(loadDefaultReaderMode());
+  }, [open]);
   const canRestore = (key: TypographyKey) => overriddenKeys.includes(key);
   const restoreLabel = t("settings.restoreDefault");
   const scopeCopy = hasBook
@@ -506,6 +516,20 @@ export function SettingsDialog({
                   ]}
                   onChange={setLocale}
                   ariaLabel={t("settings.language")}
+                />
+              </PresetRow>
+              <PresetRow label={t("settings.defaultMode")}>
+                <SegmentedControl
+                  value={defaultReaderMode}
+                  options={[
+                    { value: "reader" as ReaderMode, label: t("settings.defaultMode.reader") },
+                    { value: "agent" as ReaderMode, label: t("settings.defaultMode.agent") },
+                  ]}
+                  onChange={(next) => {
+                    saveDefaultReaderMode(next);
+                    setDefaultReaderMode(next);
+                  }}
+                  ariaLabel={t("settings.defaultMode")}
                 />
               </PresetRow>
             </div>

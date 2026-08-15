@@ -142,6 +142,20 @@ pub(crate) fn is_valid_font_family(value: &str) -> bool {
     })
 }
 
+fn is_valid_reader_mode(value: &str) -> bool {
+    value == "reader" || value == "agent"
+}
+
+fn validate_reader_mode(value: &str) -> AppResult<()> {
+    if is_valid_reader_mode(value) {
+        Ok(())
+    } else {
+        Err(AppError::invalid_input(
+            "lastReaderMode must be \"reader\" or \"agent\"",
+        ))
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct BookRecord {
@@ -176,6 +190,12 @@ pub struct BookRecord {
         skip_serializing_if = "Option::is_none"
     )]
     content_version: Option<String>,
+    #[serde(
+        rename = "lastReaderMode",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub last_reader_mode: Option<String>,
 }
 
 #[derive(Debug, Serialize, Clone, Copy, PartialEq, Eq)]
@@ -208,6 +228,8 @@ pub struct BookOpenContext {
     #[serde(rename = "lastFraction", skip_serializing_if = "Option::is_none")]
     pub last_fraction: Option<f64>,
     pub settings: Option<ReadingSettings>,
+    #[serde(rename = "lastReaderMode", skip_serializing_if = "Option::is_none")]
+    pub last_reader_mode: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -479,6 +501,7 @@ impl LibraryStore {
                 last_opened_at: None,
                 content_hash: Some(incoming_hash),
                 content_version: Some(import_id.clone()),
+                last_reader_mode: None,
             });
             if let Err(error) = self.write_library(&library) {
                 let rollback = fs::remove_dir_all(&book_dir);
@@ -679,6 +702,7 @@ impl LibraryStore {
             })?,
             last_fraction: record.last_fraction,
             settings: record.settings.clone(),
+            last_reader_mode: record.last_reader_mode.clone(),
         })
     }
 
@@ -851,9 +875,10 @@ impl LibraryStore {
         book_id: &str,
         last_fraction: Option<f64>,
         settings: Option<ReadingSettings>,
+        last_reader_mode: Option<String>,
     ) -> AppResult<()> {
         validate_book_id(book_id)?;
-        if last_fraction.is_none() && settings.is_none() {
+        if last_fraction.is_none() && settings.is_none() && last_reader_mode.is_none() {
             return Err(AppError::invalid_input(
                 "At least one reading state field is required",
             ));
@@ -867,6 +892,9 @@ impl LibraryStore {
         }
         if let Some(settings) = &settings {
             validate_settings(settings)?;
+        }
+        if let Some(mode) = &last_reader_mode {
+            validate_reader_mode(mode)?;
         }
 
         let _guard = self.transaction()?;
@@ -885,6 +913,9 @@ impl LibraryStore {
             } else {
                 Some(settings)
             };
+        }
+        if let Some(mode) = last_reader_mode {
+            record.last_reader_mode = Some(mode);
         }
         self.write_library(&library)
     }
@@ -1419,6 +1450,14 @@ fn validate_library_records(root: &Path, data: &LibraryData) -> AppResult<()> {
             validate_settings(settings).map_err(|error| {
                 AppError::storage_corrupt(format!("Invalid settings for book {}: {error}", book.id))
             })?;
+        }
+        if let Some(mode) = &book.last_reader_mode {
+            if !is_valid_reader_mode(mode) {
+                return Err(AppError::storage_corrupt(format!(
+                    "Invalid lastReaderMode for book {}",
+                    book.id
+                )));
+            }
         }
     }
     Ok(())
@@ -2123,9 +2162,13 @@ pub async fn update_reading_state(
     book_id: String,
     last_fraction: Option<f64>,
     settings: Option<ReadingSettings>,
+    last_reader_mode: Option<String>,
 ) -> AppResult<()> {
     let store = store.inner().clone();
-    run_blocking(move || store.update_reading_state(&book_id, last_fraction, settings)).await
+    run_blocking(move || {
+        store.update_reading_state(&book_id, last_fraction, settings, last_reader_mode)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -2296,7 +2339,7 @@ mod tests {
         let fraction_barrier = barrier.clone();
         let fraction = std::thread::spawn(move || {
             fraction_barrier.wait();
-            fraction_store.update_reading_state(&fraction_id, Some(0.75), None)
+            fraction_store.update_reading_state(&fraction_id, Some(0.75), None, None)
         });
         let settings_store = store.clone();
         let settings_id = id.clone();
@@ -2312,6 +2355,7 @@ mod tests {
                     theme: Some("sepia".to_string()),
                     ..ReadingSettings::default()
                 }),
+                None,
             )
         });
         barrier.wait();
@@ -2421,7 +2465,7 @@ mod tests {
         store.fail_next_library_write();
 
         store
-            .update_reading_state(&id, Some(0.9), None)
+            .update_reading_state(&id, Some(0.9), None, None)
             .expect_err("injected failure");
 
         assert_eq!(
@@ -2498,7 +2542,7 @@ mod tests {
         store.delete_book(&id).expect("delete");
 
         let error = store
-            .update_reading_state(&id, Some(0.5), None)
+            .update_reading_state(&id, Some(0.5), None, None)
             .expect_err("late update");
 
         assert_eq!(error.code, AppErrorCode::BookNotFound);
@@ -2511,7 +2555,7 @@ mod tests {
         let source = Path::new("/source/reimport.epub");
         let id = import_test_book(&store, source);
         store
-            .update_reading_state(&id, Some(0.4), None)
+            .update_reading_state(&id, Some(0.4), None, None)
             .expect("progress");
         let version_two = b"version-two-and-different".to_vec();
 
@@ -2634,7 +2678,7 @@ mod tests {
         let id = import_test_book(&store, Path::new("/source/validation.epub"));
         for fraction in [f64::NAN, f64::INFINITY, -0.1, 1.1] {
             let error = store
-                .update_reading_state(&id, Some(fraction), None)
+                .update_reading_state(&id, Some(fraction), None, None)
                 .expect_err("fraction validation");
             assert_eq!(error.code, AppErrorCode::InvalidInput);
         }
@@ -2648,6 +2692,7 @@ mod tests {
                     theme: Some("neon".to_string()),
                     ..ReadingSettings::default()
                 }),
+                None,
             )
             .expect_err("settings validation");
         assert_eq!(error.code, AppErrorCode::InvalidInput);
@@ -2673,6 +2718,7 @@ mod tests {
                     first_line_indent: Some(2.0),
                     ..ReadingSettings::default()
                 }),
+                None,
             )
             .expect("persist override");
 
@@ -2710,6 +2756,7 @@ mod tests {
                     page_padding: Some(1.25),
                     ..ReadingSettings::default()
                 }),
+                None,
             )
             .expect("persist override");
         store
@@ -2723,6 +2770,7 @@ mod tests {
                     page_padding: Some(1.25),
                     ..ReadingSettings::default()
                 }),
+                None,
             )
             .expect("restore lineHeight");
 
@@ -2751,6 +2799,7 @@ mod tests {
                     font_family: Some("Noto Serif CJK SC".to_string()),
                     ..ReadingSettings::default()
                 }),
+                None,
             )
             .expect("persist named font");
         let settings = store
@@ -2780,6 +2829,7 @@ mod tests {
                         font_family: Some(value),
                         ..ReadingSettings::default()
                     }),
+                    None,
                 )
                 .expect_err("invalid font");
             assert_eq!(error.code, AppErrorCode::InvalidInput);
@@ -2798,7 +2848,7 @@ mod tests {
         let (_directory, store) = test_store();
         let id = import_test_book(&store, Path::new("/source/old-enum-settings.epub"));
         store
-            .update_reading_state(&id, None, Some(settings.clone()))
+            .update_reading_state(&id, None, Some(settings.clone()), None)
             .expect("persist old enums");
         let stored = store
             .list_books()
@@ -2823,6 +2873,7 @@ mod tests {
                     line_height: Some(3.0),
                     ..ReadingSettings::default()
                 }),
+                None,
             )
             .expect_err("out of range lineHeight");
         assert_eq!(error.code, AppErrorCode::InvalidInput);
@@ -2840,10 +2891,11 @@ mod tests {
                     font_size: Some(18.0),
                     ..ReadingSettings::default()
                 }),
+                None,
             )
             .expect("persist override");
         store
-            .update_reading_state(&id, None, Some(ReadingSettings::default()))
+            .update_reading_state(&id, None, Some(ReadingSettings::default()), None)
             .expect("clear overrides");
         assert!(store
             .list_books()
@@ -2863,7 +2915,7 @@ mod tests {
         let (_directory, store) = test_store();
         let id = import_test_book(&store, Path::new("/source/old-font-settings.epub"));
         store
-            .update_reading_state(&id, None, Some(settings.clone()))
+            .update_reading_state(&id, None, Some(settings.clone()), None)
             .expect("persist old snapshot");
         let stored = store
             .list_books()
@@ -3049,8 +3101,11 @@ mod tests {
         let source = Path::new("/source/overwrite.epub");
         let id = import_test_book(&store, source);
         store
-            .update_reading_state(&id, Some(0.42), None)
+            .update_reading_state(&id, Some(0.42), None, None)
             .expect("progress");
+        store
+            .update_reading_state(&id, None, None, Some("agent".to_string()))
+            .expect("mode");
         store.mark_book_opened(&id).expect("opened");
         let before = store.list_books().expect("before").remove(0);
 
@@ -3078,6 +3133,7 @@ mod tests {
         assert_eq!(after.last_fraction, Some(0.42));
         assert_eq!(after.last_opened_at, before.last_opened_at);
         assert_eq!(after.settings, before.settings);
+        assert_eq!(after.last_reader_mode.as_deref(), Some("agent"));
         assert_eq!(
             after.content_hash.as_deref(),
             Some(sha256_hex(b"version-two").as_str())
@@ -3090,7 +3146,7 @@ mod tests {
         let source = Path::new("/source/unchanged.epub");
         let id = import_test_book(&store, source);
         store
-            .update_reading_state(&id, Some(0.42), None)
+            .update_reading_state(&id, Some(0.42), None, None)
             .expect("progress");
         store.mark_book_opened(&id).expect("opened");
         let before = store.list_books().expect("before").remove(0);
@@ -3210,7 +3266,7 @@ mod tests {
         let source = Path::new("/source/discard-overwrite.epub");
         let id = import_test_book(&store, source);
         store
-            .update_reading_state(&id, Some(0.3), None)
+            .update_reading_state(&id, Some(0.3), None, None)
             .expect("progress");
 
         let result = store
@@ -3291,6 +3347,91 @@ mod tests {
         )
         .expect("write bad hash");
         let error = store.list_books().expect_err("bad contentHash");
+        assert_eq!(error.code, AppErrorCode::StorageCorrupt);
+    }
+
+    #[test]
+    fn last_reader_mode_missing_is_valid_and_round_trips() {
+        let (directory, store) = test_store();
+        let id = import_test_book(&store, Path::new("/source/reader-mode.epub"));
+        let book = store.list_books().expect("list").remove(0);
+        assert!(book.last_reader_mode.is_none());
+        let library_path = directory.path().join("library.json");
+        let raw = fs::read_to_string(&library_path).expect("library text");
+        assert!(!raw.contains("lastReaderMode"));
+
+        store
+            .update_reading_state(&id, None, None, Some("agent".to_string()))
+            .expect("write mode");
+        let stored = store.list_books().expect("after write").remove(0);
+        assert_eq!(stored.last_reader_mode.as_deref(), Some("agent"));
+        assert_eq!(stored.last_fraction, None);
+        assert!(stored.settings.is_none());
+
+        let context = store.get_book_open_context(&id).expect("open context");
+        assert_eq!(context.last_reader_mode.as_deref(), Some("agent"));
+    }
+
+    #[test]
+    fn last_reader_mode_does_not_clobber_fraction_or_settings() {
+        let (_directory, store) = test_store();
+        let id = import_test_book(&store, Path::new("/source/reader-mode-independent.epub"));
+        store
+            .update_reading_state(&id, Some(0.3), None, None)
+            .expect("fraction");
+        store
+            .update_reading_state(
+                &id,
+                None,
+                Some(ReadingSettings {
+                    font_size: Some(18.0),
+                    ..ReadingSettings::default()
+                }),
+                None,
+            )
+            .expect("settings");
+        store
+            .update_reading_state(&id, None, None, Some("reader".to_string()))
+            .expect("mode");
+
+        let book = store.list_books().expect("list").remove(0);
+        assert_eq!(book.last_fraction, Some(0.3));
+        assert_eq!(book.settings.expect("settings").font_size, Some(18.0));
+        assert_eq!(book.last_reader_mode.as_deref(), Some("reader"));
+
+        store
+            .update_reading_state(&id, Some(0.8), None, None)
+            .expect("fraction only");
+        let book = store.list_books().expect("list").remove(0);
+        assert_eq!(book.last_fraction, Some(0.8));
+        assert_eq!(book.settings.expect("settings").font_size, Some(18.0));
+        assert_eq!(book.last_reader_mode.as_deref(), Some("reader"));
+    }
+
+    #[test]
+    fn last_reader_mode_rejects_invalid_update_and_stored_value() {
+        let (directory, store) = test_store();
+        let id = import_test_book(&store, Path::new("/source/reader-mode-invalid.epub"));
+        let error = store
+            .update_reading_state(&id, None, None, Some("dark".to_string()))
+            .expect_err("invalid update");
+        assert_eq!(error.code, AppErrorCode::InvalidInput);
+
+        let error = store
+            .update_reading_state(&id, None, None, None)
+            .expect_err("empty update");
+        assert_eq!(error.code, AppErrorCode::InvalidInput);
+
+        let library_path = directory.path().join("library.json");
+        let original = fs::read(&library_path).expect("original library");
+        let mut value: serde_json::Value = serde_json::from_slice(&original).expect("library json");
+        value["books"][0]["lastReaderMode"] = serde_json::Value::String("dark".to_string());
+        fs::write(
+            &library_path,
+            serde_json::to_vec_pretty(&value).expect("bad mode"),
+        )
+        .expect("write bad mode");
+        let error = store.list_books().expect_err("bad lastReaderMode");
         assert_eq!(error.code, AppErrorCode::StorageCorrupt);
     }
 

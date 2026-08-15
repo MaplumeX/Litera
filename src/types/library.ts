@@ -25,6 +25,7 @@ export interface BookRecord {
   settings?: ReadingSettings;
   lastOpenedAt?: string;
   contentHash?: string;
+  lastReaderMode?: "reader" | "agent";
 }
 
 export type ImportStatus = "new" | "overwrite" | "duplicate";
@@ -46,6 +47,7 @@ export interface BookOpenContext {
   contentVersion: string;
   lastFraction?: number;
   settings?: ReadingSettings;
+  lastReaderMode?: "reader" | "agent";
 }
 
 /** A page bookmark stored in books/<id>/annotations.json — not on BookRecord. */

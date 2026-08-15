@@ -547,7 +547,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
     );
 
     return (
-      <div className="relative h-full w-full">
+      <div data-testid="reader-view" className="relative h-full w-full">
         <div ref={containerRef} className="h-full w-full" />
 
         {selectionPos && (

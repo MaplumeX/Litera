@@ -9,14 +9,23 @@ import {
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { Group, Panel, Separator, useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { Button } from "@/components/ui/button";
 import {
   WindowControls,
   onTitlebarDragMouseDown,
   titlebarClassName,
 } from "@/components/WindowControls";
-import { Bookmark, ChevronLeft, List, Type, MessageSquare } from "lucide-react";
+import {
+  BookOpen,
+  BookText,
+  Bookmark,
+  Bot,
+  ChevronLeft,
+  List,
+  MessageSquare,
+  MessagesSquare,
+  Type,
+} from "lucide-react";
 import {
   ReaderView,
   type ReaderViewHandle,
@@ -69,6 +78,21 @@ import { useBookImport } from "@/lib/use-book-import";
 import { useOpenPaths } from "@/lib/use-open-paths";
 import { useT } from "@/lib/i18n";
 import { clampTocWidth, loadTocWidth, saveTocWidth } from "@/lib/toc-sidebar-width";
+import {
+  clampAgentBookWidth,
+  loadAgentBookWidth,
+  saveAgentBookWidth,
+} from "@/lib/agent-book-width";
+import {
+  clampChatPanelWidth,
+  loadChatPanelWidth,
+  saveChatPanelWidth,
+} from "@/lib/chat-panel-width";
+import {
+  isReaderMode,
+  resolveReaderMode,
+  type ReaderMode,
+} from "@/lib/reader-mode";
 
 interface FileData {
   bytes: Uint8Array<ArrayBuffer>;
@@ -114,6 +138,11 @@ function App() {
     fraction: 0,
   });
   const [chatCollapsed, setChatCollapsed] = useState(true);
+  const [readerMode, setReaderMode] = useState<ReaderMode>("reader");
+  const [sessionRailOpen, setSessionRailOpen] = useState(true);
+  const [bookCollapsed, setBookCollapsed] = useState(false);
+  const [chatWidth, setChatWidth] = useState(loadChatPanelWidth);
+  const [agentBookWidth, setAgentBookWidth] = useState(loadAgentBookWidth);
   const [tocVisible, setTocVisible] = useState(false);
   const [tocWidth, setTocWidth] = useState(loadTocWidth);
   const [annotationsVisible, setAnnotationsVisible] = useState(false);
@@ -150,19 +179,18 @@ function App() {
   const bookImport = useBookImport();
   const readerRef = useRef<ReaderViewHandle>(null);
   const chatRef = useRef<ChatPanelHandle>(null);
-  const chatPanelRef = usePanelRef();
+  const shellRef = useRef<HTMLDivElement>(null);
   const tocDrawerRef = useRef<HTMLDivElement>(null);
   const tocResizeRef = useRef<{ startX: number; startWidth: number; maxWidth: number } | null>(
     null,
   );
+  const paneResizeRef = useRef<{
+    startX: number;
+    startSize: number;
+    containerWidth: number;
+  } | null>(null);
   const tocWidthRef = useRef(tocWidth);
   tocWidthRef.current = tocWidth;
-  // Persist the drag-adjusted chat panel width across restarts; only user
-  // interactions are saved so imperative collapse/expand never overwrite it.
-  const { defaultLayout: savedChatLayout, onLayoutChanged } = useDefaultLayout({
-    id: "reader-chat",
-    onlySaveAfterUserInteractions: true,
-  });
   const pendingCaptureRef = useRef<SelectionCapture | null>(null);
   const closingRef = useRef(false);
   const openBookControllerRef = useRef(createLatestSerializedTaskController());
@@ -202,16 +230,29 @@ function App() {
     reportPersistenceError,
   );
 
+  const persistReaderMode = useDebouncedCallback(
+    async (bookId: string, lastReaderMode: ReaderMode) => {
+      await invoke("update_reading_state", { bookId, lastReaderMode });
+    },
+    500,
+    reportPersistenceError,
+  );
+
   const flushReadingState = useCallback(
     async () => {
       try {
-        await Promise.all([persistFraction.flush(), persistSettings.flush(), flushPreferences()]);
+        await Promise.all([
+          persistFraction.flush(),
+          persistSettings.flush(),
+          persistReaderMode.flush(),
+          flushPreferences(),
+        ]);
       } catch (error) {
         reportPersistenceError(error);
         throw error;
       }
     },
-    [persistFraction, persistSettings, reportPersistenceError, flushPreferences],
+    [persistFraction, persistSettings, persistReaderMode, reportPersistenceError, flushPreferences],
   );
 
   useEffect(() => {
@@ -374,7 +415,14 @@ function App() {
         importedAt: "",
         lastFraction: context.lastFraction,
         settings: context.settings,
+        lastReaderMode: isReaderMode(context.lastReaderMode)
+          ? context.lastReaderMode
+          : undefined,
       });
+      setReaderMode(resolveReaderMode(context.lastReaderMode));
+      setChatCollapsed(true);
+      setSessionRailOpen(true);
+      setBookCollapsed(false);
       setAnnotations(emptyAnnotations());
       annotationsWritableRef.current = false;
 
@@ -424,6 +472,10 @@ function App() {
     setTocVisible(false);
     setAnnotationsVisible(false);
     setAnnotations(emptyAnnotations());
+    setReaderMode("reader");
+    setChatCollapsed(true);
+    setSessionRailOpen(true);
+    setBookCollapsed(false);
     annotationsWritableRef.current = false;
   }, [flushReadingState]);
 
@@ -440,6 +492,11 @@ function App() {
   );
 
   const handleSelectionCapture = useCallback((capture: SelectionCapture) => {
+    if (readerMode === "agent") {
+      if (bookCollapsed) return;
+      chatRef.current?.fillInput(capture.text, capture.chapterHref);
+      return;
+    }
     if (chatCollapsed) {
       pendingCaptureRef.current = capture;
       setChatCollapsed(false);
@@ -450,27 +507,21 @@ function App() {
     } else {
       pendingCaptureRef.current = capture;
     }
-  }, [chatCollapsed]);
+  }, [bookCollapsed, chatCollapsed, readerMode]);
 
-  useLayoutEffect(() => {
-    if (view !== "reader") return;
-    const panel = chatPanelRef.current;
-    if (!panel) return;
-    if (chatCollapsed) {
-      panel.collapse();
-      return;
-    }
-    panel.expand();
-    const savedWidth = savedChatLayout?.chat;
-    if (savedWidth !== undefined && savedWidth > 0) {
-      // Restore the user's saved width, which may be below the 22% default.
-      // Pass a percentage string: numeric values are interpreted as pixels.
-      panel.resize(`${savedWidth}%`);
-    } else if (panel.isCollapsed() || panel.getSize().asPercentage <= 18) {
-      // First expand has no saved size, so the library opens at minSize (18).
-      panel.resize("22");
-    }
-  }, [view, chatCollapsed, chatPanelRef, savedChatLayout]);
+  const handleReaderModeChange = useCallback(
+    (mode: ReaderMode) => {
+      setReaderMode(mode);
+      if (mode === "agent") {
+        setSessionRailOpen(true);
+        setBookCollapsed(false);
+      }
+      setCurrentBook((current) => (current ? { ...current, lastReaderMode: mode } : current));
+      const bookId = fileData?.bookId ?? currentBook?.id;
+      if (bookId) persistReaderMode.schedule(bookId, mode);
+    },
+    [currentBook?.id, fileData?.bookId, persistReaderMode],
+  );
 
   useLayoutEffect(() => {
     if (chatCollapsed) return;
@@ -572,6 +623,50 @@ function App() {
     tocResizeRef.current = null;
   }, []);
 
+  const startPaneResize = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    const container = shellRef.current;
+    if (!container) return;
+    const containerWidth = container.getBoundingClientRect().width;
+    if (containerWidth <= 0) return;
+    paneResizeRef.current = {
+      startX: e.clientX,
+      startSize: readerMode === "reader" ? chatWidth : agentBookWidth,
+      containerWidth,
+    };
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+  }, [agentBookWidth, chatWidth, readerMode]);
+
+  const onPaneResizeMove = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
+    const state = paneResizeRef.current;
+    if (!state) return;
+    const next =
+      state.startSize + ((state.startX - e.clientX) / state.containerWidth) * 100;
+    if (readerMode === "reader") setChatWidth(clampChatPanelWidth(next));
+    else setAgentBookWidth(clampAgentBookWidth(next));
+  }, [readerMode]);
+
+  const endPaneResize = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
+    const state = paneResizeRef.current;
+    if (!state) return;
+    paneResizeRef.current = null;
+    const next =
+      state.startSize + ((state.startX - e.clientX) / state.containerWidth) * 100;
+    if (readerMode === "reader") {
+      const width = clampChatPanelWidth(next);
+      setChatWidth(width);
+      saveChatPanelWidth(width);
+    } else {
+      const width = clampAgentBookWidth(next);
+      setAgentBookWidth(width);
+      saveAgentBookWidth(width);
+    }
+  }, [readerMode]);
+
+  const cancelPaneResize = useCallback(() => {
+    paneResizeRef.current = null;
+  }, []);
+
   const closeOverlays = useCallback(() => {
     setTocVisible(false);
     setAnnotationsVisible(false);
@@ -634,6 +729,15 @@ function App() {
 
   const chapterLabel = progress.label ?? `Chapter ${progress.index + 1}`;
   const bookTitle = currentBook?.title || fileData?.name || "";
+  const sideCollapsed = readerMode === "reader" ? chatCollapsed : bookCollapsed;
+  const sideWidth = readerMode === "reader" ? chatWidth : agentBookWidth;
+  const chatHidden = readerMode === "reader" && chatCollapsed;
+  const bookHidden = readerMode === "agent" && bookCollapsed;
+  const seekProgress = (frac: number) => {
+    void seekControllerRef.current.run(async () => {
+      await readerRef.current?.goToFraction(frac);
+    });
+  };
   const editingBook = view === "reader" && Boolean(currentBook || fileData);
   const overriddenKeys: TypographyKey[] = editingBook
     ? TYPOGRAPHY_KEYS.filter((key) => isTypographyOverridden(currentBook?.settings, key))
@@ -720,8 +824,10 @@ function App() {
             size="icon-sm"
             variant={tocVisible ? "secondary" : "ghost"}
             onClick={() => {
-              setTocVisible((v) => !v);
+              const next = !tocVisible;
+              setTocVisible(next);
               setAnnotationsVisible(false);
+              if (next) setBookCollapsed(false);
             }}
             aria-label={t("reader.toc")}
           >
@@ -731,8 +837,10 @@ function App() {
             size="icon-sm"
             variant={annotationsVisible ? "secondary" : "ghost"}
             onClick={() => {
-              setAnnotationsVisible((v) => !v);
+              const next = !annotationsVisible;
+              setAnnotationsVisible(next);
               setTocVisible(false);
+              if (next) setBookCollapsed(false);
             }}
             aria-label={t("reader.annotations")}
           >
@@ -749,125 +857,177 @@ function App() {
           </Button>
           <Button
             size="icon-sm"
-            variant={chatCollapsed ? "ghost" : "secondary"}
-            onClick={() => setChatCollapsed((v) => !v)}
-            aria-label={chatCollapsed ? t("reader.showChat") : t("reader.hideChat")}
+            variant="ghost"
+            onClick={() =>
+              handleReaderModeChange(readerMode === "reader" ? "agent" : "reader")
+            }
+            aria-label={
+              readerMode === "reader" ? t("reader.switchToAgent") : t("reader.switchToReader")
+            }
           >
-            <MessageSquare />
+            {readerMode === "reader" ? <Bot /> : <BookOpen />}
           </Button>
+          {readerMode === "reader" ? (
+            <Button
+              size="icon-sm"
+              variant={chatCollapsed ? "ghost" : "secondary"}
+              onClick={() => setChatCollapsed((v) => !v)}
+              aria-label={chatCollapsed ? t("reader.showChat") : t("reader.hideChat")}
+            >
+              <MessageSquare />
+            </Button>
+          ) : (
+            <>
+              <Button
+                size="icon-sm"
+                variant={sessionRailOpen ? "secondary" : "ghost"}
+                onClick={() => setSessionRailOpen((v) => !v)}
+                aria-label={
+                  sessionRailOpen ? t("reader.hideSessions") : t("reader.showSessions")
+                }
+              >
+                <MessagesSquare />
+              </Button>
+              <Button
+                size="icon-sm"
+                variant={bookCollapsed ? "ghost" : "secondary"}
+                onClick={() => setBookCollapsed((v) => !v)}
+                aria-label={bookCollapsed ? t("reader.showBook") : t("reader.hideBook")}
+              >
+                <BookText />
+              </Button>
+            </>
+          )}
         </div>
         <WindowControls />
       </header>
-      <ReaderProgressBar
-        fraction={progress.fraction}
-        chapterLabel={chapterLabel}
-        onSeek={(frac) => {
-          void seekControllerRef.current.run(async () => {
-            await readerRef.current?.goToFraction(frac);
-          });
-        }}
-      />
+      {readerMode === "reader" && (
+        <ReaderProgressBar
+          fraction={progress.fraction}
+          chapterLabel={chapterLabel}
+          onSeek={seekProgress}
+        />
+      )}
 
-      {/* Reader + Chat panel split */}
-      <div className="relative flex flex-1 overflow-hidden">
-        <Group
-          id="reader-chat"
-          orientation="horizontal"
-          className="h-full w-full"
-          defaultLayout={
-            chatCollapsed ? { reader: 100, chat: 0 } : (savedChatLayout ?? { reader: 78, chat: 22 })
+      {/* Same two cells; mode only swaps grid-template-areas. */}
+      <div
+        ref={shellRef}
+        data-testid="reader-shell"
+        className="relative grid flex-1 overflow-hidden"
+        style={{
+          gridTemplateAreas: readerMode === "reader" ? '"book chat"' : '"chat book"',
+          gridTemplateColumns: sideCollapsed ? "1fr 0px" : `1fr ${sideWidth}%`,
+        }}
+      >
+        <div
+          data-testid="reader-book-cell"
+          hidden={bookHidden}
+          className={
+            bookHidden
+              ? "min-h-0 min-w-0 flex-col overflow-hidden"
+              : "relative flex min-h-0 min-w-0 flex-col overflow-hidden"
           }
-          onLayoutChanged={onLayoutChanged}
+          style={{ gridArea: "book" }}
         >
-          <Panel id="reader" defaultSize="78" minSize="40">
-            <div className="relative h-full w-full overflow-hidden">
-              {fileData && (
-                <ReaderView
-                  ref={readerRef}
-                  fileData={fileData}
-                  onRelocate={handleRelocate}
-                  onSelectionCapture={handleSelectionCapture}
-                  onHighlight={handleAddHighlight}
-                  highlights={annotations.highlights}
-                  initialFraction={currentBook?.lastFraction}
-                  onBookReady={handleBookReady}
-                />
-              )}
-              {tocVisible && (
-                <>
-                  <button
-                    type="button"
-                    className="absolute inset-0 z-20 bg-background/50"
-                    aria-label={t("reader.closeToc")}
-                    onClick={() => setTocVisible(false)}
-                  />
-                  <div
-                    ref={tocDrawerRef}
-                    className="absolute inset-y-0 left-0 z-30 overflow-hidden border-r bg-background shadow-md"
-                    style={{ width: tocWidth }}
-                  >
-                    <TocSidebar toc={toc} onGoTo={handleTocGoTo} />
-                  </div>
-                  <div
-                    className="absolute inset-y-0 z-40 w-1.5 cursor-col-resize touch-none select-none bg-transparent hover:bg-primary/30"
-                    style={{ left: tocWidth - 3 }}
-                    role="separator"
-                    aria-orientation="vertical"
-                    onPointerDown={startTocResize}
-                    onPointerMove={onTocResizeMove}
-                    onPointerUp={endTocResize}
-                    onPointerCancel={cancelTocResize}
-                  />
-                </>
-              )}
-              {annotationsVisible && (
-                <>
-                  <button
-                    type="button"
-                    className="absolute inset-0 z-20 bg-background/50"
-                    aria-label={t("reader.closeAnnotations")}
-                    onClick={() => setAnnotationsVisible(false)}
-                  />
-                  <div className="absolute inset-y-0 left-0 z-30 w-56 overflow-hidden border-r bg-background shadow-md">
-                    <AnnotationsSidebar
-                      bookmarks={annotations.bookmarks}
-                      highlights={annotations.highlights}
-                      onAddBookmark={handleAddBookmark}
-                      onJumpBookmark={handleJumpBookmark}
-                      onDeleteBookmark={handleDeleteBookmark}
-                      onJumpHighlight={handleJumpHighlight}
-                      onDeleteHighlight={handleDeleteHighlight}
-                    />
-                  </div>
-                </>
-              )}
-            </div>
-          </Panel>
-          <Separator
-            className={
-              chatCollapsed
-                ? "hidden"
-                : "w-px cursor-col-resize bg-border transition-colors hover:bg-primary/30"
-            }
-            disabled={chatCollapsed}
-          />
-          <Panel
-            id="chat"
-            defaultSize="22"
-            minSize="18"
-            collapsible
-            collapsedSize="0"
-            panelRef={chatPanelRef}
-          >
-            <div className={chatCollapsed ? "hidden h-full" : "h-full"}>
-              <ChatPanel
-                ref={chatRef}
-                currentChapterHref={progress.chapterHref}
-                bookId={fileData?.bookId ?? ""}
+          {readerMode === "agent" && (
+            <ReaderProgressBar
+              fraction={progress.fraction}
+              chapterLabel={chapterLabel}
+              onSeek={seekProgress}
+            />
+          )}
+          <div className="relative min-h-0 flex-1 overflow-hidden">
+            {fileData && (
+              <ReaderView
+                ref={readerRef}
+                fileData={fileData}
+                onRelocate={handleRelocate}
+                onSelectionCapture={handleSelectionCapture}
+                onHighlight={handleAddHighlight}
+                highlights={annotations.highlights}
+                initialFraction={currentBook?.lastFraction}
+                onBookReady={handleBookReady}
               />
-            </div>
-          </Panel>
-        </Group>
+            )}
+            {tocVisible && (
+              <>
+                <button
+                  type="button"
+                  className="absolute inset-0 z-20 bg-background/50"
+                  aria-label={t("reader.closeToc")}
+                  onClick={() => setTocVisible(false)}
+                />
+                <div
+                  ref={tocDrawerRef}
+                  className="absolute inset-y-0 left-0 z-30 overflow-hidden border-r bg-background shadow-md"
+                  style={{ width: tocWidth }}
+                >
+                  <TocSidebar toc={toc} onGoTo={handleTocGoTo} />
+                </div>
+                <div
+                  className="absolute inset-y-0 z-40 w-1.5 cursor-col-resize touch-none select-none bg-transparent hover:bg-primary/30"
+                  style={{ left: tocWidth - 3 }}
+                  role="separator"
+                  aria-orientation="vertical"
+                  onPointerDown={startTocResize}
+                  onPointerMove={onTocResizeMove}
+                  onPointerUp={endTocResize}
+                  onPointerCancel={cancelTocResize}
+                />
+              </>
+            )}
+            {annotationsVisible && (
+              <>
+                <button
+                  type="button"
+                  className="absolute inset-0 z-20 bg-background/50"
+                  aria-label={t("reader.closeAnnotations")}
+                  onClick={() => setAnnotationsVisible(false)}
+                />
+                <div className="absolute inset-y-0 left-0 z-30 w-56 overflow-hidden border-r bg-background shadow-md">
+                  <AnnotationsSidebar
+                    bookmarks={annotations.bookmarks}
+                    highlights={annotations.highlights}
+                    onAddBookmark={handleAddBookmark}
+                    onJumpBookmark={handleJumpBookmark}
+                    onDeleteBookmark={handleDeleteBookmark}
+                    onJumpHighlight={handleJumpHighlight}
+                    onDeleteHighlight={handleDeleteHighlight}
+                  />
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+        <div
+          hidden={chatHidden}
+          className="h-full min-h-0 min-w-0 overflow-hidden"
+          style={{ gridArea: "chat" }}
+        >
+          <ChatPanel
+            ref={chatRef}
+            currentChapterHref={progress.chapterHref}
+            bookId={fileData?.bookId ?? ""}
+            variant={readerMode === "agent" ? "workspace" : "docked"}
+            sessionRailOpen={sessionRailOpen}
+            onSessionRailOpenChange={setSessionRailOpen}
+          />
+        </div>
+        {!sideCollapsed && (
+          <div
+            className="absolute inset-y-0 z-10 w-1.5 cursor-col-resize touch-none select-none bg-transparent hover:bg-primary/30"
+            style={{ left: `calc(100% - ${sideWidth}% - 3px)` }}
+            role="separator"
+            aria-orientation="vertical"
+            aria-label={
+              readerMode === "reader" ? t("reader.resizeChat") : t("reader.resizeBook")
+            }
+            onPointerDown={startPaneResize}
+            onPointerMove={onPaneResizeMove}
+            onPointerUp={endPaneResize}
+            onPointerCancel={cancelPaneResize}
+          />
+        )}
       </div>
       {settingsDialog}
       <BookImportConfirmDialog

@@ -26,10 +26,22 @@ export interface ChatPanelHandle {
 interface ChatPanelProps {
   currentChapterHref?: string;
   bookId: string;
+  variant?: "docked" | "workspace";
+  sessionRailOpen?: boolean;
+  onSessionRailOpenChange?: (open: boolean) => void;
 }
 
 export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
-  function ChatPanel({ currentChapterHref, bookId }, ref) {
+  function ChatPanel(
+    {
+      currentChapterHref,
+      bookId,
+      variant = "docked",
+      sessionRailOpen,
+      onSessionRailOpenChange,
+    },
+    ref,
+  ) {
     const { t } = useT();
     const bridge = useAgentBridge(bookId);
     const { state } = bridge;
@@ -48,6 +60,10 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       chapterHref?: string;
     } | null>(null);
     const [showSessionList, setShowSessionList] = useState(false);
+    const [internalRailOpen, setInternalRailOpen] = useState(true);
+    const isWorkspace = variant === "workspace";
+    const railOpen = sessionRailOpen ?? internalRailOpen;
+    const setRailOpen = onSessionRailOpenChange ?? setInternalRailOpen;
     const [showConfig, setShowConfig] = useState(false);
     const [submitting, setSubmitting] = useState(false);
     const [invokeError, setInvokeError] = useState<string | null>(null);
@@ -101,6 +117,10 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       setEditDraft("");
       autoSwitchRef.current = null;
     }, [bookId]);
+
+    useEffect(() => {
+      if (isWorkspace) setShowSessionList(false);
+    }, [isWorkspace]);
 
     useEffect(() => {
       setEditingIndex(null);
@@ -247,14 +267,65 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 
     useImperativeHandle(ref, () => ({ fillInput }), [fillInput]);
 
+    const sessionList = (
+      <SessionList
+        layout={isWorkspace ? "rail" : "overlay"}
+        sessions={state.sessions}
+        activeSessionId={state.sessionId}
+        isStreaming={isStreaming}
+        editingSessionId={editingSessionId}
+        editingTitle={editingTitle}
+        onClose={() => setShowSessionList(false)}
+        onNewSession={() => {
+          setInvokeError(null);
+          if (!isWorkspace) setShowSessionList(false);
+          if (!(state.sessionId && state.messages.length === 0)) {
+            void newSession().catch((error) => setInvokeError(String(error)));
+          }
+          queueMicrotask(() => inputRef.current?.focus());
+        }}
+        onSwitchSession={(id) => {
+          setInvokeError(null);
+          void switchSession(id).catch((error) => setInvokeError(String(error)));
+        }}
+        onStartRename={(id, title) => {
+          setEditingSessionId(id);
+          setEditingTitle(title);
+        }}
+        onTitleChange={setEditingTitle}
+        onSaveRename={(id) => void handleRenameSave(id)}
+        onCancelRename={() => setEditingSessionId(null)}
+        onDeleteSession={(id) => {
+          setInvokeError(null);
+          void deleteSession(id).catch((error) => setInvokeError(String(error)));
+        }}
+      />
+    );
+
     return (
-      <div className="relative flex h-full flex-col bg-card">
+      <div data-testid="chat-panel" className="relative flex h-full min-h-0 bg-card">
+        {isWorkspace && (
+          <div
+            hidden={!railOpen}
+            className={
+              railOpen
+                ? "h-full min-h-0 shrink-0 overflow-hidden border-r"
+                : "h-full w-0 overflow-hidden"
+            }
+          >
+            {sessionList}
+          </div>
+        )}
+        <div className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col">
         <div className="flex items-center justify-between border-b px-3 py-2">
           <div className="flex items-center gap-2">
             <Button
               size="icon-xs"
-              variant="ghost"
-              onClick={() => setShowSessionList((value) => !value)}
+              variant={isWorkspace && railOpen ? "secondary" : "ghost"}
+              onClick={() => {
+                if (isWorkspace) setRailOpen(!railOpen);
+                else setShowSessionList((value) => !value);
+              }}
               disabled={!bookId}
               aria-label={t("chat.sessions")}
             >
@@ -277,39 +348,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
           </div>
         </div>
 
-        {showSessionList && (
-          <SessionList
-            sessions={state.sessions}
-            activeSessionId={state.sessionId}
-            isStreaming={isStreaming}
-            editingSessionId={editingSessionId}
-            editingTitle={editingTitle}
-            onClose={() => setShowSessionList(false)}
-            onNewSession={() => {
-              setInvokeError(null);
-              setShowSessionList(false);
-              if (!(state.sessionId && state.messages.length === 0)) {
-                void newSession().catch((error) => setInvokeError(String(error)));
-              }
-              queueMicrotask(() => inputRef.current?.focus());
-            }}
-            onSwitchSession={(id) => {
-              setInvokeError(null);
-              void switchSession(id).catch((error) => setInvokeError(String(error)));
-            }}
-            onStartRename={(id, title) => {
-              setEditingSessionId(id);
-              setEditingTitle(title);
-            }}
-            onTitleChange={setEditingTitle}
-            onSaveRename={(id) => void handleRenameSave(id)}
-            onCancelRename={() => setEditingSessionId(null)}
-            onDeleteSession={(id) => {
-              setInvokeError(null);
-              void deleteSession(id).catch((error) => setInvokeError(String(error)));
-            }}
-          />
-        )}
+        {!isWorkspace && showSessionList && sessionList}
 
         <div
           ref={scrollContainerRef}
@@ -389,6 +428,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
           textareaRef={inputRef}
         />
         <AgentConfigDialog open={showConfig} onClose={() => setShowConfig(false)} />
+        </div>
       </div>
     );
   },

@@ -10,7 +10,8 @@ interface SessionListProps {
   isStreaming: boolean;
   editingSessionId: string | null;
   editingTitle: string;
-  onClose: () => void;
+  layout?: "overlay" | "rail";
+  onClose?: () => void;
   onNewSession: () => void;
   onSwitchSession: (id: string) => void;
   onStartRename: (id: string, title: string) => void;
@@ -26,6 +27,7 @@ export function SessionList({
   isStreaming,
   editingSessionId,
   editingTitle,
+  layout = "overlay",
   onClose,
   onNewSession,
   onSwitchSession,
@@ -36,19 +38,28 @@ export function SessionList({
   onDeleteSession,
 }: SessionListProps) {
   const { t } = useT();
+  const isRail = layout === "rail";
   return (
-    <div className="absolute inset-x-0 top-[37px] bottom-0 z-10 flex flex-col bg-card">
+    <div
+      className={
+        isRail
+          ? "flex h-full min-h-0 w-[240px] shrink-0 flex-col bg-card"
+          : "absolute inset-x-0 top-[37px] bottom-0 z-10 flex flex-col bg-card"
+      }
+    >
       <div className="flex items-center justify-between border-b px-3 py-2">
         <span className="text-sm font-semibold">{t("chat.sessions")}</span>
-        <Button
-          size="sm"
-          variant="ghost"
-          className="h-7 px-2 text-xs"
-          onClick={onClose}
-          aria-label={t("chat.close")}
-        >
-          <X />
-        </Button>
+        {!isRail && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 px-2 text-xs"
+            onClick={onClose}
+            aria-label={t("chat.close")}
+          >
+            <X />
+          </Button>
+        )}
       </div>
       <div className="flex-1 space-y-1 overflow-y-auto p-2">
         <Button
