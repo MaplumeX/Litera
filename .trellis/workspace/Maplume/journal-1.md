@@ -1350,3 +1350,25 @@ TOC drawer now has a right-edge drag handle (pointer events, cursor-col-resize, 
 ### Status
 
 [OK] **Completed**
+
+
+## Session 59: Chat stick-to-bottom: streaming auto-scroll respects user position
+
+**Date**: 2026-08-15
+**Task**: Chat stick-to-bottom: streaming auto-scroll respects user position
+**Branch**: `rainy-dinosaur`
+
+### Summary
+
+Replaced unconditional scrollIntoView in ChatPanel with stick-to-bottom logic: stickToBottom state gated by user scroll position (48px threshold), auto-follow only while at bottom, explicit reset on send/edit/session switch. Spec convention recorded in frontend component-guidelines. tsc clean, 224/224 tests pass.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6b5b946` | (see git log) |
+| `4b5381f` | (see git log) |
+
+### Status
+
+[OK] **Completed**

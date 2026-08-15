@@ -130,6 +130,19 @@ body:     [TOC or 标注 overlay]  Reader  |  Chat (collapsed = 0 width, still m
 
 **Related**: [State Management](./state-management.md) for process-only `tocVisible` / `chatCollapsed`.
 
+### Convention: chat auto-scroll respects user position (stick-to-bottom)
+
+**What**: Streaming assistant messages must not yank the scroll position back to the bottom. `ChatPanel` keeps a `stickToBottom` state (initial `true`); the message container's `onScroll` computes `scrollHeight - scrollTop - clientHeight` and flips it `false` once the user scrolls up beyond a ~48px threshold, `true` when they return. The `[state.messages]` auto-scroll effect only runs `scrollIntoView({ behavior: "smooth" })` while `stickToBottom` is `true`. Explicit user intent (send, edit re-send, session switch / new session via `state.sessionId` effect) calls `scrollToBottom()` which re-enables following and scrolls down.
+
+**Why**: Unconditional `scrollIntoView` on every streamed chunk makes reading earlier content impossible — the viewport is continuously dragged to the latest token.
+
+**Rules**:
+- Track stickiness with a state flag, not by reading scroll metrics inside the auto-scroll effect — growth of `scrollHeight` during streaming doesn't fire scroll events, so appending messages never falsely clears the flag; only real user scrolls update it.
+- Reset stickiness only on explicit user intent (send / edit / session change), not on stream end.
+- The 48px threshold is a local constant; keep it in `ChatPanel`.
+
+**Related**: `src/components/chat/ChatPanel.tsx`.
+
 ### Convention: chat message action rows reserve height
 
 **What**: User-message edit and assistant-message copy live in a fixed-height row **below** the bubble / markdown (`h-6`). Hover may change icon contrast. Editing replaces that row with save/cancel; the bubble becomes a textarea.
