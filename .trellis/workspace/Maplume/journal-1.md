@@ -1330,12 +1330,22 @@ Ported pi coding agent's context compaction design to Litera's embedded agent ru
 ### Summary
 
 TOC drawer now has a right-edge drag handle (pointer events, cursor-col-resize, hover feedback matching the chat Separator). Width persists to localStorage (toc-sidebar-width, default 224px, min 160px, clamped to reader container). New src/lib/toc-sidebar-width.ts helpers + 9 unit tests + 7 component tests; 223 tests pass, build passes. AnnotationsSidebar and chat panel untouched. Spec updated in component-guidelines.md.
+## Session 58: Fix duplicate-open stacking foliate renderers
+
+**Date**: 2026-08-15
+**Task**: Fix duplicate-open stacking foliate renderers
+**Branch**: `large-squid`
+
+### Summary
+
+系统打开已在书库的 EPUB 时自动打开书并显示「已在书库」banner,用户再点「打开」导致第二次 handleOpenBook → ReaderView 重复 view.open(file) → foliate-view.open() 不清理旧 renderer,shadow root 堆叠两个 paginator,翻页作用在屏幕外的 renderer 上。修复:1) 系统打开路径传 suppressDuplicateNotice:true 不再显示 banner(拖放/文件选择器保留);2) ReaderView open effect 先 view.close?.() 再 open,防止 renderer 堆叠。后端与 foliate-js submodule 零改动。新增 book-import suppress 测试,全量 208 测试 + tsc 通过。spec 新增 foliate re-open gotcha。
 
 ### Git Commits
 
 | Hash | Message |
 |------|---------|
 | `a39fc6b` | (see git log) |
+| `b1d291d` | (see git log) |
 
 ### Status
 
