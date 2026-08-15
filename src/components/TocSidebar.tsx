@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import type { TocItem } from "@/components/ReaderView";
 import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -20,9 +21,17 @@ function TocNode({
   onGoTo: (href: string) => void;
 }) {
   const isCurrent = Boolean(currentHref) && item.href === currentHref;
+  const rowRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!isCurrent) return;
+    rowRef.current?.scrollIntoView({ block: "nearest", behavior: "auto" });
+  }, [isCurrent]);
+
   return (
     <>
       <button
+        ref={rowRef}
         onClick={() => onGoTo(item.href)}
         className={cn(
           "block w-full truncate rounded px-2 py-1.5 text-left text-sm",

@@ -1,8 +1,15 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TocItem } from "@/components/ReaderView";
 import { TocSidebar } from "@/components/TocSidebar";
+
+const scrollIntoView = vi.fn();
+
+beforeEach(() => {
+  scrollIntoView.mockReset();
+  HTMLElement.prototype.scrollIntoView = scrollIntoView;
+});
 
 afterEach(() => {
   cleanup();
@@ -46,5 +53,38 @@ describe("TocSidebar", () => {
     );
     expect(getByText("第一章").className).not.toContain("font-medium");
     expect(getByText("第二章").className).not.toContain("font-medium");
+  });
+
+  it("scrolls the matching row into view on mount", () => {
+    const { getByText } = render(
+      <TocSidebar toc={toc} currentHref="c1" onGoTo={() => {}} />,
+    );
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    expect(scrollIntoView).toHaveBeenCalledWith({
+      block: "nearest",
+      behavior: "auto",
+    });
+    expect(scrollIntoView.mock.contexts[0]).toBe(getByText("第一章"));
+  });
+
+  it("scrolls the new matching row when currentHref changes", () => {
+    const { getByText, rerender } = render(
+      <TocSidebar toc={toc} currentHref="c1" onGoTo={() => {}} />,
+    );
+    scrollIntoView.mockClear();
+    rerender(<TocSidebar toc={toc} currentHref="c2" onGoTo={() => {}} />);
+    expect(scrollIntoView).toHaveBeenCalledTimes(1);
+    expect(scrollIntoView).toHaveBeenCalledWith({
+      block: "nearest",
+      behavior: "auto",
+    });
+    expect(scrollIntoView.mock.contexts[0]).toBe(getByText("第二章"));
+  });
+
+  it("does not scroll when currentHref is missing or matches nothing", () => {
+    const { rerender } = render(<TocSidebar toc={toc} onGoTo={() => {}} />);
+    expect(scrollIntoView).not.toHaveBeenCalled();
+    rerender(<TocSidebar toc={toc} currentHref="missing" onGoTo={() => {}} />);
+    expect(scrollIntoView).not.toHaveBeenCalled();
   });
 });
