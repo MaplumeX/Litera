@@ -97,7 +97,90 @@ pub fn run() {
 
 `tauri-plugin-single-instance` has no JS API and needs no capability. It **must be the first plugin**. File associations live in `tauri.conf.json` `bundle.fileAssociations`, not capabilities. Catching `RunEvent::Opened` requires `build().run(|app, event|)`, not `Builder::run`.
 
-Rust-only plugins already in this repo (single-instance, dialog, window-state) are **not** granted in `capabilities/default.json`. Live desktop `cfg` is `#[cfg(any(target_os = "macos", windows, target_os = "linux"))]`, not the `#[cfg(desktop)]` snippet above.
+Rust-only plugins already in this repo (single-instance, dialog, window-state) are **not** granted in `capabilities/default.json`. `tauri-plugin-opener` is JS-facing and **is** granted there — URL-scoped only (see "Settings About / system browser links"). Live desktop `cfg` is `#[cfg(any(target_os = "macos", windows, target_os = "linux"))]`, not the `#[cfg(desktop)]` snippet above.
+
+## Scenario: Settings About / system browser links
+
+### 1. Scope / Trigger
+
+- Trigger: show the installed app version and open the GitHub repo / Releases in the OS browser from Settings → About.
+- CSP `default-src 'self'` blocks WebView navigation to GitHub. Do not use `<a href>` or `window.open`.
+
+### 2. Signatures
+
+No new `#[tauri::command]`.
+
+```ts
+import { getVersion } from "@tauri-apps/api/app";
+import { openUrl } from "@tauri-apps/plugin-opener";
+
+await getVersion(); // e.g. "0.2.0"
+await openUrl("https://github.com/MaplumeX/Litera");
+```
+
+```rust
+// src-tauri/src/lib.rs — main builder, with dialog / http
+.plugin(tauri_plugin_opener::init())
+```
+
+### 3. Contracts
+
+- Product name on the About pane is the proper noun `Litera` (not translated, not `getName()`).
+- Version comes from `getVersion()` when Settings is open and the section is `about`. Do not hardcode the version in the component.
+- URLs are compile-time constants only:
+  - `https://github.com/MaplumeX/Litera`
+  - `https://github.com/MaplumeX/Litera/releases`
+- Links are `Button`s that call `openUrl`. Capability must list those exact URLs under `opener:allow-open-url`.
+- About `DialogDescription` is `settings.about.description`, not typography scope (`settings.editingDefault` / `settings.editingBook`).
+- Do not add About to `preferences.json` or a new window / route / library button.
+
+### 4. Validation & Error Matrix
+
+- `getVersion` rejects → log; show `settings.about.versionUnavailable` (`—`); keep both links.
+- `openUrl` rejects → log; leave Settings open on About.
+- URL not in the capability allow list → plugin denies; same as `openUrl` reject.
+- Dialog unmounts mid-`getVersion` → ignore the result (`disposed` flag).
+
+### 5. Good/Base/Bad Cases
+
+- Good: Settings → 关于 shows `Litera` + `0.2.0`; each button calls `openUrl` with one constant URL.
+- Base: `getVersion` still pending → `—` (same placeholder as failure).
+- Bad: `<a href={url}>`, `opener:default`, or `npm run tauri add opener` (grants any https + reveal files).
+
+### 6. Tests Required
+
+- About nav appears; selecting it hides typography / appearance / AI controls.
+- Mock `getVersion` → `"0.2.0"` is visible; reject → wait for the error log, then assert `—` and that `0.2.0` is absent. Do not treat the initial `null` render as the failure case.
+- Mock `openUrl` with the two GitHub URLs. `openUrl` reject does not call `onClose`.
+- Locale `en` labels the nav `About`.
+- Existing typography / appearance / AI / book-scope tests still pass.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+```ts
+<a href="https://github.com/MaplumeX/Litera">GitHub</a>
+// or: npm run tauri add opener  → opener:default
+```
+
+#### Correct
+```ts
+<Button type="button" variant="link" onClick={() => void openUrl(ABOUT_REPO_URL)}>
+  {t("settings.about.repo")}
+</Button>
+```
+
+```json
+{
+  "identifier": "opener:allow-open-url",
+  "allow": [
+    { "url": "https://github.com/MaplumeX/Litera" },
+    { "url": "https://github.com/MaplumeX/Litera/releases" }
+  ]
+}
+```
+
+Do not grant `allow-open-path` or `allow-reveal-item-in-dir`. Install the crate and `@tauri-apps/plugin-opener` by hand.
 
 ## Scenario: main window size / position / maximized
 

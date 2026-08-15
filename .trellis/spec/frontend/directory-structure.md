@@ -14,7 +14,7 @@ litera/
 │   ├── index.css           # Tailwind v4 entry + shadcn/ui theme variables
 │   ├── components/
 │   │   ├── chat/         # Reading-assistant chat panel (ChatPanel container + subcomponents)
-│   │   ├── settings/     # SettingsDialog (typography / appearance / AI) + tests
+│   │   ├── settings/     # SettingsDialog (typography / appearance / AI / about) + tests
 │   │   └── ui/           # shadcn/ui components (code-owned, not npm)
 │   │       └── button.tsx
 │   ├── lib/

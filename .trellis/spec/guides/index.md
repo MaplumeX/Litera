@@ -39,6 +39,7 @@ These guides help you **ask the right questions before coding**.
 - [ ] You want to remember last reader vs Agent layout — per-book `lastReaderMode` via `update_reading_state`, not `ReadingSettings` or `preferences.json` (see backend `tauri-commands.md` "Scenario: lastReaderMode")
 - [ ] You want to remember window size/position/maximized — use `tauri-plugin-window-state`, not `preferences.json` (see frontend `quality-guidelines.md` "main window size / position / maximized")
 - [ ] You want to change the OS title bar / traffic lights / window buttons — merge into existing headers; apply Overlay vs `set_decorations(false)` in `lib.rs` **before** `show()`; custom close must `close()` not `destroy()` (see frontend `quality-guidelines.md` "main window chrome")
+- [ ] You want the OS browser to open a URL — Settings → About uses scoped `tauri-plugin-opener` `openUrl`; do not `<a href>` / `window.open` / `npm run tauri add opener` (see frontend `quality-guidelines.md` "Settings About / system browser links")
 - [ ] You want to store a named `fontFamily` — `is_supported` must use `is_valid_font_family`, not a three-value enum, or `ensure_file` resets theme + typography (see backend `tauri-commands.md` "reader system font family")
 - [ ] UI / command code starts casting raw payload fields directly
 - [ ] OS / argv / deep-link input can arrive twice or before the WebView mounts (drain a queue; see backend `tauri-commands.md` "OS EPUB open")

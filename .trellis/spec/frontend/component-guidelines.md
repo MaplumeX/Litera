@@ -222,7 +222,7 @@ Same two CSS-grid children (`grid-area: book` / `chat`). Mode only changes `grid
 
 | Entry | Owner / state | Surface |
 |---|---|---|
-| Library gear | `App` `settingsOpen` via `LibraryView.onOpenSettings` | `SettingsDialog` (typography / appearance / AI) |
+| Library gear | `App` `settingsOpen` via `LibraryView.onOpenSettings` | `SettingsDialog` (typography / appearance / AI / about) |
 | Reader toolbar Aa (`aria-label="字体与主题"`) | `App` `settingsOpen` | `SettingsDialog` |
 | Chat panel gear / "打开设置" banner | `ChatPanel` local `showConfig` | `AgentConfigDialog` only |
 
@@ -243,7 +243,7 @@ Same two CSS-grid children (`grid-area: book` / `chat`). Mode only changes `grid
 **Don't**:
 - Rebuild these rows as independent `rounded border` buttons with `gap-1`.
 - Use `bg-primary text-primary-foreground` for the selected segment.
-- Change the left nav (排版 / 外观 / AI) into a segmented control — that is a category list.
+- Change the left nav (排版 / 外观 / AI / 关于) into a segmented control — that is a category list.
 - Put `locale` on `preferences.json` when touching the language row (see `i18n.md`).
 
 **Tests**: Query these options as `radio`, not `button`. Assert the group name and the current value's `aria-checked`.
