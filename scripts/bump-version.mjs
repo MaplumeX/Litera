@@ -55,7 +55,7 @@ function collectVersions() {
 function readCargoLockVersion(path) {
   const text = readFileSync(path, "utf8");
   const match = text.match(
-    /\[\[package\]\]\nname = "litera"\nversion = "([^"]+)"/,
+    /\[\[package\]\]\r?\nname = "litera"\r?\nversion = "([^"]+)"/,
   );
   if (!match) {
     throw new Error(`${path} has no litera package version`);
@@ -66,7 +66,7 @@ function readCargoLockVersion(path) {
 function replaceCargoLockVersion(path, version) {
   const text = readFileSync(path, "utf8");
   const next = text.replace(
-    /(\[\[package\]\]\nname = "litera"\nversion = ")([^"]+)(")/,
+    /(\[\[package\]\]\r?\nname = "litera"\r?\nversion = ")([^"]+)(")/,
     `$1${version}$3`,
   );
   if (next === text && readCargoLockVersion(path) !== version) {
