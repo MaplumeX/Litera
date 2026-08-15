@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-08-16
+
+### Added
+
+- **Agent 阅读模式**：阅读页可在「书为主」和「对话为主」之间切换。Agent 模式左侧是会话列表，中间是对话，右侧是完整阅读器；每本书记住上次模式。
+- **目录自动定位**：打开目录后当前章节滚入视口；目录开着翻章时也会跟上。
+
+### Changed
+
+- **界面焕新**：应用壳换成冷静的产品工具外观（自托管 Geist、冷灰扁平层次），覆盖书库、阅读器、对话和设置。
+- **桌面阅读器布局**：顶栏按功能分组，进度条贴在书页底部，带章节刻度、拖动预览和上一章 / 下一章；书页满幅顶到顶栏和进度条。
+
 ## [0.1.3] - 2026-08-15
 
 ### Added
