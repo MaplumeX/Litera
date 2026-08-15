@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { CheckIcon, ChevronsUpDown } from "lucide-react";
 import {
   Dialog,
@@ -41,13 +43,17 @@ import {
   type ReaderMode,
 } from "@/lib/reader-mode";
 
-type SettingsSection = "typography" | "appearance" | "ai";
+type SettingsSection = "typography" | "appearance" | "ai" | "about";
 
 const SECTIONS: { id: SettingsSection; labelKey: MessageKey }[] = [
   { id: "typography", labelKey: "settings.typography" },
   { id: "appearance", labelKey: "settings.appearance" },
   { id: "ai", labelKey: "settings.ai" },
+  { id: "about", labelKey: "settings.about" },
 ];
+
+const ABOUT_REPO_URL = "https://github.com/MaplumeX/Litera";
+const ABOUT_RELEASES_URL = "https://github.com/MaplumeX/Litera/releases";
 
 const THEME_LABEL_KEYS: Record<(typeof THEMES)[number], MessageKey> = {
   light: "settings.theme.light",
@@ -385,15 +391,39 @@ export function SettingsDialog({
   const { t, locale, setLocale } = useT();
   const [section, setSection] = useState<SettingsSection>("typography");
   const [defaultReaderMode, setDefaultReaderMode] = useState(loadDefaultReaderMode);
+  const [version, setVersion] = useState<string | null>(null);
 
   useEffect(() => {
     if (open) setDefaultReaderMode(loadDefaultReaderMode());
   }, [open]);
+
+  useEffect(() => {
+    if (!open || section !== "about") return;
+    let disposed = false;
+    void getVersion()
+      .then((next) => {
+        if (!disposed) setVersion(next);
+      })
+      .catch((error) => {
+        console.error("Failed to get app version:", error);
+        if (!disposed) setVersion(null);
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [open, section]);
+
   const canRestore = (key: TypographyKey) => overriddenKeys.includes(key);
   const restoreLabel = t("settings.restoreDefault");
   const scopeCopy = hasBook
     ? t("settings.editingBook", { title: bookTitle || t("settings.thisBook") })
     : t("settings.editingDefault");
+
+  function openAboutUrl(url: string) {
+    void openUrl(url).catch((error) => {
+      console.error("Failed to open URL:", error);
+    });
+  }
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
@@ -424,7 +454,9 @@ export function SettingsDialog({
         </aside>
 
         <div className="min-h-0 flex-1 overflow-y-auto p-6">
-          <DialogDescription className="mb-5">{scopeCopy}</DialogDescription>
+          <DialogDescription className="mb-5">
+            {section === "about" ? t("settings.about.description") : scopeCopy}
+          </DialogDescription>
 
           {section === "typography" && (
             <div className="max-w-md space-y-5">
@@ -538,6 +570,40 @@ export function SettingsDialog({
           {section === "ai" && (
             <div className="max-w-md">
               <AgentConfigForm />
+            </div>
+          )}
+
+          {section === "about" && (
+            <div className="max-w-md space-y-5">
+              <div>
+                <div className="text-base font-medium">Litera</div>
+                <div className="mt-2 flex items-baseline gap-2">
+                  <span className="text-xs font-medium text-muted-foreground">
+                    {t("settings.about.version")}
+                  </span>
+                  <span className="text-sm tabular-nums">
+                    {version ?? t("settings.about.versionUnavailable")}
+                  </span>
+                </div>
+              </div>
+              <div className="flex flex-col items-start gap-1">
+                <Button
+                  type="button"
+                  variant="link"
+                  className="h-auto px-0"
+                  onClick={() => openAboutUrl(ABOUT_REPO_URL)}
+                >
+                  {t("settings.about.repo")}
+                </Button>
+                <Button
+                  type="button"
+                  variant="link"
+                  className="h-auto px-0"
+                  onClick={() => openAboutUrl(ABOUT_RELEASES_URL)}
+                >
+                  {t("settings.about.releases")}
+                </Button>
+              </div>
             </div>
           )}
         </div>

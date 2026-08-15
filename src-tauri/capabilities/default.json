@@ -16,6 +16,13 @@
         { "url": "http://**" },
         { "url": "https://**" }
       ]
+    },
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [
+        { "url": "https://github.com/MaplumeX/Litera" },
+        { "url": "https://github.com/MaplumeX/Litera/releases" }
+      ]
     }
   ]
 }

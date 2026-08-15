@@ -21,6 +21,17 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: (cmd: string, args?: unknown) => invokeMock(cmd, args),
 }));
 
+const getVersionMock = vi.fn(() => Promise.resolve("0.2.0"));
+const openUrlMock = vi.fn(() => Promise.resolve());
+
+vi.mock("@tauri-apps/api/app", () => ({
+  getVersion: () => getVersionMock(),
+}));
+
+vi.mock("@tauri-apps/plugin-opener", () => ({
+  openUrl: (url: string) => openUrlMock(url),
+}));
+
 vi.mock("@/lib/use-agent-config", () => ({
   useAgentConfig: () => ({
     snapshot: {
@@ -70,6 +81,10 @@ afterEach(() => {
   setLocale("zh-CN");
   localStorage.removeItem(DEFAULT_READER_MODE_KEY);
   invokeMock.mockClear();
+  getVersionMock.mockReset();
+  getVersionMock.mockImplementation(() => Promise.resolve("0.2.0"));
+  openUrlMock.mockReset();
+  openUrlMock.mockImplementation(() => Promise.resolve());
 });
 
 describe("SettingsDialog", () => {
@@ -403,5 +418,168 @@ describe("SettingsDialog", () => {
     expect(getByRole("radio", { name: "Agent" }).getAttribute("aria-checked")).toBe("true");
     expect(invokeMock.mock.calls.some((call) => call[0] === "save_preferences")).toBe(false);
     expect(invokeMock.mock.calls.some((call) => call[0] === "update_reading_state")).toBe(false);
+  });
+
+  it("opens the about section without typography, appearance, or AI controls", async () => {
+    const { getByRole, getByText, queryByRole, queryByText, findByText } = render(
+      <SettingsDialog
+        open
+        onClose={noop}
+        bookTitle="测试书"
+        hasBook={true}
+        styleState={styleState}
+        onTypographyChange={noop}
+        onRestoreDefault={noop}
+        overriddenKeys={[]}
+        theme="light"
+        onThemeChange={noop}
+      />,
+    );
+
+    expect(getByRole("button", { name: "关于" })).toBeTruthy();
+    expect(getByText("正在编辑《测试书》的排版")).toBeTruthy();
+
+    act(() => {
+      getByRole("button", { name: "关于" }).click();
+    });
+
+    expect(getByText("Litera")).toBeTruthy();
+    expect(getByText("版本信息与项目链接")).toBeTruthy();
+    expect(await findByText("0.2.0")).toBeTruthy();
+    expect(queryByRole("slider", { name: "字体大小" })).toBeNull();
+    expect(queryByRole("radio", { name: "白天" })).toBeNull();
+    expect(queryByText("当前使用")).toBeNull();
+    expect(queryByText("正在编辑默认排版")).toBeNull();
+    expect(queryByText("正在编辑《测试书》的排版")).toBeNull();
+  });
+
+  it("shows the runtime version and opens GitHub URLs from about", async () => {
+    const { getByRole, findByText } = render(
+      <SettingsDialog
+        open
+        onClose={noop}
+        bookTitle={null}
+        hasBook={false}
+        styleState={styleState}
+        onTypographyChange={noop}
+        onRestoreDefault={noop}
+        overriddenKeys={[]}
+        theme="light"
+        onThemeChange={noop}
+      />,
+    );
+
+    act(() => {
+      getByRole("button", { name: "关于" }).click();
+    });
+
+    expect(await findByText("0.2.0")).toBeTruthy();
+    expect(getByRole("button", { name: "源码仓库" })).toBeTruthy();
+    expect(getByRole("button", { name: "发行版本" })).toBeTruthy();
+
+    act(() => {
+      getByRole("button", { name: "源码仓库" }).click();
+    });
+    expect(openUrlMock).toHaveBeenCalledWith("https://github.com/MaplumeX/Litera");
+
+    act(() => {
+      getByRole("button", { name: "发行版本" }).click();
+    });
+    expect(openUrlMock).toHaveBeenCalledWith("https://github.com/MaplumeX/Litera/releases");
+  });
+
+  it("shows a version placeholder when getVersion fails and keeps links usable", async () => {
+    getVersionMock.mockRejectedValue(new Error("no version"));
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const { getByRole, getByText, queryByText } = render(
+        <SettingsDialog
+          open
+          onClose={noop}
+          bookTitle={null}
+          hasBook={false}
+          styleState={styleState}
+          onTypographyChange={noop}
+          onRestoreDefault={noop}
+          overriddenKeys={[]}
+          theme="light"
+          onThemeChange={noop}
+        />,
+      );
+
+      act(() => {
+        getByRole("button", { name: "关于" }).click();
+      });
+
+      await waitFor(() => {
+        expect(error).toHaveBeenCalled();
+      });
+      expect(getByText("—")).toBeTruthy();
+      expect(queryByText("0.2.0")).toBeNull();
+      act(() => {
+        getByRole("button", { name: "源码仓库" }).click();
+      });
+      expect(openUrlMock).toHaveBeenCalledWith("https://github.com/MaplumeX/Litera");
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  it("keeps the about section open when opening a link fails", async () => {
+    openUrlMock.mockRejectedValue(new Error("no browser"));
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const { getByRole, getByText, findByText } = render(
+        <SettingsDialog
+          open
+          onClose={noop}
+          bookTitle={null}
+          hasBook={false}
+          styleState={styleState}
+          onTypographyChange={noop}
+          onRestoreDefault={noop}
+          overriddenKeys={[]}
+          theme="light"
+          onThemeChange={noop}
+        />,
+      );
+
+      act(() => {
+        getByRole("button", { name: "关于" }).click();
+      });
+      expect(await findByText("0.2.0")).toBeTruthy();
+
+      act(() => {
+        getByRole("button", { name: "源码仓库" }).click();
+      });
+      await waitFor(() => {
+        expect(error).toHaveBeenCalled();
+      });
+      expect(getByRole("dialog")).toBeTruthy();
+      expect(getByText("Litera")).toBeTruthy();
+      expect(getByRole("button", { name: "源码仓库" })).toBeTruthy();
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  it("labels the about nav as About in English", () => {
+    setLocale("en");
+    const { getByRole } = render(
+      <SettingsDialog
+        open
+        onClose={noop}
+        bookTitle={null}
+        hasBook={false}
+        styleState={styleState}
+        onTypographyChange={noop}
+        onRestoreDefault={noop}
+        overriddenKeys={[]}
+        theme="light"
+        onThemeChange={noop}
+      />,
+    );
+
+    expect(getByRole("button", { name: "About" })).toBeTruthy();
   });
 });

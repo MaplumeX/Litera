@@ -34,6 +34,7 @@ pub fn run() {
     builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_http::init())
+        .plugin(tauri_plugin_opener::init())
         .manage(open_paths::OpenedPaths::default())
         .setup(|app| {
             let root_result = app.path().app_data_dir().map_err(|error| {
