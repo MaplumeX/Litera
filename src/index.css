@@ -122,6 +122,43 @@
   }
 }
 
+/* --- 美化滚动条 ---
+ * 适配 light/dark 两套主题，细圆角、半透明，hover 时加深。
+ * 仅作用于主应用 DOM；阅读器内容处于 closed Shadow DOM 内，不受影响。
+ */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: oklch(0.6 0 0 / 35%) transparent;
+}
+.dark * {
+  scrollbar-color: oklch(0.8 0 0 / 30%) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background-color: oklch(0.6 0 0 / 35%);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.dark *::-webkit-scrollbar-thumb {
+  background-color: oklch(0.8 0 0 / 30%);
+}
+*::-webkit-scrollbar-thumb:hover {
+  background-color: oklch(0.5 0 0 / 55%);
+}
+.dark *::-webkit-scrollbar-thumb:hover {
+  background-color: oklch(0.85 0 0 / 50%);
+}
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 @keyframes chat-typing {
   0%,
   60%,
