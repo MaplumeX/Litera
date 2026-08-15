@@ -115,9 +115,11 @@ import { ChevronLeft, List, Settings } from "lucide-react"
 
 **Layout**:
 ```
-header:   [mac inset?] [←]  book title (drag)  [spacer drag]  [TOC][标注][Aa][mode][reader: chat | agent: sessions+book]  [Win/Linux window buttons]
-reader:   progress (full width) then  [ book 1fr | chat 22% or 0 ]
-agent:    [ chat (rail 240px + messages) | book 38% or 0 with in-cell progress ]
+header:   [mac inset?] [←][TOC][标注]  book title (drag)  [spacer drag]  [Aa] | [mode][reader: chat | agent: book]  [Win/Linux window buttons]
+book:     [ ReaderView canvas + overlay TOC/标注 ]
+          [ ‹章  chapter    ====●==|==|====   42%  章› ]
+reader:   [ book 1fr | chat 22% or 0 ]
+agent:    [ chat (rail 240px + messages) | book 38% or 0 ]
 ```
 
 Same two CSS-grid children (`grid-area: book` / `chat`). Mode only changes `grid-template-areas` (`"book chat"` vs `"chat book"`) and column sizes. Do not render a second `ReaderView` or `ChatPanel`.
@@ -153,9 +155,11 @@ Same two CSS-grid children (`grid-area: book` / `chat`). Mode only changes `grid
 
 **Rules**:
 - Reader header title is the book name. Do not put the `Litera` brand in the reader toolbar.
-- Progress is always visible on the book. Reader mode: full-width scrubber under the header. Agent mode: the same `ReaderProgressBar` **inside the book cell** (do not stretch it across chat). Click/drag maps pointer x / width to 0–1 and calls `readerRef.goToFraction`. Drag can outrun foliate: wrap seeks in `createLatestSerializedTaskController` (latest-wins). Do not put percent in the header icon cluster, and do not add hover-only bars, remaining-time, or footer page numbers. `App` still keeps `progress` as relocate state: `chapterHref` goes to `ChatPanel`; `fraction` persists as `lastFraction`. Library-card percent stays on `BookCard`.
+- The book cell is a one-step muted surface (`bg-muted/40`); `ReaderView` sits in a `p-3` `bg-background` inset. Do not paint warm paper on app chrome, and do not put Geist into `generateStylesCss`.
+- Flatten TOC and prev/next chapter via `src/lib/toc-items.ts` (`flattenToc`, `chapterNavAt`). `ReaderViewHandle.getSectionFractions` / `previewLabelAt` wrap the mounted foliate-view. Do not import `src/foliate-js/progress.js` into React, and do not walk the TOC tree inline in `App`.
+- Progress is always visible at the **bottom of the book cell** in both modes. Do not mount it under the header or stretch it across chat. Click seeks immediately; drag updates a local draft (thumb, fill, preview) and seeks on release. Map pointer x / width with `fractionFromPointer` and wrap seeks in `createLatestSerializedTaskController` (latest-wins). Section ticks come from `readerRef.getSectionFractions()`. Prev/next chapter walk the flattened TOC by `chapterHref` via `goToTocItem` — not previous/next page. Do not put percent in the header icon cluster, and do not add hover-only bars, remaining-time, or footer page numbers. `App` still keeps `progress` as relocate state: `chapterHref` goes to `ChatPanel`; `fraction` persists as `lastFraction`. Library-card percent stays on `BookCard`.
 - TOC is an absolute left drawer over `ReaderView` (backdrop / Esc / chapter click close). Do not insert a `w-56 shrink-0` column beside the reader. If the Agent book cell is collapsed, opening TOC/标注 must expand the book first. `App` may listen for `Escape` to close TOC; do not handle `ArrowLeft` / `ArrowRight` in `App` (ReaderView owns paging on the chapter iframe). The drawer width is user-resizable via a right-edge drag handle (pointer events, `cursor-col-resize`, `hover:bg-primary/30`) and persisted to `localStorage` key `toc-sidebar-width` (default 224px, min 160px, clamped to the reader container). Width helpers live in `src/lib/toc-sidebar-width.ts`; do not hardcode `w-56` on the TOC drawer.
-- 标注 is the same overlay chrome as TOC (`w-56`, backdrop, Esc). The toolbar Bookmark button sits between TOC and Aa. Opening 标注 closes TOC and vice versa. The open flag is process-only (`annotationsVisible` in `App`); do not persist it. Clicking a list row jumps then closes the drawer. Do not remount `ReaderView` when toggling either drawer. 标注 keeps its fixed `w-56`; only TOC is resizable.
+- 标注 is the same overlay chrome as TOC (`w-56`, backdrop, Esc). TOC and 标注 sit immediately after back, left of the title. Aa is on the right, then a 1px rule, then mode + chat (reader) or mode + book (agent). Agent sessions toggle lives only in `ChatPanel`. Opening 标注 closes TOC and vice versa. The open flag is process-only (`annotationsVisible` in `App`); do not persist it. Clicking a list row jumps then closes the drawer. Do not remount `ReaderView` when toggling either drawer. 标注 keeps its fixed `w-56`; only TOC is resizable.
 - Mount exactly one `ReaderView` and one `ChatPanel`. Keep both mounted when a pane is collapsed (`hidden` + width 0). Do not branch two copies. Do not swap them between two `Group` trees — that remounts. Session rail in Agent mode is a flex sibling **inside** `ChatPanel` (`variant="workspace"`, ~240px, not `absolute` overlay). Docked/reader chat keeps the overlay list. Clear the overlay flag when entering workspace.
 - Chat open size is ~22% (`litera.chat-panel-width`). Agent book open size is ~38% (`litera.agent-book-width`, clamp 22–60). Session rail width is fixed. Do not bind layout default/min size to collapse flags. Session-rail / book / chat collapsed flags are process-only; re-entering Agent mode opens the rail and the book.
 - Mode resolution: book `lastReaderMode` → `localStorage` `litera.defaultReaderMode` → `"reader"`. Toolbar switch persists via `update_reading_state({ lastReaderMode })`. Settings default writes localStorage only — never `preferences.json`, never a library patch. Helpers: `src/lib/reader-mode.ts`.
