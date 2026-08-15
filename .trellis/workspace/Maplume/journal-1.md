@@ -1507,3 +1507,40 @@ TOC overlay now scrolls the highlighted current row into the list viewport on op
 ### Status
 
 [OK] **Completed**
+
+
+## Session 66: Settings About section with version and GitHub links
+
+**Date**: 2026-08-16
+**Task**: Settings About section with version and GitHub links
+**Branch**: `main`
+
+### Summary
+
+Added Settings → About: runtime version via getVersion(), scoped opener links to the GitHub repo and Releases. Recorded the opener/capability contract in frontend specs.
+
+### Main Changes
+
+- Settings left nav gained About after typography / appearance / AI; shows Litera + getVersion(), placeholder on failure
+- Manual tauri-plugin-opener + URL-scoped opener:allow-open-url for the two GitHub URLs only
+- Documented Settings About / system browser links in frontend quality-guidelines and updated nav mentions
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b631669` | (see git log) |
+| `a6fc478` | (see git log) |
+| `d1e5104` | (see git log) |
+
+### Testing
+
+- [OK] npm test -- --run SettingsDialog.test.tsx i18n.test.ts (26 passed); npx tsc --noEmit; cargo test --locked (131 passed)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Manual: npm run tauri dev → Settings → About → confirm 0.2.0 and both links open in the system browser
