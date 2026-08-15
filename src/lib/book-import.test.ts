@@ -55,6 +55,26 @@ describe("processImportResults", () => {
     expect(invokeMock.mock.calls.some(([cmd]) => cmd === "save_book_metadata")).toBe(false);
   });
 
+  it("suppresses the duplicate notice but still returns the book id", async () => {
+    const onNotice = vi.fn();
+    const duplicate: ImportBookResult = {
+      status: "duplicate",
+      bookId: "book-1",
+      title: "Stored Title",
+      name: "copy.epub",
+    };
+
+    const ids = await processImportResults([duplicate], {
+      askConfirm: vi.fn(),
+      onNotice,
+      suppressDuplicateNotice: true,
+    });
+
+    expect(ids).toEqual(["book-1"]);
+    expect(onNotice).not.toHaveBeenCalled();
+    expect(invokeMock.mock.calls.some(([cmd]) => cmd === "save_book_metadata")).toBe(false);
+  });
+
   it("discards an overwrite when the user cancels", async () => {
     const overwrite: ImportBookResult = {
       status: "overwrite",

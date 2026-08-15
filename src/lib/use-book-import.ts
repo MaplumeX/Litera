@@ -81,7 +81,7 @@ export function useBookImport() {
   }, [askConfirm, pushNotice]);
 
   const importFromPaths = useCallback(
-    async (paths: string[]) => {
+    async (paths: string[], options?: { suppressDuplicateNotice?: boolean }) => {
       if (importingRef.current) return [];
       importingRef.current = true;
       setImporting(true);
@@ -89,6 +89,7 @@ export function useBookImport() {
         return await importAbsolutePaths(paths, {
           askConfirm,
           onNotice: pushNotice,
+          suppressDuplicateNotice: options?.suppressDuplicateNotice,
         });
       } finally {
         importingRef.current = false;
