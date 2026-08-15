@@ -56,8 +56,10 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     const [editingTitle, setEditingTitle] = useState("");
     const [editingIndex, setEditingIndex] = useState<number | null>(null);
     const [editDraft, setEditDraft] = useState("");
+    const [stickToBottom, setStickToBottom] = useState(true);
     const { snapshot: configSnapshot, load: loadConfig } = useAgentConfig();
     const messagesEndRef = useRef<HTMLDivElement>(null);
+    const scrollContainerRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
     const autoSwitchRef = useRef<string | null>(null);
     const lastSentRef = useRef<{ text: string; selection?: string; chapterHref?: string } | null>(null);
@@ -68,13 +70,28 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     const error = invokeError ?? state.error?.message ?? null;
     const lastMessage = state.messages[state.messages.length - 1];
 
+    const scrollToBottom = useCallback(() => {
+      setStickToBottom(true);
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, []);
+
+    const handleScroll = useCallback(() => {
+      const container = scrollContainerRef.current;
+      if (!container) return;
+      const distanceFromBottom =
+        container.scrollHeight - container.scrollTop - container.clientHeight;
+      setStickToBottom(distanceFromBottom < 48);
+    }, []);
+
     useEffect(() => {
       void loadConfig();
     }, [loadConfig]);
 
     useEffect(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    }, [state.messages]);
+      if (stickToBottom) {
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      }
+    }, [state.messages, stickToBottom]);
 
     useEffect(() => {
       setShowSessionList(false);
@@ -88,7 +105,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     useEffect(() => {
       setEditingIndex(null);
       setEditDraft("");
-    }, [state.sessionId]);
+      scrollToBottom();
+    }, [state.sessionId, scrollToBottom]);
 
     useEffect(() => {
       if (state.promptId || state.error) setSubmitting(false);
@@ -132,6 +150,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       setPendingSelection(null);
       setInvokeError(null);
       setSubmitting(true);
+      scrollToBottom();
       try {
         await prompt(
           text,
@@ -142,7 +161,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         setInvokeError(String(error));
         setSubmitting(false);
       }
-    }, [bookId, currentChapterHref, input, isStreaming, pendingSelection, prompt]);
+    }, [bookId, currentChapterHref, input, isStreaming, pendingSelection, prompt, scrollToBottom]);
 
     const handleAbort = useCallback(async () => {
       setInvokeError(null);
@@ -189,6 +208,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       setEditingIndex(null);
       setInvokeError(null);
       setSubmitting(true);
+      scrollToBottom();
       try {
         await editPrompt(
           index,
@@ -202,7 +222,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         setSubmitting(false);
         setEditingIndex(index);
       }
-    }, [bookId, currentChapterHref, editDraft, editPrompt, editingIndex, isStreaming, state.messages]);
+    }, [bookId, currentChapterHref, editDraft, editPrompt, editingIndex, isStreaming, scrollToBottom, state.messages]);
 
     const handleRenameSave = useCallback(async (sessionId: string) => {
       const title = editingTitle.trim();
@@ -291,7 +311,11 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
           />
         )}
 
-        <div className="flex-1 space-y-4 overflow-y-auto p-3">
+        <div
+          ref={scrollContainerRef}
+          onScroll={handleScroll}
+          className="flex-1 space-y-4 overflow-y-auto p-3"
+        >
           {configSnapshot && !configSnapshot.configured && (
             <div className="flex items-start gap-2 rounded border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-400">
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
