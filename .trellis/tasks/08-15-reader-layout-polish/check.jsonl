@@ -1,0 +1,7 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Quality check entry for frontend specs"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Must not break reading-first shell, overlay drawers, or remount rules"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Chrome, CSP font-src, no second titlebar"}
+{"file": ".trellis/spec/frontend/i18n.md", "reason": "Catalog parity and useT() for new chrome strings"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "No new durable layout state"}
+{"file": ".trellis/tasks/08-15-reader-layout-polish/research/desktop-reader-progress.md", "reason": "Progress interaction matches researched desktop pattern"}

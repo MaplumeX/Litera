@@ -1,0 +1,7 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend guideline index and pre-dev checklist"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Reader chrome, progress, TOC overlay, icon-button, and product-tool surface contracts"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "Process-only drawer/chat flags; no preferences.json fields"}
+{"file": ".trellis/spec/frontend/i18n.md", "reason": "New prev/next chapter and preview strings must use useT() with zh-CN/en parity"}
+{"file": ".trellis/spec/guides/index.md", "reason": "Cross-layer trigger: do not persist chrome layout into preferences.json"}
+{"file": ".trellis/tasks/08-15-reader-layout-polish/research/desktop-reader-progress.md", "reason": "Foliate getSectionFractions ticks, seek-on-release, no page buttons"}
