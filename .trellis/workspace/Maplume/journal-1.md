@@ -1484,3 +1484,26 @@ Planned and shipped a reader chrome optical pass: full-bleed book canvas, quiete
 ### Status
 
 [OK] **Completed**
+
+
+## Session 65: Scroll current TOC row into view
+
+**Date**: 2026-08-16
+**Task**: Scroll current TOC row into view
+**Branch**: `main`
+
+### Summary
+
+TOC overlay now scrolls the highlighted current row into the list viewport on open and when currentHref changes while the drawer stays open. Recorded the nearest/auto scroll convention in frontend component guidelines.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `196d656` | (see git log) |
+| `c717b20` | (see git log) |
+| `40aa384` | (see git log) |
+
+### Status
+
+[OK] **Completed**

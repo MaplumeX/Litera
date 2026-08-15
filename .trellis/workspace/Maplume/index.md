@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 64
+- **Total Sessions**: 65
 - **Last Active**: 2026-08-16
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1486 | Active |
+| `journal-1.md` | ~1509 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 65 | 2026-08-16 | Scroll current TOC row into view | `196d656`, `c717b20`, `40aa384` | `main` |
 | 64 | 2026-08-16 | Tighten reader chrome hierarchy | `0fcacfd`, `6e59534`, `1631a89` | `main` |
 | 63 | 2026-08-15 | Polish reader layout to desktop conventions | `e1711d3`, `39dbf33`, `81804ea` | `main` |
 | 62 | 2026-08-15 | Restyle app chrome as a product-tool surface | `34fb1a3`, `c10cb34`, `087f829` | `main` |
