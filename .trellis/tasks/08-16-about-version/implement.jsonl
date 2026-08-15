@@ -1,0 +1,5 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/frontend/i18n.md", "reason": "About copy must use catalogs + useT(); key parity zh-CN/en"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Reuse existing Button/Dialog; chrome language; no new overlay"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Plugin registration in lib.rs + capabilities; do not use tauri add; CSP blocks <a href>"}
+{"file": ".trellis/tasks/08-16-about-version/research/opener.md", "reason": "Scoped opener install and allow-open-url URLs"}
