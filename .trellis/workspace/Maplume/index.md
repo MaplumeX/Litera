@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 58
+- **Total Sessions**: 59
 - **Last Active**: 2026-08-15
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1342 | Active |
+| `journal-1.md` | ~1374 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 59 | 2026-08-15 | Chat stick-to-bottom: streaming auto-scroll respects user position | `6b5b946`, `4b5381f` | `rainy-dinosaur` |
 | 58 | 2026-08-15 | Make TOC sidebar width resizable | `a39fc6b` | `electric-hippo` |
 | 58 | 2026-08-15 | Fix duplicate-open stacking foliate renderers | `b1d291d` | `large-squid` |
 | 57 | 2026-08-15 | Implement context compaction for agent sessions | `ff3d80b` | `main` |
