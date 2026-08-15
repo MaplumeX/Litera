@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import type { BookRecord } from "@/types/library";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   WindowControls,
   onTitlebarDragMouseDown,
@@ -185,7 +186,7 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
       {/* Toolbar */}
       <header className={titlebarClassName()}>
         <h1
-          className="select-none text-lg font-bold"
+          className="select-none text-lg font-semibold"
           data-tauri-drag-region
           onMouseDown={onTitlebarDragMouseDown}
         >
@@ -197,12 +198,12 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
           onMouseDown={onTitlebarDragMouseDown}
         />
         <div className="flex items-center gap-2">
-          <input
+          <Input
             type="text"
             placeholder={t("library.searchPlaceholder")}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-56 rounded-md border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+            className="h-8 w-56"
           />
           {selectMode ? (
             <>

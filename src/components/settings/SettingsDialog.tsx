@@ -356,10 +356,10 @@ function SegmentedControl<T extends string>({
               }
             }}
             className={cn(
-              "flex-1 rounded-sm px-2 py-1 text-xs transition-colors",
+              "flex-1 rounded-sm border px-2 py-1 text-xs transition-colors duration-200 motion-reduce:transition-none",
               selected
-                ? "bg-background text-foreground shadow-xs"
-                : "text-muted-foreground hover:text-foreground",
+                ? "border-border bg-background text-foreground"
+                : "border-transparent text-muted-foreground hover:text-foreground",
             )}
           >
             {option.label}

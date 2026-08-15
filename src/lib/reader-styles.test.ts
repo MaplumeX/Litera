@@ -124,6 +124,7 @@ describe("generateStylesCss", () => {
     expect(css).toContain("text-align: justify");
     expect(css).toContain("margin-block-end: 1.1em !important");
     expect(css).toContain("text-indent: 2em !important");
+    expect(css).not.toContain("Geist");
   });
 
   it("quotes named fonts and appends a serif fallback", () => {

@@ -47,12 +47,12 @@ export function MessageBubble({
           value={draft}
           onChange={(event) => onDraftChange(event.target.value)}
           onKeyDown={handleKeyDown}
-          className="max-w-[85%] min-w-[12rem] resize-none rounded-2xl bg-primary px-3 py-2 text-sm text-primary-foreground outline-none ring-0 placeholder:text-primary-foreground/50"
+          className="max-w-[85%] min-w-[12rem] resize-none rounded-xl bg-primary px-3 py-2 text-sm text-primary-foreground outline-none ring-0 placeholder:text-primary-foreground/50"
           rows={Math.min(8, Math.max(2, draft.split("\n").length))}
           autoFocus
         />
       ) : (
-        <div className="max-w-[85%] rounded-2xl bg-primary px-3 py-2 text-sm text-primary-foreground">
+        <div className="max-w-[85%] rounded-xl bg-primary px-3 py-2 text-sm text-primary-foreground">
           {message.content}
         </div>
       )}

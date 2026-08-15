@@ -808,7 +808,7 @@ function App() {
           <ChevronLeft />
         </Button>
         <h1
-          className="min-w-0 shrink truncate select-none text-lg font-bold"
+          className="min-w-0 shrink truncate select-none text-lg font-semibold"
           data-tauri-drag-region
           onMouseDown={onTitlebarDragMouseDown}
         >
@@ -959,7 +959,7 @@ function App() {
                 />
                 <div
                   ref={tocDrawerRef}
-                  className="absolute inset-y-0 left-0 z-30 overflow-hidden border-r bg-background shadow-md"
+                  className="absolute inset-y-0 left-0 z-30 overflow-hidden border-r bg-background"
                   style={{ width: tocWidth }}
                 >
                   <TocSidebar toc={toc} onGoTo={handleTocGoTo} />
@@ -984,7 +984,7 @@ function App() {
                   aria-label={t("reader.closeAnnotations")}
                   onClick={() => setAnnotationsVisible(false)}
                 />
-                <div className="absolute inset-y-0 left-0 z-30 w-56 overflow-hidden border-r bg-background shadow-md">
+                <div className="absolute inset-y-0 left-0 z-30 w-56 overflow-hidden border-r bg-background">
                   <AnnotationsSidebar
                     bookmarks={annotations.bookmarks}
                     highlights={annotations.highlights}

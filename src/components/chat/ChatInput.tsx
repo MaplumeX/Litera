@@ -76,7 +76,7 @@ export function ChatInput({
           </button>
         </div>
       )}
-      <div className="rounded-2xl border bg-background shadow-sm focus-within:ring-1 focus-within:ring-ring">
+      <div className="rounded-xl border bg-background focus-within:ring-1 focus-within:ring-ring">
         <textarea
           ref={textareaRef}
           className={cn(

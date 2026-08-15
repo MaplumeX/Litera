@@ -83,7 +83,11 @@ describe("BookCard", () => {
       <BookCard book={book} onOpen={() => {}} onDelete={onDelete} />,
     );
 
-    getByTitle("删除").click();
+    const remove = getByTitle("删除");
+    expect(remove.getAttribute("aria-label")).toBe("删除");
+    expect(remove.querySelector("svg")).toBeTruthy();
+    expect(remove.textContent).not.toContain("✕");
+    remove.click();
     expect(onDelete).toHaveBeenCalledWith("abc");
     expect(confirm).not.toHaveBeenCalled();
     confirm.mockRestore();

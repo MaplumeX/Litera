@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { Check } from "lucide-react";
+import { Check, X } from "lucide-react";
 import type { BookRecord } from "@/types/library";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
@@ -42,8 +42,8 @@ export function BookCard({
       {/* Cover */}
       <button
         className={cn(
-          "relative aspect-[2/3] w-full overflow-hidden rounded-lg border bg-muted shadow-sm transition-shadow hover:shadow-md",
-          selectMode && selected && "ring-2 ring-primary",
+          "relative aspect-[2/3] w-full overflow-hidden rounded-md border bg-muted transition-[border-color,transform,opacity] duration-200 hover:border-foreground/25 active:scale-[0.98] motion-reduce:transition-none motion-reduce:active:scale-100",
+          selectMode && selected && "ring-1 ring-primary",
         )}
         onClick={() => {
           if (selectMode) {
@@ -64,21 +64,21 @@ export function BookCard({
             onError={() => setImgError(true)}
           />
         ) : (
-          <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-muted to-muted/60">
-            <span className="text-4xl font-bold text-muted-foreground/40">
+          <div className="flex h-full w-full items-center justify-center bg-muted">
+            <span className="text-4xl font-medium text-muted-foreground/40">
               {initial}
             </span>
           </div>
         )}
         {progressPct != null && !opening && (
           <>
-            <span className="absolute inset-x-0 bottom-0 h-1 bg-black/25">
+            <span className="absolute inset-x-0 bottom-0 h-0.5 bg-foreground/15">
               <span
                 className="block h-full bg-primary"
                 style={{ width: `${progressPct}%` }}
               />
             </span>
-            <span className="absolute bottom-1.5 right-1.5 rounded bg-background/85 px-1 py-px text-[10px] font-medium tabular-nums">
+            <span className="absolute bottom-1.5 right-1.5 rounded-sm bg-background/80 px-1 py-px text-[10px] font-medium tabular-nums text-foreground/80">
               {progressPct}%
             </span>
           </>
@@ -91,7 +91,7 @@ export function BookCard({
         {selectMode && (
           <span
             className={cn(
-              "absolute left-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full border border-background/80 shadow-sm",
+              "absolute left-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-sm border border-background/80",
               selected
                 ? "bg-primary text-primary-foreground"
                 : "bg-background/80 text-transparent",
@@ -105,15 +105,16 @@ export function BookCard({
       {/* Delete button (visible on hover, hidden in select mode) */}
       {!selectMode && (
         <button
-          className="absolute right-1 top-1 z-10 flex h-6 w-6 items-center justify-center rounded-full bg-background/80 text-destructive opacity-0 shadow-sm transition-opacity hover:bg-background group-hover:opacity-100"
+          className="absolute right-1 top-1 z-10 flex h-6 w-6 items-center justify-center rounded-md border border-border/80 bg-background text-muted-foreground opacity-0 transition-opacity duration-200 hover:bg-muted hover:text-destructive group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring motion-reduce:transition-none"
           onClick={(e) => {
             e.stopPropagation();
             onDelete(book.id);
           }}
           disabled={deleteDisabled}
           title={t("common.delete")}
+          aria-label={t("common.delete")}
         >
-          ✕
+          <X className="size-3.5" />
         </button>
       )}
 

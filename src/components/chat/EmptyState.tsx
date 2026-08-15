@@ -24,9 +24,7 @@ export function EmptyState({ hasSelection, bookReady, onSuggestion }: EmptyState
   const suggestionKeys = hasSelection ? SELECTION_SUGGESTIONS : bookReady ? BOOK_SUGGESTIONS : [];
   return (
     <div className="flex h-full flex-col items-center justify-center gap-4 px-6 py-8 text-center">
-      <div className="flex size-10 items-center justify-center rounded-full bg-muted" aria-hidden="true">
-        <Bot className="h-5 w-5 text-muted-foreground" />
-      </div>
+      <Bot className="h-5 w-5 text-muted-foreground" aria-hidden="true" />
       <div>
         <h3 className="text-sm font-semibold">{t("chat.title")}</h3>
         <p className="mt-1 text-sm text-muted-foreground">

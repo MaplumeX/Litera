@@ -54,9 +54,9 @@ export function ReaderProgressBar({
           draggingRef.current = false;
         }}
       >
-        <div className="h-1 w-full rounded bg-muted">
+        <div className="h-0.5 w-full rounded-full bg-muted">
           <div
-            className="h-full rounded bg-primary transition-all"
+            className="h-full rounded-full bg-primary transition-[width] duration-200 motion-reduce:transition-none"
             style={{ width: `${pct}%` }}
           />
         </div>

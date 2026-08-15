@@ -19,20 +19,20 @@ export function SelectionToolbar({
     <div
       className={cn(
         "fixed z-50 flex -translate-x-1/2 -translate-y-full gap-1",
-        "rounded-md bg-primary p-0.5 text-xs font-medium text-primary-foreground shadow-lg",
+        "rounded-md border border-primary-foreground/10 bg-primary p-0.5 text-xs font-medium text-primary-foreground",
       )}
       style={{ left: `${x}px`, top: `${y - 8}px` }}
     >
       <button
         type="button"
-        className="rounded px-3 py-1.5 hover:bg-primary-foreground/15"
+        className="rounded-md px-3 py-1.5 transition-colors duration-200 hover:bg-primary-foreground/15 motion-reduce:transition-none"
         onClick={onHighlight}
       >
         {t("reader.highlight")}
       </button>
       <button
         type="button"
-        className="rounded px-3 py-1.5 hover:bg-primary-foreground/15"
+        className="rounded-md px-3 py-1.5 transition-colors duration-200 hover:bg-primary-foreground/15 motion-reduce:transition-none"
         onClick={onAskAgent}
       >
         {t("reader.askAgent")}

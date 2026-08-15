@@ -38,10 +38,10 @@ function CopyButton({ text }: { text: string }) {
 export function BotAvatar() {
   return (
     <div
-      className="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted"
+      className="flex size-6 shrink-0 items-center justify-center rounded-md bg-muted"
       aria-hidden="true"
     >
-      <Bot className="h-4 w-4" />
+      <Bot className="h-3.5 w-3.5 text-muted-foreground" />
     </div>
   );
 }
@@ -65,7 +65,7 @@ export function AssistantMessage({ message, streaming = false }: AssistantMessag
                 {message.content}
               </ReactMarkdown>
               {streaming && (
-                <span className="ml-0.5 inline-block h-4 w-2 animate-pulse bg-primary/70" />
+                <span className="ml-0.5 inline-block h-4 w-2 animate-pulse bg-primary/70 motion-reduce:animate-none" />
               )}
             </div>
             <div className="flex h-6 items-center">
