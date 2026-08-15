@@ -1372,3 +1372,24 @@ Replaced unconditional scrollIntoView in ChatPanel with stick-to-bottom logic: s
 ### Status
 
 [OK] **Completed**
+
+
+## Session 60: 美化滚动条样式
+
+**Date**: 2026-08-15
+**Task**: 美化滚动条样式
+**Branch**: `main`
+
+### Summary
+
+在 src/index.css 添加全局滚动条美化样式：细圆角半透明滚动条，适配 light/dark 双主题，hover 加深。覆盖所有应用滚动容器，阅读器 Shadow DOM 内部不受影响。构建通过。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2ff3f89` | (see git log) |
+
+### Status
+
+[OK] **Completed**
