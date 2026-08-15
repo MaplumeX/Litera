@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2026-08-15
+
+### Added
+
+- **上下文压缩**：对话较长时自动用 LLM 摘要压缩历史，替代原来的硬截断，阅读助手能记住更早的上下文。
+- **自定义窗口外观**：移除原生标题栏，macOS 保留红绿灯，Windows / Linux 在库与阅读页工具栏内提供最小化、最大化、关闭按钮。
+- **面板宽度记忆**：AI 聊天面板的宽度在重启后恢复。
+
+### Changed
+
+- **内嵌 Agent 运行时**：阅读助手不再依赖外部 sidecar 进程，Pi 直接在应用内运行。
+
 ## [0.1.1] - 2026-08-14
 
 首个公开版之后的小更新。
