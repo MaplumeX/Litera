@@ -8,6 +8,7 @@ const files = {
   rootPkg: join(root, "package.json"),
   tauri: join(root, "src-tauri", "tauri.conf.json"),
   cargo: join(root, "src-tauri", "Cargo.toml"),
+  cargoLock: join(root, "src-tauri", "Cargo.lock"),
   rootLock: join(root, "package-lock.json"),
 };
 
@@ -51,6 +52,31 @@ function collectVersions() {
   };
 }
 
+function readCargoLockVersion(path) {
+  const text = readFileSync(path, "utf8");
+  const match = text.match(
+    /\[\[package\]\]\nname = "litera"\nversion = "([^"]+)"/,
+  );
+  if (!match) {
+    throw new Error(`${path} has no litera package version`);
+  }
+  return match[1];
+}
+
+function replaceCargoLockVersion(path, version) {
+  const text = readFileSync(path, "utf8");
+  const next = text.replace(
+    /(\[\[package\]\]\nname = "litera"\nversion = ")([^"]+)(")/,
+    `$1${version}$3`,
+  );
+  if (next === text && readCargoLockVersion(path) !== version) {
+    throw new Error(`Could not update litera version in ${path}`);
+  }
+  if (next !== text) {
+    writeFileSync(path, next);
+  }
+}
+
 function lockfileVersions(path) {
   let json;
   try {
@@ -70,14 +96,16 @@ function lockfileVersions(path) {
 }
 
 function assertLockstep(expected) {
-  const versions = collectVersions();
+  const versions = {
+    ...collectVersions(),
+    [files.cargoLock]: readCargoLockVersion(files.cargoLock),
+  };
   const mismatches = Object.entries(versions)
     .filter(([, version]) => version !== expected)
     .map(([path, version]) => `  ${path}: ${version}`);
   if (mismatches.length) {
     throw new Error(
-      `Version lockstep failed (expected ${expected}):\n${mismatches.join("\n")}`,
-    );
+      `Version lockstep failed (expected ${expected}):\n${mismatches.join("\n")}`);
   }
   for (const lock of [files.rootLock]) {
     for (const version of lockfileVersions(lock)) {
@@ -174,6 +202,7 @@ function writeVersions(version) {
   replaceJsonVersion(files.rootPkg, version);
   replaceJsonVersion(files.tauri, version);
   replaceCargoPackageVersion(files.cargo, version);
+  replaceCargoLockVersion(files.cargoLock, version);
   replaceLockfileRootVersion(files.rootLock, version);
   assertLockstep(version);
   process.stdout.write(`${version}\n`);
