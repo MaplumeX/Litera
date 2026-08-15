@@ -5,7 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.2] - 2026-08-15
+## [0.1.3] - 2026-08-15
+
+### Added
+
+- **目录侧边栏宽度可调**：阅读页目录侧边栏支持拖拽调整宽度，调整后重启保持。
+
+### Fixed
+
+- **重复打开翻页失效**：系统「打开方式」打开一本已在书库的 EPUB，或同一本书在阅读页内被重复打开，不再堆叠渲染器导致翻页失效。
+- **流式生成滚动干扰**：AI 流式生成期间向上滚动查看历史内容时，不再被强制拽回底部。
 
 ### Added
 
