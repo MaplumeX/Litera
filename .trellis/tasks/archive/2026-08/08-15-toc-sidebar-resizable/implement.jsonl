@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "UI 组件规范：react-resizable-panels 是官方分栏库，拖拽手柄风格需与现有 Separator 一致"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "质量规范：禁止模式、CSP 约束，确保拖拽实现不违反项目约定"}
+{"file": ".trellis/spec/frontend/hook-guidelines.md", "reason": "Hook 规范：持久化/副作用写法参考（debounced persistence 模式）"}
+{"file": ".trellis/spec/frontend/i18n.md", "reason": "localStorage key 命名风格参考（litera.locale 模式）"}
