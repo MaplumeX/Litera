@@ -1,0 +1,5 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Verify chrome stays reading-first and full-bleed; no remount; drawers stay overlays"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Window chrome, CSP font-src, no second titlebar"}
+{"file": ".trellis/spec/frontend/i18n.md", "reason": "Catalog parity if any aria/copy changes"}
+{"file": ".trellis/spec/guides/index.md", "reason": "No new preferences.json fields"}

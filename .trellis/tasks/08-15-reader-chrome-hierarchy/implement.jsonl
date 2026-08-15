@@ -1,0 +1,4 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Reader chrome, full-bleed vs inset canvas, docked chat, drawer overlay, icon-button contracts"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Window chrome merged into headers; close() not destroy(); no second titlebar"}
+{"file": ".trellis/spec/guides/index.md", "reason": "Do not persist chrome layout into preferences.json"}
