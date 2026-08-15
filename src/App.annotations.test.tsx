@@ -63,6 +63,8 @@ const readerHandle: ReaderViewHandle = {
   next: vi.fn(),
   goToFraction: vi.fn(async () => {}),
   goToTocItem: vi.fn(),
+  getSectionFractions: () => [],
+  previewLabelAt: () => undefined,
   goToCfi: vi.fn(async () => true),
   setStyles: vi.fn(),
   getToc: () => [],
@@ -200,7 +202,9 @@ afterEach(() => {
 describe("reader annotation chrome", () => {
   it("opens the overlay drawer and is exclusive with TOC", async () => {
     const screen = await openReader();
-    expect(screen.getByText("Chapter 1 · 10%")).toBeTruthy();
+    expect(screen.getByTestId("reader-book-cell").contains(screen.getByTestId("reader-progress-bar"))).toBe(true);
+    expect(screen.getByText("Chapter 1")).toBeTruthy();
+    expect(screen.getByText("10%")).toBeTruthy();
     fireEvent.click(screen.getByLabelText("标注"));
     expect(screen.getByText("添加书签")).toBeTruthy();
     expect(screen.getByText("还没有书签")).toBeTruthy();
@@ -287,7 +291,7 @@ describe("reader annotation chrome", () => {
     expect(header).toBeTruthy();
     expect(header!.hasAttribute("data-tauri-drag-region")).toBe(false);
     expect(header!.querySelectorAll("[data-tauri-drag-region]")).toHaveLength(2);
-    for (const name of [
+    const toolbarNames = [
       "返回书库",
       "目录",
       "标注",
@@ -295,7 +299,14 @@ describe("reader annotation chrome", () => {
       "切换到 Agent 模式",
       "显示对话",
       "关闭窗口",
-    ]) {
+    ];
+    const headerButtons = [...header!.querySelectorAll("button")].map(
+      (button) => button.getAttribute("aria-label"),
+    );
+    expect(headerButtons.filter((name) => name && toolbarNames.includes(name))).toEqual(
+      toolbarNames,
+    );
+    for (const name of toolbarNames) {
       expect(screen.getByRole("button", { name }).hasAttribute("data-tauri-drag-region")).toBe(
         false,
       );

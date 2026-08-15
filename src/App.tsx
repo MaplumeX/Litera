@@ -23,7 +23,6 @@ import {
   ChevronLeft,
   List,
   MessageSquare,
-  MessagesSquare,
   Type,
 } from "lucide-react";
 import {
@@ -93,6 +92,7 @@ import {
   resolveReaderMode,
   type ReaderMode,
 } from "@/lib/reader-mode";
+import { chapterNavAt } from "@/lib/toc-items";
 
 interface FileData {
   bytes: Uint8Array<ArrayBuffer>;
@@ -148,6 +148,7 @@ function App() {
   const [annotationsVisible, setAnnotationsVisible] = useState(false);
   const [annotations, setAnnotations] = useState<AnnotationsFile>(emptyAnnotations);
   const [toc, setToc] = useState<TocItem[]>([]);
+  const [sectionTicks, setSectionTicks] = useState<number[]>([]);
   const [persistenceError, setPersistenceError] = useState<string | null>(null);
   const [openingBookId, setOpeningBookId] = useState<string | null>(null);
   const {
@@ -406,6 +407,8 @@ function App() {
         index: 0,
         fraction: context.lastFraction ?? 0,
       });
+      setToc([]);
+      setSectionTicks([]);
       setCurrentBook({
         id: context.bookId,
         title: context.title,
@@ -469,6 +472,7 @@ function App() {
     setCurrentBook(null);
     setProgress({ index: 0, fraction: 0 });
     setToc([]);
+    setSectionTicks([]);
     setTocVisible(false);
     setAnnotationsVisible(false);
     setAnnotations(emptyAnnotations());
@@ -533,6 +537,7 @@ function App() {
 
   const handleBookReady = useCallback((bookToc: TocItem[]) => {
     setToc(bookToc);
+    setSectionTicks(readerRef.current?.getSectionFractions() ?? []);
     // Apply saved styles now that the renderer exists.
     readerRef.current?.setStyles(generateStylesCss(styleStateRef.current));
   }, []);
@@ -585,10 +590,24 @@ function App() {
     [currentBook, persistBookSnapshot],
   );
 
-  const handleTocGoTo = useCallback((href: string) => {
+  const goToChapterHref = useCallback((href: string) => {
     readerRef.current?.goToTocItem(href);
-    setTocVisible(false);
   }, []);
+
+  const handleTocGoTo = useCallback((href: string) => {
+    goToChapterHref(href);
+    setTocVisible(false);
+  }, [goToChapterHref]);
+
+  const handlePrevChapter = useCallback(() => {
+    const href = chapterNavAt(toc, progress.chapterHref).prevHref;
+    if (href) goToChapterHref(href);
+  }, [goToChapterHref, progress.chapterHref, toc]);
+
+  const handleNextChapter = useCallback(() => {
+    const href = chapterNavAt(toc, progress.chapterHref).nextHref;
+    if (href) goToChapterHref(href);
+  }, [goToChapterHref, progress.chapterHref, toc]);
 
   const startTocResize = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
@@ -728,6 +747,10 @@ function App() {
   );
 
   const chapterLabel = progress.label ?? `Chapter ${progress.index + 1}`;
+  const chapterNav = useMemo(
+    () => chapterNavAt(toc, progress.chapterHref),
+    [progress.chapterHref, toc],
+  );
   const bookTitle = currentBook?.title || fileData?.name || "";
   const sideCollapsed = readerMode === "reader" ? chatCollapsed : bookCollapsed;
   const sideWidth = readerMode === "reader" ? chatWidth : agentBookWidth;
@@ -807,18 +830,6 @@ function App() {
         >
           <ChevronLeft />
         </Button>
-        <h1
-          className="min-w-0 shrink truncate select-none text-lg font-semibold"
-          data-tauri-drag-region
-          onMouseDown={onTitlebarDragMouseDown}
-        >
-          {bookTitle}
-        </h1>
-        <div
-          className="min-h-0 min-w-0 flex-1 select-none self-stretch"
-          data-tauri-drag-region
-          onMouseDown={onTitlebarDragMouseDown}
-        />
         <div className="flex items-center gap-1">
           <Button
             size="icon-sm"
@@ -846,7 +857,20 @@ function App() {
           >
             <Bookmark />
           </Button>
-          {/* Font + theme controls */}
+        </div>
+        <h1
+          className="min-w-0 shrink truncate select-none text-lg font-semibold"
+          data-tauri-drag-region
+          onMouseDown={onTitlebarDragMouseDown}
+        >
+          {bookTitle}
+        </h1>
+        <div
+          className="min-h-0 min-w-0 flex-1 select-none self-stretch"
+          data-tauri-drag-region
+          onMouseDown={onTitlebarDragMouseDown}
+        />
+        <div className="flex items-center gap-1">
           <Button
             size="icon-sm"
             variant="ghost"
@@ -855,6 +879,9 @@ function App() {
           >
             <Type />
           </Button>
+        </div>
+        <div className="h-4 w-px shrink-0 bg-border" />
+        <div className="flex items-center gap-1">
           <Button
             size="icon-sm"
             variant="ghost"
@@ -877,37 +904,18 @@ function App() {
               <MessageSquare />
             </Button>
           ) : (
-            <>
-              <Button
-                size="icon-sm"
-                variant={sessionRailOpen ? "secondary" : "ghost"}
-                onClick={() => setSessionRailOpen((v) => !v)}
-                aria-label={
-                  sessionRailOpen ? t("reader.hideSessions") : t("reader.showSessions")
-                }
-              >
-                <MessagesSquare />
-              </Button>
-              <Button
-                size="icon-sm"
-                variant={bookCollapsed ? "ghost" : "secondary"}
-                onClick={() => setBookCollapsed((v) => !v)}
-                aria-label={bookCollapsed ? t("reader.showBook") : t("reader.hideBook")}
-              >
-                <BookText />
-              </Button>
-            </>
+            <Button
+              size="icon-sm"
+              variant={bookCollapsed ? "ghost" : "secondary"}
+              onClick={() => setBookCollapsed((v) => !v)}
+              aria-label={bookCollapsed ? t("reader.showBook") : t("reader.hideBook")}
+            >
+              <BookText />
+            </Button>
           )}
         </div>
         <WindowControls />
       </header>
-      {readerMode === "reader" && (
-        <ReaderProgressBar
-          fraction={progress.fraction}
-          chapterLabel={chapterLabel}
-          onSeek={seekProgress}
-        />
-      )}
 
       {/* Same two cells; mode only swaps grid-template-areas. */}
       <div
@@ -924,31 +932,28 @@ function App() {
           hidden={bookHidden}
           className={
             bookHidden
-              ? "min-h-0 min-w-0 flex-col overflow-hidden"
-              : "relative flex min-h-0 min-w-0 flex-col overflow-hidden"
+              ? "min-h-0 min-w-0 flex-col overflow-hidden bg-muted/40"
+              : "relative flex min-h-0 min-w-0 flex-col overflow-hidden bg-muted/40"
           }
           style={{ gridArea: "book" }}
         >
-          {readerMode === "agent" && (
-            <ReaderProgressBar
-              fraction={progress.fraction}
-              chapterLabel={chapterLabel}
-              onSeek={seekProgress}
-            />
-          )}
           <div className="relative min-h-0 flex-1 overflow-hidden">
-            {fileData && (
-              <ReaderView
-                ref={readerRef}
-                fileData={fileData}
-                onRelocate={handleRelocate}
-                onSelectionCapture={handleSelectionCapture}
-                onHighlight={handleAddHighlight}
-                highlights={annotations.highlights}
-                initialFraction={currentBook?.lastFraction}
-                onBookReady={handleBookReady}
-              />
-            )}
+            <div className="absolute inset-0 p-3">
+              <div className="h-full w-full overflow-hidden bg-background">
+                {fileData && (
+                  <ReaderView
+                    ref={readerRef}
+                    fileData={fileData}
+                    onRelocate={handleRelocate}
+                    onSelectionCapture={handleSelectionCapture}
+                    onHighlight={handleAddHighlight}
+                    highlights={annotations.highlights}
+                    initialFraction={currentBook?.lastFraction}
+                    onBookReady={handleBookReady}
+                  />
+                )}
+              </div>
+            </div>
             {tocVisible && (
               <>
                 <button
@@ -962,7 +967,11 @@ function App() {
                   className="absolute inset-y-0 left-0 z-30 overflow-hidden border-r bg-background"
                   style={{ width: tocWidth }}
                 >
-                  <TocSidebar toc={toc} onGoTo={handleTocGoTo} />
+                  <TocSidebar
+                    toc={toc}
+                    currentHref={progress.chapterHref}
+                    onGoTo={handleTocGoTo}
+                  />
                 </div>
                 <div
                   className="absolute inset-y-0 z-40 w-1.5 cursor-col-resize touch-none select-none bg-transparent hover:bg-primary/30"
@@ -998,6 +1007,17 @@ function App() {
               </>
             )}
           </div>
+          <ReaderProgressBar
+            fraction={progress.fraction}
+            chapterLabel={chapterLabel}
+            ticks={sectionTicks}
+            onSeek={seekProgress}
+            onPrevChapter={handlePrevChapter}
+            onNextChapter={handleNextChapter}
+            canPrevChapter={chapterNav.canPrev}
+            canNextChapter={chapterNav.canNext}
+            previewLabelAt={(frac) => readerRef.current?.previewLabelAt(frac)}
+          />
         </div>
         <div
           hidden={chatHidden}

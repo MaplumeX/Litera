@@ -20,6 +20,11 @@ declare module "*/foliate-js/view.js" {
     init(opts: Record<string, unknown>): Promise<void>;
     goToFraction(frac: number): Promise<void>;
     goTo(target: string | number | { fraction: number }): Promise<unknown>;
+    getSectionFractions(): number[];
+    getProgressOf(
+      index: number,
+      range?: Range,
+    ): { tocItem?: { label?: string; href?: string }; pageItem?: unknown };
     getCFI(index: number, range?: Range): string;
     addAnnotation(annotation: { value: string }, remove?: boolean): Promise<unknown>;
     deleteAnnotation(annotation: { value: string }): Promise<unknown>;

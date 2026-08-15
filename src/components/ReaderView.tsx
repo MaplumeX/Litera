@@ -13,6 +13,7 @@ import {
   shouldIgnorePagingTarget,
   type WheelPagingState,
 } from "@/lib/reader-paging";
+import { sectionIndexAt } from "@/lib/reader-progress";
 import { SelectionToolbar } from "@/components/SelectionToolbar";
 import type { HighlightRecord } from "@/types/library";
 
@@ -117,6 +118,8 @@ export interface ReaderViewHandle {
   next: () => void;
   goToFraction: (frac: number) => void;
   goToTocItem: (href: string) => void;
+  getSectionFractions: () => number[];
+  previewLabelAt: (fraction: number) => string | undefined;
   goToCfi: (cfi: string) => Promise<boolean>;
   setStyles: (css: string) => void;
   getToc: () => TocItem[];
@@ -484,6 +487,21 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         ?.goTo?.(href)
         .catch((err: unknown) => console.error("goTo error:", err));
     }, []);
+    const getSectionFractions = useCallback((): number[] => {
+      const view = viewRef.current as unknown as { getSectionFractions?: () => number[] };
+      return view?.getSectionFractions?.() ?? [];
+    }, []);
+    const previewLabelAt = useCallback((fraction: number): string | undefined => {
+      const view = viewRef.current as unknown as {
+        getSectionFractions?: () => number[];
+        getProgressOf?: (index: number) => { tocItem?: { label?: string } };
+      };
+      if (!view) return undefined;
+      const index = sectionIndexAt(fraction, view.getSectionFractions?.() ?? []);
+      if (index == null) return undefined;
+      const label = view.getProgressOf?.(index)?.tocItem?.label;
+      return label || undefined;
+    }, []);
     const goToCfi = useCallback(async (cfi: string) => {
       const view = viewRef.current as unknown as FoliateAnnotator | null;
       try {
@@ -523,6 +541,8 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         next,
         goToFraction,
         goToTocItem,
+        getSectionFractions,
+        previewLabelAt,
         goToCfi,
         setStyles,
         getToc,
@@ -536,6 +556,8 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         next,
         goToFraction,
         goToTocItem,
+        getSectionFractions,
+        previewLabelAt,
         goToCfi,
         setStyles,
         getToc,

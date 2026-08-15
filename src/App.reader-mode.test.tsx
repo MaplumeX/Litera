@@ -61,6 +61,8 @@ const readerHandle: ReaderViewHandle = {
   next: vi.fn(),
   goToFraction: vi.fn(async () => {}),
   goToTocItem: vi.fn(),
+  getSectionFractions: () => [],
+  previewLabelAt: () => undefined,
   goToCfi: vi.fn(async () => true),
   setStyles: vi.fn(),
   getToc: () => [],
@@ -207,7 +209,14 @@ describe("reader / agent mode", () => {
     const screen = await openReader();
     expect(screen.getByLabelText("切换到 Agent 模式")).toBeTruthy();
     expect(screen.getByLabelText("显示对话")).toBeTruthy();
-    expect(screen.getByText("Chapter 1 · 10%")).toBeTruthy();
+    const bookCell = screen.getByTestId("reader-book-cell");
+    expect(bookCell.contains(screen.getByTestId("reader-progress-bar"))).toBe(true);
+    expect(bookCell.lastElementChild).toBe(screen.getByTestId("reader-progress-bar"));
+    expect(screen.getAllByTestId("reader-progress-bar")).toHaveLength(1);
+    expect(screen.getByText("Chapter 1")).toBeTruthy();
+    expect(screen.getByText("10%")).toBeTruthy();
+    expect((screen.getByLabelText("上一章") as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByLabelText("下一章") as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByTestId("reader-shell").style.gridTemplateAreas).toBe('"book chat"');
   });
 
@@ -215,8 +224,11 @@ describe("reader / agent mode", () => {
     localStorage.setItem(DEFAULT_READER_MODE_KEY, "agent");
     const screen = await openReader();
     expect(screen.getByLabelText("切换到阅读模式")).toBeTruthy();
-    expect(screen.getByLabelText("隐藏会话列表")).toBeTruthy();
+    expect(screen.getByLabelText("会话列表")).toBeTruthy();
+    expect(screen.queryByLabelText("显示会话列表")).toBeNull();
+    expect(screen.queryByLabelText("隐藏会话列表")).toBeNull();
     expect(screen.getByLabelText("隐藏书籍")).toBeTruthy();
+    expect(screen.getByTestId("reader-book-cell").contains(screen.getByTestId("reader-progress-bar"))).toBe(true);
     expect(screen.getByTestId("reader-shell").style.gridTemplateAreas).toBe('"chat book"');
     expect(screen.getByTestId("reader-shell").style.gridTemplateColumns).toBe("1fr 38%");
     expect(screen.getByRole("button", { name: "新建会话" })).toBeTruthy();
@@ -286,7 +298,7 @@ describe("reader / agent mode", () => {
     const screen = await openReader();
     expect(screen.getByRole("button", { name: "新建会话" })).toBeTruthy();
 
-    fireEvent.click(screen.getByLabelText("隐藏会话列表"));
+    fireEvent.click(screen.getByLabelText("会话列表"));
     expect(screen.queryByRole("button", { name: "新建会话" })).toBeNull();
     expect(screen.getByPlaceholderText("输入问题…")).toBeTruthy();
 
@@ -352,11 +364,11 @@ describe("reader / agent mode", () => {
   it("re-entering agent mode opens the list and the book", async () => {
     const screen = await openReader();
     fireEvent.click(screen.getByLabelText("切换到 Agent 模式"));
-    fireEvent.click(screen.getByLabelText("隐藏会话列表"));
+    fireEvent.click(screen.getByLabelText("会话列表"));
     fireEvent.click(screen.getByLabelText("隐藏书籍"));
     fireEvent.click(screen.getByLabelText("切换到阅读模式"));
     fireEvent.click(screen.getByLabelText("切换到 Agent 模式"));
-    expect(screen.getByLabelText("隐藏会话列表")).toBeTruthy();
+    expect(screen.getByLabelText("会话列表")).toBeTruthy();
     expect(screen.getByLabelText("隐藏书籍")).toBeTruthy();
     expect(screen.getByRole("button", { name: "新建会话" })).toBeTruthy();
     expect(screen.getByTestId("reader-shell").style.gridTemplateColumns).toBe("1fr 38%");

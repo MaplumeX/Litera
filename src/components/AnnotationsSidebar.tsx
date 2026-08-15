@@ -30,10 +30,10 @@ export function AnnotationsSidebar({
   const { t } = useT();
   return (
     <nav className="flex h-full w-full flex-col overflow-hidden">
-      <div className="border-b px-3 py-2 text-sm font-medium">{t("annotations.title")}</div>
-      <div className="flex-1 overflow-y-auto">
-        <section className="border-b py-2">
-          <div className="flex items-center justify-between px-3 pb-1">
+      <div className="border-b px-4 py-3 text-sm font-medium">{t("annotations.title")}</div>
+      <div className="flex-1 overflow-y-auto py-1">
+        <section className="border-b py-3">
+          <div className="flex items-center justify-between px-4 pb-2">
             <h2 className="text-xs font-medium text-muted-foreground">
               {t("annotations.bookmarks")}
             </h2>
@@ -49,7 +49,7 @@ export function AnnotationsSidebar({
             </Button>
           </div>
           {bookmarks.length === 0 ? (
-            <div className="px-3 py-2 text-xs text-muted-foreground">
+            <div className="px-4 py-2 text-xs text-muted-foreground">
               {t("annotations.emptyBookmarks")}
             </div>
           ) : (
@@ -76,12 +76,12 @@ export function AnnotationsSidebar({
             ))
           )}
         </section>
-        <section className="py-2">
-          <h2 className="px-3 pb-1 text-xs font-medium text-muted-foreground">
+        <section className="py-3">
+          <h2 className="px-4 pb-2 text-xs font-medium text-muted-foreground">
             {t("annotations.highlights")}
           </h2>
           {highlights.length === 0 ? (
-            <div className="px-3 py-2 text-xs text-muted-foreground">
+            <div className="px-4 py-2 text-xs text-muted-foreground">
               {t("annotations.emptyHighlights")}
             </div>
           ) : (
