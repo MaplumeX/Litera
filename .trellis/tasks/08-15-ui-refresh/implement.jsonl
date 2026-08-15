@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend guideline index and pre-dev checklist"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "shadcn, lucide, reader chrome, settings, chat conventions that must not be broken"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "CSP font-src and window chrome constraints"}
+{"file": ".trellis/spec/frontend/i18n.md", "reason": "useT catalogs; do not add locale to preferences.json"}
+{"file": ".trellis/tasks/08-15-ui-refresh/research/geist-fontsource.md", "reason": "Geist Fontsource install, CJK fallback, CSP"}

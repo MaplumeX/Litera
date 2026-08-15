@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend quality-check entry"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Reader/chat/settings conventions to verify after restyle"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "CSP and window chrome must stay intact"}
+{"file": ".trellis/spec/frontend/i18n.md", "reason": "New chrome strings must go through useT"}
+{"file": ".trellis/tasks/08-15-ui-refresh/research/geist-fontsource.md", "reason": "Geist must stay self-hosted and off the reader iframe"}
