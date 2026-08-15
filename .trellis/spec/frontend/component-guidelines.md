@@ -279,6 +279,14 @@ See `src/lib/book-utils.ts` for the full implementation.
 >
 > Always use a defensive extractor (like `extractFirstValue` in `book-utils.ts`) that handles all four formats. Naive `String(metadata.title)` would produce `"[object Object]"` for language maps.
 
+### Gotcha: re-opening a book without close() stacks renderers
+
+> **Warning**: `foliate-view.open()` creates a new `foliate-paginator` and appends it to the shadow root **without removing the previous one**; only `close()` calls `renderer.destroy()` + `renderer.remove()`. Calling `open()` twice on the same element (e.g. a repeated `setFileData` in the reader) stacks two full-height paginators: the visible one is the first book, while paging (`next()` / `prev()`) acts on the second, off-screen one — pages appear to not turn.
+>
+> **Correct**: call `view.close?.()` before `view.open(file)` in the open effect. `close()` is synchronous, so there is no race with the async `open()`. See `src/components/ReaderView.tsx`.
+>
+> Do **not** patch `src/foliate-js/` (git submodule) to make `open()` self-cleaning — defend at the call site.
+
 ### Gotcha: position restore must wait for init() to complete
 
 > **Warning**: `view.init({})` internally calls `next()` to advance to the first content section. If you call `view.goToFraction(frac)` concurrently with `init()`, the two navigations conflict and the position may not restore correctly.

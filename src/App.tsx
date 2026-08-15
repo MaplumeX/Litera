@@ -370,7 +370,7 @@ function App() {
   }, [flushReadingState, reportPersistenceError, t]);
 
   useOpenPaths({
-    importPaths: bookImport.importFromPaths,
+    importPaths: (paths) => bookImport.importFromPaths(paths, { suppressDuplicateNotice: true }),
     openBook: handleOpenBook,
     onError: (error) => {
       console.error("open-paths error:", error);

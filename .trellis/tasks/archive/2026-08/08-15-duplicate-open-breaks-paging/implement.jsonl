@@ -1,0 +1,5 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/frontend/index.md", "reason": "frontend 层总览:组件/状态/类型约定"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "ReaderView/App 组件改动遵循的组件规范"}
+{"file": ".trellis/spec/frontend/hook-guidelines.md", "reason": "useBookImport hook 签名扩展遵循的 hook 规范"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "ProcessImportDeps 类型扩展遵循的类型安全约定"}

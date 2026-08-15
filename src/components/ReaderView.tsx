@@ -399,10 +399,15 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         open: (file: File) => Promise<void>;
         init: (opts: Record<string, unknown>) => Promise<void>;
         goToFraction: (frac: number) => Promise<void>;
+        close?: () => void;
       };
       const { bytes, name } = fileData;
       const file = new File([bytes], name);
       const fractionToRestore = initialFraction;
+      // Close any previous renderer before opening a new book so foliate does
+      // not stack multiple paginators in the shadow root (duplicate opens would
+      // otherwise leave the visible renderer stale while paging hits the new one).
+      view.close?.();
       view
         .open(file)
         .then(async () => {

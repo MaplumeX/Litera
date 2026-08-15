@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 57
+- **Total Sessions**: 58
 - **Last Active**: 2026-08-15
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1321 | Active |
+| `journal-1.md` | ~1342 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 58 | 2026-08-15 | Fix duplicate-open stacking foliate renderers | `b1d291d` | `large-squid` |
 | 57 | 2026-08-15 | Implement context compaction for agent sessions | `ff3d80b` | `main` |
 | 56 | 2026-08-15 | Embed Pi agent runtime and remove sidecar | `6f4045b`, `08b8069` | `main` |
 | 55 | 2026-08-14 | Persist AI chat panel width | `c88f338` | `main` |

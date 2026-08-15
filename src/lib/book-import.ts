@@ -21,6 +21,7 @@ export interface ConfirmRequest {
 export interface ProcessImportDeps {
   askConfirm: (request: ConfirmRequest) => Promise<boolean>;
   onNotice: (notice: ImportNotice) => void;
+  suppressDuplicateNotice?: boolean;
 }
 
 export async function commitStagedImport(result: ImportBookResult): Promise<void> {
@@ -67,11 +68,13 @@ export async function processImportResults(
   const successfulBookIds: string[] = [];
   for (const result of results) {
     if (result.status === "duplicate") {
-      deps.onNotice({
-        kind: "info",
-        message: t("library.alreadyInLibrary", { title: result.title }),
-        action: { label: t("library.open"), bookId: result.bookId },
-      });
+      if (!deps.suppressDuplicateNotice) {
+        deps.onNotice({
+          kind: "info",
+          message: t("library.alreadyInLibrary", { title: result.title }),
+          action: { label: t("library.open"), bookId: result.bookId },
+        });
+      }
       successfulBookIds.push(result.bookId);
       continue;
     }
