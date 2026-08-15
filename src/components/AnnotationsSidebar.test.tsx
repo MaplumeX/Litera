@@ -34,6 +34,15 @@ const noop = {
 };
 
 describe("AnnotationsSidebar", () => {
+  it("uses a title row as dense as the window header", () => {
+    const { getByText } = render(
+      <AnnotationsSidebar bookmarks={[]} highlights={[]} {...noop} />,
+    );
+    expect(getByText("标注").className).toContain("h-12");
+    expect(getByText("标注").className).toContain("px-3");
+    expect(getByText("标注").className).not.toContain("py-3");
+  });
+
   it("shows empty states for both sections", () => {
     const { getByText } = render(
       <AnnotationsSidebar bookmarks={[]} highlights={[]} {...noop} />,

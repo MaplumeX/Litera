@@ -186,7 +186,7 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
       {/* Toolbar */}
       <header className={titlebarClassName()}>
         <h1
-          className="select-none text-lg font-semibold"
+          className="select-none text-sm font-medium"
           data-tauri-drag-region
           onMouseDown={onTitlebarDragMouseDown}
         >

@@ -209,10 +209,21 @@ describe("reader / agent mode", () => {
     const screen = await openReader();
     expect(screen.getByLabelText("切换到 Agent 模式")).toBeTruthy();
     expect(screen.getByLabelText("显示对话")).toBeTruthy();
+    const title = screen.getByRole("heading", { level: 1 });
+    expect(title.className).toContain("text-sm");
+    expect(title.className).toContain("font-medium");
+    expect(title.className).not.toContain("text-lg");
+    expect(title.className).not.toContain("font-semibold");
     const bookCell = screen.getByTestId("reader-book-cell");
+    expect(bookCell.className).not.toContain("bg-muted/40");
+    expect(bookCell.className).not.toContain("p-3");
     expect(bookCell.contains(screen.getByTestId("reader-progress-bar"))).toBe(true);
     expect(bookCell.lastElementChild).toBe(screen.getByTestId("reader-progress-bar"));
     expect(screen.getAllByTestId("reader-progress-bar")).toHaveLength(1);
+    const readerHost = screen.getByTestId("reader-view").parentElement;
+    expect(readerHost?.className).toContain("flex-1");
+    expect(readerHost?.className).not.toContain("p-3");
+    expect(readerHost?.className).not.toContain("bg-muted/40");
     expect(screen.getByText("Chapter 1")).toBeTruthy();
     expect(screen.getByText("10%")).toBeTruthy();
     expect((screen.getByLabelText("上一章") as HTMLButtonElement).disabled).toBe(true);
@@ -232,6 +243,30 @@ describe("reader / agent mode", () => {
     expect(screen.getByTestId("reader-shell").style.gridTemplateAreas).toBe('"chat book"');
     expect(screen.getByTestId("reader-shell").style.gridTemplateColumns).toBe("1fr 38%");
     expect(screen.getByRole("button", { name: "新建会话" })).toBeTruthy();
+  });
+
+  it("paints a hairline on the visible right-hand cell only", async () => {
+    const screen = await openReader();
+    const bookCell = screen.getByTestId("reader-book-cell");
+    const chatCell = screen.getByTestId("reader-chat-cell");
+    expect(chatCell.hidden).toBe(true);
+    expect(bookCell.className).not.toContain("border-l");
+    expect(chatCell.className).not.toContain("border-l");
+
+    fireEvent.click(screen.getByLabelText("显示对话"));
+    expect(chatCell.hidden).toBe(false);
+    expect(chatCell.className).toContain("border-l");
+    expect(bookCell.className).not.toContain("border-l");
+
+    fireEvent.click(screen.getByLabelText("切换到 Agent 模式"));
+    expect(bookCell.hidden).toBe(false);
+    expect(bookCell.className).toContain("border-l");
+    expect(chatCell.className).not.toContain("border-l");
+
+    fireEvent.click(screen.getByLabelText("隐藏书籍"));
+    expect(bookCell.hidden).toBe(true);
+    expect(bookCell.className).not.toContain("border-l");
+    expect(chatCell.className).not.toContain("border-l");
   });
 
   it("lets book lastReaderMode win over the app default", async () => {

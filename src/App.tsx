@@ -859,7 +859,7 @@ function App() {
           </Button>
         </div>
         <h1
-          className="min-w-0 shrink truncate select-none text-lg font-semibold"
+          className="min-w-0 shrink truncate select-none text-sm font-medium"
           data-tauri-drag-region
           onMouseDown={onTitlebarDragMouseDown}
         >
@@ -932,28 +932,26 @@ function App() {
           hidden={bookHidden}
           className={
             bookHidden
-              ? "min-h-0 min-w-0 flex-col overflow-hidden bg-muted/40"
-              : "relative flex min-h-0 min-w-0 flex-col overflow-hidden bg-muted/40"
+              ? "min-h-0 min-w-0 flex-col overflow-hidden"
+              : readerMode === "agent"
+                ? "relative flex min-h-0 min-w-0 flex-col overflow-hidden border-l"
+                : "relative flex min-h-0 min-w-0 flex-col overflow-hidden"
           }
           style={{ gridArea: "book" }}
         >
           <div className="relative min-h-0 flex-1 overflow-hidden">
-            <div className="absolute inset-0 p-3">
-              <div className="h-full w-full overflow-hidden bg-background">
-                {fileData && (
-                  <ReaderView
-                    ref={readerRef}
-                    fileData={fileData}
-                    onRelocate={handleRelocate}
-                    onSelectionCapture={handleSelectionCapture}
-                    onHighlight={handleAddHighlight}
-                    highlights={annotations.highlights}
-                    initialFraction={currentBook?.lastFraction}
-                    onBookReady={handleBookReady}
-                  />
-                )}
-              </div>
-            </div>
+            {fileData && (
+              <ReaderView
+                ref={readerRef}
+                fileData={fileData}
+                onRelocate={handleRelocate}
+                onSelectionCapture={handleSelectionCapture}
+                onHighlight={handleAddHighlight}
+                highlights={annotations.highlights}
+                initialFraction={currentBook?.lastFraction}
+                onBookReady={handleBookReady}
+              />
+            )}
             {tocVisible && (
               <>
                 <button
@@ -1020,8 +1018,13 @@ function App() {
           />
         </div>
         <div
+          data-testid="reader-chat-cell"
           hidden={chatHidden}
-          className="h-full min-h-0 min-w-0 overflow-hidden"
+          className={
+            !chatHidden && readerMode === "reader"
+              ? "h-full min-h-0 min-w-0 overflow-hidden border-l"
+              : "h-full min-h-0 min-w-0 overflow-hidden"
+          }
           style={{ gridArea: "chat" }}
         >
           <ChatPanel

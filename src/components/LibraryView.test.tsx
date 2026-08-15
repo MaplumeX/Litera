@@ -338,6 +338,11 @@ describe("LibraryView", () => {
 
     const header = container.querySelector("header");
     expect(header).toBeTruthy();
+    const title = getByRole("heading", { name: "Litera" });
+    expect(title.className).toContain("text-sm");
+    expect(title.className).toContain("font-medium");
+    expect(title.className).not.toContain("text-lg");
+    expect(title.className).not.toContain("font-semibold");
     expect(header!.hasAttribute("data-tauri-drag-region")).toBe(false);
     expect(header!.querySelectorAll("[data-tauri-drag-region]")).toHaveLength(2);
     expect(getByPlaceholderText("搜索书名或作者…").hasAttribute("data-tauri-drag-region")).toBe(

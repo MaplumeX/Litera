@@ -18,6 +18,15 @@ const toc: TocItem[] = [
 ];
 
 describe("TocSidebar", () => {
+  it("uses a title row as dense as the window header", () => {
+    const { getByText } = render(
+      <TocSidebar toc={toc} onGoTo={() => {}} />,
+    );
+    expect(getByText("目录").className).toContain("h-12");
+    expect(getByText("目录").className).toContain("px-3");
+    expect(getByText("目录").className).not.toContain("py-3");
+  });
+
   it("highlights the current chapter and still jumps from a nested row", () => {
     const onGoTo = vi.fn();
     const { getByText } = render(

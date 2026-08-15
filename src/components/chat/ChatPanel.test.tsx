@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createAgentState, type AgentState } from "@/lib/agent-reducer";
 
@@ -119,12 +119,24 @@ describe("ChatPanel session layouts", () => {
     );
     expect(view.getByRole("button", { name: "新建会话" })).toBeTruthy();
     expect(view.queryByRole("button", { name: "关闭" })).toBeNull();
+    const header = view.getByTestId("chat-panel-header");
+    expect(header.className).toContain("border-b");
+    expect(within(header).getByRole("heading", { name: "阅读助手" }).className).toContain(
+      "font-semibold",
+    );
   });
 
   it("keeps the overlay list in docked variant", () => {
     const view = openSessionList();
     expect(view.getByRole("button", { name: "关闭" })).toBeTruthy();
     expect(view.getByRole("button", { name: "新建会话" })).toBeTruthy();
+    const header = view.getByTestId("chat-panel-header");
+    expect(header.className).not.toContain("border-b");
+    const title = within(header).getByRole("heading", { name: "阅读助手" });
+    expect(title.className).toContain("font-medium");
+    expect(title.className).not.toContain("font-semibold");
+    expect(view.getByRole("button", { name: "会话列表" })).toBeTruthy();
+    expect(view.getByRole("button", { name: "设置" })).toBeTruthy();
   });
 
   it("does not hide the message column when the rail collapses", () => {

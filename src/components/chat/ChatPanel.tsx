@@ -317,7 +317,14 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
           </div>
         )}
         <div className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col">
-        <div className="flex items-center justify-between border-b px-3 py-2">
+        <div
+          data-testid="chat-panel-header"
+          className={
+            isWorkspace
+              ? "flex items-center justify-between border-b px-3 py-2"
+              : "flex items-center justify-between px-3 py-2"
+          }
+        >
           <div className="flex items-center gap-2">
             <Button
               size="icon-xs"
@@ -331,7 +338,9 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
             >
               <MessagesSquare />
             </Button>
-            <h2 className="text-sm font-semibold">{t("chat.title")}</h2>
+            <h2 className={isWorkspace ? "text-sm font-semibold" : "text-sm font-medium"}>
+              {t("chat.title")}
+            </h2>
           </div>
           <div className="flex items-center gap-2">
             <span className="text-[10px] text-muted-foreground">
