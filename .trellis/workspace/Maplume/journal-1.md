@@ -1415,3 +1415,26 @@ Designed and shipped a coexisting Agent reading mode: ChatGPT-like session rail 
 ### Status
 
 [OK] **Completed**
+
+
+## Session 62: Restyle app chrome as a product-tool surface
+
+**Date**: 2026-08-15
+**Task**: Restyle app chrome as a product-tool surface
+**Branch**: `main`
+
+### Summary
+
+Planned and shipped a Linear-like chrome restyle: self-hosted Geist, cool zinc tokens, flattened shadows across library, reader chrome, chat, and settings. EPUB body typography unchanged. Recorded chrome visual-language contracts in frontend specs.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `34fb1a3` | (see git log) |
+| `c10cb34` | (see git log) |
+| `087f829` | (see git log) |
+
+### Status
+
+[OK] **Completed**
