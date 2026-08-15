@@ -124,6 +124,16 @@ agent:    [ chat (rail 240px + messages) | book 38% or 0 ]
 
 Same two CSS-grid children (`grid-area: book` / `chat`). Mode only changes `grid-template-areas` (`"book chat"` vs `"chat book"`) and column sizes. Do not render a second `ReaderView` or `ChatPanel`.
 
+### Convention: TOC current row stays in the list viewport
+
+**What**: `TocSidebar` highlights the row whose `href` equals `currentHref`. That same row must also be scrolled into the list (`flex-1 overflow-y-auto`) on mount and whenever `currentHref` changes to another match. Call the row's `scrollIntoView({ block: "nearest", behavior: "auto" })`. No match or no `currentHref`: do not scroll.
+
+**Why**: The drawer remounts on every open (`{tocVisible && <TocSidebar />}`). Long TOCs hide the highlight below the fold. `nearest` avoids jumping when the row is already visible; `auto` lands immediately. The progress bar can change chapter while the drawer stays open.
+
+**Don't**: Scroll the outer drawer. Use `smooth`. Change href matching (still `item.href === currentHref`) as part of a scroll tweak. Pin the TOC as a third column.
+
+**Related**: `src/components/TocSidebar.tsx`; overlay TOC in "reader chrome is reading-first".
+
 ### Convention: window chrome merges into existing headers
 
 **What**: There is no second titlebar. Library and reader headers are `h-12` via `titlebarClassName()`. macOS keeps system traffic lights and adds `pl-[72px]`; Windows / Linux render `WindowControls` on the far right.
