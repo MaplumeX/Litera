@@ -54,6 +54,16 @@ frame-src 'self' blob:
 
 **Instead**: Keep `script-src 'self'` only. `blob:` goes in `img-src`, `font-src`, `media-src`, `frame-src` where foliate.js needs it for rendering, not script execution.
 
+### Convention: chrome fonts stay same-origin
+
+**What**: App chrome uses `@fontsource-variable/geist`. Vite emits woff2 under `dist/assets/`. That satisfies `font-src 'self'`.
+
+**Why**: Google Fonts or any `https://fonts.gstatic.com` URL is blocked. Loosening `font-src` to fix a 404 would also let a book iframe load remote fonts.
+
+**Don't**: Add a `<link>` to fonts.google.com, or add `https:` to `font-src` because a font failed to load. Fix the Fontsource import instead.
+
+**Related**: frontend `component-guidelines.md` "app chrome is a cool product-tool surface".
+
 ## Tauri 2 Plugin Registration
 
 ### Convention: Plugins in lib.rs, permissions in capabilities/

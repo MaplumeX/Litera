@@ -22,6 +22,36 @@ npx shadcn@latest add <component-name>
 | `react-resizable-panels` | Draggable split-pane layout (shadcn/ui Resizable component base) |
 | `react-markdown` + `remark-gfm` | Agent response Markdown rendering (lists, code blocks, tables) |
 | `lucide-react` | Icon library for all toolbar/action buttons |
+| `@fontsource-variable/geist` | Self-hosted Geist Variable for **app chrome only** |
+
+### Convention: app chrome is a cool product-tool surface
+
+**What**: Library, reader chrome, chat, and settings share one Linear-like language. Tokens live in `src/index.css` (`:root` / `.dark`). Chrome type is Geist Variable plus CJK system fallbacks, imported from `src/main.tsx` before `index.css`.
+
+**Why**: Default shadcn zinc + system UI + card shadows read as scaffolding. A reader still needs a precise tool shell; book-page type stays user-owned.
+
+**How**:
+```tsx
+// src/main.tsx — chrome font, Vite-emitted same-origin woff2
+import "@fontsource-variable/geist/wght.css";
+import "./index.css";
+```
+
+```css
+/* src/index.css @theme inline */
+--font-sans: "Geist Variable", "PingFang SC", "Microsoft YaHei", "Noto Sans SC", ui-sans-serif, system-ui, sans-serif;
+/* --radius: 0.5rem; cool zinc neutrals; no second brand color */
+```
+
+**Rules**:
+- Do not put Geist (or `--font-sans`) into `generateStylesCss`. Reader body uses the user's `fontFamily`. `reader-styles` tests must reject `Geist` in that CSS.
+- Do not add a Google Fonts CDN. CSP `font-src` is `'self' blob: data:` (see quality-guidelines).
+- Elevation is a 1px border or one-step surface shift. Do not put `shadow-sm` / `shadow-md` / `shadow-lg` on cards, the chat composer, TOC/标注 drawers, or dialogs.
+- Neutrals stay one cool zinc family (same hue in light and dark). No warm paper/bone canvas, no purple/blue glow, no second accent.
+- Library delete is lucide `X` with `useT()` `aria-label`, never emoji `✕`.
+- Keep layout geometry from "reader chrome is reading-first". Restyle tokens and surfaces only.
+
+**Related**: frontend `quality-guidelines.md` CSP `font-src`; `reader-styles.ts` `generateStylesCss`.
 
 ### Installed shadcn components
 
