@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Reader chrome, window chrome, and quality gates for App layout changes"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Verify no second ReaderView, no remount on mode toggle, overlays stay overlays"}
+{"file": ".trellis/spec/frontend/i18n.md", "reason": "New strings in both catalogs; default mode not in preferences.json"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "lastReaderMode camelCase wire contract matches Rust"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Library persistence and command validation quality gates"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "Optional field rules and update_reading_state merge semantics"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Cross-layer check for the new persisted mode field"}
+{"file": ".trellis/tasks/08-15-agent-reading-mode/research/persistence-reader-mode.md", "reason": "Confirm storage choices were followed"}

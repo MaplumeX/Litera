@@ -5,8 +5,11 @@
 ## State ownership
 
 - Rust owns durable library metadata, preferences, annotations, Agent config,
-  and Pi v3 session files.
+  and Pi v3 session files. Per-book last reader/Agent mode is `BookRecord.lastReaderMode`.
 - React owns route/layout/form state and the reducer projection used by chat UI.
+  App default mode (`litera.defaultReaderMode`) and pane widths live in `localStorage`.
+  `chatCollapsed`, `bookCollapsed`, `sessionRailOpen`, `tocVisible`, and
+  `annotationsVisible` are process-only.
 - `LiteraAgentRuntime` owns the active book worker, model stream, session leaf,
   and monotonically increasing local event version.
 - The EPUB worker owns extracted chapter text and search indexes for the currently
@@ -38,9 +41,10 @@ an old book or prompt advance no user-visible state.
 ## Durable writes
 
 Library/preferences/annotation mutations go through Tauri commands. Reading
-position and settings are debounced but flush on navigation/unmount. Pi session
-appends include the expected leaf id; stale writers fail rather than overwrite a
-new branch.
+position, typography settings, and `lastReaderMode` are debounced but flush on
+navigation/unmount. Changing the Settings default mode must not call
+`update_reading_state`. Pi session appends include the expected leaf id; stale
+writers fail rather than overwrite a new branch.
 
 ## Configuration
 

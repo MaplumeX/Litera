@@ -164,9 +164,15 @@ async fn open_book_bytes(app: AppHandle, store: State<'_, LibraryStore>, book_id
 #[tauri::command]
 async fn delete_book(store: State<'_, LibraryStore>, book_id: String) -> AppResult<()>
 
-// Update reading position/settings (called on relocate debounce + settings change debounce)
+// Update reading position/settings/mode (relocate debounce + settings debounce + mode toggle)
 #[tauri::command]
-async fn update_reading_state(store: State<'_, LibraryStore>, book_id: String, last_fraction: Option<f64>, settings: Option<ReadingSettings>) -> AppResult<()>
+async fn update_reading_state(
+    store: State<'_, LibraryStore>,
+    book_id: String,
+    last_fraction: Option<f64>,
+    settings: Option<ReadingSettings>,
+    last_reader_mode: Option<String>,
+) -> AppResult<()>
 
 // Per-book bookmarks + highlights (not BookRecord / library.json)
 #[tauri::command]
@@ -193,6 +199,7 @@ interface BookRecord {
   settings?: ReadingSettings;
   lastOpenedAt?: string;  // RFC3339; missing = never opened
   contentHash?: string;   // SHA-256 hex of committed EPUB bytes
+  lastReaderMode?: "reader" | "agent";  // missing = no memory; do not put on settings
 }
 
 interface ReadingSettings {
@@ -224,6 +231,7 @@ interface BookOpenContext {
   contentVersion: string;
   lastFraction?: number;
   settings?: ReadingSettings;
+  lastReaderMode?: "reader" | "agent";
 }
 
 interface BookmarkRecord {
@@ -276,7 +284,7 @@ interface AnnotationsFile {
 
 Do not filter `book.id != incoming_id` when matching `contentHash`. That made same-path unchanged look like `overwrite` and popped a replace dialog on every OS reopen of the same file.
 
-`save_book_metadata` writes `contentHash` from the staged bytes. An overwrite must keep `lastFraction`, `settings`, and `lastOpenedAt`. Same-path unchanged is a no-op on `library.json` and the committed EPUB. Overwrite also leaves `books/<id>/annotations.json` in place.
+`save_book_metadata` writes `contentHash` from the staged bytes. An overwrite must keep `lastFraction`, `settings`, `lastOpenedAt`, and `lastReaderMode`. Same-path unchanged is a no-op on `library.json` and the committed EPUB. Overwrite also leaves `books/<id>/annotations.json` in place.
 
 **Annotations**: `get_annotations` / `save_annotations` read and replace `books/<bookId>/annotations.json` under the `LibraryStore` gate. Missing file → `{ schemaVersion: 1, bookmarks: [], highlights: [] }`, not corrupt. Invalid JSON / unknown fields / unsupported `schemaVersion` → `StorageCorrupt`. `save_annotations` is a full snapshot replace (same contract as `settings`). Validate unique ids, non-empty `epubcfi(...)` locators, bookmark `fraction` in `0..=1`, and excerpt/label byte caps. Frontend must not `save_annotations` until `get_annotations` for that book succeeded — a failed load must not be treated as empty and written back. Cap highlight excerpts to the same UTF-8 byte limit on the client before save. Do not add annotation fields to `BookRecord`. Do not add WebView `fs` permission.
 
@@ -291,6 +299,70 @@ Do not filter `book.id != incoming_id` when matching `contentHash`. That made sa
 **Drag-drop paths**: `import_paths` accepts only OS drop / picker-equivalent absolute paths. Reject non-`.epub`, symlinks, and non-regular files. Do not add `dialog` / `fs` / `opener` permissions to the WebView capability.
 
 **OS file open**: system "Open With" / double-click is a third path source. It must reuse `import_paths` after `take_pending_open_paths`. See "Scenario: OS EPUB open" below.
+
+## Scenario: lastReaderMode
+
+### 1. Scope / Trigger
+
+Cross-layer reading-state field. The WebView resolves reader vs Agent layout; Rust persists the last mode on the book record. App default must not go through this command.
+
+### 2. Signatures
+
+```rust
+async fn update_reading_state(
+    store: State<'_, LibraryStore>,
+    book_id: String,
+    last_fraction: Option<f64>,
+    settings: Option<ReadingSettings>,
+    last_reader_mode: Option<String>,
+) -> AppResult<()>
+
+// BookOpenContext / BookRecord include:
+// last_reader_mode: Option<String>  // wire name lastReaderMode
+```
+
+### 3. Contracts
+
+- Request: `lastReaderMode` is omitted, `"reader"`, or `"agent"`. Independent of `lastFraction` and `settings`. At least one of the three Options is required.
+- Response: `BookOpenContext.lastReaderMode` is omitted when the book has no memory.
+- Environment: none. App default is WebView-only: `localStorage["litera.defaultReaderMode"]`.
+- Overwrite import keeps `lastReaderMode` with `lastFraction` / `settings` / `lastOpenedAt`.
+- Changing the Settings default must not call this command and must not patch existing books.
+
+### 4. Validation & Error Matrix
+
+- all three Options `None` → `InvalidInput` ("At least one reading state field is required")
+- `lastReaderMode` present and not `"reader"` / `"agent"` → `InvalidInput` on write
+- stored `lastReaderMode` present and not `"reader"` / `"agent"` → `StorageCorrupt` on read
+- missing field on old `library.json` → valid (`None`)
+- unknown book → `BookNotFound`
+
+### 5. Good/Base/Bad Cases
+
+- Good: `{ lastReaderMode: "agent" }` writes only the mode; fraction and settings stay.
+- Base: omitted field on an old book; open uses `litera.defaultReaderMode` or `"reader"`.
+- Bad: `{ lastReaderMode: "dark" }` or stuffing mode into `ReadingSettings`.
+
+### 6. Tests Required
+
+- Missing field loads; write/read round-trip; `BookOpenContext` returns the value.
+- Mode update does not clobber fraction or settings; fraction/settings updates do not clobber mode.
+- Invalid update rejected; invalid stored value is `StorageCorrupt`.
+- Frontend: book memory wins over default; changing default does not invoke `update_reading_state` for mode.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+```ts
+await invoke("save_preferences", { defaultReaderMode: "agent" });
+await invoke("update_reading_state", { bookId, settings: { lastReaderMode: "agent" } });
+```
+
+#### Correct
+```ts
+localStorage.setItem("litera.defaultReaderMode", "agent");
+await invoke("update_reading_state", { bookId, lastReaderMode: "agent" });
+```
 
 ## Scenario: OS EPUB open
 

@@ -1,0 +1,9 @@
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend checklist and layer map before editing React reader/chat chrome"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Single ReaderView/ChatPanel, no remount on collapse, TOC/annotations overlays, window chrome, shadcn/i18n button rules"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "Rust vs React ownership; process-only flags vs durable reading state"}
+{"file": ".trellis/spec/frontend/hook-guidelines.md", "reason": "useAgentBridge stays in ChatPanel; debounced persist + flush on book change"}
+{"file": ".trellis/spec/frontend/i18n.md", "reason": "Do not put default mode in preferences.json; catalog keys; useT before early return"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend checklist for library persistence changes"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "Optional BookRecord fields, no schema bump, update_reading_state independent Options"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "New persisted field crosses TS, serde, and old-build deny_unknown_fields"}
+{"file": ".trellis/tasks/08-15-agent-reading-mode/research/persistence-reader-mode.md", "reason": "Where default vs per-book mode and pane widths are stored"}
