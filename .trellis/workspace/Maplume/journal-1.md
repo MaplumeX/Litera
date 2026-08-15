@@ -1438,3 +1438,26 @@ Planned and shipped a Linear-like chrome restyle: self-hosted Geist, cool zinc t
 ### Status
 
 [OK] **Completed**
+
+
+## Session 63: Polish reader layout to desktop conventions
+
+**Date**: 2026-08-15
+**Task**: Polish reader layout to desktop conventions
+**Branch**: `main`
+
+### Summary
+
+Planned and shipped a desktop-reader chrome pass: regrouped toolbar, inset book canvas, book-cell footer scrubber with thumb/ticks/drag preview/prev-next chapter, current-chapter TOC highlight. Recorded the new layout contracts in frontend specs.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e1711d3` | (see git log) |
+| `39dbf33` | (see git log) |
+| `81804ea` | (see git log) |
+
+### Status
+
+[OK] **Completed**

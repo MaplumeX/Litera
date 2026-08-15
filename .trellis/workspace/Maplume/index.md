@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 62
+- **Total Sessions**: 63
 - **Last Active**: 2026-08-15
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1440 | Active |
+| `journal-1.md` | ~1463 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 63 | 2026-08-15 | Polish reader layout to desktop conventions | `e1711d3`, `39dbf33`, `81804ea` | `main` |
 | 62 | 2026-08-15 | Restyle app chrome as a product-tool surface | `34fb1a3`, `c10cb34`, `087f829` | `main` |
 | 61 | 2026-08-15 | Agent reading mode | `292bdc8`, `e2ec221` | `main` |
 | 60 | 2026-08-15 | 美化滚动条样式 | `2ff3f89` | `main` |
