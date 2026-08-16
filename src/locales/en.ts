@@ -147,6 +147,10 @@ export const en: { [K in MessageKey]: string } = {
   "chat.generating": "Generating reply",
   "chat.edit": "Edit",
   "chat.copy": "Copy",
+  "chat.citation.openChapter": "Open chapter: {label}",
+  "chat.citation.openAnnotation": "Open annotation: {label}",
+  "chat.citation.chapter": "Chapter {n}",
+  "chat.citation.annotation": "Annotation",
 
   "agent.title": "LLM settings",
   "agent.description": "Configure the LLM provider, API key, and model.",

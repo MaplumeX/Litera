@@ -18,6 +18,7 @@ import { EmptyState } from "./EmptyState";
 import { SessionList } from "./SessionList";
 import { TypingIndicator } from "./TypingIndicator";
 import { useT } from "@/lib/i18n";
+import type { BookCitation } from "@/lib/tool-citations";
 
 export interface ChatPanelHandle {
   fillInput: (text: string, chapterHref?: string) => void;
@@ -29,6 +30,7 @@ interface ChatPanelProps {
   variant?: "docked" | "workspace";
   sessionRailOpen?: boolean;
   onSessionRailOpenChange?: (open: boolean) => void;
+  onOpenCitation?: (citation: BookCitation) => void;
 }
 
 export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
@@ -39,6 +41,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       variant = "docked",
       sessionRailOpen,
       onSessionRailOpenChange,
+      onOpenCitation,
     },
     ref,
   ) {
@@ -405,6 +408,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                 <AssistantMessage
                   message={message}
                   streaming={isStreaming && index === state.messages.length - 1}
+                  onOpenCitation={onOpenCitation}
                 />
               )}
             </div>

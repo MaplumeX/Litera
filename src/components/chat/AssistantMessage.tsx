@@ -3,6 +3,7 @@ import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Bot, Check, Copy } from "lucide-react";
 import type { AgentMessage } from "@/types/agent";
+import type { BookCitation } from "@/lib/tool-citations";
 import { ToolCallCard } from "./ToolCallCard";
 import { TypingIndicator } from "./TypingIndicator";
 import { useT } from "@/lib/i18n";
@@ -49,15 +50,22 @@ export function BotAvatar() {
 interface AssistantMessageProps {
   message: AgentMessage;
   streaming?: boolean;
+  onOpenCitation?: (citation: BookCitation) => void;
 }
 
-export function AssistantMessage({ message, streaming = false }: AssistantMessageProps) {
+export function AssistantMessage({
+  message,
+  streaming = false,
+  onOpenCitation,
+}: AssistantMessageProps) {
   return (
     <div className="flex gap-2">
       <BotAvatar />
       <div className="min-w-0 max-w-[90%] space-y-1">
         {streaming && <TypingIndicator />}
-        {message.toolCalls?.map((call) => <ToolCallCard key={call.toolCallId} call={call} />)}
+        {message.toolCalls?.map((call) => (
+          <ToolCallCard key={call.toolCallId} call={call} onOpenCitation={onOpenCitation} />
+        ))}
         {message.content && (
           <div>
             <div className="prose prose-sm max-w-none overflow-x-auto dark:prose-invert">

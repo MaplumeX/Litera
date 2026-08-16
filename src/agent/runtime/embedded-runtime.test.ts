@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { createFauxCore, fauxAssistantMessage } from "@earendil-works/pi-ai";
+import { createFauxCore, fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { LiteraAgentRuntime, type RuntimeConfig } from "./embedded-runtime";
 import type { BookContentPort } from "@/agent/book/book-content";
 import type { SessionPort } from "@/agent/sessions/session-port";
 import type { DecodedPiSession, PiSessionEntry } from "@/agent/sessions/pi-session";
+import type { AnnotationsFile } from "@/types/library";
 
 const now="2026-08-14T00:00:00Z";
 function session():DecodedPiSession{return{header:{type:"session",version:3,id:"session-1",timestamp:now,cwd:""},entries:[],leafId:null};}
@@ -175,4 +176,110 @@ describe("LiteraAgentRuntime",()=>{
     releaseConfig({provider:"custom-a",model:"model-a",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret"});
     await first;
   });
+
+  it("persists list_annotations bookmarks and highlights as JSON toolResult",async()=>{
+    const current=session();const batches:PiSessionEntry[][]=[];
+    const sessions:SessionPort={create:async()=>current,list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,entries)=>{batches.push(entries);return entries[entries.length-1]?.id??null;}};
+    const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:1}),toc:async()=>[],readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:1,text:"chapter"}),search:async()=>[],close:()=>{}};
+    const annotations:AnnotationsFile={schemaVersion:1,bookmarks:[{id:"b1",cfi:"epubcfi(/6/8!/4/2/1:0)",fraction:0.2,createdAt:"2026-08-14T00:00:00.000Z",label:"Loomings"},{id:"b2",cfi:"epubcfi(/6/10!/4/2/1:0)",fraction:0,createdAt:"2026-08-14T00:00:00.000Z"}],highlights:[{id:"h1",cfi:"epubcfi(/6/8!/4/2,/1:12,/1:48)",excerpt:"Call me Ishmael.",createdAt:"2026-08-14T00:00:00.000Z"}]};
+    const requested:string[]=[];
+    const faux=createFauxCore({tokensPerSecond:10_000});faux.setResponses([fauxAssistantMessage(fauxToolCall("list_annotations",{}),{stopReason:"toolUse"}),fauxAssistantMessage("those marks")]);
+    const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret"};
+    const runtime=new LiteraAgentRuntime({sessions,book,loadConfig:async()=>config,loadStream:async()=>faux.streamSimple,loadAnnotations:async(bookId)=>{requested.push(bookId);return annotations;}});
+    await runtime.openBook("book",new ArrayBuffer(1));
+    await runtime.prompt("what did I highlight?",{});
+    expect(requested).toEqual(["book"]);
+    expect(listAnnotationsPayload(batches)).toEqual({bookmarks:[{id:"b1",cfi:"epubcfi(/6/8!/4/2/1:0)",fraction:0.2,createdAt:"2026-08-14T00:00:00.000Z",label:"Loomings"},{id:"b2",cfi:"epubcfi(/6/10!/4/2/1:0)",fraction:0,createdAt:"2026-08-14T00:00:00.000Z"}],highlights:[{id:"h1",cfi:"epubcfi(/6/8!/4/2,/1:12,/1:48)",excerpt:"Call me Ishmael.",createdAt:"2026-08-14T00:00:00.000Z"}]});
+  });
+
+  it("returns empty bookmark and highlight arrays when the annotations file is empty",async()=>{
+    const current=session();const batches:PiSessionEntry[][]=[];
+    const sessions:SessionPort={create:async()=>current,list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,entries)=>{batches.push(entries);return entries[entries.length-1]?.id??null;}};
+    const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:1}),toc:async()=>[],readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:1,text:"chapter"}),search:async()=>[],close:()=>{}};
+    const faux=createFauxCore({tokensPerSecond:10_000});faux.setResponses([fauxAssistantMessage(fauxToolCall("list_annotations",{}),{stopReason:"toolUse"}),fauxAssistantMessage("none")]);
+    const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret"};
+    const runtime=new LiteraAgentRuntime({sessions,book,loadConfig:async()=>config,loadStream:async()=>faux.streamSimple,loadAnnotations:async()=>({schemaVersion:1,bookmarks:[],highlights:[]})});
+    await runtime.openBook("book",new ArrayBuffer(1));
+    await runtime.prompt("any marks?",{});
+    expect(listAnnotationsPayload(batches)).toEqual({bookmarks:[],highlights:[]});
+  });
+
+  it("returns a structured tool error when get_annotations fails",async()=>{
+    const current=session();const batches:PiSessionEntry[][]=[];
+    const sessions:SessionPort={create:async()=>current,list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,entries)=>{batches.push(entries);return entries[entries.length-1]?.id??null;}};
+    const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:1}),toc:async()=>[],readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:1,text:"chapter"}),search:async()=>[],close:()=>{}};
+    const faux=createFauxCore({tokensPerSecond:10_000});faux.setResponses([fauxAssistantMessage(fauxToolCall("list_annotations",{}),{stopReason:"toolUse"}),fauxAssistantMessage("could not read marks")]);
+    const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret"};
+    const runtime=new LiteraAgentRuntime({sessions,book,loadConfig:async()=>config,loadStream:async()=>faux.streamSimple,loadAnnotations:async()=>{throw{code:"StorageCorrupt",message:"Failed to parse annotations.json"};}});
+    await runtime.openBook("book",new ArrayBuffer(1));
+    await runtime.prompt("what did I mark?",{});
+    const result=listAnnotationsResult(batches);
+    expect(result?.isError).toBe(true);
+    expect(result?.text).toContain("Failed to parse annotations.json");
+    expect(result?.text).not.toContain("[object Object]");
+  });
+
+  it("rejects a stale list_annotations execute after the bookId switches",async()=>{
+    const current=session();const batches:PiSessionEntry[][]=[];
+    const sessions:SessionPort={create:async()=>current,list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,entries)=>{batches.push(entries);return entries[entries.length-1]?.id??null;}};
+    const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:1}),toc:async()=>[],readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:1,text:"chapter"}),search:async()=>[],close:()=>{}};
+    let releaseLoad:(value:AnnotationsFile)=>void=()=>{};
+    const pending=new Promise<AnnotationsFile>((resolve)=>{releaseLoad=resolve;});
+    let started!:()=>void;
+    const loadStarted=new Promise<void>((resolve)=>{started=resolve;});
+    const faux=createFauxCore({tokensPerSecond:10_000});faux.setResponses([fauxAssistantMessage(fauxToolCall("list_annotations",{}),{stopReason:"toolUse"}),fauxAssistantMessage("stale")]);
+    const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret"};
+    const runtime=new LiteraAgentRuntime({sessions,book,loadConfig:async()=>config,loadStream:async()=>faux.streamSimple,loadAnnotations:async()=>{started();return pending;}});
+    await runtime.openBook("book-a",new ArrayBuffer(1));
+    const prompt=runtime.prompt("what did I mark?",{});
+    await loadStarted;
+    await runtime.openBook("book-b",new ArrayBuffer(1));
+    releaseLoad({schemaVersion:1,bookmarks:[{id:"stale",cfi:"epubcfi(/6/8!/4/2/1:0)",fraction:0.2,createdAt:"2026-08-14T00:00:00.000Z",label:"Loomings"}],highlights:[]});
+    await prompt.catch(()=>{});
+    const result=listAnnotationsResult(batches);
+    expect(result?.isError).toBe(true);
+    expect(result?.text).toContain("电子书上下文已切换");
+    expect(result?.text).not.toContain("stale");
+  });
+
+  it("resolves chapter hrefs from the worker TOC index, not array position",async()=>{
+    const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:2}),toc:async()=>[{index:2,label:"Three",hrefs:["three.xhtml","three-alt.xhtml"],chars:3},{index:0,label:"One",hrefs:["one.xhtml"],chars:1}],readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:1,text:"chapter"}),search:async()=>[],close:()=>{}};
+    const runtime=new LiteraAgentRuntime({book});
+    expect(await runtime.resolveChapterHref(0)).toBeUndefined();
+    await runtime.openBook("book",new ArrayBuffer(1));
+    expect(await runtime.resolveChapterHref(2)).toBe("three.xhtml");
+    expect(await runtime.resolveChapterHref(0)).toBe("one.xhtml");
+    expect(await runtime.resolveChapterHref(1)).toBeUndefined();
+    runtime.closeBook();
+    expect(await runtime.resolveChapterHref(2)).toBeUndefined();
+  });
+
+  it("returns undefined when resolveChapterHref races a book switch",async()=>{
+    let release!:()=>void;
+    const held=new Promise<void>((resolve)=>{release=resolve;});
+    const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:1}),toc:async()=>{await held;return[{index:0,label:"One",hrefs:["one.xhtml"],chars:1}];},readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:1,text:"chapter"}),search:async()=>[],close:()=>{}};
+    const runtime=new LiteraAgentRuntime({book});
+    await runtime.openBook("book-a",new ArrayBuffer(1));
+    const pending=runtime.resolveChapterHref(0);
+    await runtime.openBook("book-b",new ArrayBuffer(1));
+    release();
+    expect(await pending).toBeUndefined();
+  });
 });
+
+function listAnnotationsResult(batches:PiSessionEntry[][]):{isError:boolean;text:string}|undefined{
+  for(const entry of batches.flat()){
+    if(entry.type!=="message")continue;
+    const message=entry.message as {role?:string;toolName?:string;isError?:boolean;content?:Array<{type?:string;text?:string}>};
+    if(message.role==="toolResult"&&message.toolName==="list_annotations"){
+      return{isError:message.isError===true,text:message.content?.find((block)=>block.type==="text")?.text??""};
+    }
+  }
+}
+
+function listAnnotationsPayload(batches:PiSessionEntry[][]):unknown{
+  const result=listAnnotationsResult(batches);
+  expect(result?.isError).toBe(false);
+  expect(result?.text).toBeTruthy();
+  return JSON.parse(result!.text);
+}

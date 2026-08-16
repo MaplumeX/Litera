@@ -31,7 +31,17 @@ describe("agentReducer", () => {
     state = reduce(state, { version: 4, type: "tool_end", bookId: "book-a", sessionId: "s", promptId: "p", toolCallId: "two", result: "done", isError: false });
     expect(state.messages[0].toolCalls).toEqual([
       expect.objectContaining({ toolCallId: "one", done: false }),
-      expect.objectContaining({ toolCallId: "two", done: true, result: "done" }),
+      expect.objectContaining({ toolCallId: "two", done: true, result: "done", isError: false }),
+    ]);
+  });
+
+  it("records tool_end isError on the matching call", () => {
+    let state = createAgentState("book-a");
+    state = reduce(state, { version: 1, type: "prompt_started", bookId: "book-a", sessionId: "s", promptId: "p" });
+    state = reduce(state, { version: 2, type: "tool_start", bookId: "book-a", sessionId: "s", promptId: "p", toolCallId: "one", tool: "search_in_book", params: {} });
+    state = reduce(state, { version: 3, type: "tool_end", bookId: "book-a", sessionId: "s", promptId: "p", toolCallId: "one", result: "boom", isError: true });
+    expect(state.messages[0].toolCalls).toEqual([
+      expect.objectContaining({ toolCallId: "one", done: true, result: "boom", isError: true }),
     ]);
   });
 

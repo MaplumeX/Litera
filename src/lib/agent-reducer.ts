@@ -129,7 +129,7 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
         messages: updateLastAssistant(base.messages, (message) => ({
           ...message,
           toolCalls: message.toolCalls?.map((call) => call.toolCallId === event.toolCallId
-            ? { ...call, result: event.result, done: true }
+            ? { ...call, result: event.result, done: true, isError: event.isError }
             : call),
         })),
       };

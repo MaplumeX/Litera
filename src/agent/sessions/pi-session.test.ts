@@ -29,6 +29,44 @@ describe("Pi session decoder", () => {
     ] as never[];
     expect(windowCompleteTurns(messages, 1).map((message) => (message as unknown as { role: string }).role)).toEqual(["custom", "user", "assistant"]);
   });
+  it("copies toolResult isError onto the visible tool call", () => {
+    const session = decodePiSession({
+      header: { type: "session", version: 3, id: "s", timestamp, cwd: "" },
+      entries: [
+        {
+          type: "message",
+          id: "a",
+          parentId: null,
+          timestamp,
+          message: {
+            role: "assistant",
+            content: [{ type: "toolCall", id: "c1", name: "search_in_book", arguments: { queries: ["x"] } }],
+            timestamp: 1,
+          },
+        },
+        {
+          type: "message",
+          id: "b",
+          parentId: "a",
+          timestamp,
+          message: {
+            role: "toolResult",
+            toolCallId: "c1",
+            toolName: "search_in_book",
+            content: [{ type: "text", text: "[]" }],
+            isError: true,
+            timestamp: 2,
+          },
+        },
+      ],
+      leafId: "b",
+    });
+    expect(visibleMessages(session)[0].toolCalls?.[0]).toMatchObject({
+      toolCallId: "c1",
+      result: "[]",
+      isError: true,
+    });
+  });
   it("normalizes legacy null content and rejects malformed known messages", () => {
     const normalized = decodePiSession({ header: { type: "session", version: 3, id: "s", timestamp, cwd: "" }, entries: [{ type: "message", id: "a", parentId: null, timestamp, message: { role: "assistant", content: null } }], leafId: "a" });
     expect((normalized.entries[0].message as { content: unknown }).content).toEqual([]);

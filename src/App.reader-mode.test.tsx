@@ -125,6 +125,7 @@ vi.mock("@/lib/use-agent-config", () => ({
   }),
 }));
 
+import { embeddedAgentRuntime } from "@/agent/runtime/embedded-runtime";
 import App from "./App";
 
 const openContext: BookOpenContext = {
@@ -167,6 +168,9 @@ async function openReader() {
 beforeEach(() => {
   invokeMock.mockReset();
   windowApi.onCloseRequested.mockClear();
+  vi.mocked(readerHandle.goToCfi).mockClear();
+  vi.mocked(readerHandle.goToTocItem).mockClear();
+  vi.mocked(readerHandle.goToFraction).mockClear();
   openContext.lastReaderMode = undefined;
   bridgeState = {
     ...createAgentState("book1"),
@@ -394,6 +398,76 @@ describe("reader / agent mode", () => {
     expect(screen.getByTestId("reader-shell").style.gridTemplateColumns).toBe("1fr 38%");
     expect(screen.getByTestId("reader-book-cell").hidden).toBe(false);
     expect(screen.getByLabelText("关闭目录")).toBeTruthy();
+  });
+
+  it("expands a collapsed agent-mode book and jumps to a search citation", async () => {
+    localStorage.setItem(DEFAULT_READER_MODE_KEY, "agent");
+    vi.spyOn(embeddedAgentRuntime, "resolveChapterHref").mockResolvedValue("loomings.xhtml");
+    bridgeState = {
+      ...bridgeState,
+      messages: [
+        {
+          role: "assistant",
+          content: "found it",
+          toolCalls: [
+            {
+              toolCallId: "s1",
+              tool: "search_in_book",
+              params: { queries: ["Ishmael"] },
+              result: JSON.stringify([
+                { chapterIndex: 2, chapterTitle: "Loomings", snippet: "Call me Ishmael." },
+              ]),
+              done: true,
+            },
+          ],
+        },
+      ],
+    };
+    const screen = await openReader();
+    fireEvent.click(screen.getByLabelText("隐藏书籍"));
+    expect(screen.getByTestId("reader-book-cell").hidden).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "打开章节：Loomings" }));
+    expect(screen.getByTestId("reader-book-cell").hidden).toBe(false);
+    await waitFor(() => {
+      expect(embeddedAgentRuntime.resolveChapterHref).toHaveBeenCalledWith(2);
+      expect(readerHandle.goToTocItem).toHaveBeenCalledWith("loomings.xhtml");
+    });
+  });
+
+  it("jumps to a highlight citation from reader-mode chat", async () => {
+    bridgeState = {
+      ...bridgeState,
+      messages: [
+        {
+          role: "assistant",
+          content: "your marks",
+          toolCalls: [
+            {
+              toolCallId: "ann-1",
+              tool: "list_annotations",
+              params: {},
+              result: JSON.stringify({
+                bookmarks: [],
+                highlights: [
+                  {
+                    id: "h1",
+                    cfi: "epubcfi(/6/8!/4/2,/1:12,/1:48)",
+                    excerpt: "Call me Ishmael.",
+                  },
+                ],
+              }),
+              done: true,
+            },
+          ],
+        },
+      ],
+    };
+    const screen = await openReader();
+    fireEvent.click(screen.getByLabelText("显示对话"));
+    fireEvent.click(screen.getByRole("button", { name: "打开标注：Call me Ishmael." }));
+    await waitFor(() => {
+      expect(readerHandle.goToCfi).toHaveBeenCalledWith("epubcfi(/6/8!/4/2,/1:12,/1:48)");
+    });
   });
 
   it("re-entering agent mode opens the list and the book", async () => {

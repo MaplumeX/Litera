@@ -28,6 +28,7 @@ export interface AgentToolCall {
   params: unknown;
   result?: unknown;
   done: boolean;
+  isError?: boolean;
 }
 
 export interface AgentMessage {

@@ -13,3 +13,28 @@ errors. Frontend catches remain `unknown` and use `invokeErrorMessage`.
   failures emit an Agent error and restore the prompt UI to a retryable state.
 - Errors must not include credentials, headers, raw provider bodies, or selected
   book text.
+
+### Convention: Agent tools must wrap Tauri `invoke` errors
+
+**What**: If a tool `execute` calls `invoke`, catch `unknown` and rethrow
+`new Error(invokeErrorMessage(error))` before the error leaves the tool.
+
+**Why**: Rust commands serialize as `{ code, message }`, not `Error`.
+`pi-agent-core` does `error instanceof Error ? error.message : String(error)`,
+so a raw invoke failure becomes the tool result `[object Object]`.
+
+```ts
+// Wrong — model sees "[object Object]"
+const data = await invoke<AnnotationsFile>("get_annotations", { bookId });
+
+// Correct — structured isError tool result with the AppError message
+try {
+  const data = await this.bookCall(bookId, () => this.loadAnnotations(bookId));
+  return result(JSON.stringify(mapAnnotations(data)));
+} catch (error) {
+  throw new Error(invokeErrorMessage(error));
+}
+```
+
+**Tests**: a fake `loadAnnotations` that rejects `{ code, message }` must persist
+a `toolResult` with `isError: true` whose text is `message`, not `[object Object]`.

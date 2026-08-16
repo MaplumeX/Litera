@@ -38,6 +38,12 @@ by id and preserve the current session when it is still present.
 Book changes reset messages, prompt state, sessions, and errors. Late events for
 an old book or prompt advance no user-visible state.
 
+Clickable tool citations are parsed only from tool JSON (`src/lib/tool-citations.ts`).
+Do not parse assistant Markdown as book locators. `App` owns the jump: expand the
+book if it is collapsed, close TOC/annotation overlays, then `jumpToAnnotation`
+for CFI or `resolveChapterHref` + `goToChapterHref` for `chapterIndex`. Do not
+keep a second reader-location store in chat state.
+
 ## Durable writes
 
 Library/preferences/annotation mutations go through Tauri commands. Reading

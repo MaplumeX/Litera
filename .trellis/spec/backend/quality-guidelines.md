@@ -18,6 +18,16 @@
   query variants, prefers exact hits, and returns deterministic bounded snippets.
 - EPUB parsing, ownership, indexing, and search run in the module worker. A book
   switch terminates the old worker and rejects pending calls.
+- `list_annotations` is a no-arg read of the current book's `annotations.json`
+  via `get_annotations`. It is not injected into `bookSnapshot` or
+  `readingContext`. Return `{ bookmarks, highlights }` JSON text: each item
+  keeps `id`, `cfi`, `createdAt`; bookmarks also `fraction` and optional
+  `label`; highlights keep `excerpt`. Omit `label` when unset. Empty arrays are
+  success. Do not call `save_annotations`. Do not invent chapter titles. Gate
+  with the same `bookCall` / `bookId` check as the text tools.
+- Resolve a model `chapterIndex` to a reader location with
+  `LiteraAgentRuntime.resolveChapterHref` (worker TOC `hrefs[0]`). Never use
+  `flattenToc(readerToc)[i]`. Do not add an `open_in_reader` model tool.
 
 ## Session integrity
 

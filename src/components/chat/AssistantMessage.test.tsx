@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-import { cleanup, render } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, fireEvent, render } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { AssistantMessage } from "./AssistantMessage";
+import type { AgentToolCall } from "@/types/agent";
 
 afterEach(() => {
   cleanup();
@@ -49,5 +50,76 @@ describe("AssistantMessage", () => {
     expect(link.getAttribute("target")).toBe("_blank");
     expect(link.getAttribute("rel")).toBe("noreferrer");
     expect(getByText("list item")).toBeTruthy();
+  });
+
+  it("clicks a search hit row and emits a chapter citation", () => {
+    const onOpenCitation = vi.fn();
+    const call: AgentToolCall = {
+      toolCallId: "search-1",
+      tool: "search_in_book",
+      params: { queries: ["Ishmael"] },
+      result: JSON.stringify([
+        { chapterIndex: 2, chapterTitle: "Loomings", snippet: "Call me Ishmael." },
+      ]),
+      done: true,
+    };
+    const { getByRole } = render(
+      <AssistantMessage
+        message={{ role: "assistant", content: "found it", toolCalls: [call] }}
+        onOpenCitation={onOpenCitation}
+      />,
+    );
+
+    fireEvent.click(getByRole("button", { name: "打开章节：Loomings" }));
+    expect(onOpenCitation).toHaveBeenCalledWith({ kind: "chapter", chapterIndex: 2 });
+  });
+
+  it("clicks a highlight row and emits a cfi citation", () => {
+    const onOpenCitation = vi.fn();
+    const call: AgentToolCall = {
+      toolCallId: "ann-1",
+      tool: "list_annotations",
+      params: {},
+      result: JSON.stringify({
+        bookmarks: [],
+        highlights: [
+          { id: "h1", cfi: "epubcfi(/6/8!/4/2,/1:12,/1:48)", excerpt: "Call me Ishmael." },
+        ],
+      }),
+      done: true,
+    };
+    const { getByRole } = render(
+      <AssistantMessage
+        message={{ role: "assistant", content: "your marks", toolCalls: [call] }}
+        onOpenCitation={onOpenCitation}
+      />,
+    );
+
+    fireEvent.click(getByRole("button", { name: "打开标注：Call me Ishmael." }));
+    expect(onOpenCitation).toHaveBeenCalledWith({
+      kind: "cfi",
+      cfi: "epubcfi(/6/8!/4/2,/1:12,/1:48)",
+    });
+  });
+
+  it("does not render citation rows for isError tool results", () => {
+    const onOpenCitation = vi.fn();
+    const call: AgentToolCall = {
+      toolCallId: "read-1",
+      tool: "read_chapter",
+      params: { chapterIndex: 2 },
+      result: "Failed to read chapter",
+      done: true,
+      isError: true,
+    };
+    const { queryByRole } = render(
+      <AssistantMessage
+        message={{ role: "assistant", content: "could not read", toolCalls: [call] }}
+        onOpenCitation={onOpenCitation}
+      />,
+    );
+
+    expect(queryByRole("button", { name: /打开章节/ })).toBeNull();
+    expect(onOpenCitation).not.toHaveBeenCalled();
   });
 });

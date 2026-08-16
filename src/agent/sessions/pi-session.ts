@@ -207,7 +207,10 @@ export function visibleMessages(session: DecodedPiSession): UiAgentMessage[] {
       const owner = toolOwners.get(message.toolCallId);
       if (owner) {
         const call = output[owner.messageIndex].toolCalls?.[owner.callIndex];
-        if (call) call.result = contentText(message.content);
+        if (call) {
+          call.result = contentText(message.content);
+          if (message.isError === true) call.isError = true;
+        }
       }
       continue;
     }

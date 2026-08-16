@@ -145,6 +145,10 @@ export const zhCN = {
   "chat.generating": "正在生成回复",
   "chat.edit": "编辑",
   "chat.copy": "复制",
+  "chat.citation.openChapter": "打开章节：{label}",
+  "chat.citation.openAnnotation": "打开标注：{label}",
+  "chat.citation.chapter": "第 {n} 章",
+  "chat.citation.annotation": "标注",
 
   "agent.title": "LLM 设置",
   "agent.description": "配置 LLM 供应商、API Key 与模型。",

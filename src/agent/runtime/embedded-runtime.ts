@@ -8,7 +8,9 @@ import { createGuardedNativeFetch } from "@/agent/transport/native-fetch";
 import { resolveRuntimeModel } from "@/agent/runtime/model-resolution";
 import { activeBranch, convertPiContextToLlm, newEntry, piContextMessages, visibleMessages, type DecodedPiSession, type PiSessionEntry } from "@/agent/sessions/pi-session";
 import { tauriSessionPort, type SessionPort } from "@/agent/sessions/session-port";
+import { invokeErrorMessage } from "@/lib/app-error";
 import type { AgentEvent, AgentMessage as UiMessage } from "@/types/agent";
+import type { AnnotationsFile } from "@/types/library";
 
 export interface RuntimeConfig { provider:string; model:string; api:string; baseUrl:string; apiKey:string }
 type Listener = (event: AgentEvent) => void;
@@ -17,7 +19,7 @@ type RuntimeEventPayload = AgentEvent extends infer Event
     ? Omit<Event, "version">
     : never
   : never;
-const SYSTEM_PROMPT = "You are Litera, an EPUB reading assistant. Use the book tools when evidence is needed. Answer in the user's language.";
+const SYSTEM_PROMPT = "You are Litera, an EPUB reading assistant. Use the book tools when evidence is needed. Highlights and bookmarks are available via list_annotations when the user asks about what they marked; do not call it for ordinary chapter questions. Answer in the user's language.";
 
 async function streamFor(api: string): Promise<StreamFn> {
   if (api === "anthropic-messages") return (await import("@earendil-works/pi-ai/api/anthropic-messages")).streamSimple as unknown as StreamFn;
@@ -32,14 +34,16 @@ const result = (text:string,details:unknown={})=>({content:[{type:"text" as cons
 export class LiteraAgentRuntime {
   private readonly listeners=new Set<Listener>(); private readonly sessions:SessionPort; private book:BookContentPort;
   private readonly loadConfig:()=>Promise<RuntimeConfig>; private readonly loadStream:(api:string)=>Promise<StreamFn>;
+  private readonly loadAnnotations:(bookId:string)=>Promise<AnnotationsFile>;
   private bookId:string|null=null; private session:DecodedPiSession|null=null; private agent:Agent|null=null; private promptId:string|null=null; private revision=0; private bookGeneration=0; private configRevision=0;
-  constructor(options?:{sessions?:SessionPort;book?:BookContentPort;loadConfig?:()=>Promise<RuntimeConfig>;loadStream?:(api:string)=>Promise<StreamFn>}){this.sessions=options?.sessions??tauriSessionPort;this.book=options?.book??new BookWorkerClient();this.loadConfig=options?.loadConfig??(()=>invoke<RuntimeConfig>("get_agent_runtime_config"));this.loadStream=options?.loadStream??streamFor;}
+  constructor(options?:{sessions?:SessionPort;book?:BookContentPort;loadConfig?:()=>Promise<RuntimeConfig>;loadStream?:(api:string)=>Promise<StreamFn>;loadAnnotations?:(bookId:string)=>Promise<AnnotationsFile>}){this.sessions=options?.sessions??tauriSessionPort;this.book=options?.book??new BookWorkerClient();this.loadConfig=options?.loadConfig??(()=>invoke<RuntimeConfig>("get_agent_runtime_config"));this.loadStream=options?.loadStream??streamFor;this.loadAnnotations=options?.loadAnnotations??((bookId)=>invoke<AnnotationsFile>("get_annotations",{bookId}));}
   subscribe(listener:Listener){this.listeners.add(listener);return()=>{this.listeners.delete(listener);};}
   syncBook(bookId:string){if(this.bookId===bookId)this.emit({type:"book_ready",bookId});}
   private emit(payload:RuntimeEventPayload){const event={version:++this.revision,...payload} as AgentEvent; for(const listener of this.listeners)listener(event);}
   invalidateConfig(){this.configRevision+=1; this.agent?.abort(); this.agent=null;}
   async openBook(bookId:string,bytes:ArrayBuffer){this.agent?.abort();this.book.close();const generation=++this.bookGeneration;this.bookId=bookId;this.session=null;this.agent=null;this.emit({type:"book_loading",bookId});try{await this.book.open(bookId,bytes);if(this.bookGeneration===generation&&this.bookId===bookId)this.emit({type:"book_ready",bookId});}catch(error){if(this.bookGeneration===generation&&this.bookId===bookId)this.emit({type:"error",scope:"book",message:error instanceof Error?error.message:String(error),recoverable:true,bookId});}}
   closeBook(){const id=this.bookId;this.agent?.abort();this.book.close();this.bookGeneration+=1;this.bookId=null;this.session=null;this.agent=null;if(id)this.emit({type:"book_closed",bookId:id});}
+  async resolveChapterHref(chapterIndex:number):Promise<string|undefined>{if(this.bookId===null||!Number.isInteger(chapterIndex)||chapterIndex<0)return undefined;const bookId=this.bookId;try{const toc=await this.bookCall(bookId,()=>this.book.toc());const href=toc.find((entry)=>entry.index===chapterIndex)?.hrefs[0];return typeof href==="string"&&href.length>0?href:undefined;}catch{return undefined;}}
   async listSessions(requestId?:string){if(!this.bookId)return;const bookId=this.bookId;const sessions=await this.sessions.list(bookId);if(this.bookId===bookId)this.emit({type:"sessions_list",bookId,requestId,sessions});}
   async newSession(requestId?:string){if(!this.bookId)return;const bookId=this.bookId;const session=await this.sessions.create(bookId);if(this.bookId!==bookId)return;this.session=session;this.agent=null;this.emit({type:"session_created",bookId,sessionId:session.header.id,requestId});}
   async switchSession(sessionId:string,requestId?:string){if(!this.bookId)return;const bookId=this.bookId;const session=await this.sessions.load(bookId,sessionId);if(this.bookId!==bookId)return;this.session=session;this.agent=null;this.emit({type:"session_switched",bookId,sessionId,requestId,messages:visibleMessages(session)});}
@@ -132,6 +136,7 @@ export class LiteraAgentRuntime {
     {name:"get_toc",label:"Table of Contents",description:"Get TOC with chapterIndex",parameters:empty,execute:async()=>result(JSON.stringify((await this.bookCall(bookId,()=>this.book.toc())).map((entry)=>({chapterIndex:entry.index,chapterNumber:entry.index+1,title:entry.label,chars:entry.chars}))))},
     {name:"read_chapter",label:"Read Chapter",description:"Read a chapter window",parameters:read,execute:async(_id,args)=>{const input=args as {chapterIndex:number;part?:number};return result(JSON.stringify(await this.bookCall(bookId,()=>this.book.readChapter(input.chapterIndex,input.part))));}},
     {name:"search_in_book",label:"Search Book",description:"Search multiple query variants",parameters:search,execute:async(_id,args)=>{const input=args as {queries:string[]};return result(JSON.stringify(await this.bookCall(bookId,()=>this.book.search(input.queries))));}},
+    {name:"list_annotations",label:"List Annotations",description:"List the current book's bookmarks and highlights. Use when the user asks about what they marked; not for ordinary chapter questions.",parameters:empty,execute:async()=>{try{const data=await this.bookCall(bookId,()=>this.loadAnnotations(bookId));return result(JSON.stringify({bookmarks:data.bookmarks.map(({id,cfi,fraction,createdAt,label})=>({id,cfi,fraction,createdAt,...(label!==undefined?{label}:{})})),highlights:data.highlights.map(({id,cfi,excerpt,createdAt})=>({id,cfi,excerpt,createdAt}))}));}catch(error){throw error instanceof Error?error:new Error(invokeErrorMessage(error));}}},
   ];}
   private onPiEvent(event:PiEvent,bookId:string,promptId:string,sessionId:string){const base={bookId,sessionId,promptId};if(event.type==="message_update"&&event.assistantMessageEvent.type==="text_delta")this.emit({type:"text_delta",...base,delta:event.assistantMessageEvent.delta});else if(event.type==="tool_execution_start")this.emit({type:"tool_start",...base,toolCallId:event.toolCallId,tool:event.toolName,params:event.args});else if(event.type==="tool_execution_end")this.emit({type:"tool_end",...base,toolCallId:event.toolCallId,result:event.result,isError:event.isError});}
 }
