@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Paging must stay iframe-safe: no overlay, no foliate-js edits, no innerWidth/root clientWidth page width"}
+{"file": ".trellis/tasks/08-16-fix-chapter-click-paging/research/document-element-client-width.md", "reason": "Verify page width is html layout width, not documentElement.clientWidth"}
