@@ -1590,3 +1590,24 @@ Iframe click paging used root clientWidth as page width; CSSOM makes that the ch
 ### Status
 
 [OK] **Completed**
+
+
+## Session 69: Agent TOC buttons follow the book
+
+**Date**: 2026-08-16
+**Task**: Agent TOC buttons follow the book
+**Branch**: `main`
+
+### Summary
+
+Moved Agent-mode TOC and annotation toolbar buttons to the right header cluster next to the book toggle. Reader-mode order unchanged. Drawer stays a left overlay on the book cell. Spec updated so book-owned controls follow the book pane.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ed279e9` | (see git log) |
+
+### Status
+
+[OK] **Completed**
