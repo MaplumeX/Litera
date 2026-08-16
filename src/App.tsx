@@ -780,6 +780,37 @@ function App() {
     />
   );
 
+  const tocAnnotationButtons = (
+    <div className="flex items-center gap-1">
+      <Button
+        size="icon-sm"
+        variant={tocVisible ? "secondary" : "ghost"}
+        onClick={() => {
+          const next = !tocVisible;
+          setTocVisible(next);
+          setAnnotationsVisible(false);
+          if (next) setBookCollapsed(false);
+        }}
+        aria-label={t("reader.toc")}
+      >
+        <List />
+      </Button>
+      <Button
+        size="icon-sm"
+        variant={annotationsVisible ? "secondary" : "ghost"}
+        onClick={() => {
+          const next = !annotationsVisible;
+          setAnnotationsVisible(next);
+          setTocVisible(false);
+          if (next) setBookCollapsed(false);
+        }}
+        aria-label={t("reader.annotations")}
+      >
+        <Bookmark />
+      </Button>
+    </div>
+  );
+
   if (view === "library") {
     return (
       <main className="flex h-screen flex-col bg-background text-foreground">
@@ -830,34 +861,7 @@ function App() {
         >
           <ChevronLeft />
         </Button>
-        <div className="flex items-center gap-1">
-          <Button
-            size="icon-sm"
-            variant={tocVisible ? "secondary" : "ghost"}
-            onClick={() => {
-              const next = !tocVisible;
-              setTocVisible(next);
-              setAnnotationsVisible(false);
-              if (next) setBookCollapsed(false);
-            }}
-            aria-label={t("reader.toc")}
-          >
-            <List />
-          </Button>
-          <Button
-            size="icon-sm"
-            variant={annotationsVisible ? "secondary" : "ghost"}
-            onClick={() => {
-              const next = !annotationsVisible;
-              setAnnotationsVisible(next);
-              setTocVisible(false);
-              if (next) setBookCollapsed(false);
-            }}
-            aria-label={t("reader.annotations")}
-          >
-            <Bookmark />
-          </Button>
-        </div>
+        {readerMode === "reader" ? tocAnnotationButtons : null}
         <h1
           className="min-w-0 shrink truncate select-none text-sm font-medium"
           data-tauri-drag-region
@@ -881,6 +885,7 @@ function App() {
           </Button>
         </div>
         <div className="h-4 w-px shrink-0 bg-border" />
+        {readerMode === "agent" ? tocAnnotationButtons : null}
         <div className="flex items-center gap-1">
           <Button
             size="icon-sm"

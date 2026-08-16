@@ -320,6 +320,31 @@ describe("reader annotation chrome", () => {
     expect(windowApi.toggleMaximize).toHaveBeenCalledTimes(1);
   });
 
+  it("places TOC and annotations next to the book toggle in agent mode", async () => {
+    vi.spyOn(window.navigator, "userAgent", "get").mockReturnValue(
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    );
+    const screen = await openReader();
+    fireEvent.click(screen.getByLabelText("切换到 Agent 模式"));
+    const header = screen.container.querySelector("header");
+    expect(header).toBeTruthy();
+    const toolbarNames = [
+      "返回书库",
+      "字体与主题",
+      "目录",
+      "标注",
+      "切换到阅读模式",
+      "隐藏书籍",
+      "关闭窗口",
+    ];
+    const headerButtons = [...header!.querySelectorAll("button")].map(
+      (button) => button.getAttribute("aria-label"),
+    );
+    expect(headerButtons.filter((name) => name && toolbarNames.includes(name))).toEqual(
+      toolbarNames,
+    );
+  });
+
   it("insets the macOS reader header and hides custom window buttons", async () => {
     vi.spyOn(window.navigator, "userAgent", "get").mockReturnValue(
       "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)",
