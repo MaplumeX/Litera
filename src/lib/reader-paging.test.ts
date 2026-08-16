@@ -4,6 +4,7 @@ import {
   consumeWheelDelta,
   hitFromClientX,
   pageLocalX,
+  pageWidthOf,
   shouldIgnorePagingTarget,
   type WheelPagingState,
 } from "./reader-paging";
@@ -34,6 +35,41 @@ describe("pageLocalX", () => {
   it("keeps left/right hit zones after mapping page 3", () => {
     expect(hitFromClientX(pageLocalX(1600 + 50, 800), 800)).toBe("left");
     expect(hitFromClientX(pageLocalX(1600 + 700, 800), 800)).toBe("right");
+  });
+});
+
+/** Chapter iframe whose viewport is the whole strip but `<html>` is one spread. */
+function chapterDoc(layoutWidth: number, viewportWidth: number): Document {
+  return {
+    documentElement: {
+      clientWidth: viewportWidth,
+      getBoundingClientRect: () => ({ width: layoutWidth }) as DOMRect,
+    },
+    defaultView: { innerWidth: viewportWidth },
+  } as unknown as Document;
+}
+
+describe("pageWidthOf", () => {
+  it("uses html layout width, not root clientWidth or innerWidth", () => {
+    const doc = chapterDoc(800, 4000);
+    expect(doc.documentElement.clientWidth).toBe(4000);
+    expect(doc.defaultView?.innerWidth).toBe(4000);
+    expect(pageWidthOf(doc)).toBe(800);
+  });
+
+  it("keeps last-page and next-chapter first-page clicks on the same zone", () => {
+    const longChapter = chapterDoc(800, 4000);
+    // Next chapter must also be a strip; a 1-page next chapter makes clientWidth
+    // equal layout width and hides the left/right flip.
+    const nextChapter = chapterDoc(800, 3200);
+    const width = pageWidthOf(longChapter);
+    const nextWidth = pageWidthOf(nextChapter);
+    const lastPageLeft = pageLocalX(3200 + 50, width);
+    const lastPageRight = pageLocalX(3200 + 700, width);
+    const nextFirstPageRight = pageLocalX(700, nextWidth);
+    expect(hitFromClientX(lastPageLeft, width)).toBe("left");
+    expect(hitFromClientX(lastPageRight, width)).toBe("right");
+    expect(hitFromClientX(nextFirstPageRight, nextWidth)).toBe("right");
   });
 });
 

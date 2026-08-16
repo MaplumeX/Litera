@@ -22,6 +22,11 @@ export function pageLocalX(clientX: number, pageWidth: number): number {
   return ((clientX % pageWidth) + pageWidth) % pageWidth;
 }
 
+/** Visible-spread width of a chapter document. Root `clientWidth` / `innerWidth` are the iframe viewport (the whole strip). */
+export function pageWidthOf(doc: Document): number {
+  return doc.documentElement?.getBoundingClientRect().width ?? 0;
+}
+
 export function hitFromClientX(x: number, width: number): HitZone {
   if (width <= 0) return "middle";
   if (x < width / 3) return "left";
