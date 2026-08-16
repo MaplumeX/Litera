@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "TOC overlay drawer and current-row scroll contract; this task replaces nearest with in-view skip + center when out of view"}
+{"file": ".trellis/spec/frontend/hook-guidelines.md", "reason": "Keep the scroll effect ref-stable: mount and currentHref change only, no extra follow state"}
