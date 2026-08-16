@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Tool registration and bookId gate"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Structured tool errors; no credential or dump leaks"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "Must not write annotations.json"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Reuse result() / bookCall; do not invent a second tool wrapper"}

@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "WebView Agent owns tools; Rust only serves get_annotations"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Single Agent loop, bookCall generation gate, JSON tool results"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Annotation load failure is a tool result, not a prompt crash"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "annotations.json schema, empty-file behavior, reuse get_annotations only"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "list_annotations JSON is the jump child's input contract"}
