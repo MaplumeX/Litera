@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-08-16
+
+### Added
+
+- **设置关于页**：设置里可以查看当前版本，并打开项目主页和发行页。
+
+### Changed
+
+- **目录当前项居中**：当前章节不在可见区域时，会滚到目录列表中间，而不是贴在底部。
+
+### Fixed
+
+- **章末点击翻页方向反了**：长章节最后一页点右侧会误进下一章，同一位置在下一章开头又被当成上一页。
+
 ## [0.2.0] - 2026-08-16
 
 ### Added
