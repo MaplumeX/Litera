@@ -1,0 +1,5 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Chrome is Geist + CJK; do not leak --font-sans into generateStylesCss; settings font combobox contract"}
+{"file": ".trellis/spec/frontend/i18n.md", "reason": "New chrome labels; persist like locale — localStorage, not preferences.json deny_unknown_fields"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "No React context; localStorage helpers like reader-mode; apply on documentElement"}
+{"file": ".trellis/spec/guides/index.md", "reason": "New preference next to theme must not add preferences.json keys"}
