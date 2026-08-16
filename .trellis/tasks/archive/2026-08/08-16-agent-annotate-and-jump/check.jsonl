@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Book tool coordinates and Agent loop gates"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Tool vs prompt error split"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Frontend quality gates"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "No duplicated annotation store in the Agent"}
+{"file": ".trellis/spec/frontend/i18n.md", "reason": "Citation chrome must be in both locale catalogs"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Citation locator must stay consistent across layers"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Reuse jumpToAnnotation / goToChapterHref; do not add a second jump path"}

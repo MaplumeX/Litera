@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend index: WebView owns Agent tools; Rust owns annotations persistence"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Book tool coordinates, single Agent loop, tool error results"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Tools return structured results; do not leak book text in errors"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend guideline index for chat + reader wiring"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "Annotations are Rust-owned; bookCollapsed is process-only; reducer stays event-driven"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Tool JSON crosses runtime → reducer → ToolCallCard → ReaderView"}
