@@ -126,11 +126,24 @@ Same two CSS-grid children (`grid-area: book` / `chat`). Mode only changes `grid
 
 ### Convention: TOC current row stays in the list viewport
 
-**What**: `TocSidebar` highlights the row whose `href` equals `currentHref`. That same row must also be scrolled into the list (`flex-1 overflow-y-auto`) on mount and whenever `currentHref` changes to another match. Call the row's `scrollIntoView({ block: "nearest", behavior: "auto" })`. No match or no `currentHref`: do not scroll.
+**What**: `TocSidebar` highlights the row whose `href` equals `currentHref`. On mount and whenever `currentHref` changes to another match, compare that row and the list (`flex-1 overflow-y-auto`) with `getBoundingClientRect`. If the row's full height is inside the list rect, do not scroll. If it is outside or clipped, set `list.scrollTop` so the row is vertically centered (clamped by scroll range near the ends). No match or no `currentHref`: do not scroll.
 
-**Why**: The drawer remounts on every open (`{tocVisible && <TocSidebar />}`). Long TOCs hide the highlight below the fold. `nearest` avoids jumping when the row is already visible; `auto` lands immediately. The progress bar can change chapter while the drawer stays open.
+**Why**: The drawer remounts on every open (`{tocVisible && <TocSidebar />}`). Long TOCs hide the highlight below the fold. `scrollIntoView({ block: "nearest" })` only scrolls until the row is barely visible, so later chapters pin to the bottom edge. Unconditional `scrollIntoView({ block: "center" })` recenters even when the row is already fully visible (user may have scrolled the list, or the next chapter is already on screen). Adjusting `list.scrollTop` only moves the list, not the outer drawer or page.
 
-**Don't**: Scroll the outer drawer. Use `smooth`. Change href matching (still `item.href === currentHref`) as part of a scroll tweak. Pin the TOC as a third column.
+**Don't**:
+```ts
+row.scrollIntoView({ block: "nearest", behavior: "auto" }); // pins current to the bottom
+row.scrollIntoView({ block: "center", behavior: "auto" });  // jumps even when already in view
+```
+
+**Instead**:
+```ts
+if (rowRect.top >= listRect.top && rowRect.bottom <= listRect.bottom) return;
+list.scrollTop +=
+  (rowRect.top + rowRect.bottom - listRect.top - listRect.bottom) / 2;
+```
+
+**Don't**: Scroll the outer drawer. Use `smooth`. Change href matching (still `item.href === currentHref`) as part of a scroll tweak. Pin the TOC as a third column. Trust jsdom's default `getBoundingClientRect` (all zeros) — TOC scroll tests must mock list vs row geometry.
 
 **Related**: `src/components/TocSidebar.tsx`; overlay TOC in "reader chrome is reading-first".
 
