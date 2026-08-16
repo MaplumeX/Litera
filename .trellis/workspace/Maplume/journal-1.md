@@ -1632,3 +1632,24 @@ Added Settings Appearance controls for UI font and root size (12-20px rem scale)
 ### Status
 
 [OK] **Completed**
+
+
+## Session 71: Agent annotations and click-to-source
+
+**Date**: 2026-08-16
+**Task**: Agent annotations and click-to-source
+**Branch**: `main`
+
+### Summary
+
+Added read-only list_annotations and clickable tool-result citations so the reader can jump to chapter starts or annotation CFIs. Model cannot navigate or write marks.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2233992` | (see git log) |
+
+### Status
+
+[OK] **Completed**
