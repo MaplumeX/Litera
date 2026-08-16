@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/frontend/index.md", "reason": "Chat and reader live in the WebView frontend"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Chat/reader quality gates; card chrome stays border-only"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "bookCollapsed is process-only; jump must not invent global store"}
+{"file": ".trellis/spec/frontend/i18n.md", "reason": "Citation labels go in en.ts and zh-CN.ts via useT()"}
+{"file": ".trellis/spec/frontend/hook-guidelines.md", "reason": "Callback from ToolCallCard to App must stay ref-stable"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "chapterIndex is TOC-owned; resolve via worker hrefs, not reader flattenToc"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Parse persisted tool JSON and live tool_end payloads the same way"}

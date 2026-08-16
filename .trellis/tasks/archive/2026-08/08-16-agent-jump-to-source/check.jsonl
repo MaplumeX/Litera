@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Frontend quality gates for chat/reader changes; no new elevation"}
+{"file": ".trellis/spec/frontend/i18n.md", "reason": "Both locale catalogs must stay in sync"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "Do not duplicate reader location in chat state"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "chapterIndex must not be treated as a spine or flattenToc index"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Reuse jumpToAnnotation and goToChapterHref"}
