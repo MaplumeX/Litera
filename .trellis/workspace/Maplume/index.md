@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 69
+- **Total Sessions**: 70
 - **Last Active**: 2026-08-16
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1613 | Active |
+| `journal-1.md` | ~1634 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 70 | 2026-08-16 | App chrome font and size settings | `004b13e` | `main` |
 | 69 | 2026-08-16 | Agent TOC buttons follow the book | `ed279e9` | `main` |
 | 68 | 2026-08-16 | Fix chapter-boundary click paging zones | `abd2d34`, `2bdf125`, `170eb51` | `main` |
 | 67 | 2026-08-16 | Center current TOC item in sidebar | `ac11a94`, `a0059b4`, `6b5b84f` | `main` |

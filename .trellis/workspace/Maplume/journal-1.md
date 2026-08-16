@@ -1611,3 +1611,24 @@ Moved Agent-mode TOC and annotation toolbar buttons to the right header cluster 
 ### Status
 
 [OK] **Completed**
+
+
+## Session 70: App chrome font and size settings
+
+**Date**: 2026-08-16
+**Task**: App chrome font and size settings
+**Branch**: `main`
+
+### Summary
+
+Added Settings Appearance controls for UI font and root size (12-20px rem scale). Persist localStorage only. Default stack stays Geist plus system CJK. Reader typography unchanged. Moved --font-sans out of @theme inline so runtime overrides work.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `004b13e` | (see git log) |
+
+### Status
+
+[OK] **Completed**
