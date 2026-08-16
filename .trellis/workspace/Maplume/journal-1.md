@@ -1567,3 +1567,26 @@ TOC current row no longer pins to the list bottom. Out-of-view or clipped rows c
 ### Status
 
 [OK] **Completed**
+
+
+## Session 68: Fix chapter-boundary click paging zones
+
+**Date**: 2026-08-16
+**Task**: Fix chapter-boundary click paging zones
+**Branch**: `main`
+
+### Summary
+
+Iframe click paging used root clientWidth as page width; CSSOM makes that the chapter-strip viewport, so a right-third click on a long chapter's last page went next and the same spot on the next chapter went prev. pageWidthOf now uses html layout width; spec and tests updated.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `abd2d34` | (see git log) |
+| `2bdf125` | (see git log) |
+| `170eb51` | (see git log) |
+
+### Status
+
+[OK] **Completed**
