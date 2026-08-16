@@ -1544,3 +1544,26 @@ Added Settings → About: runtime version via getVersion(), scoped opener links 
 ### Next Steps
 
 - Manual: npm run tauri dev → Settings → About → confirm 0.2.0 and both links open in the system browser
+
+
+## Session 67: Center current TOC item in sidebar
+
+**Date**: 2026-08-16
+**Task**: Center current TOC item in sidebar
+**Branch**: `main`
+
+### Summary
+
+TOC current row no longer pins to the list bottom. Out-of-view or clipped rows center via list.scrollTop; fully visible rows stay put. Tests mock geometry. Spec updated from nearest to this contract.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ac11a94` | (see git log) |
+| `a0059b4` | (see git log) |
+| `6b5b84f` | (see git log) |
+
+### Status
+
+[OK] **Completed**
