@@ -42,6 +42,15 @@ import {
   saveDefaultReaderMode,
   type ReaderMode,
 } from "@/lib/reader-mode";
+import {
+  DEFAULT_UI_FONT_FAMILY,
+  UI_FONT_SIZE_RANGE,
+  applyUiChrome,
+  loadUiFontFamily,
+  loadUiFontSize,
+  saveUiFontFamily,
+  saveUiFontSize,
+} from "@/lib/ui-chrome-font";
 
 type SettingsSection = "typography" | "appearance" | "ai" | "about";
 
@@ -175,9 +184,11 @@ function SliderRow({
 function FontFamilyPicker({
   value,
   onChange,
+  includeGeist = false,
 }: {
   value: string;
   onChange: (value: string) => void;
+  includeGeist?: boolean;
 }) {
   const { t } = useT();
   const [open, setOpen] = useState(false);
@@ -201,11 +212,22 @@ function FontFamilyPicker({
     };
   }, []);
 
-  const listedSystem = systemFonts.filter((name) => !isGenericFontFamily(name));
-  const missing = loaded && !isGenericFontFamily(value) && !listedSystem.includes(value);
+  const listedSystem = systemFonts.filter((name) => {
+    if (isGenericFontFamily(name)) return false;
+    if (includeGeist && name === DEFAULT_UI_FONT_FAMILY) return false;
+    return true;
+  });
+  const isGeist = value === DEFAULT_UI_FONT_FAMILY;
+  const missing =
+    loaded &&
+    !isGenericFontFamily(value) &&
+    !(includeGeist && isGeist) &&
+    !listedSystem.includes(value);
   const selectedLabel = isGenericFontFamily(value)
     ? t(FONT_LABEL_KEYS[value])
-    : value;
+    : includeGeist && isGeist
+      ? t("settings.font.geist")
+      : value;
 
   return (
     <Popover open={open} onOpenChange={setOpen} modal={false}>
@@ -240,6 +262,27 @@ function FontFamilyPicker({
           <CommandList>
             <CommandEmpty>{t("settings.font.empty")}</CommandEmpty>
             <CommandGroup>
+              {includeGeist && (
+                <CommandItem
+                  key={DEFAULT_UI_FONT_FAMILY}
+                  value={`${DEFAULT_UI_FONT_FAMILY} ${t("settings.font.geist")}`}
+                  keywords={[DEFAULT_UI_FONT_FAMILY, t("settings.font.geist"), "Geist"]}
+                  onSelect={() => {
+                    onChange(DEFAULT_UI_FONT_FAMILY);
+                    setOpen(false);
+                  }}
+                >
+                  <CheckIcon
+                    className={cn(
+                      "size-4",
+                      value === DEFAULT_UI_FONT_FAMILY ? "opacity-100" : "opacity-0",
+                    )}
+                  />
+                  <span style={{ fontFamily: cssFontFamily(DEFAULT_UI_FONT_FAMILY) }}>
+                    {t("settings.font.geist")}
+                  </span>
+                </CommandItem>
+              )}
               {FONT_FAMILIES.map((fam) => {
                 const label = t(FONT_LABEL_KEYS[fam.value]);
                 return (
@@ -391,10 +434,15 @@ export function SettingsDialog({
   const { t, locale, setLocale } = useT();
   const [section, setSection] = useState<SettingsSection>("typography");
   const [defaultReaderMode, setDefaultReaderMode] = useState(loadDefaultReaderMode);
+  const [uiFontFamily, setUiFontFamily] = useState(loadUiFontFamily);
+  const [uiFontSize, setUiFontSize] = useState(loadUiFontSize);
   const [version, setVersion] = useState<string | null>(null);
 
   useEffect(() => {
-    if (open) setDefaultReaderMode(loadDefaultReaderMode());
+    if (!open) return;
+    setDefaultReaderMode(loadDefaultReaderMode());
+    setUiFontFamily(loadUiFontFamily());
+    setUiFontSize(loadUiFontSize());
   }, [open]);
 
   useEffect(() => {
@@ -539,6 +587,40 @@ export function SettingsDialog({
                   ariaLabel={t("settings.theme")}
                 />
               </PresetRow>
+              <PresetRow label={t("settings.chrome.font")} contentClassName="w-full">
+                <FontFamilyPicker
+                  includeGeist
+                  value={uiFontFamily}
+                  onChange={(name) => {
+                    saveUiFontFamily(name);
+                    setUiFontFamily(name);
+                    applyUiChrome(uiFontSize, name);
+                  }}
+                />
+              </PresetRow>
+              <div>
+                <div className="mb-1.5 flex items-center justify-between gap-2">
+                  <div className="text-xs font-medium text-muted-foreground">
+                    {t("settings.chrome.fontSize")}
+                  </div>
+                  <span className="text-xs tabular-nums text-foreground">
+                    {`${uiFontSize}px`}
+                  </span>
+                </div>
+                <Slider
+                  aria-label={t("settings.chrome.fontSize")}
+                  value={[uiFontSize]}
+                  min={UI_FONT_SIZE_RANGE.min}
+                  max={UI_FONT_SIZE_RANGE.max}
+                  step={UI_FONT_SIZE_RANGE.step}
+                  onValueChange={([next]) => {
+                    if (typeof next !== "number") return;
+                    saveUiFontSize(next);
+                    setUiFontSize(next);
+                    applyUiChrome(next, uiFontFamily);
+                  }}
+                />
+              </div>
               <PresetRow label={t("settings.language")}>
                 <SegmentedControl
                   value={locale}

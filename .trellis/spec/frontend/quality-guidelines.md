@@ -56,7 +56,7 @@ frame-src 'self' blob:
 
 ### Convention: chrome fonts stay same-origin
 
-**What**: App chrome uses `@fontsource-variable/geist`. Vite emits woff2 under `dist/assets/`. That satisfies `font-src 'self'`.
+**What**: App chrome ships `@fontsource-variable/geist`. Vite emits woff2 under `dist/assets/`. That satisfies `font-src 'self'`. User-selected system faces use the OS; do not add a Google Fonts CDN or a second CJK webfont package to make a Chinese default.
 
 **Why**: Google Fonts or any `https://fonts.gstatic.com` URL is blocked. Loosening `font-src` to fix a 404 would also let a book iframe load remote fonts.
 

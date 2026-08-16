@@ -26,7 +26,7 @@ npx shadcn@latest add <component-name>
 
 ### Convention: app chrome is a cool product-tool surface
 
-**What**: Library, reader chrome, chat, and settings share one Linear-like language. Tokens live in `src/index.css` (`:root` / `.dark`). Chrome type is Geist Variable plus CJK system fallbacks, imported from `src/main.tsx` before `index.css`.
+**What**: Library, reader chrome, chat, and settings share one Linear-like language. Tokens live in `src/index.css` (`:root` / `.dark`). Default chrome type is Geist Variable plus CJK system fallbacks, imported from `src/main.tsx` before `index.css`. Users can override family and root size in Settings → Appearance; the default stack does not change.
 
 **Why**: Default shadcn zinc + system UI + card shadows read as scaffolding. A reader still needs a precise tool shell; book-page type stays user-owned.
 
@@ -38,13 +38,17 @@ import "./index.css";
 ```
 
 ```css
-/* src/index.css @theme inline */
---font-sans: "Geist Variable", "PingFang SC", "Microsoft YaHei", "Noto Sans SC", ui-sans-serif, system-ui, sans-serif;
-/* --radius: 0.5rem; cool zinc neutrals; no second brand color */
+/* src/index.css — NOT @theme inline, or utilities inline the stack and ignore runtime overrides */
+@theme {
+  --font-sans: "Geist Variable", "PingFang SC", "Microsoft YaHei", "Noto Sans SC", ui-sans-serif, system-ui, sans-serif;
+}
 ```
 
 **Rules**:
-- Do not put Geist (or `--font-sans`) into `generateStylesCss`. Reader body uses the user's `fontFamily`. `reader-styles` tests must reject `Geist` in that CSS.
+- Chrome family/size: `src/lib/ui-chrome-font.ts`. Persist `localStorage` `litera.uiFontFamily` / `litera.uiFontSize` (Geist Variable / 16 when unset or invalid). Apply on `document.documentElement` (`--font-sans` + `font-size`) from `main.tsx` after `initLocale()` and live from Appearance. Do not add these keys to `preferences.json`.
+- Keep `--font-sans` in a non-inline `@theme` block so `.font-sans` stays `var(--font-sans)`. `@theme inline` bakes the stack into the utility; setting the variable on `html` then does nothing.
+- Appearance font picker prepends Geist (`includeGeist`); Typography still starts with the three generics. Do not put Geist in the reader list.
+- Do not put Geist (or `--font-sans`) into `generateStylesCss`. Reader body uses the user's `fontFamily`. `reader-styles` tests must reject `Geist` in that CSS. Do not bundle Noto / Source Han for a Chinese default — CJK stays PingFang / YaHei / Noto Sans SC system fallbacks.
 - Do not add a Google Fonts CDN. CSP `font-src` is `'self' blob: data:` (see quality-guidelines).
 - Elevation is a 1px border or one-step surface shift. Do not put `shadow-sm` / `shadow-md` / `shadow-lg` on cards, the chat composer, TOC/标注 drawers, or dialogs.
 - Neutrals stay one cool zinc family (same hue in light and dark). No warm paper/bone canvas, no purple/blue glow, no second accent.
@@ -440,7 +444,7 @@ readerRef.current?.setStyles(css)
 
 `font-family` must go through `cssFontFamily`: generics (`serif` / `sans-serif` / `monospace`) stay unquoted; named faces are quoted/escaped and followed by `, serif`. Do not interpolate a raw user-facing family name into the stylesheet.
 
-The Settings typography font control is a searchable combobox (`Popover` + `Command`), not a segmented control. Theme / language / text-align stay on `SegmentedControl` (see "settings exclusive choices" above). Put the three generics first, then `list_system_fonts` families. If the saved name is missing from the list, keep it selected and mark it unavailable — do not rewrite the stored value. Set `modal={false}` on the popover so it can open inside `SettingsDialog` without a focus trap. App chrome fonts stay on the theme stylesheet; this picker only affects reader body CSS.
+The Settings font control is a searchable combobox (`Popover` + `Command`), not a segmented control. Theme / language / text-align stay on `SegmentedControl` (see "settings exclusive choices" above). Typography: three generics first, then `list_system_fonts`. Appearance chrome: Geist first (`includeGeist`), then the same generics + system list. If the saved name is missing from the list, keep it selected and mark it unavailable — do not rewrite the stored value. Set `modal={false}` on the popover so it can open inside `SettingsDialog` without a focus trap. One picker component; do not fork a second combobox. Typography writes reader `fontFamily` only. Chrome writes `litera.uiFontFamily` + `applyUiChrome`.
 
 **Caveat**: `view.renderer` is a non-official public field (not documented in foliate.js README). Submodule commit lock mitigates upgrade risk. Fixed-layout epub (foliate-fxl) may not support `setStyles` — MVP targets reflowable only.
 

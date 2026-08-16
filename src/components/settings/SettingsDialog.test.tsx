@@ -1,10 +1,17 @@
 // @vitest-environment jsdom
-import { act, cleanup, render, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SettingsDialog } from "./SettingsDialog";
 import type { ReaderStyleState } from "@/lib/reader-styles";
 import { setLocale } from "@/lib/i18n";
 import { DEFAULT_READER_MODE_KEY } from "@/lib/reader-mode";
+import {
+  DEFAULT_UI_FONT_FAMILY,
+  UI_FONT_FAMILY_KEY,
+  UI_FONT_SIZE_KEY,
+  applyUiChrome,
+  chromeFontStack,
+} from "@/lib/ui-chrome-font";
 
 class ResizeObserverStub {
   observe() {}
@@ -80,6 +87,10 @@ afterEach(() => {
   cleanup();
   setLocale("zh-CN");
   localStorage.removeItem(DEFAULT_READER_MODE_KEY);
+  localStorage.removeItem(UI_FONT_SIZE_KEY);
+  localStorage.removeItem(UI_FONT_FAMILY_KEY);
+  document.documentElement.style.fontSize = "";
+  document.documentElement.style.removeProperty("--font-sans");
   invokeMock.mockClear();
   getVersionMock.mockReset();
   getVersionMock.mockImplementation(() => Promise.resolve("0.2.0"));
@@ -314,6 +325,29 @@ describe("SettingsDialog", () => {
     expect(getByRole("radio", { name: "English" }).getAttribute("aria-checked")).toBe("false");
   });
 
+  it("does not list Geist in the typography font picker", async () => {
+    const { getByRole, queryByRole } = render(
+      <SettingsDialog
+        open
+        onClose={noop}
+        bookTitle={null}
+        hasBook={false}
+        styleState={styleState}
+        onTypographyChange={noop}
+        onRestoreDefault={noop}
+        overriddenKeys={[]}
+        theme="light"
+        onThemeChange={noop}
+      />,
+    );
+
+    act(() => {
+      getByRole("combobox").click();
+    });
+    await waitFor(() => getByRole("option", { name: "衬线" }));
+    expect(queryByRole("option", { name: "Geist" })).toBeNull();
+  });
+
   it("opens a searchable font combobox with generics at the top", async () => {
     const { getByRole, getByPlaceholderText } = render(
       <SettingsDialog
@@ -389,6 +423,151 @@ describe("SettingsDialog", () => {
 
     expect(await findByText("不可用")).toBeTruthy();
     expect(getByRole("combobox").textContent).toContain("MissingFont");
+  });
+
+  it("shows chrome font and size under appearance and applies them live", async () => {
+    const onTypographyChange = vi.fn();
+    const { getByRole, getByText } = render(
+      <SettingsDialog
+        open
+        onClose={noop}
+        bookTitle={null}
+        hasBook={false}
+        styleState={styleState}
+        onTypographyChange={onTypographyChange}
+        onRestoreDefault={noop}
+        overriddenKeys={[]}
+        theme="light"
+        onThemeChange={noop}
+      />,
+    );
+
+    act(() => {
+      getByRole("button", { name: "外观" }).click();
+    });
+
+    expect(getByText("界面字体")).toBeTruthy();
+    expect(getByText("界面字号")).toBeTruthy();
+    expect(getByRole("combobox").textContent).toContain("Geist");
+    const sizeSlider = getByRole("slider", { name: "界面字号" });
+    expect(sizeSlider.getAttribute("aria-valuenow")).toBe("16");
+    expect(sizeSlider.getAttribute("aria-valuemin")).toBe("12");
+    expect(sizeSlider.getAttribute("aria-valuemax")).toBe("20");
+    expect(getByText("16px")).toBeTruthy();
+
+    act(() => {
+      getByRole("combobox").click();
+    });
+    const geist = await waitFor(() => getByRole("option", { name: "Geist" }));
+    const serif = getByRole("option", { name: "衬线" });
+    const named = await waitFor(() => getByRole("option", { name: "Noto Sans CJK SC" }));
+    expect(
+      geist.compareDocumentPosition(serif) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      serif.compareDocumentPosition(named) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    act(() => {
+      named.click();
+    });
+    expect(document.documentElement.style.getPropertyValue("--font-sans")).toBe(
+      chromeFontStack("Noto Sans CJK SC"),
+    );
+    expect(localStorage.getItem(UI_FONT_FAMILY_KEY)).toBe("Noto Sans CJK SC");
+    expect(onTypographyChange).not.toHaveBeenCalled();
+    expect(invokeMock.mock.calls.some((call) => call[0] === "save_preferences")).toBe(false);
+
+    act(() => {
+      fireEvent.keyDown(sizeSlider, { key: "ArrowRight" });
+    });
+    expect(document.documentElement.style.fontSize).toBe("17px");
+    expect(localStorage.getItem(UI_FONT_SIZE_KEY)).toBe("17");
+    expect(getByText("17px")).toBeTruthy();
+  });
+
+  it("does not apply chrome when the typography font changes", async () => {
+    applyUiChrome(16, DEFAULT_UI_FONT_FAMILY);
+    const before = document.documentElement.style.getPropertyValue("--font-sans");
+    const onChange = vi.fn();
+    const { getByRole } = render(
+      <SettingsDialog
+        open
+        onClose={noop}
+        bookTitle={null}
+        hasBook={false}
+        styleState={styleState}
+        onTypographyChange={onChange}
+        onRestoreDefault={noop}
+        overriddenKeys={[]}
+        theme="light"
+        onThemeChange={noop}
+      />,
+    );
+
+    act(() => {
+      getByRole("combobox").click();
+    });
+    const option = await waitFor(() => getByRole("option", { name: /Noto Sans CJK SC/ }));
+    act(() => {
+      option.click();
+    });
+    expect(onChange).toHaveBeenCalledWith("fontFamily", "Noto Sans CJK SC");
+    expect(document.documentElement.style.getPropertyValue("--font-sans")).toBe(before);
+    expect(localStorage.getItem(UI_FONT_FAMILY_KEY)).toBeNull();
+  });
+
+  it("keeps a missing chrome font selected and does not rewrite storage", async () => {
+    localStorage.setItem(UI_FONT_FAMILY_KEY, "MissingChromeFont");
+    const { getByRole, findByText } = render(
+      <SettingsDialog
+        open
+        onClose={noop}
+        bookTitle={null}
+        hasBook={false}
+        styleState={styleState}
+        onTypographyChange={noop}
+        onRestoreDefault={noop}
+        overriddenKeys={[]}
+        theme="light"
+        onThemeChange={noop}
+      />,
+    );
+
+    act(() => {
+      getByRole("button", { name: "外观" }).click();
+    });
+    expect(await findByText("不可用")).toBeTruthy();
+    expect(getByRole("combobox").textContent).toContain("MissingChromeFont");
+    expect(localStorage.getItem(UI_FONT_FAMILY_KEY)).toBe("MissingChromeFont");
+  });
+
+  it("filters chrome system fonts from the shared search box", async () => {
+    const { getByRole, getByPlaceholderText, findByRole, queryByRole } = render(
+      <SettingsDialog
+        open
+        onClose={noop}
+        bookTitle={null}
+        hasBook={false}
+        styleState={styleState}
+        onTypographyChange={noop}
+        onRestoreDefault={noop}
+        overriddenKeys={[]}
+        theme="light"
+        onThemeChange={noop}
+      />,
+    );
+
+    act(() => {
+      getByRole("button", { name: "外观" }).click();
+    });
+    act(() => {
+      getByRole("combobox").click();
+    });
+    await waitFor(() => getByRole("option", { name: "Noto Sans CJK SC" }));
+    fireEvent.change(getByPlaceholderText("搜索字体…"), { target: { value: "Noto" } });
+    expect(await findByRole("option", { name: "Noto Sans CJK SC" })).toBeTruthy();
+    expect(queryByRole("option", { name: "衬线" })).toBeNull();
   });
 
   it("persists the default reader mode to localStorage only", () => {
