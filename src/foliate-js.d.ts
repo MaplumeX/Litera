@@ -15,6 +15,57 @@ declare module "*/foliate-js/view.js" {
 
   export const makeBook: (file: File | Blob) => Promise<Book>;
 
+  export type TtsGranularity = "grapheme" | "word" | "sentence";
+
+  export interface TtsHighlight {
+    (range: Range): void;
+  }
+
+  export class TTS {
+    readonly doc: Document;
+    highlight: TtsHighlight;
+    constructor(
+      doc: Document,
+      textWalker: (
+        root: Range | Document | DocumentFragment,
+        func: (
+          strs: string[],
+          makeRange: (
+            startIndex: number,
+            startOffset: number,
+            endIndex: number,
+            endOffset: number,
+          ) => Range,
+        ) => Iterable<[string, Range]>,
+      ) => Iterable<[string, Range]>,
+      highlight: TtsHighlight,
+      granularity?: TtsGranularity,
+    );
+    start(): string | undefined;
+    resume(): string | undefined;
+    prev(paused?: boolean): string | undefined;
+    next(paused?: boolean): string | undefined;
+    from(range: Range): string | undefined;
+    setMark(mark: string): void;
+  }
+
+  export interface FoliateContents {
+    index: number;
+    doc?: Document;
+    overlayer?: {
+      add(key: string, range: Range, draw: unknown, options?: { color?: string }): void;
+      remove(key: string): void;
+    };
+  }
+
+  export interface FoliateRenderer {
+    getContents(): FoliateContents[];
+    scrollToAnchor(anchor: Range | number, select?: boolean): Promise<void>;
+    setStyles?(css: string): void;
+    nextSection?(): Promise<void>;
+    next?(distance?: number): Promise<void>;
+  }
+
   export class View extends HTMLElement {
     open(book: Book | File): Promise<void>;
     init(opts: Record<string, unknown>): Promise<void>;
@@ -32,7 +83,53 @@ declare module "*/foliate-js/view.js" {
     next(): Promise<void>;
     goLeft(): Promise<void>;
     goRight(): Promise<void>;
-    close?(): void;
+    book?: Book & { toc?: unknown[]; sections?: { id?: string; cfi?: string }[] };
+    renderer: FoliateRenderer;
+    tts: TTS | null;
+    mediaOverlay: EventTarget | null;
+    lastLocation: {
+      cfi?: string;
+      range?: Range;
+      tocItem?: { label?: string; href?: string };
+      fraction?: number;
+    } | null;
+    initTTS(granularity?: TtsGranularity, highlight?: TtsHighlight): Promise<void>;
+    startMediaOverlay(): unknown;
+    close(): void;
+  }
+}
+
+declare module "*/foliate-js/tts.js" {
+  export type TtsGranularity = "grapheme" | "word" | "sentence";
+  export interface TtsHighlight {
+    (range: Range): void;
+  }
+  export class TTS {
+    readonly doc: Document;
+    highlight: TtsHighlight;
+    constructor(
+      doc: Document,
+      textWalker: (
+        root: Range | Document | DocumentFragment,
+        func: (
+          strs: string[],
+          makeRange: (
+            startIndex: number,
+            startOffset: number,
+            endIndex: number,
+            endOffset: number,
+          ) => Range,
+        ) => Iterable<[string, Range]>,
+      ) => Iterable<[string, Range]>,
+      highlight: TtsHighlight,
+      granularity?: TtsGranularity,
+    );
+    start(): string | undefined;
+    resume(): string | undefined;
+    prev(paused?: boolean): string | undefined;
+    next(paused?: boolean): string | undefined;
+    from(range: Range): string | undefined;
+    setMark(mark: string): void;
   }
 }
 

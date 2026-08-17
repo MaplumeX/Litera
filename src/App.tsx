@@ -23,7 +23,9 @@ import {
   ChevronLeft,
   List,
   MessageSquare,
+  Pause,
   Type,
+  Volume2,
 } from "lucide-react";
 import {
   ReaderView,
@@ -41,6 +43,7 @@ import {
   BookImportNotices,
 } from "@/components/BookImportFeedback";
 import { ReaderProgressBar } from "@/components/ReaderProgressBar";
+import { ReaderTtsBar } from "@/components/ReaderTtsBar";
 import { TocSidebar } from "@/components/TocSidebar";
 import { AnnotationsSidebar } from "@/components/AnnotationsSidebar";
 import {
@@ -94,6 +97,7 @@ import {
   type ReaderMode,
 } from "@/lib/reader-mode";
 import { chapterNavAt } from "@/lib/toc-items";
+import { useReaderTts } from "@/lib/use-reader-tts";
 
 interface FileData {
   bytes: Uint8Array<ArrayBuffer>;
@@ -180,6 +184,12 @@ function App() {
   );
   const bookImport = useBookImport();
   const readerRef = useRef<ReaderViewHandle>(null);
+  const bookHidden = readerMode === "agent" && bookCollapsed;
+  const tts = useReaderTts({
+    readerRef,
+    bookHidden,
+    fileKey: fileData?.bookId ?? null,
+  });
   const chatRef = useRef<ChatPanelHandle>(null);
   const shellRef = useRef<HTMLDivElement>(null);
   const tocDrawerRef = useRef<HTMLDivElement>(null);
@@ -467,6 +477,7 @@ function App() {
     } catch {
       return;
     }
+    tts.stop();
     embeddedAgentRuntime.closeBook();
     setView("library");
     setFileData(null);
@@ -482,7 +493,7 @@ function App() {
     setSessionRailOpen(true);
     setBookCollapsed(false);
     annotationsWritableRef.current = false;
-  }, [flushReadingState]);
+  }, [flushReadingState, tts.stop]);
 
   const handleRelocate = useCallback(
     (index: number, fraction: number, label?: string, chapterHref?: string) => {
@@ -768,7 +779,6 @@ function App() {
   const sideCollapsed = readerMode === "reader" ? chatCollapsed : bookCollapsed;
   const sideWidth = readerMode === "reader" ? chatWidth : agentBookWidth;
   const chatHidden = readerMode === "reader" && chatCollapsed;
-  const bookHidden = readerMode === "agent" && bookCollapsed;
   const seekProgress = (frac: number) => {
     void seekControllerRef.current.run(async () => {
       await readerRef.current?.goToFraction(frac);
@@ -891,6 +901,17 @@ function App() {
           <Button
             size="icon-sm"
             variant="ghost"
+            disabled={bookHidden}
+            aria-label={
+              tts.status === "playing" ? t("reader.ttsPause") : t("reader.ttsPlay")
+            }
+            onClick={() => tts.toggle()}
+          >
+            {tts.status === "playing" ? <Pause /> : <Volume2 />}
+          </Button>
+          <Button
+            size="icon-sm"
+            variant="ghost"
             onClick={() => setSettingsOpen(true)}
             aria-label={t("reader.fontAndTheme")}
           >
@@ -968,6 +989,8 @@ function App() {
                 highlights={annotations.highlights}
                 initialFraction={currentBook?.lastFraction}
                 onBookReady={handleBookReady}
+                onTtsToggle={tts.toggle}
+                onUserRelocate={tts.onUserRelocate}
               />
             )}
             {tocVisible && (
@@ -1023,6 +1046,27 @@ function App() {
               </>
             )}
           </div>
+          {tts.error ? (
+            <div
+              role="alert"
+              className="border-t px-3 py-1.5 text-xs text-destructive"
+            >
+              {tts.error}
+            </div>
+          ) : null}
+          {tts.status !== "idle" ? (
+            <ReaderTtsBar
+              playing={tts.status === "playing"}
+              rate={tts.rate}
+              voiceURI={tts.voiceURI}
+              voices={tts.voices}
+              onPause={tts.pause}
+              onPlay={tts.play}
+              onStop={tts.stop}
+              onRate={tts.setRate}
+              onVoice={tts.setVoice}
+            />
+          ) : null}
           <ReaderProgressBar
             fraction={progress.fraction}
             chapterLabel={chapterLabel}

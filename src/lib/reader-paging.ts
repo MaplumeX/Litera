@@ -52,6 +52,20 @@ export function shouldIgnorePagingTarget(el: EventTarget | null): boolean {
   return Boolean(node.closest?.('[role="dialog"]'));
 }
 
+export function shouldIgnoreSpaceTarget(el: EventTarget | null): boolean {
+  if (shouldIgnorePagingTarget(el)) return true;
+  if (el == null || typeof el !== "object") return false;
+  const node = el as {
+    nodeType?: number;
+    parentElement?: EventTarget | null;
+    tagName?: string;
+    closest?: (selector: string) => EventTarget | null;
+  };
+  if (node.nodeType === 3) return shouldIgnoreSpaceTarget(node.parentElement ?? null);
+  if (node.tagName === "BUTTON") return true;
+  return Boolean(node.closest?.('button, [role="button"], [role="slider"], input[type="range"]'));
+}
+
 export function consumeWheelDelta(
   state: WheelPagingState,
   delta: number,

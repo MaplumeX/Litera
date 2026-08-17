@@ -79,6 +79,13 @@ const readerHandle: ReaderViewHandle = {
   }),
   addHighlight: vi.fn(),
   removeHighlight: vi.fn(),
+  initTts: vi.fn(async () => true),
+  ttsSpeakOrigin: vi.fn(() => '<speak><mark name="0"/>Hello.</speak>'),
+  ttsNext: vi.fn(() => undefined),
+  ttsResume: vi.fn(() => '<speak><mark name="0"/>Hello.</speak>'),
+  ttsSetMark: vi.fn(),
+  clearTtsHighlight: vi.fn(),
+  advanceTtsSection: vi.fn(async () => undefined),
 };
 
 vi.mock("@/components/ReaderView", async () => {

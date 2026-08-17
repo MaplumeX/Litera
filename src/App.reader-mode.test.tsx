@@ -5,6 +5,8 @@ import type { AnnotationsFile, BookOpenContext } from "@/types/library";
 import type { ReaderViewHandle } from "@/components/ReaderView";
 import { createAgentState, type AgentState } from "@/lib/agent-reducer";
 import { DEFAULT_READER_MODE_KEY } from "@/lib/reader-mode";
+import { shouldIgnoreSpaceTarget } from "@/lib/reader-paging";
+import { TTS_RATE_KEY, TTS_VOICE_KEY } from "@/lib/reader-tts";
 import { AGENT_BOOK_WIDTH_KEY } from "@/lib/agent-book-width";
 import { CHAT_PANEL_WIDTH_KEY } from "@/lib/chat-panel-width";
 
@@ -77,6 +79,13 @@ const readerHandle: ReaderViewHandle = {
   }),
   addHighlight: vi.fn(),
   removeHighlight: vi.fn(),
+  initTts: vi.fn(async () => true),
+  ttsSpeakOrigin: vi.fn(() => '<speak><mark name="0"/>Hello.</speak>'),
+  ttsNext: vi.fn(() => undefined),
+  ttsResume: vi.fn(() => '<speak><mark name="0"/>Hello.</speak>'),
+  ttsSetMark: vi.fn(),
+  clearTtsHighlight: vi.fn(),
+  advanceTtsSection: vi.fn(async () => undefined),
 };
 
 vi.mock("@/components/ReaderView", async () => {
@@ -85,10 +94,20 @@ vi.mock("@/components/ReaderView", async () => {
     ReaderView: React.forwardRef(function MockReader(
       props: {
         onSelectionCapture?: (capture: { text: string; chapterHref?: string }) => void;
+        onTtsToggle?: () => void;
       },
       ref: React.ForwardedRef<ReaderViewHandle>,
     ) {
       React.useImperativeHandle(ref, () => readerHandle);
+      React.useEffect(() => {
+        const onKey = (event: KeyboardEvent) => {
+          if (event.key !== " ") return;
+          if (shouldIgnoreSpaceTarget(event.target)) return;
+          props.onTtsToggle?.();
+        };
+        window.addEventListener("keydown", onKey);
+        return () => window.removeEventListener("keydown", onKey);
+      }, [props.onTtsToggle]);
       return (
         <div data-testid="reader-view">
           <button
@@ -481,5 +500,137 @@ describe("reader / agent mode", () => {
     expect(screen.getByLabelText("隐藏书籍")).toBeTruthy();
     expect(screen.getByRole("button", { name: "新建会话" })).toBeTruthy();
     expect(screen.getByTestId("reader-shell").style.gridTemplateColumns).toBe("1fr 38%");
+  });
+});
+
+function installSpeechMock() {
+  const voices = [
+    {
+      voiceURI: "mock://en",
+      name: "Mock English",
+      lang: "en-US",
+      localService: true,
+      default: true,
+    },
+  ] as SpeechSynthesisVoice[];
+  const pending: Array<{
+    onstart: ((ev: Event) => void) | null;
+    onend: ((ev: Event) => void) | null;
+    onerror: ((ev: Event) => void) | null;
+  }> = [];
+  const synth = {
+    speaking: false,
+    pending: false,
+    paused: false,
+    getVoices: () => voices,
+    speak(utterance: (typeof pending)[number]) {
+      pending.push(utterance);
+      queueMicrotask(() => utterance.onstart?.(new Event("start")));
+    },
+    cancel() {
+      for (const utterance of pending) {
+        utterance.onerror?.(Object.assign(new Event("error"), { error: "canceled" }));
+      }
+      pending.length = 0;
+    },
+    pause() {},
+    resume() {},
+    addEventListener() {},
+    removeEventListener() {},
+  };
+  vi.stubGlobal("speechSynthesis", synth);
+  vi.stubGlobal(
+    "SpeechSynthesisUtterance",
+    class {
+      text = "";
+      rate = 1;
+      lang = "";
+      voice: SpeechSynthesisVoice | null = null;
+      onstart: ((ev: Event) => void) | null = null;
+      onend: ((ev: Event) => void) | null = null;
+      onerror: ((ev: Event) => void) | null = null;
+      constructor(text?: string) {
+        this.text = text ?? "";
+      }
+    },
+  );
+}
+
+describe("reader TTS chrome", () => {
+  beforeEach(() => {
+    localStorage.removeItem(TTS_RATE_KEY);
+    localStorage.removeItem(TTS_VOICE_KEY);
+    installSpeechMock();
+    vi.mocked(readerHandle.initTts).mockClear();
+    vi.mocked(readerHandle.ttsSpeakOrigin).mockClear();
+    vi.mocked(readerHandle.clearTtsHighlight).mockClear();
+  });
+
+  it("hides the play button on the library page", () => {
+    const screen = render(<App />);
+    expect(screen.queryByLabelText("朗读")).toBeNull();
+    expect(screen.queryByTestId("reader-tts-bar")).toBeNull();
+  });
+
+  it("shows the play button after opening a book", async () => {
+    const screen = await openReader();
+    expect(screen.getByLabelText("朗读")).toBeTruthy();
+    expect(screen.queryByTestId("reader-tts-bar")).toBeNull();
+  });
+
+  it("shows the bar above the progress bar after play and hides it on stop", async () => {
+    const screen = await openReader();
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText("朗读"));
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("reader-tts-bar")).toBeTruthy();
+    });
+    const bookCell = screen.getByTestId("reader-book-cell");
+    const bar = screen.getByTestId("reader-tts-bar");
+    const progress = screen.getByTestId("reader-progress-bar");
+    expect(bar.nextElementSibling).toBe(progress);
+    expect(bookCell.lastElementChild).toBe(progress);
+    fireEvent.click(screen.getByLabelText("停止"));
+    expect(screen.queryByTestId("reader-tts-bar")).toBeNull();
+  });
+
+  it("ignores space in the chat input and plays from the window", async () => {
+    const screen = await openReader();
+    fireEvent.click(screen.getByLabelText("显示对话"));
+    const input = screen.getByPlaceholderText("输入问题…");
+    fireEvent.keyDown(input, { key: " ", code: "Space" });
+    expect(screen.queryByTestId("reader-tts-bar")).toBeNull();
+    await act(async () => {
+      fireEvent.keyDown(window, { key: " ", code: "Space" });
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("reader-tts-bar")).toBeTruthy();
+    });
+  });
+
+  it("stops and returns to the library without leftover chrome", async () => {
+    const screen = await openReader();
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText("朗读"));
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("reader-tts-bar")).toBeTruthy();
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText("返回书库"));
+    });
+    await waitFor(() => {
+      expect(screen.queryByTestId("reader-view")).toBeNull();
+    });
+    expect(screen.queryByLabelText("朗读")).toBeNull();
+    expect(screen.queryByTestId("reader-tts-bar")).toBeNull();
+  });
+
+  it("disables play when the agent-mode book is hidden", async () => {
+    localStorage.setItem(DEFAULT_READER_MODE_KEY, "agent");
+    const screen = await openReader();
+    fireEvent.click(screen.getByLabelText("隐藏书籍"));
+    expect((screen.getByLabelText("朗读") as HTMLButtonElement).disabled).toBe(true);
   });
 });

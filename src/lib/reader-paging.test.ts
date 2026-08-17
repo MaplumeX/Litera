@@ -6,6 +6,7 @@ import {
   pageLocalX,
   pageWidthOf,
   shouldIgnorePagingTarget,
+  shouldIgnoreSpaceTarget,
   type WheelPagingState,
 } from "./reader-paging";
 
@@ -119,6 +120,31 @@ describe("shouldIgnorePagingTarget", () => {
   it("allows ordinary reading targets and null", () => {
     expect(shouldIgnorePagingTarget(document.createElement("p"))).toBe(false);
     expect(shouldIgnorePagingTarget(null)).toBe(false);
+  });
+});
+
+describe("shouldIgnoreSpaceTarget", () => {
+  it("still ignores paging targets", () => {
+    expect(shouldIgnoreSpaceTarget(document.createElement("textarea"))).toBe(true);
+    expect(shouldIgnoreSpaceTarget(document.createElement("input"))).toBe(true);
+  });
+
+  it("ignores buttons and sliders so Space does not double-toggle", () => {
+    expect(shouldIgnoreSpaceTarget(document.createElement("button"))).toBe(true);
+    const roleButton = document.createElement("div");
+    roleButton.setAttribute("role", "button");
+    expect(shouldIgnoreSpaceTarget(roleButton)).toBe(true);
+    const slider = document.createElement("div");
+    slider.setAttribute("role", "slider");
+    expect(shouldIgnoreSpaceTarget(slider)).toBe(true);
+    const range = document.createElement("input");
+    range.type = "range";
+    expect(shouldIgnoreSpaceTarget(range)).toBe(true);
+  });
+
+  it("allows ordinary reading targets", () => {
+    expect(shouldIgnoreSpaceTarget(document.createElement("p"))).toBe(false);
+    expect(shouldIgnoreSpaceTarget(null)).toBe(false);
   });
 });
 

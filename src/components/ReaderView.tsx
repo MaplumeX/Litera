@@ -12,9 +12,11 @@ import {
   pageLocalX,
   pageWidthOf,
   shouldIgnorePagingTarget,
+  shouldIgnoreSpaceTarget,
   type WheelPagingState,
 } from "@/lib/reader-paging";
 import { sectionIndexAt } from "@/lib/reader-progress";
+import { TTS_HIGHLIGHT_COLOR, TTS_OVERLAY_KEY } from "@/lib/reader-tts";
 import { SelectionToolbar } from "@/components/SelectionToolbar";
 import type { HighlightRecord } from "@/types/library";
 
@@ -128,6 +130,13 @@ export interface ReaderViewHandle {
   getSelectionCfi: () => SelectionCfi | null;
   addHighlight: (cfi: string) => void;
   removeHighlight: (cfi: string) => void;
+  initTts: () => Promise<boolean>;
+  ttsSpeakOrigin: (source?: "auto" | "visible") => string | undefined;
+  ttsNext: () => string | undefined;
+  ttsResume: () => string | undefined;
+  ttsSetMark: (mark: string) => void;
+  clearTtsHighlight: () => void;
+  advanceTtsSection: () => Promise<string | undefined>;
 }
 
 interface ReaderViewProps {
@@ -145,15 +154,75 @@ interface ReaderViewProps {
   initialFraction?: number;
   /** Called after the book is opened and toc is available. */
   onBookReady?: (toc: TocItem[]) => void;
+  /** Space play/pause while the chapter iframe or window is focused. */
+  onTtsToggle?: () => void;
+  /** User-initiated relocate while TTS should resync from the new visible range. */
+  onUserRelocate?: () => void;
 }
+
+type FoliateOverlayer = {
+  add(key: string, range: Range, draw: unknown, options?: { color?: string }): void;
+  remove(key: string): void;
+};
+
+type FoliateTtsEngine = {
+  doc: Document;
+  start: () => string | undefined;
+  resume: () => string | undefined;
+  next: (paused?: boolean) => string | undefined;
+  from: (range: Range) => string | undefined;
+  setMark: (mark: string) => void;
+};
 
 type FoliateAnnotator = {
   getCFI?: (index: number, range?: Range) => string;
   addAnnotation?: (annotation: { value: string }, remove?: boolean) => Promise<unknown>;
   deleteAnnotation?: (annotation: { value: string }) => Promise<unknown>;
   goTo?: (target: string) => Promise<unknown>;
-  renderer?: { getContents?: () => { index: number; doc?: Document }[] };
+  tts?: FoliateTtsEngine | null;
+  initTTS?: (granularity?: string, highlight?: (range: Range) => void) => Promise<void>;
+  lastLocation?: { range?: Range } | null;
+  next?: () => Promise<void>;
+  renderer?: {
+    getContents?: () => { index: number; doc?: Document; overlayer?: FoliateOverlayer }[];
+    scrollToAnchor?: (anchor: Range | number, select?: boolean) => void | Promise<void>;
+    nextSection?: () => Promise<void>;
+  };
 };
+
+function isTtsRangeVisible(range: Range, visible?: Range): boolean {
+  if (visible) {
+    try {
+      return (
+        range.compareBoundaryPoints(Range.START_TO_END, visible) < 0 &&
+        range.compareBoundaryPoints(Range.END_TO_START, visible) > 0
+      );
+    } catch {
+      // detached ranges fall through to a viewport check
+    }
+  }
+  const rect = range.getBoundingClientRect();
+  if (rect.width === 0 && rect.height === 0) return false;
+  const doc =
+    range.startContainer.nodeType === Node.DOCUMENT_NODE
+      ? (range.startContainer as Document)
+      : range.startContainer.ownerDocument;
+  const view = doc?.defaultView;
+  if (!view) return true;
+  return rect.bottom > 0 && rect.top < view.innerHeight && rect.right > 0 && rect.left < view.innerWidth;
+}
+
+function readIframeSelectionRange(view: FoliateAnnotator): Range | null {
+  const contents = view.renderer?.getContents?.() ?? [];
+  for (const { doc } of contents) {
+    if (!doc) continue;
+    const sel = doc.getSelection();
+    if (!sel || sel.isCollapsed || sel.rangeCount === 0) continue;
+    if (!sel.toString().trim()) continue;
+    return sel.getRangeAt(0);
+  }
+  return null;
+}
 
 function selectionOverlayPos(doc: Document, range: Range): { x: number; y: number } | null {
   const rect = range.getBoundingClientRect();
@@ -201,6 +270,8 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       highlights = [],
       initialFraction,
       onBookReady,
+      onTtsToggle,
+      onUserRelocate,
     },
     ref,
   ) {
@@ -216,8 +287,46 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
     // when parent recreates them (e.g. onBookReady changing with styleState).
     const onRelocateRef = useRef(onRelocate);
     const onBookReadyRef = useRef(onBookReady);
+    const onTtsToggleRef = useRef(onTtsToggle);
+    const onUserRelocateRef = useRef(onUserRelocate);
     onRelocateRef.current = onRelocate;
     onBookReadyRef.current = onBookReady;
+    onTtsToggleRef.current = onTtsToggle;
+    onUserRelocateRef.current = onUserRelocate;
+    const ttsRangeRef = useRef<Range | null>(null);
+    const suppressUserRelocateRef = useRef(0);
+    const applyTtsHighlightRef = useRef<(range: Range) => void>(() => {});
+    const stableTtsHighlight = useRef((range: Range) => {
+      applyTtsHighlightRef.current(range);
+    }).current;
+
+    applyTtsHighlightRef.current = (range: Range) => {
+      const view = viewRef.current as unknown as FoliateAnnotator | null;
+      const contents = view?.renderer?.getContents?.()[0];
+      const doc = contents?.doc;
+      const rangeDoc =
+        range.startContainer.nodeType === Node.DOCUMENT_NODE
+          ? (range.startContainer as Document)
+          : range.startContainer.ownerDocument;
+      if (!contents || !doc) return;
+      if (!rangeDoc || rangeDoc !== doc) {
+        ttsRangeRef.current = null;
+        return;
+      }
+      ttsRangeRef.current = range;
+      if (contents.overlayer) {
+        contents.overlayer.remove(TTS_OVERLAY_KEY);
+        contents.overlayer.add(TTS_OVERLAY_KEY, range, Overlayer.highlight, {
+          color: TTS_HIGHLIGHT_COLOR,
+        });
+      }
+      if (isTtsRangeVisible(range, view?.lastLocation?.range)) return;
+      suppressUserRelocateRef.current += 1;
+      const done = () => {
+        suppressUserRelocateRef.current = Math.max(0, suppressUserRelocateRef.current - 1);
+      };
+      void Promise.resolve(view?.renderer?.scrollToAnchor?.(range, false)).then(done, done);
+    };
     const [selectionPos, setSelectionPos] = useState<{
       x: number;
       y: number;
@@ -246,6 +355,9 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
           lastLocationRef.current = { cfi: detail.cfi, fraction, label };
         }
         onRelocateRef.current?.(index, fraction, label, chapterHref);
+        if (suppressUserRelocateRef.current === 0) {
+          onUserRelocateRef.current?.();
+        }
       };
       el.addEventListener("relocate", handleRelocate as EventListener);
 
@@ -254,6 +366,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         for (const highlight of highlightsRef.current) {
           paintHighlight(view, highlight.cfi);
         }
+        if (ttsRangeRef.current) applyTtsHighlightRef.current(ttsRangeRef.current);
       };
       const handleDrawAnnotation = (e: Event) => {
         const detail = (e as CustomEvent<{ draw?: (fn: unknown, opts: { color: string }) => void }>).detail;
@@ -303,6 +416,12 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         const ke = e as KeyboardEvent;
         if (ke.defaultPrevented) return;
         if (ke.altKey || ke.metaKey || ke.ctrlKey || ke.shiftKey) return;
+        if (ke.key === " " || ke.code === "Space") {
+          if (shouldIgnoreSpaceTarget(ke.target)) return;
+          ke.preventDefault();
+          onTtsToggleRef.current?.();
+          return;
+        }
         if (shouldIgnorePagingTarget(ke.target)) return;
         if (ke.key === "ArrowLeft") {
           ke.preventDefault();
@@ -394,6 +513,8 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       currentChapterHrefRef.current = undefined;
       lastLocationRef.current = null;
       lastSelectionDocRef.current = null;
+      ttsRangeRef.current = null;
+      suppressUserRelocateRef.current = 0;
       paintedCfisRef.current = new Set();
       setSelectionPos(null);
       if (!fileData || !viewRef.current) return;
@@ -533,6 +654,67 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       if (view) paintHighlight(view, cfi, true);
     }, []);
 
+    const clearTtsHighlight = useCallback(() => {
+      ttsRangeRef.current = null;
+      const view = viewRef.current as unknown as FoliateAnnotator | null;
+      view?.renderer?.getContents?.()[0]?.overlayer?.remove(TTS_OVERLAY_KEY);
+    }, []);
+
+    const initTts = useCallback(async () => {
+      const view = viewRef.current as unknown as FoliateAnnotator | null;
+      const doc = view?.renderer?.getContents?.()[0]?.doc;
+      if (!view?.initTTS || !doc) return false;
+      await view.initTTS("sentence", stableTtsHighlight);
+      return Boolean(view.tts);
+    }, [stableTtsHighlight]);
+
+    const ttsSpeakOrigin = useCallback((source: "auto" | "visible" = "auto") => {
+      const view = viewRef.current as unknown as FoliateAnnotator | null;
+      if (!view?.tts) return undefined;
+      if (source !== "visible") {
+        const selection = readIframeSelectionRange(view);
+        if (selection) return view.tts.from(selection);
+      }
+      const visible = view.lastLocation?.range;
+      if (visible) return view.tts.from(visible);
+      return view.tts.start();
+    }, []);
+
+    const ttsNext = useCallback(() => {
+      const view = viewRef.current as unknown as FoliateAnnotator | null;
+      return view?.tts?.next();
+    }, []);
+
+    const ttsResume = useCallback(() => {
+      const view = viewRef.current as unknown as FoliateAnnotator | null;
+      return view?.tts?.resume();
+    }, []);
+
+    const ttsSetMark = useCallback((mark: string) => {
+      const view = viewRef.current as unknown as FoliateAnnotator | null;
+      view?.tts?.setMark(mark);
+    }, []);
+
+    const advanceTtsSection = useCallback(async () => {
+      const view = viewRef.current as unknown as FoliateAnnotator | null;
+      if (!view) return undefined;
+      const before = view.renderer?.getContents?.()[0]?.doc;
+      clearTtsHighlight();
+      suppressUserRelocateRef.current += 1;
+      try {
+        if (view.renderer?.nextSection) await view.renderer.nextSection();
+        else await view.next?.();
+        const after = view.renderer?.getContents?.()[0]?.doc;
+        if (!after || after === before) return undefined;
+        const ok = await initTts();
+        const tts = view.tts;
+        if (!ok || !tts) return undefined;
+        return tts.start();
+      } finally {
+        suppressUserRelocateRef.current = Math.max(0, suppressUserRelocateRef.current - 1);
+      }
+    }, [clearTtsHighlight, initTts]);
+
     useImperativeHandle(
       ref,
       () => ({
@@ -549,6 +731,13 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         getSelectionCfi,
         addHighlight,
         removeHighlight,
+        initTts,
+        ttsSpeakOrigin,
+        ttsNext,
+        ttsResume,
+        ttsSetMark,
+        clearTtsHighlight,
+        advanceTtsSection,
       }),
       [
         prev,
@@ -564,6 +753,13 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         getSelectionCfi,
         addHighlight,
         removeHighlight,
+        initTts,
+        ttsSpeakOrigin,
+        ttsNext,
+        ttsResume,
+        ttsSetMark,
+        clearTtsHighlight,
+        advanceTtsSection,
       ],
     );
 
