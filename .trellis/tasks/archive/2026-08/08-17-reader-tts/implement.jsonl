@@ -1,0 +1,12 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend checklist and layer map"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Chrome language, icon buttons, reader-first layout, shadcn"}
+{"file": ".trellis/spec/frontend/i18n.md", "reason": "Catalogs + localStorage prefs; do not touch preferences.json"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "foliate-js.d.ts contract; no any"}
+{"file": ".trellis/spec/frontend/hook-guidelines.md", "reason": "Hook lifecycle, cleanup, fake timers"}
+{"file": ".trellis/spec/frontend/directory-structure.md", "reason": "foliate-view createElement; lib vs components"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "localStorage vs Rust durable state"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Do not add TTS keys to deny_unknown_fields preferences"}
+{"file": ".trellis/tasks/08-17-reader-tts/research/foliate-tts-api.md", "reason": "initTTS, setMark, overlay vs annotation, re-init rules"}
+{"file": ".trellis/tasks/08-17-reader-tts/research/web-speech-ssml.md", "reason": "SSML strip, cancel vs pause, voiceschanged, rate"}
+{"file": ".trellis/tasks/08-17-reader-tts/research/reader-integration-points.md", "reason": "Header slot, Space ignore list, handle mock drift, bookHidden stop"}

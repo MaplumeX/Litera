@@ -1,0 +1,9 @@
+{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Quality Check entry"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "CSP, chrome, forbidden patterns"}
+{"file": ".trellis/spec/frontend/i18n.md", "reason": "New strings must be in both catalogs"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "No any; d.ts vs handle contract"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Icon aria-labels, no extra shadows"}
+{"file": ".trellis/tasks/08-17-reader-tts/research/foliate-tts-api.md", "reason": "Highlight must not use addAnnotation or default select=true"}
+{"file": ".trellis/tasks/08-17-reader-tts/research/web-speech-ssml.md", "reason": "Speech pause is unreliable; no-voices path"}
+{"file": ".trellis/tasks/08-17-reader-tts/research/reader-integration-points.md", "reason": "Overlay key, Space vs button/slider, App handle mocks"}
