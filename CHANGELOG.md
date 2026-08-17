@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-08-17
+
+### Added
+
+- **助手可读标注**：阅读助手能按需查看当前书的书签和高亮，并据此回答。
+- **点击工具结果跳转**：点搜索、读章或标注工具结果里的引用，阅读器翻到对应位置。
+- **界面字体与字号**：设置 → 外观可改软件界面字体和字号，立刻生效，不影响书页排版。
+
+### Changed
+
+- **Agent 模式目录/标注跟书走**：Agent 模式下目录和标注按钮移到右侧书控件旁。
+- **应用图标**：更新应用图标和 favicon。
+
 ## [0.2.1] - 2026-08-16
 
 ### Added
