@@ -69,6 +69,8 @@ declare module "../foliate-js/view.js" {
 }
 ```
 
+Host-only APIs used by the reader (`initTTS`, `TTS` methods returning `string | undefined`, `renderer.getContents`, `lastLocation.range`) belong in this file. Do not add `any`. Do not patch the submodule to invent types.
+
 ---
 
 ## Rust ↔ TypeScript Contract

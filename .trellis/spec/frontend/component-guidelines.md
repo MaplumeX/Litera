@@ -119,8 +119,8 @@ import { ChevronLeft, List, Settings } from "lucide-react"
 
 **Layout**:
 ```
-header (reader): [mac inset?] [←][TOC][标注]  book title (drag)  [spacer drag]  [Aa] | [mode][chat]  [Win/Linux window buttons]
-header (agent):  [mac inset?] [←]  book title (drag)  [spacer drag]  [Aa] | [TOC][标注] [mode][book]  [Win/Linux window buttons]
+header (reader): [mac inset?] [←][TOC][标注]  book title (drag)  [spacer drag]  [Aa][TTS] | [mode][chat]  [Win/Linux window buttons]
+header (agent):  [mac inset?] [←]  book title (drag)  [spacer drag]  [Aa][TTS] | [TOC][标注] [mode][book]  [Win/Linux window buttons]
 book:     [ ReaderView canvas + overlay TOC/标注 ]
           [ ‹章  chapter    ====●==|==|====   42%  章› ]
 reader:   [ book 1fr | chat 22% or 0 ]
@@ -151,6 +151,33 @@ list.scrollTop +=
 **Don't**: Scroll the outer drawer. Use `smooth`. Change href matching (still `item.href === currentHref`) as part of a scroll tweak. Pin the TOC as a third column. Trust jsdom's default `getBoundingClientRect` (all zeros) — TOC scroll tests must mock list vs row geometry.
 
 **Related**: `src/components/TocSidebar.tsx`; overlay TOC in "reader chrome is reading-first".
+
+### Convention: reader TTS is Web Speech + a reserved overlay
+
+**What**: In-reader read-aloud lives in `useReaderTts` + `ReaderView` + `ReaderTtsBar`. The header has one play/pause icon. A bar appears above `ReaderProgressBar` only while `status !== "idle"`. Rate/voice persist as `localStorage` `litera.ttsRate` / `litera.ttsVoice`.
+
+**Why**: foliate-js `TTS` returns SSML and does not speak. `preferences.json` `deny_unknown_fields` would reset theme if TTS keys were added there. Default `initTTS` highlight uses `scrollToAnchor(range, true)` and opens the selection toolbar.
+
+**How**:
+```ts
+await view.initTTS("sentence", drawLiteraTtsHighlight);
+// parse SSML marks → one SpeechSynthesisUtterance per sentence
+// utterance.onstart → view.tts.setMark(name)
+overlayer.add("litera-tts", range, Overlayer.highlight, { color: TTS_HIGHLIGHT_COLOR });
+scrollToAnchor(range, false); // only if off-screen
+```
+
+**Rules**:
+- Do not edit `src/foliate-js/**`. Type `initTTS` / `TTS` in `src/foliate-js.d.ts`.
+- Do not feed foliate SSML to `utterance.text`. Parse `<mark>` and speak plain text.
+- Pause with `speechSynthesis.cancel()` plus a leftover queue. Do not rely on `pause()`.
+- Treat `canceled` / `interrupted` as expected after `cancel()`, not as AC10 failures.
+- Overlay key is `litera-tts`, never a CFI. Never `addAnnotation` for follow highlight.
+- Space play/pause binds in `ReaderView` (window + iframe). Ignore BUTTON / slider in addition to `shouldIgnorePagingTarget`.
+- Stop on back-to-library, book change, unmount, and `bookHidden`. User relocate while speaking restarts from the new visible range.
+- No TTS button on `SelectionToolbar`. No Media Overlay path this feature.
+
+**Related**: frontend `i18n.md` (do not add TTS keys to `preferences.json`); `src/lib/reader-tts.ts`.
 
 ### Convention: window chrome merges into existing headers
 

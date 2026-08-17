@@ -8,6 +8,8 @@
   and Pi v3 session files. Per-book last reader/Agent mode is `BookRecord.lastReaderMode`.
 - React owns route/layout/form state and the reducer projection used by chat UI.
   App default mode (`litera.defaultReaderMode`) and pane widths live in `localStorage`.
+  TTS rate/voice live in `localStorage` (`litera.ttsRate` / `litera.ttsVoice`);
+  playing/paused is process-only and must not be persisted.
   `chatCollapsed`, `bookCollapsed`, `sessionRailOpen`, `tocVisible`, and
   `annotationsVisible` are process-only.
 - `LiteraAgentRuntime` owns the active book worker, model stream, session leaf,
