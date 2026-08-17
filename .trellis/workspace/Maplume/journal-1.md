@@ -1653,3 +1653,25 @@ Added read-only list_annotations and clickable tool-result citations so the read
 ### Status
 
 [OK] **Completed**
+
+
+## Session 72: Reader TTS playback
+
+**Date**: 2026-08-17
+**Task**: Reader TTS playback
+**Branch**: `main`
+
+### Summary
+
+Added in-reader TTS: Web Speech plus foliate-js sentence follow highlight, playback bar, persisted rate/voice, and spec conventions. Real-book audio was not hand-tested in this environment.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `373fd28` | (see git log) |
+| `36b9437` | (see git log) |
+
+### Status
+
+[OK] **Completed**

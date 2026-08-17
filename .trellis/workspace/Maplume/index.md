@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 71
-- **Last Active**: 2026-08-16
+- **Total Sessions**: 72
+- **Last Active**: 2026-08-17
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1655 | Active |
+| `journal-1.md` | ~1677 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 72 | 2026-08-17 | Reader TTS playback | `373fd28`, `36b9437` | `main` |
 | 71 | 2026-08-16 | Agent annotations and click-to-source | `2233992` | `main` |
 | 70 | 2026-08-16 | App chrome font and size settings | `004b13e` | `main` |
 | 69 | 2026-08-16 | Agent TOC buttons follow the book | `ed279e9` | `main` |
