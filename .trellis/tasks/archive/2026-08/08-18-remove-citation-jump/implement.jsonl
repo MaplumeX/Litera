@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend checklist and layer map"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "ToolCallCard chrome language; chat panel conventions"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "Contains the citation-jump paragraph to remove; agent runtime conventions"}
+{"file": ".trellis/spec/frontend/i18n.md", "reason": "Removing chat.citation.* keys from both catalogs"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "No any; delete code must keep types clean"}

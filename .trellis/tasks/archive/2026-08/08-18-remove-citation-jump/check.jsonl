@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/frontend/index.md", "reason": "Quality Check entry"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Forbidden patterns, dead-code hygiene"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "Verify citation paragraph removed; agent runtime untouched elsewhere"}
+{"file": ".trellis/spec/frontend/i18n.md", "reason": "Both catalogs consistent after key removal"}
