@@ -1697,3 +1697,24 @@ Removed clickable tool-result citations (search_in_book / read_chapter / list_an
 ### Status
 
 [OK] **Completed**
+
+
+## Session 74: Fix chat scroll jump on session enter
+
+**Date**: 2026-08-19
+**Task**: Fix chat scroll jump on session enter
+**Branch**: `main`
+
+### Summary
+
+ChatPanel jumped from top to bottom on session enter because the reducer swaps the whole message list in one event while scrollToBottom used smooth scrolling. scrollToBottom now takes a smooth flag; session enter/switch sets scrollTop directly (instant), smooth is kept for streaming and send/edit. Auto-scroll effect gated on isStreaming. Added 2 tests; 363 tests pass, tsc clean.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d85db18` | (see git log) |
+
+### Status
+
+[OK] **Completed**
