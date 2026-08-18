@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 72
-- **Last Active**: 2026-08-17
+- **Total Sessions**: 73
+- **Last Active**: 2026-08-18
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1677 | Active |
+| `journal-1.md` | ~1699 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 73 | 2026-08-18 | Remove agent citation jump-to-location | `f51e784`, `0ea3a98` | `main` |
 | 72 | 2026-08-17 | Reader TTS playback | `373fd28`, `36b9437` | `main` |
 | 71 | 2026-08-16 | Agent annotations and click-to-source | `2233992` | `main` |
 | 70 | 2026-08-16 | App chrome font and size settings | `004b13e` | `main` |

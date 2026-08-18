@@ -1675,3 +1675,25 @@ Added in-reader TTS: Web Speech plus foliate-js sentence follow highlight, playb
 ### Status
 
 [OK] **Completed**
+
+
+## Session 73: Remove agent citation jump-to-location
+
+**Date**: 2026-08-18
+**Task**: Remove agent citation jump-to-location
+**Branch**: `main`
+
+### Summary
+
+Removed clickable tool-result citations (search_in_book / read_chapter / list_annotations no longer jump the reader). Deleted tool-citations.ts, resolveChapterHref, chat.citation.* i18n keys, and onOpenCitation chain; kept list_annotations tool and chrome-owned jumps. Spec updated. 361 tests green, tsc clean.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f51e784` | (see git log) |
+| `0ea3a98` | (see git log) |
+
+### Status
+
+[OK] **Completed**
