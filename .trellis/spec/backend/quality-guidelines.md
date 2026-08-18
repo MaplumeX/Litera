@@ -25,9 +25,11 @@
   `label`; highlights keep `excerpt`. Omit `label` when unset. Empty arrays are
   success. Do not call `save_annotations`. Do not invent chapter titles. Gate
   with the same `bookCall` / `bookId` check as the text tools.
-- Resolve a model `chapterIndex` to a reader location with
-  `LiteraAgentRuntime.resolveChapterHref` (worker TOC `hrefs[0]`). Never use
-  `flattenToc(readerToc)[i]`. Do not add an `open_in_reader` model tool.
+- Tool results are read-only in chat; there is no clickable tool-result →
+  reader-location jump, so no runtime `chapterIndex` → href resolution is needed.
+  Reader jumps stay chrome-owned (`goToChapterHref` / `goToTocItem` for TOC and
+  prev/next, `jumpToAnnotation` for annotation drawers). Never resolve
+  `flattenToc(readerToc)[i]` and do not add an `open_in_reader` model tool.
 
 ## Session integrity
 
