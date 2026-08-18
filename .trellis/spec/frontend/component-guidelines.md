@@ -226,14 +226,15 @@ scrollToAnchor(range, false); // only if off-screen
 
 ### Convention: chat auto-scroll respects user position (stick-to-bottom)
 
-**What**: Streaming assistant messages must not yank the scroll position back to the bottom. `ChatPanel` keeps a `stickToBottom` state (initial `true`); the message container's `onScroll` computes `scrollHeight - scrollTop - clientHeight` and flips it `false` once the user scrolls up beyond a ~48px threshold, `true` when they return. The `[state.messages]` auto-scroll effect only runs `scrollIntoView({ behavior: "smooth" })` while `stickToBottom` is `true`. Explicit user intent (send, edit re-send, session switch / new session via `state.sessionId` effect) calls `scrollToBottom()` which re-enables following and scrolls down.
+**What**: Streaming assistant messages must not yank the scroll position back to the bottom. `ChatPanel` keeps a `stickToBottom` state (initial `true`); the message container's `onScroll` computes `scrollHeight - scrollTop - clientHeight` and flips it `false` once the user scrolls up beyond a ~48px threshold, `true` when they return. The `[state.messages]` auto-scroll effect only runs `scrollIntoView({ behavior: "smooth" })` while `stickToBottom` is `true` **and** `isStreaming` is `true`. Explicit user intent (send, edit re-send) calls `scrollToBottom()` (smooth); session switch / new session via the `state.sessionId` effect calls `scrollToBottom(false)`, which sets `scrollTop = scrollHeight` directly — an instant jump with no animation.
 
-**Why**: Unconditional `scrollIntoView` on every streamed chunk makes reading earlier content impossible — the viewport is continuously dragged to the latest token.
+**Why**: Unconditional `scrollIntoView` on every streamed chunk makes reading earlier content impossible — the viewport is continuously dragged to the latest token. And a smooth scroll on session enter animates from the top of the freshly replaced message list to the bottom (the reducer swaps the whole `messages` array in one event, so the container starts at `scrollTop` 0) — the longer the history, the longer the visible top-to-bottom sweep.
 
 **Rules**:
 - Track stickiness with a state flag, not by reading scroll metrics inside the auto-scroll effect — growth of `scrollHeight` during streaming doesn't fire scroll events, so appending messages never falsely clears the flag; only real user scrolls update it.
 - Reset stickiness only on explicit user intent (send / edit / session change), not on stream end.
 - The 48px threshold is a local constant; keep it in `ChatPanel`.
+- Session enter / switch must jump instantly (`scrollTop = scrollHeight`), never smooth-scroll. Smooth scrolling is reserved for streaming updates and explicit send / edit actions.
 
 **Related**: `src/components/chat/ChatPanel.tsx`.
 

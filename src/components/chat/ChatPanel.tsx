@@ -86,9 +86,14 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     const error = invokeError ?? state.error?.message ?? null;
     const lastMessage = state.messages[state.messages.length - 1];
 
-    const scrollToBottom = useCallback(() => {
+    const scrollToBottom = useCallback((smooth = true) => {
       setStickToBottom(true);
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      if (smooth) {
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      } else {
+        const container = scrollContainerRef.current;
+        if (container) container.scrollTop = container.scrollHeight;
+      }
     }, []);
 
     const handleScroll = useCallback(() => {
@@ -104,10 +109,10 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     }, [loadConfig]);
 
     useEffect(() => {
-      if (stickToBottom) {
+      if (stickToBottom && isStreaming) {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
       }
-    }, [state.messages, stickToBottom]);
+    }, [state.messages, stickToBottom, isStreaming]);
 
     useEffect(() => {
       setShowSessionList(false);
@@ -125,7 +130,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     useEffect(() => {
       setEditingIndex(null);
       setEditDraft("");
-      scrollToBottom();
+      scrollToBottom(false);
     }, [state.sessionId, scrollToBottom]);
 
     useEffect(() => {

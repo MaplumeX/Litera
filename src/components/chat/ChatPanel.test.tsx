@@ -196,3 +196,25 @@ describe("ChatPanel session layouts", () => {
     expect(view.getByRole("button", { name: "新建会话" })).toBeTruthy();
   });
 });
+
+describe("ChatPanel scroll behavior", () => {
+  it("jumps instantly to the bottom on session enter without smooth scrolling", () => {
+    const scrollIntoView = vi.fn();
+    HTMLElement.prototype.scrollIntoView = scrollIntoView;
+    render(<ChatPanel currentChapterHref="OEBPS/ch1.xhtml" bookId="book-1" />);
+    expect(scrollIntoView).not.toHaveBeenCalled();
+  });
+
+  it("smooth-scrolls to the bottom while streaming new content", () => {
+    const scrollIntoView = vi.fn();
+    HTMLElement.prototype.scrollIntoView = scrollIntoView;
+    const view = render(<ChatPanel currentChapterHref="OEBPS/ch1.xhtml" bookId="book-1" />);
+    scrollIntoView.mockClear();
+    bridgeState = readyState({
+      status: "prompting",
+      messages: [{ role: "assistant", content: "正在生成" }],
+    });
+    view.rerender(<ChatPanel currentChapterHref="OEBPS/ch1.xhtml" bookId="book-1" />);
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth" });
+  });
+});
