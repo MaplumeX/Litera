@@ -241,30 +241,6 @@ describe("LiteraAgentRuntime",()=>{
     expect(result?.text).toContain("电子书上下文已切换");
     expect(result?.text).not.toContain("stale");
   });
-
-  it("resolves chapter hrefs from the worker TOC index, not array position",async()=>{
-    const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:2}),toc:async()=>[{index:2,label:"Three",hrefs:["three.xhtml","three-alt.xhtml"],chars:3},{index:0,label:"One",hrefs:["one.xhtml"],chars:1}],readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:1,text:"chapter"}),search:async()=>[],close:()=>{}};
-    const runtime=new LiteraAgentRuntime({book});
-    expect(await runtime.resolveChapterHref(0)).toBeUndefined();
-    await runtime.openBook("book",new ArrayBuffer(1));
-    expect(await runtime.resolveChapterHref(2)).toBe("three.xhtml");
-    expect(await runtime.resolveChapterHref(0)).toBe("one.xhtml");
-    expect(await runtime.resolveChapterHref(1)).toBeUndefined();
-    runtime.closeBook();
-    expect(await runtime.resolveChapterHref(2)).toBeUndefined();
-  });
-
-  it("returns undefined when resolveChapterHref races a book switch",async()=>{
-    let release!:()=>void;
-    const held=new Promise<void>((resolve)=>{release=resolve;});
-    const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:1}),toc:async()=>{await held;return[{index:0,label:"One",hrefs:["one.xhtml"],chars:1}];},readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:1,text:"chapter"}),search:async()=>[],close:()=>{}};
-    const runtime=new LiteraAgentRuntime({book});
-    await runtime.openBook("book-a",new ArrayBuffer(1));
-    const pending=runtime.resolveChapterHref(0);
-    await runtime.openBook("book-b",new ArrayBuffer(1));
-    release();
-    expect(await pending).toBeUndefined();
-  });
 });
 
 function listAnnotationsResult(batches:PiSessionEntry[][]):{isError:boolean;text:string}|undefined{

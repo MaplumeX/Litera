@@ -36,7 +36,6 @@ import {
 } from "@/components/ReaderView";
 import { ChatPanel, type ChatPanelHandle } from "@/components/chat/ChatPanel";
 import { embeddedAgentRuntime } from "@/agent/runtime/embedded-runtime";
-import type { BookCitation } from "@/lib/tool-citations";
 import { LibraryView } from "@/components/LibraryView";
 import {
   BookImportConfirmDialog,
@@ -711,18 +710,6 @@ function App() {
     closeOverlays();
   }, [closeOverlays]);
 
-  const handleOpenCitation = useCallback((citation: BookCitation) => {
-    if (readerMode === "agent") setBookCollapsed(false);
-    closeOverlays();
-    if (citation.kind === "cfi") {
-      void jumpToAnnotation(citation.cfi, citation.fraction);
-      return;
-    }
-    void embeddedAgentRuntime.resolveChapterHref(citation.chapterIndex).then((href) => {
-      if (href) goToChapterHref(href);
-    });
-  }, [closeOverlays, goToChapterHref, jumpToAnnotation, readerMode]);
-
   const handleAddBookmark = useCallback(() => {
     const location = readerRef.current?.getLocation();
     if (!location?.cfi) return;
@@ -1096,7 +1083,6 @@ function App() {
             variant={readerMode === "agent" ? "workspace" : "docked"}
             sessionRailOpen={sessionRailOpen}
             onSessionRailOpenChange={setSessionRailOpen}
-            onOpenCitation={handleOpenCitation}
           />
         </div>
         {!sideCollapsed && (
