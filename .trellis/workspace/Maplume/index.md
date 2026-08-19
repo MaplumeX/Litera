@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 74
+- **Total Sessions**: 75
 - **Last Active**: 2026-08-19
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1720 | Active |
+| `journal-1.md` | ~1741 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 75 | 2026-08-19 | Reader footnote popup feature | `4f76378` | `prime-hyena` |
 | 74 | 2026-08-19 | Fix chat scroll jump on session enter | `d85db18` | `main` |
 | 73 | 2026-08-18 | Remove agent citation jump-to-location | `f51e784`, `0ea3a98` | `main` |
 | 72 | 2026-08-17 | Reader TTS playback | `373fd28`, `36b9437` | `main` |

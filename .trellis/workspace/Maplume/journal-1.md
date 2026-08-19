@@ -1718,3 +1718,24 @@ ChatPanel jumped from top to bottom on session enter because the reducer swaps t
 ### Status
 
 [OK] **Completed**
+
+
+## Session 75: Reader footnote popup feature
+
+**Date**: 2026-08-19
+**Task**: Reader footnote popup feature
+**Branch**: `prime-hyena`
+
+### Summary
+
+Implemented popup footnotes in the EPUB reader via foliate-js FootnoteHandler: click a footnote reference to see its content in a popup at the reference position instead of paging away. New FootnotePopup component (fixed positioning, backdrop/Esc close, viewport clamping), inner <foliate-view> with scrolled flow + injected reader styles (stylesCss prop from App), popup-internal links close the popup and navigate in the main view. Guarded before-render close/out-of-order races with click sequence tokens (check agent fixed 3 races). Added 6 unit tests; 369 tests + build pass. Updated component-guidelines spec with the footnote popup convention and race gotcha.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4f76378` | (see git log) |
+
+### Status
+
+[OK] **Completed**
