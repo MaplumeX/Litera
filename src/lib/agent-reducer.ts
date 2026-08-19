@@ -183,6 +183,21 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
           updatedAt: new Date().toISOString(),
         }),
       };
+    case "session_config_updated":
+      if (!matchesBook(base, event.bookId)) return base;
+      return {
+        ...base,
+        sessions: upsertSession(base.sessions, {
+          ...base.sessions.find((session) => session.id === event.sessionId) ?? {
+            id: event.sessionId,
+            title: t("chat.newSessionTitle"),
+            createdAt: new Date().toISOString(),
+          },
+          ...(event.systemPrompt !== undefined ? { systemPrompt: event.systemPrompt } : {}),
+          ...(event.thinkingLevel !== undefined ? { thinkingLevel: event.thinkingLevel } : {}),
+          updatedAt: new Date().toISOString(),
+        }),
+      };
     case "sessions_list":
       if (!matchesBook(base, event.bookId) || event.requestId !== base.sessionListRequestId) return base;
       return { ...base, sessions: event.sessions, sessionListRequestId: null };

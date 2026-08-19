@@ -249,12 +249,40 @@ export function windowCompleteTurns(messages: PiAgentMessage[], maxTurns = 12): 
   return snapshot ? [snapshot, ...window] : window;
 }
 
+export interface SessionConfig {
+  systemPrompt: string;
+  thinkingLevel: string;
+}
+
+/**
+ * Latest session_config entry on the active branch, or null when the session
+ * has none. Absent systemPrompt -> "" (empty string means unset -> default
+ * SYSTEM_PROMPT at runtime); absent thinkingLevel -> "off".
+ */
+export function sessionConfig(session: DecodedPiSession): SessionConfig | null {
+  const branch = activeBranch(session);
+  for (let index = branch.length - 1; index >= 0; index -= 1) {
+    const entry = branch[index];
+    if (entry.type !== "session_config") continue;
+    return {
+      systemPrompt: string(entry.systemPrompt) ?? "",
+      thinkingLevel: string(entry.thinkingLevel) ?? "off",
+    };
+  }
+  return null;
+}
+
 export function sessionSummary(value: unknown): AgentSessionSummary {
   const item = object(value);
   if (!item || !string(item.id) || typeof item.title !== "string" || !string(item.createdAt) || !string(item.updatedAt)) {
     throw new Error("Invalid session summary");
   }
-  return { id: item.id as string, title: item.title, createdAt: item.createdAt as string, updatedAt: item.updatedAt as string };
+  const summary: AgentSessionSummary = { id: item.id as string, title: item.title, createdAt: item.createdAt as string, updatedAt: item.updatedAt as string };
+  const systemPrompt = string(item.systemPrompt);
+  const thinkingLevel = string(item.thinkingLevel);
+  if (systemPrompt !== null) summary.systemPrompt = systemPrompt;
+  if (thinkingLevel !== null) summary.thinkingLevel = thinkingLevel;
+  return summary;
 }
 
 export function newEntry(type: string, parentId: string | null, fields: Record<string, unknown>): PiSessionEntry {

@@ -156,6 +156,13 @@ export const zhCN = {
   "chat.generating": "正在生成回复",
   "chat.edit": "编辑",
   "chat.copy": "复制",
+  "chat.sessionSettings": "会话设置",
+  "chat.sessionConfigTitle": "会话设置",
+  "chat.sessionConfigDescription": "配置该会话的系统提示词与思考强度。",
+  "chat.systemPrompt": "系统提示词",
+  "chat.systemPromptHint": "留空使用默认提示词",
+  "chat.thinkingLevel": "思考强度",
+  "chat.clearPrompt": "清空",
 
   "agent.title": "LLM 设置",
   "agent.description": "配置 LLM 供应商、API Key 与模型。",

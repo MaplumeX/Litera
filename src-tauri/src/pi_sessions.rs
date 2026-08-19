@@ -31,6 +31,8 @@ pub struct PiSessionSummary {
     title: String,
     created_at: String,
     updated_at: String,
+    system_prompt: Option<String>,
+    thinking_level: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -217,11 +219,25 @@ impl PiSessionStore {
                 .map(str::to_string)
                 .or_else(|| first_user_text(&entries))
                 .unwrap_or_else(|| "新会话".to_string());
+            let session_config = entries
+                .iter()
+                .rev()
+                .find(|entry| entry.get("type").and_then(Value::as_str) == Some("session_config"));
+            let system_prompt = session_config
+                .and_then(|entry| entry.get("systemPrompt"))
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            let thinking_level = session_config
+                .and_then(|entry| entry.get("thinkingLevel"))
+                .and_then(Value::as_str)
+                .map(str::to_string);
             summaries.push(PiSessionSummary {
                 id: id.to_string(),
                 title,
                 created_at: created,
                 updated_at: updated,
+                system_prompt,
+                thinking_level,
             });
         }
         summaries.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
@@ -896,6 +912,46 @@ mod tests {
         fs::write(dir.join("future.jsonl"), format!("{{\"type\":\"session\",\"version\":4,\"id\":\"future\",\"timestamp\":\"{now}\",\"cwd\":\"\"}}\n")).unwrap();
         assert_eq!(store.list("book").unwrap().len(), 1);
         assert_eq!(store.list("book").unwrap()[0].id, valid.header["id"]);
+    }
+
+    #[test]
+    fn list_exposes_the_latest_session_config() {
+        let (temp, store) = store();
+        let dir = temp.path().join("sessions/book");
+        fs::create_dir(&dir).unwrap();
+        let now = Utc::now().to_rfc3339();
+        fs::write(
+            dir.join("one.jsonl"),
+            format!(
+                "{{\"type\":\"session\",\"version\":3,\"id\":\"one\",\"timestamp\":\"{now}\",\"cwd\":\"\"}}\n\
+                 {{\"type\":\"session_config\",\"id\":\"cfg1\",\"parentId\":null,\"timestamp\":\"{now}\",\"systemPrompt\":\"旧提示词\",\"thinkingLevel\":\"max\"}}\n\
+                 {{\"type\":\"session_config\",\"id\":\"cfg2\",\"parentId\":\"cfg1\",\"timestamp\":\"{now}\",\"systemPrompt\":\"翻译为古文\"}}\n"
+            ),
+        )
+        .unwrap();
+        let summary = &store.list("book").unwrap()[0];
+        assert_eq!(summary.id, "one");
+        assert_eq!(summary.system_prompt.as_deref(), Some("翻译为古文"));
+        // Latest entry omits thinkingLevel -> absent field is None, not inherited.
+        assert_eq!(summary.thinking_level, None);
+    }
+
+    #[test]
+    fn list_leaves_session_config_fields_none_when_absent() {
+        let (temp, store) = store();
+        let dir = temp.path().join("sessions/book");
+        fs::create_dir(&dir).unwrap();
+        let now = Utc::now().to_rfc3339();
+        fs::write(
+            dir.join("plain.jsonl"),
+            format!(
+                "{{\"type\":\"session\",\"version\":3,\"id\":\"plain\",\"timestamp\":\"{now}\",\"cwd\":\"\"}}\n{{\"type\":\"message\",\"id\":\"m1\",\"parentId\":null,\"timestamp\":\"{now}\",\"message\":{{\"role\":\"user\",\"content\":\"hello\",\"timestamp\":1}}}}\n"
+            ),
+        )
+        .unwrap();
+        let summary = &store.list("book").unwrap()[0];
+        assert_eq!(summary.system_prompt, None);
+        assert_eq!(summary.thinking_level, None);
     }
 
     #[cfg(unix)]

@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.4] - 2026-08-19
+
+### Added
+
+- **每会话系统提示词**：会话列表每条目可打开「会话设置」弹窗，单独设置该会话的系统提示词（留空恢复默认），随会话保存、切换会话各自生效。
+- **每会话思考强度**：同一弹窗可选思考强度（off 到 max），不支持思考的模型会自动安全降级。
+
 ## [0.2.3] - 2026-08-19
 
 ### Added
