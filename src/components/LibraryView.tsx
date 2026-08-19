@@ -6,8 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   WindowControls,
-  onTitlebarDragMouseDown,
   titlebarClassName,
+  useTitlebarWindowDrag,
 } from "@/components/WindowControls";
 import { Plus, Settings } from "lucide-react";
 import { BookCard } from "@/components/BookCard";
@@ -31,6 +31,7 @@ function isEpubPath(path: string): boolean {
 
 export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }: LibraryViewProps) {
   const { t } = useT();
+  const titlebarDrag = useTitlebarWindowDrag();
   const [books, setBooks] = useState<BookRecord[]>([]);
   const [search, setSearch] = useState("");
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -187,15 +188,15 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
       <header className={titlebarClassName()}>
         <h1
           className="select-none text-sm font-medium"
-          data-tauri-drag-region
-          onMouseDown={onTitlebarDragMouseDown}
+          data-titlebar-drag
+          {...titlebarDrag}
         >
           Litera
         </h1>
         <div
           className="min-h-0 min-w-0 flex-1 select-none self-stretch"
-          data-tauri-drag-region
-          onMouseDown={onTitlebarDragMouseDown}
+          data-titlebar-drag
+          {...titlebarDrag}
         />
         <div className="flex items-center gap-2">
           <Input

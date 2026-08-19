@@ -186,8 +186,8 @@ scrollToAnchor(range, false); // only if off-screen
 **Why**: A dedicated titlebar steals reading height. Shared `"decorations": false` would drop macOS traffic lights.
 
 **Rules**:
-- Use `titlebarClassName()` / `onTitlebarDragMouseDown` / `WindowControls` from `src/components/WindowControls.tsx`. Do not fork a second chrome row.
-- `data-tauri-drag-region` + `select-none` only on the title and the flex spacer. Never on the header root, search, or buttons.
+- Use `titlebarClassName()` / `useTitlebarWindowDrag()` / `WindowControls` from `src/components/WindowControls.tsx`. Do not fork a second chrome row.
+- `data-titlebar-drag` + `select-none` + the hook's pointer props only on the title and the flex spacer. Never on the header root, search, or buttons. Do not put `data-tauri-drag-region` on those nodes (native drag on first down races double-click maximize).
 - Custom close calls `close()`, not `destroy()`.
 - Window buttons are `Button` `icon-sm` `ghost` + lucide (`Minus` / `Square` / `X`) with `useT()` aria-labels (`window.minimize` / `window.maximize` / `window.close`).
 - Detect OS with `src/lib/platform.ts` (`navigator.userAgent`). Do not add `@tauri-apps/plugin-os`.

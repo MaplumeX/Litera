@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const windowApi = {
   minimize: vi.fn(async () => {}),
   toggleMaximize: vi.fn(async () => {}),
+  startDragging: vi.fn(async () => {}),
   close: vi.fn(async () => {}),
   destroy: vi.fn(async () => {}),
 };
@@ -14,10 +15,16 @@ vi.mock("@tauri-apps/api/window", () => ({
 }));
 
 import {
-  onTitlebarDragMouseDown,
+  shouldStartTitlebarDrag,
   titlebarClassName,
+  useTitlebarWindowDrag,
   WindowControls,
 } from "./WindowControls";
+
+function TitlebarDragTarget() {
+  const drag = useTitlebarWindowDrag();
+  return <div data-testid="titlebar-drag" {...drag} />;
+}
 
 function mockUserAgent(ua: string) {
   vi.spyOn(window.navigator, "userAgent", "get").mockReturnValue(ua);
@@ -26,6 +33,7 @@ function mockUserAgent(ua: string) {
 beforeEach(() => {
   windowApi.minimize.mockClear();
   windowApi.toggleMaximize.mockClear();
+  windowApi.startDragging.mockClear();
   windowApi.close.mockClear();
   windowApi.destroy.mockClear();
 });
@@ -88,25 +96,98 @@ describe("titlebar helpers", () => {
     expect(titlebarClassName()).not.toContain("pl-[72px]");
   });
 
-  it("toggles maximize on a primary double-click", () => {
-    const event = {
-      buttons: 1,
-      detail: 2,
-      preventDefault: vi.fn(),
-    } as unknown as Parameters<typeof onTitlebarDragMouseDown>[0];
-    onTitlebarDragMouseDown(event);
-    expect(event.preventDefault).toHaveBeenCalled();
-    expect(windowApi.toggleMaximize).toHaveBeenCalledTimes(1);
+  it("starts a titlebar drag at the 4px threshold", () => {
+    expect(shouldStartTitlebarDrag(4, 0)).toBe(true);
+    expect(shouldStartTitlebarDrag(0, 4)).toBe(true);
+    expect(shouldStartTitlebarDrag(3, 0)).toBe(false);
+    expect(shouldStartTitlebarDrag(3, 3)).toBe(true);
   });
 
-  it("does not toggle maximize on a single click", () => {
-    const event = {
-      buttons: 1,
+  it("toggles maximize on a primary double-click without dragging", () => {
+    const { getByTestId } = render(<TitlebarDragTarget />);
+    fireEvent.pointerDown(getByTestId("titlebar-drag"), {
+      button: 0,
+      detail: 2,
+      pointerId: 1,
+      clientX: 10,
+      clientY: 10,
+    });
+    expect(windowApi.toggleMaximize).toHaveBeenCalledTimes(1);
+    expect(windowApi.startDragging).not.toHaveBeenCalled();
+  });
+
+  it("does not toggle maximize or drag on a primary press", () => {
+    const { getByTestId } = render(<TitlebarDragTarget />);
+    fireEvent.pointerDown(getByTestId("titlebar-drag"), {
+      button: 0,
       detail: 1,
-      preventDefault: vi.fn(),
-    } as unknown as Parameters<typeof onTitlebarDragMouseDown>[0];
-    onTitlebarDragMouseDown(event);
-    expect(event.preventDefault).not.toHaveBeenCalled();
+      pointerId: 1,
+      clientX: 10,
+      clientY: 10,
+    });
+    expect(windowApi.toggleMaximize).not.toHaveBeenCalled();
+    expect(windowApi.startDragging).not.toHaveBeenCalled();
+  });
+
+  it("starts dragging once after movement past 4px", () => {
+    const { getByTestId } = render(<TitlebarDragTarget />);
+    const target = getByTestId("titlebar-drag");
+    fireEvent.pointerDown(target, {
+      button: 0,
+      detail: 1,
+      pointerId: 1,
+      clientX: 10,
+      clientY: 10,
+    });
+    fireEvent.pointerMove(target, { pointerId: 1, clientX: 15, clientY: 10 });
+    fireEvent.pointerMove(target, { pointerId: 1, clientX: 20, clientY: 10 });
+    expect(windowApi.startDragging).toHaveBeenCalledTimes(1);
+    expect(windowApi.toggleMaximize).not.toHaveBeenCalled();
+  });
+
+  it("does not drag or maximize when movement stays under 4px", () => {
+    const { getByTestId } = render(<TitlebarDragTarget />);
+    const target = getByTestId("titlebar-drag");
+    fireEvent.pointerDown(target, {
+      button: 0,
+      detail: 1,
+      pointerId: 1,
+      clientX: 10,
+      clientY: 10,
+    });
+    fireEvent.pointerMove(target, { pointerId: 1, clientX: 11, clientY: 10 });
+    fireEvent.pointerUp(target, { pointerId: 1, clientX: 11, clientY: 10 });
+    expect(windowApi.startDragging).not.toHaveBeenCalled();
+    expect(windowApi.toggleMaximize).not.toHaveBeenCalled();
+  });
+
+  it("does not start dragging after a maximize gesture", () => {
+    const { getByTestId } = render(<TitlebarDragTarget />);
+    const target = getByTestId("titlebar-drag");
+    fireEvent.pointerDown(target, {
+      button: 0,
+      detail: 2,
+      pointerId: 1,
+      clientX: 10,
+      clientY: 10,
+    });
+    fireEvent.pointerMove(target, { pointerId: 1, clientX: 20, clientY: 20 });
+    expect(windowApi.toggleMaximize).toHaveBeenCalledTimes(1);
+    expect(windowApi.startDragging).not.toHaveBeenCalled();
+  });
+
+  it("ignores a non-primary pointer down", () => {
+    const { getByTestId } = render(<TitlebarDragTarget />);
+    const target = getByTestId("titlebar-drag");
+    fireEvent.pointerDown(target, {
+      button: 2,
+      detail: 1,
+      pointerId: 1,
+      clientX: 10,
+      clientY: 10,
+    });
+    fireEvent.pointerMove(target, { pointerId: 1, clientX: 20, clientY: 10 });
+    expect(windowApi.startDragging).not.toHaveBeenCalled();
     expect(windowApi.toggleMaximize).not.toHaveBeenCalled();
   });
 });

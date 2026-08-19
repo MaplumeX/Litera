@@ -10,6 +10,7 @@ const dragDrop: {
 const windowApi = {
   minimize: vi.fn(async () => {}),
   toggleMaximize: vi.fn(async () => {}),
+  startDragging: vi.fn(async () => {}),
   close: vi.fn(async () => {}),
   destroy: vi.fn(async () => {}),
 };
@@ -70,6 +71,7 @@ beforeEach(() => {
   dragDrop.handler = undefined;
   windowApi.minimize.mockClear();
   windowApi.toggleMaximize.mockClear();
+  windowApi.startDragging.mockClear();
   windowApi.close.mockClear();
   windowApi.destroy.mockClear();
   setupInvoke();
@@ -343,22 +345,21 @@ describe("LibraryView", () => {
     expect(title.className).toContain("font-medium");
     expect(title.className).not.toContain("text-lg");
     expect(title.className).not.toContain("font-semibold");
-    expect(header!.hasAttribute("data-tauri-drag-region")).toBe(false);
-    expect(header!.querySelectorAll("[data-tauri-drag-region]")).toHaveLength(2);
-    expect(getByPlaceholderText("搜索书名或作者…").hasAttribute("data-tauri-drag-region")).toBe(
-      false,
-    );
+    expect(header!.hasAttribute("data-titlebar-drag")).toBe(false);
+    expect(header!.querySelectorAll("[data-titlebar-drag]")).toHaveLength(2);
+    expect(getByPlaceholderText("搜索书名或作者…").hasAttribute("data-titlebar-drag")).toBe(false);
     for (const name of ["导入", "选择", "设置", "最小化", "最大化", "关闭窗口"]) {
-      expect(getByRole("button", { name }).hasAttribute("data-tauri-drag-region")).toBe(false);
+      expect(getByRole("button", { name }).hasAttribute("data-titlebar-drag")).toBe(false);
     }
 
     getByRole("button", { name: "关闭窗口" }).click();
     expect(windowApi.close).toHaveBeenCalledTimes(1);
     expect(windowApi.destroy).not.toHaveBeenCalled();
 
-    const spacer = header!.querySelectorAll("[data-tauri-drag-region]")[1];
-    fireEvent.mouseDown(spacer, { buttons: 1, detail: 2 });
+    const spacer = header!.querySelectorAll("[data-titlebar-drag]")[1];
+    fireEvent.pointerDown(spacer, { button: 0, detail: 2 });
     expect(windowApi.toggleMaximize).toHaveBeenCalledTimes(1);
+    expect(windowApi.startDragging).not.toHaveBeenCalled();
   });
 
   it("insets the macOS library header and hides custom window buttons", async () => {
