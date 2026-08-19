@@ -1823,3 +1823,24 @@ Replaced data-tauri-drag-region + detail===2 maximize with useTitlebarWindowDrag
 ### Status
 
 [OK] **Completed**
+
+
+## Session 80: 将思考强度从会话级移到输入框附近(全局级)
+
+**Date**: 2026-08-20
+**Task**: 将思考强度从会话级移到输入框附近(全局级)
+**Branch**: `young-dingo`
+
+### Summary
+
+把 LLM 思考强度从会话级 SessionConfigDialog 弹窗改为全局级 ChatInput 工具栏 Select 控件。Rust 新增 set_thinking_level command，AgentConfigSnapshot/AgentRuntimeConfig 暴露 thinkingLevel；save_agent_config/switch_provider 保留已有 defaultThinkingLevel；PiSessionSummary 移除 thinking_level。TS 侧 RuntimeConfig 携带 thinkingLevel，ensureAgent 改读 config；updateSessionConfig 去 thinkingLevel；SessionConfigDialog 只保留 systemPrompt；ChatInput 加 7 档 Select；ChatPanel 接线 set_thinking_level + invalidateConfig。旧 session_config.thinkingLevel 读取时忽略。399 前端测试 + 141 Rust 测试全绿。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4010b50` | (see git log) |
+
+### Status
+
+[OK] **Completed**
