@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "shadcn Select 用法、icon button、app chrome 视觉语言；ChatInput 新增控件需遵循"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "全局设置持久化路径、Tauri invoke 模式；thinkingLevel 全局值读写遵循"}
+{"file": ".trellis/spec/frontend/i18n.md", "reason": "i18n key 规范；调整 sessionConfigDescription 文案"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "Rust↔TS serde 契约；AgentConfigSnapshot/PiSessionSummary 字段变更需保持类型一致"}
+{"file": ".trellis/spec/backend/tauri-commands.md", "reason": "新增 set_thinking_level command 注册与错误处理规范"}

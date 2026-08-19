@@ -97,12 +97,11 @@ describe("useAgentBridge", () => {
   it("forwards session config updates to the embedded runtime", async () => {
     const { result } = renderHook(() => useAgentBridge("book-a"));
     await act(async () => {
-      await result.current.updateSessionConfig("session-1", "你是翻译助手", "high");
+      await result.current.updateSessionConfig("session-1", "你是翻译助手");
     });
     expect(runtime.updateSessionConfig).toHaveBeenCalledWith(
       "session-1",
       "你是翻译助手",
-      "high",
       expect.stringMatching(/^update-session-config-/),
     );
   });

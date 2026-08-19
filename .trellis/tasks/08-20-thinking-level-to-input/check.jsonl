@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "CSP、Tauri 插件注册等前端质量检查项"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "检查 ChatInput 新控件符合 shadcn/icon 视觉规范"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "检查 Rust↔TS 字段契约一致性"}
+{"file": ".trellis/spec/backend/tauri-commands.md", "reason": "检查新 command 注册与错误处理"}

@@ -5,6 +5,21 @@ use serde::Serialize;
 use serde_json::Value;
 use tauri::Manager;
 
+const VALID_THINKING_LEVELS: &[&str] =
+    &["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+fn read_thinking_level(settings: &Value) -> String {
+    let raw = settings
+        .get("defaultThinkingLevel")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    if VALID_THINKING_LEVELS.contains(&raw) {
+        raw.to_string()
+    } else {
+        "medium".to_string()
+    }
+}
+
 use crate::error::{AppError, AppResult};
 use crate::library;
 
@@ -20,6 +35,7 @@ pub struct AgentConfigSnapshot {
     pub model: Option<String>,
     pub has_api_key: bool,
     pub custom_providers: Vec<CustomProviderEntry>,
+    pub thinking_level: String,
 }
 
 /// A custom OpenAI-compatible provider entry listed in the settings dialog.
@@ -41,6 +57,7 @@ pub struct AgentRuntimeConfig {
     pub api: String,
     pub base_url: String,
     pub api_key: String,
+    pub thinking_level: String,
 }
 
 #[tauri::command]
@@ -217,6 +234,18 @@ pub async fn switch_provider(
     .map_err(|error| AppError::storage_io(format!("Agent config write worker failed: {error}")))?
 }
 
+#[tauri::command]
+pub async fn set_thinking_level(app: tauri::AppHandle, level: String) -> AppResult<()> {
+    if !VALID_THINKING_LEVELS.contains(&level.as_str()) {
+        return Err(AppError::invalid_input("Invalid thinking level"));
+    }
+
+    let agent_dir = resolve_agent_dir(&app)?;
+    tauri::async_runtime::spawn_blocking(move || set_thinking_level_impl(&agent_dir, &level))
+        .await
+        .map_err(|error| AppError::storage_io(format!("Agent config write worker failed: {error}")))?
+}
+
 fn resolve_agent_dir(app: &tauri::AppHandle) -> AppResult<std::path::PathBuf> {
     app.path()
         .app_data_dir()
@@ -268,6 +297,7 @@ fn read_snapshot(agent_dir: &Path) -> AppResult<AgentConfigSnapshot> {
 
     let configured = provider.is_some() && model.is_some() && has_api_key;
     let custom_providers = read_custom_providers(agent_dir, &auth)?;
+    let thinking_level = read_thinking_level(&settings);
 
     Ok(AgentConfigSnapshot {
         configured,
@@ -275,6 +305,7 @@ fn read_snapshot(agent_dir: &Path) -> AppResult<AgentConfigSnapshot> {
         model,
         has_api_key,
         custom_providers,
+        thinking_level,
     })
 }
 
@@ -363,12 +394,14 @@ fn read_runtime_config(agent_dir: &Path) -> AppResult<AgentRuntimeConfig> {
             "Provider base URL must use HTTP(S)",
         ));
     }
+    let thinking_level = read_thinking_level(&settings);
     Ok(AgentRuntimeConfig {
         provider,
         model,
         api,
         base_url,
         api_key,
+        thinking_level,
     })
 }
 
@@ -638,10 +671,10 @@ fn save_config(agent_dir: &Path, provider: &str, api_key: &str, model: &str) -> 
         "defaultModel".to_string(),
         serde_json::Value::String(model.to_string()),
     );
-    settings_object.insert(
-        "defaultThinkingLevel".to_string(),
-        serde_json::Value::String("medium".to_string()),
-    );
+    // Preserve an existing defaultThinkingLevel; initialize to "medium" only on first install.
+    settings_object
+        .entry("defaultThinkingLevel".to_string())
+        .or_insert_with(|| serde_json::Value::String("medium".to_string()));
     let settings_bytes = serde_json::to_vec_pretty(&settings).map_err(|error| {
         AppError::storage_io(format!("Failed to serialize settings.json: {error}"))
     })?;
@@ -875,9 +908,30 @@ fn switch_provider_impl(agent_dir: &Path, provider_id: &str, model: &str) -> App
         "defaultModel".to_string(),
         serde_json::Value::String(model.to_string()),
     );
+    // Preserve an existing defaultThinkingLevel; initialize to "medium" only on first install.
+    settings_object
+        .entry("defaultThinkingLevel".to_string())
+        .or_insert_with(|| serde_json::Value::String("medium".to_string()));
+    let settings_bytes = serde_json::to_vec_pretty(&settings).map_err(|error| {
+        AppError::storage_io(format!("Failed to serialize settings.json: {error}"))
+    })?;
+    library::atomic_write(&settings_path, &settings_bytes, "settings.json")?;
+
+    Ok(())
+}
+
+fn set_thinking_level_impl(agent_dir: &Path, level: &str) -> AppResult<()> {
+    let settings_path = agent_dir.join("settings.json");
+    let mut settings = read_json_or_empty(&settings_path, "settings.json")?;
+    if settings.is_null() {
+        settings = serde_json::Value::Object(serde_json::Map::new());
+    }
+    let settings_object = settings.as_object_mut().ok_or_else(|| {
+        AppError::storage_corrupt("settings.json root is not a JSON object".to_string())
+    })?;
     settings_object.insert(
         "defaultThinkingLevel".to_string(),
-        serde_json::Value::String("medium".to_string()),
+        serde_json::Value::String(level.to_string()),
     );
     let settings_bytes = serde_json::to_vec_pretty(&settings).map_err(|error| {
         AppError::storage_io(format!("Failed to serialize settings.json: {error}"))
@@ -1709,5 +1763,127 @@ mod tests {
         let unknown =
             resolve_list_models_key(dir.path(), "", Some("custom-deadbeef")).expect_err("unknown");
         assert_eq!(unknown.code, AppErrorCode::InvalidInput);
+    }
+
+    // --- thinking level ---
+
+    #[test]
+    fn read_snapshot_defaults_thinking_level_to_medium() {
+        let dir = temp_agent_dir();
+        let snapshot = read_snapshot(dir.path()).expect("read snapshot");
+        assert_eq!(snapshot.thinking_level, "medium");
+    }
+
+    #[test]
+    fn read_snapshot_reads_thinking_level_from_settings() {
+        let dir = temp_agent_dir();
+        fs::write(
+            dir.path().join("settings.json"),
+            br#"{"defaultThinkingLevel":"high"}"#,
+        )
+        .expect("seed settings");
+        let snapshot = read_snapshot(dir.path()).expect("read snapshot");
+        assert_eq!(snapshot.thinking_level, "high");
+    }
+
+    #[test]
+    fn read_snapshot_falls_back_to_medium_for_invalid_thinking_level() {
+        let dir = temp_agent_dir();
+        fs::write(
+            dir.path().join("settings.json"),
+            br#"{"defaultThinkingLevel":"bogus"}"#,
+        )
+        .expect("seed settings");
+        let snapshot = read_snapshot(dir.path()).expect("read snapshot");
+        assert_eq!(snapshot.thinking_level, "medium");
+    }
+
+    #[test]
+    fn read_runtime_config_exposes_thinking_level() {
+        let dir = temp_agent_dir();
+        save_config(dir.path(), "anthropic", "secret", "claude-opus-4-5").expect("save config");
+        let runtime = read_runtime_config(dir.path()).expect("runtime config");
+        assert_eq!(runtime.thinking_level, "medium");
+
+        // Change via set_thinking_level_impl and re-read.
+        set_thinking_level_impl(dir.path(), "high").expect("set thinking level");
+        let runtime = read_runtime_config(dir.path()).expect("runtime config");
+        assert_eq!(runtime.thinking_level, "high");
+    }
+
+    #[test]
+    fn save_config_preserves_existing_thinking_level() {
+        let dir = temp_agent_dir();
+        let settings_path = dir.path().join("settings.json");
+        fs::write(
+            &settings_path,
+            br#"{"defaultThinkingLevel":"high"}"#,
+        )
+        .expect("seed settings");
+
+        save_config(dir.path(), "anthropic", "anthropic-key", "claude-opus-4-5")
+            .expect("save config");
+
+        let settings: serde_json::Value =
+            serde_json::from_slice(&fs::read(&settings_path).expect("read settings"))
+                .expect("parse settings");
+        assert_eq!(settings["defaultThinkingLevel"], "high");
+    }
+
+    #[test]
+    fn switch_provider_preserves_existing_thinking_level() {
+        let dir = temp_agent_dir();
+        fs::write(
+            dir.path().join("settings.json"),
+            br#"{"defaultThinkingLevel":"max"}"#,
+        )
+        .expect("seed settings");
+
+        let entry = add_custom_provider_impl(
+            dir.path(),
+            "Ollama",
+            "http://localhost:11434/v1",
+            "key",
+            &ids(&["llama-3.1"]),
+        )
+        .expect("add custom provider");
+
+        switch_provider_impl(dir.path(), &entry.id, "llama-3.1").expect("switch provider");
+
+        let settings: serde_json::Value = serde_json::from_slice(
+            &fs::read(dir.path().join("settings.json")).expect("read settings"),
+        )
+        .expect("parse settings");
+        assert_eq!(settings["defaultThinkingLevel"], "max");
+    }
+
+    #[test]
+    fn set_thinking_level_writes_and_rejects_invalid() {
+        let dir = temp_agent_dir();
+        set_thinking_level_impl(dir.path(), "high").expect("set high");
+
+        let settings: serde_json::Value = serde_json::from_slice(
+            &fs::read(dir.path().join("settings.json")).expect("read settings"),
+        )
+        .expect("parse settings");
+        assert_eq!(settings["defaultThinkingLevel"], "high");
+
+        // Overwrite to another valid level.
+        set_thinking_level_impl(dir.path(), "off").expect("set off");
+        let settings: serde_json::Value = serde_json::from_slice(
+            &fs::read(dir.path().join("settings.json")).expect("read settings"),
+        )
+        .expect("parse settings");
+        assert_eq!(settings["defaultThinkingLevel"], "off");
+    }
+
+    #[test]
+    fn set_thinking_level_command_rejects_invalid_level() {
+        let invalid = "bogus".to_string();
+        assert!(!VALID_THINKING_LEVELS.contains(&invalid.as_str()));
+
+        for valid in VALID_THINKING_LEVELS {
+            assert!(VALID_THINKING_LEVELS.contains(valid));
+        }
     }
 }

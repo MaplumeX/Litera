@@ -31,8 +31,9 @@ async fn append_agent_session_entries(
 async fn delete_agent_session(app: AppHandle, book_id: String, session_id: String) -> AppResult<()>
 ```
 
-`AgentRuntimeConfig` contains `provider`, `model`, `api`, `baseUrl`, and the
-active `apiKey`. `LoadedPiSession` contains the v3 `header`, raw `entries`, and
+`AgentRuntimeConfig` contains `provider`, `model`, `api`, `baseUrl`, the
+active `apiKey`, and `thinkingLevel` (global, from `settings.json`
+`defaultThinkingLevel`). `LoadedPiSession` contains the v3 `header`, raw `entries`, and
 `leafId`. Session summaries contain only id, derived title, and timestamps.
 
 ### 3. Contracts
@@ -669,6 +670,9 @@ async fn get_agent_config(app: AppHandle) -> AppResult<AgentConfigSnapshot>
 async fn save_agent_config(app: AppHandle, provider: String, api_key: String, model: String) -> AppResult<()>
 
 #[tauri::command]
+async fn set_thinking_level(app: AppHandle, level: String) -> AppResult<()>
+
+#[tauri::command]
 async fn add_custom_provider(app: AppHandle, name: String, base_url: String, api_key: String, models: Vec<String>) -> AppResult<CustomProviderEntry>
 
 #[tauri::command]
@@ -691,6 +695,7 @@ interface AgentConfigSnapshot {
   model: string | null;
   hasApiKey: boolean;
   customProviders: CustomProviderEntry[];
+  thinkingLevel: string;     // global, from settings.json defaultThinkingLevel; "medium" when absent/invalid
 }
 
 interface CustomProviderEntry {
@@ -704,7 +709,7 @@ interface CustomProviderEntry {
 
 **Contracts**:
 - `get_agent_config` reads `<app_data>/agent/auth.json` + `settings.json` + `models.json` and returns a masked snapshot (no plaintext key). Custom rows include the full `models` id list (empty ids skipped).
-- `save_agent_config` merge-writes: preserves other provider entries in `auth.json` and other fields in `settings.json`. Uses the shared `atomic_write` pattern (temp file + persist + sync_parent_dir). Reserved for **built-in** providers (frontend-hardcoded list). `api_key` may be empty **only when `auth.json` already has a key for that provider** — the existing key is kept and auth.json is untouched; otherwise `InvalidInput`.
+- `save_agent_config` merge-writes: preserves other provider entries in `auth.json` and other fields in `settings.json`, including an existing `defaultThinkingLevel` (only initializes to `"medium"` when the key is absent). Uses the shared `atomic_write` pattern (temp file + persist + sync_parent_dir). Reserved for **built-in** providers (frontend-hardcoded list). `api_key` may be empty **only when `auth.json` already has a key for that provider** — the existing key is kept and auth.json is untouched; otherwise `InvalidInput`.
 - Frontend invalidates the cached embedded runtime after config mutations so the next prompt resolves fresh credentials and model configuration.
 - The API key MUST NOT appear in logs, journal, or non-`auth.json` files.
 - Provider/model selection for built-in providers is a frontend-hardcoded list of common API-key providers (`src/types/agent-config.ts`); model id is free-text.
@@ -713,10 +718,11 @@ interface CustomProviderEntry {
 - `add_custom_provider` generates a `custom-<8hex>` id, writes a provider entry to `<app_data>/agent/models.json` (`{ name, baseUrl, api: "openai-completions", models: [{ id }, ...] }`, **no apiKey** in models.json), and writes the key to `auth.json[<customId>]`. `models` must be non-empty with no blank ids. Does **not** write `settings.json`. Returns the masked entry so the frontend can update its list without a re-fetch.
 - `update_custom_provider` edits an existing custom provider: rewrites name/baseUrl/`models` in models.json (preserving the `api` field), upserts `auth.json[<customId>]` **only when `api_key` is non-empty** (empty keeps the existing key). Does **not** write `settings.json`. Activation is exclusively `switch_provider` / `save_agent_config`. Returns the updated masked entry. Rejects ids not starting with `custom-`, unknown ids, empty `models`, or blank model ids (`InvalidInput`).
 - `delete_custom_provider` rejects any `provider_id` not starting with `custom-` (guards built-in provider credentials from accidental erasure), removes the models.json + auth.json entries, and clears `defaultProvider`/`defaultModel` in settings.json when the deleted provider was active.
-- `switch_provider` merge-writes only `settings.json` (`defaultProvider` + `defaultModel` + `defaultThinkingLevel: "medium"`); it never touches `auth.json`. Used for both built-in and custom providers when only the active selection changes (no key update).
+- `switch_provider` merge-writes only `settings.json` (`defaultProvider` + `defaultModel`); it preserves an existing `defaultThinkingLevel` (initializes to `"medium"` only when absent) and never touches `auth.json`. Used for both built-in and custom providers when only the active selection changes (no key update).
 - `list_remote_models` is custom OpenAI-compatible only. `GET {trim_end_matches(baseUrl, '/')}/models` with `Authorization: Bearer`, `Accept: application/json`, ~10s timeout, ~1 MiB body cap. If `api_key` is empty and `provider_id` is `custom-*`, read the key from `auth.json`; otherwise empty key is `InvalidInput`. Parse `data[].id` or a top-level string array; drop blanks; de-dupe preserving order. Empty parsed list, HTTP failure, timeout, or oversize body → `InvalidInput` (never include the key). It does not write agent JSON or mutate the active runtime.
 - `api` is fixed to `"openai-completions"` and never exposed in the UI.
-- The embedded runtime receives a normalized provider configuration from `get_agent_runtime_config`; API keys remain Rust-owned outside that request boundary.
+- The embedded runtime receives a normalized provider configuration from `get_agent_runtime_config` (including `thinkingLevel`); API keys remain Rust-owned outside that request boundary.
+- `set_thinking_level` writes only `settings.json` `defaultThinkingLevel` — it does not touch provider/model/auth. The frontend calls it from the ChatInput toolbar Select, then `invalidateConfig()` so the next prompt rebuilds the Agent with the new level. Valid levels: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`; invalid → `InvalidInput`. `clampThinkingLevel` at runtime safely downgrades unsupported levels for the active model.
 
 ### Validation & Error Matrix
 
