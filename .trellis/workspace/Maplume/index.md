@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 76
+- **Total Sessions**: 77
 - **Last Active**: 2026-08-19
 <!-- @@@/auto:current-status -->
 
@@ -29,7 +29,8 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
-| 76 | 2026-08-19 | fix: restore minimized window on epub open | `598d2ae` | `glowing-cat` |
+| 77 | 2026-08-19 | fix: restore minimized window on epub open | `598d2ae` | `glowing-cat` |
+| 76 | 2026-08-19 | Per-session agent system prompt and thinking level | `70851d0` | `wizardly-unicorn` |
 | 75 | 2026-08-19 | Reader footnote popup feature | `4f76378` | `prime-hyena` |
 | 74 | 2026-08-19 | Fix chat scroll jump on session enter | `d85db18` | `main` |
 | 73 | 2026-08-18 | Remove agent citation jump-to-location | `f51e784`, `0ea3a98` | `main` |

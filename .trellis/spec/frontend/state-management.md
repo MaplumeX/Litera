@@ -36,6 +36,9 @@ idle -> loadingBook -> bookReady -> prompting -> bookReady
 `session_created` optimistically inserts a local summary so a new empty session
 is visible before its first persisted message. Session list refreshes de-duplicate
 by id and preserve the current session when it is still present.
+`session_config_updated` upserts the per-session `systemPrompt` / `thinkingLevel`
+onto the matching summary (or inserts one when the list has not loaded yet) so
+session settings stay visible without a full list refresh.
 
 Book changes reset messages, prompt state, sessions, and errors. Late events for
 an old book or prompt advance no user-visible state.

@@ -61,6 +61,22 @@ describe("agentReducer", () => {
     expect(state.messages).toEqual([{ role: "user", content: "question" }]);
   });
 
+  it("upserts systemPrompt and thinkingLevel on session_config_updated", () => {
+    let state = createAgentState("book-a");
+    state = reduce(state, { version: 1, type: "session_created", bookId: "book-a", sessionId: "s" });
+    state = reduce(state, { version: 2, type: "session_config_updated", bookId: "book-a", sessionId: "s", systemPrompt: "你是翻译助手", thinkingLevel: "high" });
+    expect(state.sessions[0]).toMatchObject({ id: "s", title: "新会话", systemPrompt: "你是翻译助手", thinkingLevel: "high" });
+  });
+
+  it("keeps the previous config field when the update omits it", () => {
+    let state = createAgentState("book-a");
+    state = reduce(state, { version: 1, type: "session_created", bookId: "book-a", sessionId: "s" });
+    state = reduce(state, { version: 2, type: "session_config_updated", bookId: "book-a", sessionId: "s", systemPrompt: "p", thinkingLevel: "off" });
+    state = reduce(state, { version: 3, type: "session_config_updated", bookId: "book-a", sessionId: "s", thinkingLevel: "max" });
+    expect(state.sessions[0].systemPrompt).toBe("p");
+    expect(state.sessions[0].thinkingLevel).toBe("max");
+  });
+
   it("optimistically inserts and later refreshes a new session", () => {
     let state = createAgentState("book-a");
     state = reduce(state, { version: 1, type: "session_created", bookId: "book-a", sessionId: "new" });

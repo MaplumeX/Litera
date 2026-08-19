@@ -1,4 +1,4 @@
-import { Pencil, Plus, X } from "lucide-react";
+import { Pencil, Plus, Settings, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { AgentSessionSummary } from "@/types/agent";
@@ -19,6 +19,7 @@ interface SessionListProps {
   onSaveRename: (id: string) => void;
   onCancelRename: () => void;
   onDeleteSession: (id: string) => void;
+  onOpenSettings: (session: AgentSessionSummary) => void;
 }
 
 export function SessionList({
@@ -36,6 +37,7 @@ export function SessionList({
   onSaveRename,
   onCancelRename,
   onDeleteSession,
+  onOpenSettings,
 }: SessionListProps) {
   const { t } = useT();
   const isRail = layout === "rail";
@@ -134,6 +136,14 @@ export function SessionList({
                   aria-label={t("chat.rename")}
                 >
                   <Pencil className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  className="px-1 text-muted-foreground opacity-0 hover:text-primary disabled:opacity-30 group-hover:opacity-100"
+                  onClick={() => onOpenSettings(session)}
+                  disabled={isStreaming}
+                  aria-label={t("chat.sessionSettings")}
+                >
+                  <Settings className="h-3.5 w-3.5" />
                 </button>
                 <button
                   className="px-1 text-xs text-destructive opacity-0 hover:underline disabled:opacity-30 group-hover:opacity-100"

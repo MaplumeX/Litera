@@ -158,6 +158,13 @@ export const en: { [K in MessageKey]: string } = {
   "chat.generating": "Generating reply",
   "chat.edit": "Edit",
   "chat.copy": "Copy",
+  "chat.sessionSettings": "Session settings",
+  "chat.sessionConfigTitle": "Session settings",
+  "chat.sessionConfigDescription": "Configure this session's system prompt and thinking level.",
+  "chat.systemPrompt": "System prompt",
+  "chat.systemPromptHint": "Leave empty to use the default prompt",
+  "chat.thinkingLevel": "Thinking level",
+  "chat.clearPrompt": "Clear",
 
   "agent.title": "LLM settings",
   "agent.description": "Configure the LLM provider, API key, and model.",

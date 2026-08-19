@@ -20,6 +20,8 @@ export interface AgentSessionSummary {
   title: string;
   createdAt: string;
   updatedAt: string;
+  systemPrompt?: string;
+  thinkingLevel?: string;
 }
 
 export interface AgentToolCall {
@@ -62,6 +64,7 @@ export type AgentEvent = EventEnvelope & (
   | ({ type: "session_rewound"; messages: AgentMessage[] } & PromptCorrelation & RequestCorrelation)
   | ({ type: "session_deleted" } & BookCorrelation & { sessionId: string } & RequestCorrelation)
   | ({ type: "session_renamed"; title: string } & BookCorrelation & { sessionId: string } & RequestCorrelation)
+  | ({ type: "session_config_updated"; systemPrompt?: string; thinkingLevel?: string } & BookCorrelation & { sessionId: string } & RequestCorrelation)
   | ({ type: "sessions_list"; sessions: AgentSessionSummary[] } & BookCorrelation & RequestCorrelation)
   | ({ type: "error" } & AgentError)
 );

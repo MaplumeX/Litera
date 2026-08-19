@@ -15,6 +15,7 @@ import { MessageBubble } from "./MessageBubble";
 import { AssistantMessage, BotAvatar } from "./AssistantMessage";
 import { ChatInput } from "./ChatInput";
 import { EmptyState } from "./EmptyState";
+import { SessionConfigDialog, type SessionConfigTarget } from "./SessionConfigDialog";
 import { SessionList } from "./SessionList";
 import { TypingIndicator } from "./TypingIndicator";
 import { useT } from "@/lib/i18n";
@@ -53,6 +54,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       editPrompt,
       renameSession,
       switchSession,
+      updateSessionConfig,
     } = bridge;
     const [input, setInput] = useState("");
     const [pendingSelection, setPendingSelection] = useState<{
@@ -70,6 +72,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     const [retryHighlight, setRetryHighlight] = useState(false);
     const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
     const [editingTitle, setEditingTitle] = useState("");
+    const [configSession, setConfigSession] = useState<SessionConfigTarget | null>(null);
     const [editingIndex, setEditingIndex] = useState<number | null>(null);
     const [editDraft, setEditDraft] = useState("");
     const [stickToBottom, setStickToBottom] = useState(true);
@@ -264,6 +267,18 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       }
     }, [editingTitle, renameSession]);
 
+    const handleSaveSessionConfig = useCallback(async (systemPrompt: string, thinkingLevel: string) => {
+      const session = configSession;
+      if (!session) return;
+      setInvokeError(null);
+      try {
+        await updateSessionConfig(session.id, systemPrompt, thinkingLevel);
+        setConfigSession(null);
+      } catch (error) {
+        setInvokeError(String(error));
+      }
+    }, [configSession, updateSessionConfig]);
+
     const fillInput = useCallback((text: string, chapterHref?: string) => {
       setPendingSelection({ text, chapterHref });
       setInput("");
@@ -300,6 +315,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         onTitleChange={setEditingTitle}
         onSaveRename={(id) => void handleRenameSave(id)}
         onCancelRename={() => setEditingSessionId(null)}
+        onOpenSettings={(session) => setConfigSession(session)}
         onDeleteSession={(id) => {
           setInvokeError(null);
           void deleteSession(id).catch((error) => setInvokeError(String(error)));
@@ -442,6 +458,14 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
           textareaRef={inputRef}
         />
         <AgentConfigDialog open={showConfig} onClose={() => setShowConfig(false)} />
+        <SessionConfigDialog
+          key={configSession?.id ?? "none"}
+          open={configSession !== null}
+          session={configSession}
+          isStreaming={isStreaming}
+          onClose={() => setConfigSession(null)}
+          onSave={(p, l) => void handleSaveSessionConfig(p, l)}
+        />
         </div>
       </div>
     );

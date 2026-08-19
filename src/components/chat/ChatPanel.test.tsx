@@ -7,6 +7,7 @@ const newSession = vi.fn(async () => {});
 const switchSession = vi.fn(async () => {});
 const renameSession = vi.fn(async () => {});
 const deleteSession = vi.fn(async () => {});
+const updateSessionConfig = vi.fn(async () => {});
 let bridgeState: AgentState;
 
 vi.mock("@/lib/use-agent-bridge", () => ({
@@ -19,6 +20,7 @@ vi.mock("@/lib/use-agent-bridge", () => ({
     editPrompt: vi.fn(),
     renameSession,
     switchSession,
+    updateSessionConfig,
   }),
 }));
 
@@ -46,6 +48,7 @@ beforeEach(() => {
   switchSession.mockClear();
   renameSession.mockClear();
   deleteSession.mockClear();
+  updateSessionConfig.mockClear();
   bridgeState = readyState();
   class ResizeObserverStub {
     observe() {}
@@ -194,6 +197,31 @@ describe("ChatPanel session layouts", () => {
     await clickNewSession(view);
     expect(newSession).toHaveBeenCalledTimes(1);
     expect(view.getByRole("button", { name: "新建会话" })).toBeTruthy();
+  });
+
+  it("opens session settings from the rail and saves the config", async () => {
+    bridgeState = readyState({
+      sessions: [
+        { id: "session-1", title: "新会话", createdAt: "1", updatedAt: "1" },
+        { id: "session-2", title: "另一会话", createdAt: "2", updatedAt: "2" },
+      ],
+    });
+    const view = render(
+      <ChatPanel variant="workspace" currentChapterHref="OEBPS/ch1.xhtml" bookId="book-1" />,
+    );
+
+    fireEvent.click(view.getAllByRole("button", { name: "会话设置" })[0]);
+    expect(view.getByRole("dialog")).toBeTruthy();
+    const dialog = view.getByRole("dialog");
+
+    fireEvent.change(within(dialog).getByRole("textbox"), {
+      target: { value: "你是翻译助手" },
+    });
+    await act(async () => {
+      within(dialog).getByRole("button", { name: "保存" }).click();
+    });
+
+    expect(updateSessionConfig).toHaveBeenCalledWith("session-1", "你是翻译助手", "off");
   });
 });
 

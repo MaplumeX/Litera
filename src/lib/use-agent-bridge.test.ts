@@ -16,6 +16,7 @@ const runtime = vi.hoisted(() => {
     newSession: vi.fn(async () => {}),
     deleteSession: vi.fn(async () => {}),
     renameSession: vi.fn(async () => {}),
+    updateSessionConfig: vi.fn(async () => {}),
   };
 });
 
@@ -91,5 +92,18 @@ describe("useAgentBridge", () => {
     act(() => runtime.emit(event({ type: "session_created", bookId: "book-a", sessionId: "new", version: 2 })));
     expect(result.current.state.sessions.map((session) => session.id)).toContain("new");
     expect(runtime.listSessions).not.toHaveBeenCalled();
+  });
+
+  it("forwards session config updates to the embedded runtime", async () => {
+    const { result } = renderHook(() => useAgentBridge("book-a"));
+    await act(async () => {
+      await result.current.updateSessionConfig("session-1", "你是翻译助手", "high");
+    });
+    expect(runtime.updateSessionConfig).toHaveBeenCalledWith(
+      "session-1",
+      "你是翻译助手",
+      "high",
+      expect.stringMatching(/^update-session-config-/),
+    );
   });
 });

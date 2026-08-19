@@ -177,6 +177,67 @@ describe("LiteraAgentRuntime",()=>{
     await first;
   });
 
+  it("uses the session system prompt and clamps thinking to off for a non-reasoning model",async()=>{
+    const current=session();current.entries=[{type:"session_config",id:"cfg1",parentId:null,timestamp:now,systemPrompt:"你是翻译助手",thinkingLevel:"high"}];current.leafId="cfg1";
+    const captured:Array<{systemPrompt?:string;reasoning?:unknown}>=[];
+    const sessions:SessionPort={create:async()=>current,list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,entries)=>entries.at(-1)?.id??null};
+    const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:1}),toc:async()=>[],readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:1,text:"chapter"}),search:async()=>[],close:()=>{}};
+    const faux=createFauxCore({tokensPerSecond:10_000});faux.setResponses([fauxAssistantMessage("answer")]);
+    const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret"};
+    const runtime=new LiteraAgentRuntime({sessions,book,loadConfig:async()=>config,loadStream:async()=>((requestModel,context,options)=>{captured.push({systemPrompt:context.systemPrompt,reasoning:options?.reasoning});return faux.streamSimple(requestModel,context,options);})});
+    await runtime.openBook("book",new ArrayBuffer(1));
+    await runtime.switchSession("session-1");
+    await runtime.prompt("question",{});
+    expect(captured[0].systemPrompt).toBe("你是翻译助手");
+    expect(captured[0].reasoning).toBeUndefined();
+  });
+
+  it("keeps the max thinking level for a reasoning-capable model",async()=>{
+    const current=session();current.entries=[{type:"session_config",id:"cfg1",parentId:null,timestamp:now,systemPrompt:"",thinkingLevel:"max"}];current.leafId="cfg1";
+    const captured:Array<unknown>=[];
+    const sessions:SessionPort={create:async()=>current,list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,entries)=>entries.at(-1)?.id??null};
+    const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:1}),toc:async()=>[],readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:1,text:"chapter"}),search:async()=>[],close:()=>{}};
+    const faux=createFauxCore({tokensPerSecond:10_000});faux.setResponses([fauxAssistantMessage("answer")]);
+    const config:RuntimeConfig={provider:"anthropic",model:"claude-opus-4-6",api:"anthropic-messages",baseUrl:"https://api.anthropic.com",apiKey:"secret"};
+    const runtime=new LiteraAgentRuntime({sessions,book,loadConfig:async()=>config,loadStream:async()=>((requestModel,context,options)=>{captured.push(options?.reasoning);return faux.streamSimple(requestModel,context,options);})});
+    await runtime.openBook("book",new ArrayBuffer(1));
+    await runtime.switchSession("session-1");
+    await runtime.prompt("question",{});
+    expect(captured[0]).toBe("max");
+  });
+
+  it("appends session_config, rebuilds the agent, and applies the new config to the next prompt",async()=>{
+    const current=session();const batches:PiSessionEntry[][]=[];const events:string[]=[];const captured:Array<{systemPrompt?:string;reasoning?:unknown}>=[];
+    const sessions:SessionPort={create:async()=>current,list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,entries)=>{batches.push(entries);return entries.at(-1)?.id??null;}};
+    const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:1}),toc:async()=>[],readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:1,text:"chapter"}),search:async()=>[],close:()=>{}};
+    const faux=createFauxCore({tokensPerSecond:10_000});faux.setResponses([fauxAssistantMessage("one"),fauxAssistantMessage("two")]);
+    const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret"};
+    const runtime=new LiteraAgentRuntime({sessions,book,loadConfig:async()=>config,loadStream:async()=>((requestModel,context,options)=>{captured.push({systemPrompt:context.systemPrompt,reasoning:options?.reasoning});return faux.streamSimple(requestModel,context,options);})});
+    runtime.subscribe((event)=>{events.push(event.type);});
+    await runtime.openBook("book",new ArrayBuffer(1));
+    await runtime.prompt("first",{});
+    expect(captured[0].systemPrompt).not.toBe("新提示词");
+    await runtime.updateSessionConfig("session-1","新提示词","high","req-1");
+    const configEntries=batches.flat().filter((entry)=>entry.type==="session_config");
+    expect(configEntries).toMatchObject([{systemPrompt:"新提示词",thinkingLevel:"high"}]);
+    expect(events).toContain("session_config_updated");
+    await runtime.prompt("second",{});
+    expect(captured[1].systemPrompt).toBe("新提示词");
+    expect(captured[1].reasoning).toBeUndefined();
+  });
+
+  it("rejects an invalid session config update",async()=>{
+    const current=session();
+    const sessions:SessionPort={create:async()=>current,list:async()=>[],load:async()=>current,delete:async()=>{},append:async()=>null};
+    const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:1}),toc:async()=>[],readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:1,text:"chapter"}),search:async()=>[],close:()=>{}};
+    const config:RuntimeConfig={provider:"custom-test",model:"model",api:"openai-completions",baseUrl:"https://example.test/v1",apiKey:"secret"};
+    const runtime=new LiteraAgentRuntime({sessions,book,loadConfig:async()=>config});
+    await expect(runtime.updateSessionConfig("session-1","ok","off")).rejects.toThrow("No book is open");
+    await runtime.openBook("book",new ArrayBuffer(1));
+    await expect(runtime.updateSessionConfig("session-1","x".repeat(16*1024+1),"off")).rejects.toThrow("Invalid system prompt");
+    await expect(runtime.updateSessionConfig("session-1","ok","extreme")).rejects.toThrow("Invalid thinking level");
+  });
+
   it("persists list_annotations bookmarks and highlights as JSON toolResult",async()=>{
     const current=session();const batches:PiSessionEntry[][]=[];
     const sessions:SessionPort={create:async()=>current,list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,entries)=>{batches.push(entries);return entries[entries.length-1]?.id??null;}};
