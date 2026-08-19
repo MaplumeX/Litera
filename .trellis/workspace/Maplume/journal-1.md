@@ -1802,3 +1802,24 @@ Fixed the EPUB footnote popup: height from renderer.viewSize, compact overlay CS
 ### Status
 
 [OK] **Completed**
+
+
+## Session 79: Fix titlebar double-click maximize race
+
+**Date**: 2026-08-20
+**Task**: Fix titlebar double-click maximize race
+**Branch**: `main`
+
+### Summary
+
+Replaced data-tauri-drag-region + detail===2 maximize with useTitlebarWindowDrag: primary double-click toggles maximize without starting a native drag; movement past 4px calls startDragging once. Updated library/reader headers, tests, chrome specs, and changelog. 399 tests and build passed. Live tauri double-click not manually verified.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f75bf30` | (see git log) |
+
+### Status
+
+[OK] **Completed**
