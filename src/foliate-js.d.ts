@@ -69,6 +69,8 @@ declare module "*/foliate-js/view.js" {
     setStyles?(css: string): void;
     nextSection?(): Promise<void>;
     next?(distance?: number): Promise<void>;
+    /** Content size along the flow axis (scrolled: expanded iframe height). */
+    viewSize?: number;
   }
 
   export class View extends HTMLElement {

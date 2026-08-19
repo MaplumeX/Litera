@@ -6,6 +6,44 @@ const VIEWPORT_MARGIN = 8;
 const POPUP_GAP = 8;
 const PLACEHOLDER_HEIGHT = 160;
 
+export interface FootnotePopupPlacementInput {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  viewportWidth: number;
+  viewportHeight: number;
+  margin?: number;
+  gap?: number;
+}
+
+/** Center on the anchor, prefer below, flip above when needed, then clamp. */
+export function placeFootnotePopup({
+  x,
+  y,
+  width,
+  height,
+  viewportWidth,
+  viewportHeight,
+  margin = VIEWPORT_MARGIN,
+  gap = POPUP_GAP,
+}: FootnotePopupPlacementInput): { left: number; top: number } {
+  const maxLeft = viewportWidth - margin - width;
+  let left = x - width / 2;
+  if (left > maxLeft) left = Math.max(margin, maxLeft);
+  if (left < margin) left = margin;
+
+  const spaceBelow = viewportHeight - y;
+  const spaceAbove = y;
+  const fitsBelow = y + gap + height <= viewportHeight - margin;
+  let top = !fitsBelow && spaceAbove > spaceBelow ? y - gap - height : y + gap;
+  const maxTop = viewportHeight - margin - height;
+  if (top > maxTop) top = Math.max(margin, maxTop);
+  if (top < margin) top = margin;
+
+  return { left, top };
+}
+
 interface FootnotePopupProps {
   /** Anchor point in screen coordinates; null (or either coordinate null) hides the popup. */
   x: number | null;
@@ -61,22 +99,24 @@ export function FootnotePopup({
     if (!container.contains(viewElement)) container.appendChild(viewElement);
   }, [viewElement]);
 
-  // Clamp the popup inside the viewport once its layout is known. The guard in
-  // setPos breaks the re-render loop (clamped values must return the same state).
+  // Position after layout: center on the anchor, flip above if needed, clamp.
+  // The guard in setPos breaks the re-render loop (same values keep state).
   useLayoutEffect(() => {
-    if (!open) {
+    if (!open || x == null || y == null) {
       setPos(null);
       return;
     }
     const el = containerRef.current;
     if (!el) return;
     const rect = el.getBoundingClientRect();
-    let left = x;
-    let top = y + POPUP_GAP;
-    const maxLeft = window.innerWidth - VIEWPORT_MARGIN - rect.width;
-    const maxTop = window.innerHeight - VIEWPORT_MARGIN - rect.height;
-    if (left > maxLeft) left = Math.max(VIEWPORT_MARGIN, maxLeft);
-    if (top > maxTop) top = Math.max(VIEWPORT_MARGIN, maxTop);
+    const { left, top } = placeFootnotePopup({
+      x,
+      y,
+      width: rect.width,
+      height: rect.height,
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+    });
     setPos((prev) =>
       prev && prev.left === left && prev.top === top ? prev : { left, top },
     );

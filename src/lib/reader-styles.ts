@@ -280,3 +280,13 @@ p { margin-block-end: ${state.paragraphSpacing}em !important; text-indent: ${sta
   const themeCss = THEME_CSS[state.theme] ?? "";
   return themeCss ? `${fontCss}\n${themeCss}` : fontCss;
 }
+
+/**
+ * Compact overlay for the footnote popup inner view. Append after
+ * `generateStylesCss` so `!important` rules beat page padding, max-width,
+ * first-line indent, and the theme page background.
+ */
+export function footnotePopupCss(): string {
+  return `html, body { background: transparent !important; min-height: 0 !important; height: auto !important; max-width: none !important; margin-inline: 0 !important; padding: 0.75rem !important; }
+p { text-indent: 0 !important; margin-block-end: 0.5em !important; }`;
+}
