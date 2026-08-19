@@ -1781,3 +1781,24 @@ Fixed handle_second_instance to unminimize+show+set_focus so clicking an epub wh
 ### Status
 
 [OK] **Completed**
+
+
+## Session 78: Fix footnote popup as compact card
+
+**Date**: 2026-08-19
+**Task**: Fix footnote popup as compact card
+**Branch**: `main`
+
+### Summary
+
+Fixed the EPUB footnote popup: height from renderer.viewSize, compact overlay CSS after generateStylesCss, center/flip placement next to the reference, and transparent inner-view background so short notes no longer sit in a tall empty page-colored box. Tests 394 + build passed.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ca623dd` | (see git log) |
+
+### Status
+
+[OK] **Completed**
