@@ -1739,3 +1739,24 @@ Implemented popup footnotes in the EPUB reader via foliate-js FootnoteHandler: c
 ### Status
 
 [OK] **Completed**
+
+
+## Session 76: Per-session agent system prompt and thinking level
+
+**Date**: 2026-08-19
+**Task**: Per-session agent system prompt and thinking level
+**Branch**: `wizardly-unicorn`
+
+### Summary
+
+Added per-session system prompt and thinking level (off..max, clamped per model) for the reading assistant. New session_config entry type in Pi v3 session files (latest wins, backwards compatible); list summaries expose systemPrompt/thinkingLevel; runtime updateSessionConfig appends + rebuilds agent; session settings dialog from SessionList gear button; session_config_updated reducer upsert; 7 i18n keys. 389 tests + cargo 133 green, tsc clean, build ok.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `70851d0` | (see git log) |
+
+### Status
+
+[OK] **Completed**
