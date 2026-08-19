@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/08-19-reader-footnotes/research.md", "reason": "验收核对:link 事件未命中时不 preventDefault 即保持既有跳转(R4);浮层关闭后主 view 位置不变(R3)"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "检查:不修改 foliate-js submodule;不破坏 reader 既有 setStyles 行为;浮层定位与 SelectionToolbar 模式一致"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "检查:ambient 声明未破坏既有类型;无 any 泄漏"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "检查:App↔ReaderView stylesCss 传递路径与现有 setStyles 调用一致性"}

@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/08-19-reader-footnotes/research.md", "reason": "FootnoteHandler 机制、link 事件 preventDefault 语义、样式注入与定位方案——实现的事实基础"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "foliate-view 挂载模式、iframe 坐标陷阱、setStyles 注入规范、浮层 UI 遵循的 chrome 视觉语言"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "foliate.js ambient 类型声明规则(只增不改);组件局部类型内联"}
+{"file": ".trellis/spec/frontend/i18n.md", "reason": "新增文案键需走 useT() 与 zh-CN/en 双目录(如浮层需要 aria-label)"}
