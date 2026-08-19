@@ -392,7 +392,7 @@ Do not set `exportedType`. EPUB is a public type.
 - Sources:
   - macOS: `RunEvent::Opened` `file://` URLs (also iOS/Android if enabled later).
   - Windows / Linux cold start: `std::env::args()` in `setup`.
-  - Windows / Linux hot start: `tauri-plugin-single-instance` callback `(app, args, cwd)` — first registered plugin, then focus `main`.
+  - Windows / Linux hot start: `tauri-plugin-single-instance` callback `(app, args, cwd)` — first registered plugin, then restore `main` to the foreground: `unminimize()` → `show()` → `set_focus()`. `set_focus` alone is a no-op on minimized windows on all three platforms (tao 0.35.3), so the restore sequence must run in that order.
 - Parser drops argv[0], `-` flags, non-`.epub`, non-`file` schemes. Relative args join the provided `cwd`.
 - Do not `canonicalize` a symlink: that would turn it into a regular file and skip `import_paths` `InvalidInput`.
 - Queue insert is path-unique. Frontend also ignores a path successfully imported in the last 5s (macOS argv + `Opened` can deliver the same file twice). Failed / cancelled imports clear that recent entry so retry works.
