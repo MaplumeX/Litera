@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.3] - 2026-08-19
+
+### Added
+
+- **文内朗读**：阅读页可用系统语音朗读当前页，支持播放 / 暂停 / 停止、跟读高亮和自动翻页，语速和声音会记住。
+- **脚注弹窗**：点击 EPUB 脚注引用会在原处弹出脚注，而不是跳到脚注页。
+
+### Fixed
+
+- **切换会话闪一下**：进入或切换对话时，列表会立刻停在底部，不再从顶部滑下来。
+
+### Removed
+
+- **点击工具结果跳转**：去掉了点搜索、读章或标注工具引用后翻到对应位置的能力。
+
 ## [0.2.2] - 2026-08-17
 
 ### Added
