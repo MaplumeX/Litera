@@ -147,6 +147,11 @@ pub fn enqueue_current_process_args(app: &AppHandle) {
 pub fn handle_second_instance(app: &AppHandle, args: Vec<String>, cwd: impl AsRef<Path>) {
     enqueue_paths(app, parse_open_args(args, cwd.as_ref()));
     if let Some(window) = app.get_webview_window("main") {
+        // set_focus is a no-op on a minimized (or hidden) window on all
+        // platforms, so unminimize and show first. All three are safe no-ops
+        // when the window state doesn't match.
+        let _ = window.unminimize();
+        let _ = window.show();
         let _ = window.set_focus();
     }
 }
