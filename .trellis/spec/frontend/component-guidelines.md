@@ -445,6 +445,28 @@ Helpers live in `src/lib/reader-paging.ts`. Implementation: `src/components/Read
 >
 > `pageWidthOf` is the `<html>` layout width (`getBoundingClientRect().width` / `offsetWidth`). `pageLocalX` is positive modulo (`((x % w) + w) % w`); `pageWidth <= 0` returns `0` so `hitFromClientX` yields `"middle"`. Click zones are the visible spread, not the full reader chrome. Do not query `#container` from outside — `Paginator` uses a closed shadow root.
 
+### Convention: footnote popups use fixed positioning + a dedicated inner view
+
+**What**: Clicking a footnote reference (`role="doc-noteref"` / `epub:type="noteref"`, or superscript heuristic) opens a popup near the reference showing the footnote content without leaving the page. The popup is `fixed` positioned (backdrop `z-40` + popup `z-50`, same family as `SelectionToolbar`); content is rendered by a second `<foliate-view>` created by `FootnoteHandler` (`src/foliate-js/footnotes.js`), not extracted as text.
+
+**Why**: Radix `Popover` anchors to iframe-external DOM nodes, so it cannot anchor to a footnote reference inside the chapter iframe. A dedicated inner view preserves book CSS and link interactivity; `FootnoteHandler` already implements fragment extraction (`before-render` / `render` CustomEvents).
+
+**How** (`src/components/ReaderView.tsx`):
+- Listen for `link` on the main `<foliate-view>`; call `footnoteHandler.handle(view.book, e)`. A returned promise means a footnote hit (the handler called `e.preventDefault()`, so the main view will NOT `goTo`); `undefined` means a normal link keeps its default behavior.
+- Position the popup at click time from the clicked `a` element: `getBoundingClientRect()` is chapter-strip local, so add `doc.defaultView.frameElement.getBoundingClientRect()` offset (same pattern as `selectionOverlayPos`). Test `nodeType === 1` instead of `instanceof Element` — the anchor lives in another realm (iframe).
+- `before-render`: append the inner view **synchronously** into the always-mounted popup mount point (foliate's `goTo(index)` runs in a microtask and the paginator measures its container during layout); set `flow="scrolled"`, `margin="0"`, and inject `stylesCss` via `renderer.setStyles` (inner views do not inherit main-view styles).
+- Inner `link` / `external-link`: close the popup, then delegate to the main view (`goTo(href)` / `window.open(href_)`). The `external-link` detail carries the raw `href_` attribute.
+- Esc must also close the popup when focus is inside the chapter iframe or the footnote iframe — bind the check in the existing per-doc `keydown` handler, not only on `window`.
+- Close (`closeFootnote`) calls `innerView.close?.()` + `remove()`; run it on popup dismiss, `fileData` change, and unmount. Keep the popup wrapper mounted but hidden (`visibility` + `pointer-events`) so `before-render` can append synchronously.
+
+**Gotcha: `before-render` fires after an async `open(book)` — guard against close and out-of-order races**:
+
+> **Warning**: `FootnoteHandler` dispatches `before-render` only after `view.open(book)` resolves. Two races follow: (1) the user dismisses the popup (Esc / backdrop) while the footnote is still loading — a late `before-render` would mount its inner view into the hidden popup and leak it; (2) rapid clicks on two different footnotes — the older click's `open(book)` can resolve *after* the newer one, so its `before-render` would replace the newer view.
+>
+> **Correct**: guard with a ref flag (`footnoteOpenRef`) and discard late inner views on close; use a monotonically increasing click sequence number captured per click, with a one-shot `before-render` listener — a `seq` mismatch means the view is stale and must be `close()` + `remove()`d. Dispose the one-shot listener if `handle()`'s promise rejects.
+>
+> See `src/components/ReaderView.tsx` `handleFootnoteBeforeRender` / `footnoteClick`.
+
 ### Display app-data images via convertFileSrc
 
 Images stored in Tauri's app data directory cannot be loaded via plain `file://` URLs (CSP blocks them). Use Tauri's asset protocol:

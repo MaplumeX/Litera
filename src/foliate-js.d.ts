@@ -11,6 +11,11 @@ declare module "*/foliate-js/view.js" {
     getCover?(): Promise<Blob | null>;
     destroy?(): void;
     sections: unknown[];
+    resolveHref?(href: string): {
+      index: number;
+      anchor: (doc: Document) => Element | number;
+    } | null;
+    isExternal?(href: string): boolean;
   }
 
   export const makeBook: (file: File | Blob) => Promise<Book>;
@@ -96,6 +101,13 @@ declare module "*/foliate-js/view.js" {
     initTTS(granularity?: TtsGranularity, highlight?: TtsHighlight): Promise<void>;
     startMediaOverlay(): unknown;
     close(): void;
+  }
+}
+
+declare module "*/foliate-js/footnotes.js" {
+  export class FootnoteHandler extends EventTarget {
+    detectFootnotes: boolean;
+    handle(book: unknown, e: Event): Promise<unknown> | undefined;
   }
 }
 

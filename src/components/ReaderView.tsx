@@ -18,11 +18,13 @@ import {
 import { sectionIndexAt } from "@/lib/reader-progress";
 import { TTS_HIGHLIGHT_COLOR, TTS_OVERLAY_KEY } from "@/lib/reader-tts";
 import { SelectionToolbar } from "@/components/SelectionToolbar";
+import { FootnotePopup } from "@/components/FootnotePopup";
 import type { HighlightRecord } from "@/types/library";
 
 // foliate.js view.js defines the <foliate-view> custom element.
 // Importing the module registers it with the customElements registry.
 import "../foliate-js/view.js";
+import { FootnoteHandler } from "../foliate-js/footnotes.js";
 import { Overlayer } from "../foliate-js/overlayer.js";
 
 const HIGHLIGHT_COLOR = "#fbbf24";
@@ -158,6 +160,8 @@ interface ReaderViewProps {
   onTtsToggle?: () => void;
   /** User-initiated relocate while TTS should resync from the new visible range. */
   onUserRelocate?: () => void;
+  /** Reader CSS (font/theme) to inject into footnote popup inner views. */
+  stylesCss?: string;
 }
 
 type FoliateOverlayer = {
@@ -188,6 +192,13 @@ type FoliateAnnotator = {
     scrollToAnchor?: (anchor: Range | number, select?: boolean) => void | Promise<void>;
     nextSection?: () => Promise<void>;
   };
+};
+
+/** Inner <foliate-view> element created by FootnoteHandler for the popup. */
+type FoliateInnerView = HTMLElement & {
+  close?: () => void;
+  goTo?: (href: string) => void;
+  renderer?: HTMLElement & { setStyles?: (css: string) => void };
 };
 
 function isTtsRangeVisible(range: Range, visible?: Range): boolean {
@@ -272,6 +283,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       onBookReady,
       onTtsToggle,
       onUserRelocate,
+      stylesCss,
     },
     ref,
   ) {
@@ -293,6 +305,40 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
     onBookReadyRef.current = onBookReady;
     onTtsToggleRef.current = onTtsToggle;
     onUserRelocateRef.current = onUserRelocate;
+    // Latest reader CSS for footnote inner views (read inside the mount effect).
+    const stylesCssRef = useRef(stylesCss);
+    stylesCssRef.current = stylesCss;
+    const footnoteInnerViewRef = useRef<FoliateInnerView | null>(null);
+    // True while a footnote popup is expected: set on a footnote hit, cleared on
+    // close. Guards `before-render` against mounting an inner view for a
+    // footnote the user already dismissed (e.g. Esc while the book was still
+    // opening) — the view would otherwise linger in the hidden popup.
+    const footnoteOpenRef = useRef(false);
+    // Always-mounted mount point for the inner view (see FootnotePopup). The
+    // popup wrapper stays in the DOM so this node exists when `before-render`
+    // fires; the inner view is appended synchronously there, before foliate
+    // runs `goTo` on it.
+    const footnoteMountRef = useRef<HTMLDivElement | null>(null);
+    const [footnotePos, setFootnotePos] = useState<{ x: number | null; y: number | null }>({
+      x: null,
+      y: null,
+    });
+    const [footnoteView, setFootnoteView] = useState<HTMLElement | null>(null);
+    const [footnoteHeight, setFootnoteHeight] = useState<number | null>(null);
+
+    // Close the footnote popup and destroy its inner view.
+    const closeFootnote = useCallback(() => {
+      footnoteOpenRef.current = false;
+      const inner = footnoteInnerViewRef.current;
+      if (inner) {
+        footnoteInnerViewRef.current = null;
+        inner.close?.();
+        inner.remove();
+      }
+      setFootnotePos({ x: null, y: null });
+      setFootnoteView(null);
+      setFootnoteHeight(null);
+    }, []);
     const ttsRangeRef = useRef<Range | null>(null);
     const suppressUserRelocateRef = useRef(0);
     const applyTtsHighlightRef = useRef<(range: Range) => void>(() => {});
@@ -416,6 +462,15 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         const ke = e as KeyboardEvent;
         if (ke.defaultPrevented) return;
         if (ke.altKey || ke.metaKey || ke.ctrlKey || ke.shiftKey) return;
+        if (ke.key === "Escape") {
+          // The footnote popup listens on window, but keydown from the chapter
+          // iframe never reaches it; close the popup here when focus is inside.
+          if (footnoteOpenRef.current) {
+            ke.preventDefault();
+            closeFootnote();
+          }
+          return;
+        }
         if (ke.key === " " || ke.code === "Space") {
           if (shouldIgnoreSpaceTarget(ke.target)) return;
           ke.preventDefault();
@@ -492,11 +547,166 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       };
       el.addEventListener("load", handleLoad as EventListener);
 
+      // --- Footnote popup ---
+      const footnoteHandler = new FootnoteHandler();
+      // Monotonic click counter: a before-render for an older click (async
+      // `open(book)` can resolve out of order across rapid re-clicks) must not
+      // replace the view of the newest click.
+      let footnoteSeq = 0;
+      const handleFootnoteBeforeRender = (e: Event, seq: number) => {
+        const detail = (e as CustomEvent<{ view: FoliateInnerView }>).detail;
+        const inner = detail.view;
+        if (seq !== footnoteSeq) {
+          // A newer footnote click superseded this one; discard its view.
+          inner.close?.();
+          inner.remove();
+          return;
+        }
+        // Replace any previous inner view (rapid clicks on another footnote).
+        const prevInner = footnoteInnerViewRef.current;
+        if (prevInner && prevInner !== inner) {
+          prevInner.close?.();
+          prevInner.remove();
+        }
+        if (!footnoteOpenRef.current) {
+          // The popup was dismissed while this footnote was still loading
+          // (Esc / backdrop during `open(book)`); discard the inner view
+          // instead of leaving it mounted in the hidden popup.
+          footnoteInnerViewRef.current = null;
+          inner.close?.();
+          inner.remove();
+          return;
+        }
+        footnoteInnerViewRef.current = inner;
+        // The popup shows a scrollable footnote; use scrolled flow and zero margins.
+        inner.style.display = "block";
+        inner.style.width = "100%";
+        inner.style.height = "100%";
+        inner.renderer?.setAttribute?.("flow", "scrolled");
+        inner.renderer?.setAttribute?.("margin", "0");
+        if (stylesCssRef.current) inner.renderer?.setStyles?.(stylesCssRef.current);
+        // Append the inner view synchronously before foliate runs `goTo(index)`
+        // (the paginator measures its container during layout).
+        const mount = footnoteMountRef.current;
+        if (mount && !mount.contains(inner)) mount.appendChild(inner);
+        setFootnoteView(inner);
+        // Links inside the footnote close the popup and let the main view
+        // handle navigation (backlink returns to the reference, others jump).
+        inner.addEventListener("link", ((linkEvent) => {
+          const href = (linkEvent as CustomEvent<{ href: string }>).detail?.href;
+          linkEvent.preventDefault();
+          closeFootnote();
+          if (href) {
+            void (el as unknown as { goTo?: (h: string) => Promise<unknown> })
+              .goTo?.(href);
+          }
+        }) as EventListener);
+        // External links inside the footnote: close and open externally,
+        // mirroring the main view's default external-link behavior. The detail
+        // carries the raw `href_` attribute (view.js #handleLinks).
+        inner.addEventListener("external-link", ((linkEvent) => {
+          const href = (linkEvent as CustomEvent<{ href_?: string }>).detail?.href_;
+          linkEvent.preventDefault();
+          closeFootnote();
+          if (href) globalThis.open(href, "_blank");
+        }) as EventListener);
+        // Esc must close the popup even when the footnote iframe has focus
+        // (iframe keydown does not reach the parent window).
+        inner.addEventListener("load", ((loadEvent) => {
+          const doc = (loadEvent as CustomEvent<{ doc?: Document }>).detail?.doc;
+          doc?.addEventListener("keydown", (keyEvent) => {
+            const ke = keyEvent as KeyboardEvent;
+            if (ke.key !== "Escape") return;
+            ke.preventDefault();
+            closeFootnote();
+          });
+        }) as EventListener);
+        // The `render` event fires before the paginator lays out and scrolls to
+        // the fragment, so measure the content height only after `relocate`.
+        inner.addEventListener("relocate", (() => {
+          const innerDoc = (inner as unknown as {
+            renderer?: { getContents?: () => { doc?: Document }[] };
+          })?.renderer?.getContents?.()[0]?.doc;
+          const h = innerDoc?.body?.getBoundingClientRect().height;
+          if (typeof h === "number" && h > 0) setFootnoteHeight(h);
+        }) as EventListener);
+      };
+      // One-shot before-render listener per click: captures the click's seq so
+      // an out-of-order arrival can be detected (see handleFootnoteBeforeRender).
+      // Only registered for footnote hits; disposed on rejection via `dispose`.
+      const footnoteClick = (e: Event): {
+        promise: Promise<unknown>;
+        dispose: () => void;
+      } | undefined => {
+        const view = el as unknown as { book?: unknown };
+        if (!view.book) return undefined;
+        let result: Promise<unknown> | undefined;
+        try {
+          result = footnoteHandler.handle(view.book, e);
+        } catch (err: unknown) {
+          console.error("footnote handler error:", err);
+          return undefined;
+        }
+        if (!result) return undefined; // not a footnote — nothing pending
+        const seq = ++footnoteSeq;
+        const onBeforeRender = (ev: Event) => {
+          footnoteHandler.removeEventListener("before-render", onBeforeRender);
+          handleFootnoteBeforeRender(ev, seq);
+        };
+        footnoteHandler.addEventListener("before-render", onBeforeRender);
+        return {
+          promise: result,
+          dispose: () => footnoteHandler.removeEventListener("before-render", onBeforeRender),
+        };
+      };
+      const handleLink = (e: Event) => {
+        const hit = footnoteClick(e);
+        if (hit) {
+          // Footnote hit: expect a popup (cleared again by closeFootnote), so a
+          // late before-render mounts its inner view. Show the popup
+          // immediately at the clicked reference.
+          footnoteOpenRef.current = true;
+          // `a` lives inside the chapter iframe, so test nodeType (realm-safe)
+          // instead of `instanceof Element`.
+          const detail = (e as CustomEvent<{ a?: unknown }>).detail;
+          const a = detail.a as
+            | {
+                nodeType?: number;
+                getBoundingClientRect?: () => DOMRect;
+                ownerDocument?: Document;
+              }
+            | null
+            | undefined;
+          if (a?.nodeType === 1 && a.getBoundingClientRect) {
+            const rect = a.getBoundingClientRect();
+            if (rect.width > 0 || rect.height > 0) {
+              const doc = a.ownerDocument;
+              const frame = doc?.defaultView?.frameElement;
+              const offset = frame?.getBoundingClientRect() ?? { left: 0, top: 0 };
+              setFootnotePos({
+                x: offset.left + rect.left + rect.width / 2,
+                y: offset.top + rect.bottom,
+              });
+            }
+          }
+          void hit.promise.catch((err: unknown) => {
+            console.error("footnote handler error:", err);
+            // A failed footnote load must not leave a stale popup open or a
+            // pending one-shot before-render listener behind.
+            hit.dispose();
+            closeFootnote();
+          });
+        }
+      };
+      el.addEventListener("link", handleLink as EventListener);
+
       return () => {
         el.removeEventListener("relocate", handleRelocate as EventListener);
         el.removeEventListener("create-overlay", handleCreateOverlay as EventListener);
         el.removeEventListener("draw-annotation", handleDrawAnnotation as EventListener);
         el.removeEventListener("load", handleLoad as EventListener);
+        el.removeEventListener("link", handleLink as EventListener);
+        closeFootnote();
         unbindDoc?.();
         unbindHostPointer();
         el.removeEventListener("wheel", handleWheel);
@@ -517,6 +727,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       suppressUserRelocateRef.current = 0;
       paintedCfisRef.current = new Set();
       setSelectionPos(null);
+      closeFootnote();
       if (!fileData || !viewRef.current) return;
       const view = viewRef.current as unknown as {
         open: (file: File) => Promise<void>;
@@ -775,6 +986,15 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
             onAskAgent={handleAskAgent}
           />
         )}
+
+        <FootnotePopup
+          x={footnotePos.x}
+          y={footnotePos.y}
+          height={footnoteHeight}
+          viewElement={footnoteView}
+          mountRef={footnoteMountRef}
+          onClose={closeFootnote}
+        />
       </div>
     );
   },

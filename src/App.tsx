@@ -978,6 +978,7 @@ function App() {
                 onBookReady={handleBookReady}
                 onTtsToggle={tts.toggle}
                 onUserRelocate={tts.onUserRelocate}
+                stylesCss={generateStylesCss({ ...styleState, theme: resolvedTheme })}
               />
             )}
             {tocVisible && (
