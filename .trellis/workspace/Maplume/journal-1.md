@@ -1739,3 +1739,24 @@ Implemented popup footnotes in the EPUB reader via foliate-js FootnoteHandler: c
 ### Status
 
 [OK] **Completed**
+
+
+## Session 76: fix: restore minimized window on epub open
+
+**Date**: 2026-08-19
+**Task**: fix: restore minimized window on epub open
+**Branch**: `glowing-cat`
+
+### Summary
+
+Fixed handle_second_instance to unminimize+show+set_focus so clicking an epub while the app is minimized restores the window to the foreground (set_focus alone is a no-op on minimized windows per tao 0.35.3). Updated spec tauri-commands.md OS EPUB open contract. Verified with cargo test (10/10) and cargo check.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `598d2ae` | (see git log) |
+
+### Status
+
+[OK] **Completed**
