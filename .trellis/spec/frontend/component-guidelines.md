@@ -498,6 +498,8 @@ The Settings font control is a searchable combobox (`Popover` + `Command`), not 
 
 **Caveat**: `view.renderer` is a non-official public field (not documented in foliate.js README). Submodule commit lock mitigates upgrade risk. Fixed-layout epub (foliate-fxl) may not support `setStyles` — MVP targets reflowable only.
 
+**Preview CSS (Settings dialog)**: `generatePreviewCss(state)` (`src/lib/reader-styles.ts`) reuses the same typography properties as `generateStylesCss` but scopes selectors to `.litera-typography-preview` / `.litera-typography-preview p` and omits the `html, body` selectors, the `!important` flags, and the `THEME_CSS` branch. It is injected via a `<style>` tag inside `TypographyPreview` (`src/components/settings/TypographyPreview.tsx`), rendered at the top of the Settings typography section so users see font/spacing changes without closing the dialog. Do not reuse `generateStylesCss` for the preview — its `html, body` selector and dark-theme `background` would pollute the dialog chrome. Keep `generatePreviewCss` free of `background` / global `color` (asserted in `reader-styles.test.ts`).
+
 ### Pattern: auto-growing textarea inside a resizable panel
 
 **Problem**: The chat input auto-grows via `el.style.height = Math.min(el.scrollHeight, 120) + "px"`. `scrollHeight` changes not only with the typed value but also with the element width (line wrapping), and the chat panel width is user-resizable (`react-resizable-panels`). Resizing the panel without typing would leave a stale height.

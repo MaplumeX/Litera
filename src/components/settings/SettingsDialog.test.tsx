@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { SettingsDialog } from "./SettingsDialog";
 import type { ReaderStyleState } from "@/lib/reader-styles";
 import { setLocale } from "@/lib/i18n";
+import { generatePreviewCss } from "@/lib/reader-styles";
 import { DEFAULT_READER_MODE_KEY } from "@/lib/reader-mode";
 import {
   DEFAULT_UI_FONT_FAMILY,
@@ -162,6 +163,202 @@ describe("SettingsDialog", () => {
     expect(dialog.className).toContain("sm:max-w-[calc(100%-2rem)]");
     expect(dialog.className).not.toContain("sm:max-w-3xl");
     expect(dialog.className).not.toContain("sm:max-w-lg");
+  });
+
+  it("renders a typography preview above the controls in the typography section", () => {
+    const { getByText } = render(
+      <SettingsDialog
+        open
+        onClose={noop}
+        bookTitle={null}
+        hasBook={false}
+        styleState={styleState}
+        onTypographyChange={noop}
+        onRestoreDefault={noop}
+        overriddenKeys={[]}
+        theme="light"
+        onThemeChange={noop}
+      />,
+    );
+
+    // Preview label
+    expect(getByText("预览")).toBeTruthy();
+    // Preview container with scoped class
+    const previewEl = document.body.querySelector(".litera-typography-preview");
+    expect(previewEl).not.toBeNull();
+    // Two example paragraphs
+    expect(previewEl!.querySelectorAll("p").length).toBe(2);
+    // Injected <style> with generated CSS
+    const styleEl = document.body.querySelector("style");
+    expect(styleEl).not.toBeNull();
+    expect(styleEl!.textContent).toContain(".litera-typography-preview");
+    expect(styleEl!.textContent).toContain("font-size: 16px");
+  });
+
+  it("updates the preview CSS when fontSize changes", () => {
+    const { rerender } = render(
+      <SettingsDialog
+        open
+        onClose={noop}
+        bookTitle={null}
+        hasBook={false}
+        styleState={styleState}
+        onTypographyChange={noop}
+        onRestoreDefault={noop}
+        overriddenKeys={[]}
+        theme="light"
+        onThemeChange={noop}
+      />,
+    );
+
+    let styleEl = document.body.querySelector("style");
+    expect(styleEl!.textContent).toContain("font-size: 16px");
+
+    rerender(
+      <SettingsDialog
+        open
+        onClose={noop}
+        bookTitle={null}
+        hasBook={false}
+        styleState={{ ...styleState, fontSize: 22 }}
+        onTypographyChange={noop}
+        onRestoreDefault={noop}
+        overriddenKeys={[]}
+        theme="light"
+        onThemeChange={noop}
+      />,
+    );
+
+    styleEl = document.body.querySelector("style");
+    expect(styleEl!.textContent).toContain("font-size: 22px");
+    expect(styleEl!.textContent).not.toContain("font-size: 16px");
+  });
+
+  it("updates the preview CSS when fontFamily changes", () => {
+    const { rerender } = render(
+      <SettingsDialog
+        open
+        onClose={noop}
+        bookTitle={null}
+        hasBook={false}
+        styleState={styleState}
+        onTypographyChange={noop}
+        onRestoreDefault={noop}
+        overriddenKeys={[]}
+        theme="light"
+        onThemeChange={noop}
+      />,
+    );
+
+    let styleEl = document.body.querySelector("style");
+    expect(styleEl!.textContent).toContain("font-family: serif;");
+
+    rerender(
+      <SettingsDialog
+        open
+        onClose={noop}
+        bookTitle={null}
+        hasBook={false}
+        styleState={{ ...styleState, fontFamily: "monospace" }}
+        onTypographyChange={noop}
+        onRestoreDefault={noop}
+        overriddenKeys={[]}
+        theme="light"
+        onThemeChange={noop}
+      />,
+    );
+
+    styleEl = document.body.querySelector("style");
+    expect(styleEl!.textContent).toContain("font-family: monospace;");
+  });
+
+  it("updates the preview CSS when textAlign changes", () => {
+    const { rerender } = render(
+      <SettingsDialog
+        open
+        onClose={noop}
+        bookTitle={null}
+        hasBook={false}
+        styleState={styleState}
+        onTypographyChange={noop}
+        onRestoreDefault={noop}
+        overriddenKeys={[]}
+        theme="light"
+        onThemeChange={noop}
+      />,
+    );
+
+    let styleEl = document.body.querySelector("style");
+    expect(styleEl!.textContent).toContain("text-align: start");
+
+    rerender(
+      <SettingsDialog
+        open
+        onClose={noop}
+        bookTitle={null}
+        hasBook={false}
+        styleState={{ ...styleState, textAlign: "justify" }}
+        onTypographyChange={noop}
+        onRestoreDefault={noop}
+        overriddenKeys={[]}
+        theme="light"
+        onThemeChange={noop}
+      />,
+    );
+
+    styleEl = document.body.querySelector("style");
+    expect(styleEl!.textContent).toContain("text-align: justify");
+  });
+
+  it("hides the preview when switching to the appearance section", () => {
+    const { getByRole, queryByText } = render(
+      <SettingsDialog
+        open
+        onClose={noop}
+        bookTitle={null}
+        hasBook={false}
+        styleState={styleState}
+        onTypographyChange={noop}
+        onRestoreDefault={noop}
+        overriddenKeys={[]}
+        theme="light"
+        onThemeChange={noop}
+      />,
+    );
+
+    expect(queryByText("预览")).not.toBeNull();
+    expect(document.body.querySelector(".litera-typography-preview")).not.toBeNull();
+
+    act(() => {
+      getByRole("button", { name: "外观" }).click();
+    });
+
+    expect(queryByText("预览")).toBeNull();
+    expect(document.body.querySelector(".litera-typography-preview")).toBeNull();
+  });
+
+  it("shows English example text in the preview when locale is en", () => {
+    setLocale("en");
+    const { getByText } = render(
+      <SettingsDialog
+        open
+        onClose={noop}
+        bookTitle={null}
+        hasBook={false}
+        styleState={styleState}
+        onTypographyChange={noop}
+        onRestoreDefault={noop}
+        overriddenKeys={[]}
+        theme="light"
+        onThemeChange={noop}
+      />,
+    );
+
+    expect(getByText("Preview")).toBeTruthy();
+    const previewEl = document.body.querySelector(".litera-typography-preview");
+    expect(previewEl).not.toBeNull();
+    expect(previewEl!.textContent).toContain("morning mist");
+    expect(previewEl!.textContent).not.toContain("清晨");
   });
 
   it("switches left-nav sections and enables fonts without a book", () => {

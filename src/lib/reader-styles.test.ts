@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   bookSettingsSnapshot,
+  generatePreviewCss,
   generateStylesCss,
   normalizeSettings,
 } from "./reader-styles";
@@ -189,5 +190,70 @@ describe("bookSettingsSnapshot", () => {
     expect(bookSettingsSnapshot({ textAlign: "justify" })).toEqual({
       textAlign: "justify",
     });
+  });
+});
+
+describe("generatePreviewCss", () => {
+  it("scopes selectors to .litera-typography-preview and includes typography props", () => {
+    const css = generatePreviewCss({
+      fontSize: 18,
+      fontFamily: "serif",
+      theme: "light",
+      lineHeight: 2,
+      contentWidth: 36,
+      pagePadding: 1.25,
+      textAlign: "justify",
+      letterSpacing: 0.02,
+      paragraphSpacing: 1.1,
+      firstLineIndent: 2,
+    });
+    expect(css).toContain(".litera-typography-preview {");
+    expect(css).toContain(".litera-typography-preview p {");
+    expect(css).toContain("font-family: serif;");
+    expect(css).toContain("font-size: 18px");
+    expect(css).toContain("line-height: 2");
+    expect(css).toContain("letter-spacing: 0.02em");
+    expect(css).toContain("max-width: 36em");
+    expect(css).toContain("margin-inline: auto");
+    expect(css).toContain("padding-inline: 1.25rem");
+    expect(css).toContain("text-align: justify");
+    expect(css).toContain("margin-block-end: 1.1em");
+    expect(css).toContain("text-indent: 2em");
+  });
+
+  it("does not inject html/body selectors or global background/color", () => {
+    const css = generatePreviewCss({
+      fontSize: 16,
+      fontFamily: "serif",
+      theme: "dark",
+      lineHeight: 1.7,
+      contentWidth: 42,
+      pagePadding: 1.75,
+      textAlign: "start",
+      letterSpacing: 0,
+      paragraphSpacing: 1,
+      firstLineIndent: 0,
+    });
+    expect(css).not.toContain("html, body");
+    expect(css).not.toContain("html,body");
+    expect(css).not.toContain("background");
+    expect(css).not.toContain("!important");
+  });
+
+  it("quotes named fonts via cssFontFamily and never emits Geist", () => {
+    const css = generatePreviewCss({
+      fontSize: 16,
+      fontFamily: "Noto Sans",
+      theme: "light",
+      lineHeight: 1.7,
+      contentWidth: 42,
+      pagePadding: 1.75,
+      textAlign: "start",
+      letterSpacing: 0,
+      paragraphSpacing: 1,
+      firstLineIndent: 0,
+    });
+    expect(css).toContain('font-family: "Noto Sans", serif');
+    expect(css).not.toContain("Geist");
   });
 });

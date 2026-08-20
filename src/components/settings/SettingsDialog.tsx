@@ -23,6 +23,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Slider } from "@/components/ui/slider";
 import { AgentConfigForm } from "@/components/AgentConfigForm";
+import { TypographyPreview } from "@/components/settings/TypographyPreview";
 import { cn } from "@/lib/utils";
 import {
   FONT_FAMILIES,
@@ -508,6 +509,8 @@ export function SettingsDialog({
 
           {section === "typography" && (
             <div className="max-w-md space-y-5">
+              <TypographyPreview styleState={styleState} />
+
               {SLIDER_ROWS.slice(0, 1).map((row) => (
                 <SliderRow
                   key={row.key}

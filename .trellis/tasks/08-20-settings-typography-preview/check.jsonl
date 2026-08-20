@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Verify Settings shell sizing unchanged, no shadow on dialog, setStyles contract preserved"}
+{"file": ".trellis/spec/frontend/i18n.md", "reason": "Verify catalog key parity zh-CN/en, useT() used before early returns, no preferences.json writes"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Verify CSP/font rules and dialog chrome conventions respected by preview"}
+{"file": ".trellis/tasks/08-20-settings-typography-preview/prd.md", "reason": "AC1-AC11 acceptance criteria to verify against implementation"}
+{"file": ".trellis/tasks/08-20-settings-typography-preview/design.md", "reason": "Verify generatePreviewCss strips theme branch, scoped selector, no global html/body injection"}

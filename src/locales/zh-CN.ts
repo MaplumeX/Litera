@@ -114,6 +114,9 @@ export const zhCN = {
   "settings.slider.letterSpacing": "字间距",
   "settings.slider.paragraphSpacing": "段距",
   "settings.slider.firstLineIndent": "首行缩进",
+  "settings.preview": "预览",
+  "settings.preview.paragraph1": "清晨的雾气还未散尽，远处的山峦在薄纱后若隐若现。沿着石板路向前走去，两旁的老树抽出了新芽，嫩绿的叶片在微风中轻轻摇曳。偶尔有几只麻雀从头顶掠过，发出清脆的叫声，打破了这个宁静清晨的沉默。",
+  "settings.preview.paragraph2": "走到巷子的尽头，眼前豁然开朗。一片开阔的草地上，几朵野花点缀其间，露珠在花瓣上滚落，映着初升的阳光闪闪发亮。他深吸一口气，空气中带着泥土与青草的气息，那是只有乡间才有的味道。这一天，注定与往日不同。",
 
   "toc.title": "目录",
   "toc.empty": "无目录",

@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend layer index: locate component/i18n/state specs before editing SettingsDialog and reader-styles"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Settings shell sizing (w-[768px] h-[40rem]), setStyles/generateStylesCss contract, font picker rules, segmented control convention"}
+{"file": ".trellis/spec/frontend/i18n.md", "reason": "useT() / MessageKey catalog parity (zh-CN/en), no preferences.json keys, test setup pins zh-CN"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "styleState ownership in App, debounced persist, local state + props pattern"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "ReaderStyleState contract, no any, foliate typing rules when touching reader-styles.ts"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "CSP font-src, no shadow-sm on dialogs, chrome surface conventions"}
+{"file": ".trellis/tasks/08-20-settings-typography-preview/prd.md", "reason": "R1-R5 requirements and AC1-AC11 acceptance criteria"}
+{"file": ".trellis/tasks/08-20-settings-typography-preview/design.md", "reason": "generatePreviewCss scoped selector, TypographyPreview component boundary, trade-offs"}
