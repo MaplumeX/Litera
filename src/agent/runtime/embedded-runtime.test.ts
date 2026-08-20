@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createFauxCore, fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
-import { LiteraAgentRuntime, type RuntimeConfig } from "./embedded-runtime";
+import { LiteraAgentRuntime, SYSTEM_PROMPT, type RuntimeConfig } from "./embedded-runtime";
 import type { BookContentPort } from "@/agent/book/book-content";
 import type { SessionPort } from "@/agent/sessions/session-port";
 import type { DecodedPiSession, PiSessionEntry } from "@/agent/sessions/pi-session";
@@ -221,7 +221,7 @@ describe("LiteraAgentRuntime",()=>{
     await runtime.openBook("book",new ArrayBuffer(1));
     await runtime.switchSession("session-1");
     await runtime.prompt("question",{});
-    expect(captured[0].systemPrompt).toBe("你是翻译助手");
+    expect(captured[0].systemPrompt).toBe(`${SYSTEM_PROMPT}\n\n你是翻译助手`);
     expect(captured[0].reasoning).toBeUndefined();
   });
 
@@ -255,7 +255,7 @@ describe("LiteraAgentRuntime",()=>{
     expect(configEntries).toMatchObject([{systemPrompt:"新提示词"}]);
     expect(events).toContain("session_config_updated");
     await runtime.prompt("second",{});
-    expect(captured[1].systemPrompt).toBe("新提示词");
+    expect(captured[1].systemPrompt).toBe(`${SYSTEM_PROMPT}\n\n新提示词`);
     expect(captured[1].reasoning).toBeUndefined();
   });
 

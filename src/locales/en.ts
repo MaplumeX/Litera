@@ -165,7 +165,7 @@ export const en: { [K in MessageKey]: string } = {
   "chat.sessionConfigTitle": "Session settings",
   "chat.sessionConfigDescription": "Configure this session's system prompt.",
   "chat.systemPrompt": "System prompt",
-  "chat.systemPromptHint": "Leave empty to use the default prompt",
+  "chat.systemPromptHint": "Leave empty to use the default prompt; otherwise appended to the default prompt",
   "chat.thinkingLevel": "Thinking level",
   "chat.clearPrompt": "Clear",
   "chat.compacting": "Compacting context…",

@@ -19,7 +19,7 @@ type RuntimeEventPayload = AgentEvent extends infer Event
     ? Omit<Event, "version">
     : never
   : never;
-const SYSTEM_PROMPT = "You are Litera, an EPUB reading assistant. Use the book tools when evidence is needed. Highlights and bookmarks are available via list_annotations when the user asks about what they marked; do not call it for ordinary chapter questions. Answer in the user's language.";
+export const SYSTEM_PROMPT = "You are Litera, an EPUB reading assistant. Use the book tools when evidence is needed. Highlights and bookmarks are available via list_annotations when the user asks about what they marked; do not call it for ordinary chapter questions. Answer in the user's language.";
 
 async function streamFor(api: string): Promise<StreamFn> {
   if (api === "anthropic-messages") return (await import("@earendil-works/pi-ai/api/anthropic-messages")).streamSimple as unknown as StreamFn;
@@ -93,7 +93,7 @@ export class LiteraAgentRuntime {
     }catch{const safeError=new Error("模型请求失败，请检查配置后重试");this.emit({type:"error",scope:"prompt",message:safeError.message,recoverable:true,bookId:promptBookId,sessionId:session?.header.id,promptId});throw safeError;}finally{unsubscribe?.();if(this.promptId===promptId)this.promptId=null;}
   }
 
-  private async ensureAgent(config:RuntimeConfig,session:DecodedPiSession,bookId:string){if(this.agent)return this.agent;const resolvedModel=await resolveRuntimeModel(config);const nativeFetch=createGuardedNativeFetch({baseUrl:resolvedModel.baseUrl});const providerStream=await this.loadStream(resolvedModel.api);const stream:StreamFn=(requestModel,requestContext,options)=>providerStream(requestModel,requestContext,{...options,fetch:nativeFetch,maxRetries:0});const tools=await this.tools(bookId);const configured=sessionConfig(session);return new Agent({initialState:{systemPrompt:configured?.systemPrompt||SYSTEM_PROMPT,model:resolvedModel,thinkingLevel:clampThinkingLevel(resolvedModel,config.thinkingLevel as ModelThinkingLevel),messages:piContextMessages(session),tools},streamFn:stream,convertToLlm:convertPiContextToLlm,getApiKey:()=>config.apiKey,transport:"sse"});}
+  private async ensureAgent(config:RuntimeConfig,session:DecodedPiSession,bookId:string){if(this.agent)return this.agent;const resolvedModel=await resolveRuntimeModel(config);const nativeFetch=createGuardedNativeFetch({baseUrl:resolvedModel.baseUrl});const providerStream=await this.loadStream(resolvedModel.api);const stream:StreamFn=(requestModel,requestContext,options)=>providerStream(requestModel,requestContext,{...options,fetch:nativeFetch,maxRetries:0});const tools=await this.tools(bookId);const configured=sessionConfig(session);const userPrompt=configured?.systemPrompt.trim();return new Agent({initialState:{systemPrompt:userPrompt?`${SYSTEM_PROMPT}\n\n${userPrompt}`:SYSTEM_PROMPT,model:resolvedModel,thinkingLevel:clampThinkingLevel(resolvedModel,config.thinkingLevel as ModelThinkingLevel),messages:piContextMessages(session),tools},streamFn:stream,convertToLlm:convertPiContextToLlm,getApiKey:()=>config.apiKey,transport:"sse"});}
 
   /**
    * Compact the session context when it approaches the model context window.

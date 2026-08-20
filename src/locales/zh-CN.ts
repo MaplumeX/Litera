@@ -163,7 +163,7 @@ export const zhCN = {
   "chat.sessionConfigTitle": "会话设置",
   "chat.sessionConfigDescription": "配置该会话的系统提示词。",
   "chat.systemPrompt": "系统提示词",
-  "chat.systemPromptHint": "留空使用默认提示词",
+  "chat.systemPromptHint": "留空使用默认提示词；填写则追加到默认提示词之后",
   "chat.thinkingLevel": "思考强度",
   "chat.clearPrompt": "清空",
   "chat.compacting": "正在压缩上下文…",
