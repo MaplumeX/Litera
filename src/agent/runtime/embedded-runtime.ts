@@ -103,6 +103,7 @@ export class LiteraAgentRuntime {
    * user's prompt result.
    */
   private async maybeCompact(agent:Agent,session:DecodedPiSession,bookId:string):Promise<boolean>{
+    const base={bookId,sessionId:session.header.id,promptId:this.promptId!};
     try{
       const settings=DEFAULT_COMPACTION_SETTINGS;
       const contextWindow=agent.state.model.contextWindow??0;
@@ -121,14 +122,16 @@ export class LiteraAgentRuntime {
       if(!overflow&&!shouldCompact(contextTokens,contextWindow,settings))return false;
       const preparation=prepareCompaction(branch,settings);
       if(!preparation)return false;
+      this.emit({type:"compaction_started",...base});
       const apiKey=await agent.getApiKey?.(agent.state.model.provider);
       const summary=await generateSummary(preparation.messagesToSummarize,agent.state.model,settings.reserveTokens,apiKey??"",undefined,agent.streamFunction,preparation.previousSummary);
       const entry=newEntry("compaction",session.leafId,{summary,firstKeptEntryId:preparation.firstKeptEntryId,tokensBefore:preparation.tokensBefore});
       const leaf=await this.sessions.append(bookId,session.header.id,session.leafId,[entry]);
       session.entries.push(entry);session.leafId=leaf;
       agent.state.messages=piContextMessages(session);
+      this.emit({type:"compaction_completed",...base});
       return true;
-    }catch{return false;}
+    }catch{this.emit({type:"compaction_failed",...base});return false;}
   }
   private async bookCall<T>(bookId:string,call:()=>Promise<T>):Promise<T>{if(this.bookId!==bookId)throw new Error("电子书上下文已切换");const value=await call();if(this.bookId!==bookId)throw new Error("电子书上下文已切换");return value;}
   private async tools(bookId:string):Promise<AgentTool[]>{const empty=Type.Object({});const read=Type.Object({chapterIndex:Type.Number(),part:Type.Optional(Type.Number())});const search=Type.Object({queries:Type.Array(Type.String())});return [

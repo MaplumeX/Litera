@@ -246,3 +246,26 @@ describe("ChatPanel scroll behavior", () => {
     expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth" });
   });
 });
+
+describe("ChatPanel compaction chip", () => {
+  it("renders a compacting chip with spinner text", () => {
+    bridgeState = readyState({ compaction: { status: "compacting" } });
+    const view = render(<ChatPanel currentChapterHref="OEBPS/ch1.xhtml" bookId="book-1" />);
+    expect(view.getByText("正在压缩上下文…")).toBeTruthy();
+    expect(view.container.querySelector(".animate-spin")).toBeTruthy();
+  });
+
+  it("renders a compacted chip without spinner", () => {
+    bridgeState = readyState({ compaction: { status: "compacted" } });
+    const view = render(<ChatPanel currentChapterHref="OEBPS/ch1.xhtml" bookId="book-1" />);
+    expect(view.getByText("上下文已压缩")).toBeTruthy();
+    expect(view.container.querySelector(".animate-spin")).toBeNull();
+  });
+
+  it("does not render a chip when compaction is null", () => {
+    bridgeState = readyState({ compaction: null });
+    const view = render(<ChatPanel currentChapterHref="OEBPS/ch1.xhtml" bookId="book-1" />);
+    expect(view.queryByText("正在压缩上下文…")).toBeNull();
+    expect(view.queryByText("上下文已压缩")).toBeNull();
+  });
+});

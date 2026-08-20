@@ -16,6 +16,7 @@ export interface AgentState {
   messages: AgentMessage[];
   sessions: AgentSessionSummary[];
   error: AgentError | null;
+  compaction: { status: "compacting" | "compacted" } | null;
   sessionListRequestId: string | null;
 }
 
@@ -38,6 +39,7 @@ export function createAgentState(bookId: string | null = null): AgentState {
     messages: [],
     sessions: [],
     error: null,
+    compaction: null,
     sessionListRequestId: null,
   };
 }
@@ -84,13 +86,13 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
   switch (event.type) {
     case "book_loading":
       return matchesBook(base, event.bookId)
-        ? { ...base, status: "loadingBook", sessionId: null, promptId: null, messages: [], sessions: [], error: null }
+        ? { ...base, status: "loadingBook", sessionId: null, promptId: null, messages: [], sessions: [], error: null, compaction: null }
         : base;
     case "book_ready":
       return matchesBook(base, event.bookId) ? { ...base, status: "bookReady", error: null } : base;
     case "book_closed":
       return matchesBook(base, event.bookId)
-        ? { ...base, status: "idle", sessionId: null, promptId: null, messages: [], sessions: [], error: null }
+        ? { ...base, status: "idle", sessionId: null, promptId: null, messages: [], sessions: [], error: null, compaction: null }
         : base;
     case "prompt_started":
       return matchesBook(base, event.bookId)
@@ -133,6 +135,12 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
             : call),
         })),
       };
+    case "compaction_started":
+      return matchesPrompt(base, event) ? { ...base, compaction: { status: "compacting" } } : base;
+    case "compaction_completed":
+      return matchesPrompt(base, event) ? { ...base, compaction: { status: "compacted" } } : base;
+    case "compaction_failed":
+      return matchesPrompt(base, event) ? { ...base, compaction: null } : base;
     case "prompt_end":
     case "prompt_aborted":
       return matchesPrompt(base, event)
@@ -155,11 +163,11 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
         : base;
     case "session_switched":
       return matchesBook(base, event.bookId)
-        ? { ...base, sessionId: event.sessionId, promptId: null, messages: event.messages, status: "bookReady", error: null }
+        ? { ...base, sessionId: event.sessionId, promptId: null, messages: event.messages, status: "bookReady", error: null, compaction: null }
         : base;
     case "session_rewound":
       return matchesBook(base, event.bookId)
-        ? { ...base, sessionId: event.sessionId, messages: event.messages, error: null }
+        ? { ...base, sessionId: event.sessionId, messages: event.messages, error: null, compaction: null }
         : base;
     case "session_deleted":
       if (!matchesBook(base, event.bookId)) return base;

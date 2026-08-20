@@ -168,6 +168,8 @@ export const en: { [K in MessageKey]: string } = {
   "chat.systemPromptHint": "Leave empty to use the default prompt",
   "chat.thinkingLevel": "Thinking level",
   "chat.clearPrompt": "Clear",
+  "chat.compacting": "Compacting context…",
+  "chat.compacted": "Context compacted",
 
   "agent.title": "LLM settings",
   "agent.description": "Configure the LLM provider, API key, and model.",

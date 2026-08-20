@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "检查前端质量基线"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "检查 CompactionChip 组件符合规范"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "检查 reducer 状态扩展符合规范"}
+{"file": ".trellis/spec/frontend/i18n.md", "reason": "检查 i18n 键符合规范"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "检查 AgentEvent 类型扩展符合规范"}

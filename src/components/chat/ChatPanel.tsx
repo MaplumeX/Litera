@@ -20,6 +20,7 @@ import { EmptyState } from "./EmptyState";
 import { SessionConfigDialog, type SessionConfigTarget } from "./SessionConfigDialog";
 import { SessionList } from "./SessionList";
 import { TypingIndicator } from "./TypingIndicator";
+import { CompactionChip } from "./CompactionChip";
 import { useT } from "@/lib/i18n";
 
 export interface ChatPanelHandle {
@@ -455,6 +456,9 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
               <AlertCircle className="h-3.5 w-3.5 shrink-0" />
               <span>{error}</span>
             </div>
+          )}
+          {state.compaction && (
+            <CompactionChip status={state.compaction.status} />
           )}
           <div ref={messagesEndRef} />
         </div>

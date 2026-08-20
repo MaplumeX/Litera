@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/frontend/index.md", "reason": "前端编码总纲，实现前必读"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "新建 CompactionChip 组件需遵循组件规范"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "agentReducer 状态扩展需遵循状态管理规范"}
+{"file": ".trellis/spec/frontend/i18n.md", "reason": "新增 chat.compacting/chat.compacted i18n 键需遵循 i18n 规范"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "AgentEvent 联合类型扩展需遵循类型安全规范"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "前端质量基线"}

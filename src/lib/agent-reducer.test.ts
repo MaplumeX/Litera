@@ -85,4 +85,51 @@ describe("agentReducer", () => {
     expect(state.sessions).toHaveLength(1);
     expect(state.sessions[0].title).toBe("Title");
   });
+
+  it("sets compaction to compacting on compaction_started", () => {
+    let state = createAgentState("book-a");
+    state = reduce(state, { version: 1, type: "prompt_started", bookId: "book-a", sessionId: "s", promptId: "p" });
+    state = reduce(state, { version: 2, type: "compaction_started", bookId: "book-a", sessionId: "s", promptId: "p" });
+    expect(state.compaction).toEqual({ status: "compacting" });
+  });
+
+  it("sets compaction to compacted on compaction_completed", () => {
+    let state = createAgentState("book-a");
+    state = reduce(state, { version: 1, type: "prompt_started", bookId: "book-a", sessionId: "s", promptId: "p" });
+    state = reduce(state, { version: 2, type: "compaction_started", bookId: "book-a", sessionId: "s", promptId: "p" });
+    state = reduce(state, { version: 3, type: "compaction_completed", bookId: "book-a", sessionId: "s", promptId: "p" });
+    expect(state.compaction).toEqual({ status: "compacted" });
+  });
+
+  it("clears compaction on compaction_failed", () => {
+    let state = createAgentState("book-a");
+    state = reduce(state, { version: 1, type: "prompt_started", bookId: "book-a", sessionId: "s", promptId: "p" });
+    state = reduce(state, { version: 2, type: "compaction_started", bookId: "book-a", sessionId: "s", promptId: "p" });
+    state = reduce(state, { version: 3, type: "compaction_failed", bookId: "book-a", sessionId: "s", promptId: "p" });
+    expect(state.compaction).toBeNull();
+  });
+
+  it("preserves compaction on prompt_end", () => {
+    let state = createAgentState("book-a");
+    state = reduce(state, { version: 1, type: "prompt_started", bookId: "book-a", sessionId: "s", promptId: "p" });
+    state = reduce(state, { version: 2, type: "compaction_completed", bookId: "book-a", sessionId: "s", promptId: "p" });
+    state = reduce(state, { version: 3, type: "prompt_end", bookId: "book-a", sessionId: "s", promptId: "p" });
+    expect(state.compaction).toEqual({ status: "compacted" });
+  });
+
+  it("clears compaction on session_switched", () => {
+    let state = createAgentState("book-a");
+    state = reduce(state, { version: 1, type: "prompt_started", bookId: "book-a", sessionId: "s", promptId: "p" });
+    state = reduce(state, { version: 2, type: "compaction_completed", bookId: "book-a", sessionId: "s", promptId: "p" });
+    state = reduce(state, { version: 3, type: "session_switched", bookId: "book-a", sessionId: "s2", messages: [] });
+    expect(state.compaction).toBeNull();
+  });
+
+  it("clears compaction on session_rewound", () => {
+    let state = createAgentState("book-a");
+    state = reduce(state, { version: 1, type: "prompt_started", bookId: "book-a", sessionId: "s", promptId: "p" });
+    state = reduce(state, { version: 2, type: "compaction_started", bookId: "book-a", sessionId: "s", promptId: "p" });
+    state = reduce(state, { version: 3, type: "session_rewound", bookId: "book-a", sessionId: "s", promptId: "p", messages: [] });
+    expect(state.compaction).toBeNull();
+  });
 });

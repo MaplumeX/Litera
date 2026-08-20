@@ -42,8 +42,18 @@ settings stay visible without a full list refresh. Thinking level is no longer
 a per-session field; it is a global setting read from `AgentConfigSnapshot`
 and controlled from the ChatInput toolbar.
 
-Book changes reset messages, prompt state, sessions, and errors. Late events for
-an old book or prompt advance no user-visible state.
+Book changes reset messages, prompt state, sessions, errors, and compaction.
+Late events for an old book or prompt advance no user-visible state.
+
+Context compaction emits three `PromptCorrelation` events from `maybeCompact`:
+`compaction_started` (before summarization), `compaction_completed` (after the
+compaction entry is persisted), and `compaction_failed` (catch path, swallowed
+error). The reducer projects these onto `state.compaction` (`{ status:
+"compacting" | "compacted" } | null`). `prompt_end` / `prompt_aborted` keep
+`compaction` so the compacted marker stays in the chat flow; `session_switched`,
+`session_rewound`, `book_loading`, `book_closed`, and `book_changed` clear it.
+The marker is process-only and is not rebuilt from session entries on re-entry
+— users see it only when compaction happens in the current view.
 
 Tool results render as read-only expandable cards; they are never parsed into
 clickable book locators. Reader jumps are owned by the chrome: TOC, prev/next
@@ -67,5 +77,6 @@ runtime cache. Provider selection alone never changes the live model.
 ## Testing
 
 Reducer tests cover version ordering, stale correlation, streaming deltas,
-tool-call matching, optimistic sessions, rewind, abort, and errors. Hook tests
+tool-call matching, optimistic sessions, rewind, abort, errors, and compaction
+state transitions (started / completed / failed / session-switch clear). Hook tests
 cover subscription cleanup, runtime method guards, and durable-write sequencing.

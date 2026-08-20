@@ -166,6 +166,8 @@ export const zhCN = {
   "chat.systemPromptHint": "留空使用默认提示词",
   "chat.thinkingLevel": "思考强度",
   "chat.clearPrompt": "清空",
+  "chat.compacting": "正在压缩上下文…",
+  "chat.compacted": "上下文已压缩",
 
   "agent.title": "LLM 设置",
   "agent.description": "配置 LLM 供应商、API Key 与模型。",
