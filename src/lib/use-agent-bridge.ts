@@ -113,9 +113,9 @@ export function useAgentBridge(bookId: string) {
   const renameSession = useCallback(async (sessionId: string, title: string) => {
     if (bookIdRef.current) await embeddedAgentRuntime.renameSession(sessionId, title, id("rename-session"));
   }, []);
-  const updateSessionConfig = useCallback(async (sessionId: string, systemPrompt: string, thinkingLevel: string) => {
+  const updateSessionConfig = useCallback(async (sessionId: string, systemPrompt: string) => {
     if (bookIdRef.current) {
-      await embeddedAgentRuntime.updateSessionConfig(sessionId, systemPrompt, thinkingLevel, id("update-session-config"));
+      await embeddedAgentRuntime.updateSessionConfig(sessionId, systemPrompt, id("update-session-config"));
     }
   }, []);
 

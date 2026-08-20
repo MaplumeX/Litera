@@ -9,7 +9,7 @@ const makeSession = (entries: unknown[], leafId: string) => decodePiSession({ he
 describe("sessionConfig", () => {
   it("returns the latest session_config entry on the active branch", () => {
     expect(sessionConfig(makeSession([configEntry("c1", null, { systemPrompt: "旧提示词", thinkingLevel: "max" }), configEntry("c2", "c1", { systemPrompt: "翻译为古文" })], "c2")))
-      .toEqual({ systemPrompt: "翻译为古文", thinkingLevel: "off" });
+      .toEqual({ systemPrompt: "翻译为古文" });
   });
   it("ignores config entries on branches the active leaf is not on", () => {
     // Fork: c1 -> alt (forked away) vs c1 -> main (active). The active branch
@@ -18,14 +18,14 @@ describe("sessionConfig", () => {
       configEntry("c1", null, { systemPrompt: "主线", thinkingLevel: "low" }),
       configEntry("alt", "c1", { systemPrompt: "分支", thinkingLevel: "high" }),
       entry("m", "c1", "user", "hello"),
-    ], "m"))).toEqual({ systemPrompt: "主线", thinkingLevel: "low" });
+    ], "m"))).toEqual({ systemPrompt: "主线" });
   });
-  it("falls back per field: empty systemPrompt -> \"\" and missing thinkingLevel -> \"off\"", () => {
+  it("falls back per field: empty systemPrompt -> \"\"", () => {
     expect(sessionConfig(makeSession([
       configEntry("c1", null, { systemPrompt: "", thinkingLevel: "xhigh" }),
       configEntry("c2", "c1", { systemPrompt: "keep" }),
-    ], "c2"))).toEqual({ systemPrompt: "keep", thinkingLevel: "off" });
-    expect(sessionConfig(makeSession([configEntry("c1", null, {})], "c1"))).toEqual({ systemPrompt: "", thinkingLevel: "off" });
+    ], "c2"))).toEqual({ systemPrompt: "keep" });
+    expect(sessionConfig(makeSession([configEntry("c1", null, {})], "c1"))).toEqual({ systemPrompt: "" });
   });
   it("returns null when the session has no session_config entry", () => {
     expect(sessionConfig(makeSession([entry("a", null, "user", "hi")], "a"))).toBeNull();
@@ -33,9 +33,9 @@ describe("sessionConfig", () => {
 });
 
 describe("sessionSummary", () => {
-  it("passes through systemPrompt and thinkingLevel when present", () => {
+  it("passes through systemPrompt when present", () => {
     expect(sessionSummary({ id: "s", title: "t", createdAt: timestamp, updatedAt: timestamp, systemPrompt: "p", thinkingLevel: "max" }))
-      .toEqual({ id: "s", title: "t", createdAt: timestamp, updatedAt: timestamp, systemPrompt: "p", thinkingLevel: "max" });
+      .toEqual({ id: "s", title: "t", createdAt: timestamp, updatedAt: timestamp, systemPrompt: "p" });
   });
   it("omits null or non-string config fields", () => {
     expect(sessionSummary({ id: "s", title: "t", createdAt: timestamp, updatedAt: timestamp, systemPrompt: null, thinkingLevel: 3 }))

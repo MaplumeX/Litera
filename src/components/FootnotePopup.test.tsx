@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useRef } from "react";
 import { setLocale } from "@/lib/i18n";
-import { FootnotePopup } from "./FootnotePopup";
+import { FootnotePopup, placeFootnotePopup } from "./FootnotePopup";
 
 function PopupHarness(props: Omit<Parameters<typeof FootnotePopup>[0], "mountRef">) {
   const mountRef = useRef<HTMLDivElement | null>(null);
@@ -66,5 +66,46 @@ describe("FootnotePopup", () => {
     unmount();
     fireEvent.keyDown(window, { key: "Escape" });
     expect(onClose).not.toHaveBeenCalled();
+  });
+});
+
+describe("placeFootnotePopup", () => {
+  it("centers horizontally on the anchor and prefers below", () => {
+    expect(
+      placeFootnotePopup({
+        x: 400,
+        y: 200,
+        width: 416,
+        height: 100,
+        viewportWidth: 800,
+        viewportHeight: 600,
+      }),
+    ).toEqual({ left: 192, top: 208 });
+  });
+
+  it("clamps against the right viewport edge", () => {
+    expect(
+      placeFootnotePopup({
+        x: 790,
+        y: 120,
+        width: 416,
+        height: 80,
+        viewportWidth: 800,
+        viewportHeight: 600,
+      }),
+    ).toEqual({ left: 376, top: 128 });
+  });
+
+  it("flips above a bottom-edge anchor when there is more space above", () => {
+    expect(
+      placeFootnotePopup({
+        x: 400,
+        y: 550,
+        width: 416,
+        height: 200,
+        viewportWidth: 800,
+        viewportHeight: 600,
+      }),
+    ).toEqual({ left: 192, top: 342 });
   });
 });

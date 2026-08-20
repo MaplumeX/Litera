@@ -6,10 +6,12 @@ import {
   useRef,
   useState,
 } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { Button } from "@/components/ui/button";
 import { MessagesSquare, Settings, AlertCircle } from "lucide-react";
 import { useAgentBridge } from "@/lib/use-agent-bridge";
 import { useAgentConfig } from "@/lib/use-agent-config";
+import { embeddedAgentRuntime } from "@/agent/runtime/embedded-runtime";
 import { AgentConfigDialog } from "@/components/AgentConfigDialog";
 import { MessageBubble } from "./MessageBubble";
 import { AssistantMessage, BotAvatar } from "./AssistantMessage";
@@ -77,6 +79,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     const [editDraft, setEditDraft] = useState("");
     const [stickToBottom, setStickToBottom] = useState(true);
     const { snapshot: configSnapshot, load: loadConfig } = useAgentConfig();
+    const thinkingLevel = configSnapshot?.thinkingLevel ?? "medium";
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const scrollContainerRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -267,17 +270,28 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       }
     }, [editingTitle, renameSession]);
 
-    const handleSaveSessionConfig = useCallback(async (systemPrompt: string, thinkingLevel: string) => {
+    const handleSaveSessionConfig = useCallback(async (systemPrompt: string) => {
       const session = configSession;
       if (!session) return;
       setInvokeError(null);
       try {
-        await updateSessionConfig(session.id, systemPrompt, thinkingLevel);
+        await updateSessionConfig(session.id, systemPrompt);
         setConfigSession(null);
       } catch (error) {
         setInvokeError(String(error));
       }
     }, [configSession, updateSessionConfig]);
+
+    const handleThinkingLevelChange = useCallback(async (level: string) => {
+      setInvokeError(null);
+      try {
+        await invoke("set_thinking_level", { level });
+        embeddedAgentRuntime.invalidateConfig();
+        await loadConfig();
+      } catch (error) {
+        setInvokeError(String(error));
+      }
+    }, [loadConfig]);
 
     const fillInput = useCallback((text: string, chapterHref?: string) => {
       setPendingSelection({ text, chapterHref });
@@ -456,6 +470,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
           onClearSelection={() => setPendingSelection(null)}
           retryHighlight={retryHighlight}
           textareaRef={inputRef}
+          thinkingLevel={thinkingLevel}
+          onThinkingLevelChange={(level) => void handleThinkingLevelChange(level)}
         />
         <AgentConfigDialog open={showConfig} onClose={() => setShowConfig(false)} />
         <SessionConfigDialog
@@ -464,7 +480,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
           session={configSession}
           isStreaming={isStreaming}
           onClose={() => setConfigSession(null)}
-          onSave={(p, l) => void handleSaveSessionConfig(p, l)}
+          onSave={(p) => void handleSaveSessionConfig(p)}
         />
         </div>
       </div>

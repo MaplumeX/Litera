@@ -1,8 +1,11 @@
 import { useEffect } from "react";
 import { Quote, Send, Square, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
+
+const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 
 export interface PendingSelection {
   text: string;
@@ -20,6 +23,8 @@ interface ChatInputProps {
   onClearSelection: () => void;
   retryHighlight: boolean;
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
+  thinkingLevel: string;
+  onThinkingLevelChange: (level: string) => void;
 }
 
 export function ChatInput({
@@ -33,6 +38,8 @@ export function ChatInput({
   onClearSelection,
   retryHighlight,
   textareaRef,
+  thinkingLevel,
+  onThinkingLevelChange,
 }: ChatInputProps) {
   const { t } = useT();
   const handleKeyDown = (event: React.KeyboardEvent) => {
@@ -92,7 +99,19 @@ export function ChatInput({
           disabled={isStreaming || !bookReady}
         />
         <div className="flex items-center justify-between px-2 pb-1.5 pt-0.5">
-          <span className="text-[10px] text-muted-foreground">{t("chat.inputHint")}</span>
+          <div className="flex items-center gap-2">
+            <Select value={thinkingLevel} onValueChange={onThinkingLevelChange} disabled={isStreaming}>
+              <SelectTrigger className="h-6 w-auto gap-1 border-none bg-transparent px-1.5 text-[10px] text-muted-foreground shadow-none focus:ring-0" aria-label={t("chat.thinkingLevel")}>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {THINKING_LEVELS.map((level) => (
+                  <SelectItem key={level} value={level}>{level}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <span className="text-[10px] text-muted-foreground">{t("chat.inputHint")}</span>
+          </div>
           {isStreaming ? (
             <Button size="icon-sm" onClick={onAbort} aria-label={t("chat.stop")}>
               <Square />

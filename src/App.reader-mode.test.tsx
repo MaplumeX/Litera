@@ -22,6 +22,7 @@ const windowApi = {
   close: vi.fn(async () => {}),
   minimize: vi.fn(async () => {}),
   toggleMaximize: vi.fn(async () => {}),
+  startDragging: vi.fn(async () => {}),
 };
 
 vi.mock("@tauri-apps/api/window", () => ({

@@ -36,9 +36,11 @@ idle -> loadingBook -> bookReady -> prompting -> bookReady
 `session_created` optimistically inserts a local summary so a new empty session
 is visible before its first persisted message. Session list refreshes de-duplicate
 by id and preserve the current session when it is still present.
-`session_config_updated` upserts the per-session `systemPrompt` / `thinkingLevel`
-onto the matching summary (or inserts one when the list has not loaded yet) so
-session settings stay visible without a full list refresh.
+`session_config_updated` upserts the per-session `systemPrompt` onto the
+matching summary (or inserts one when the list has not loaded yet) so session
+settings stay visible without a full list refresh. Thinking level is no longer
+a per-session field; it is a global setting read from `AgentConfigSnapshot`
+and controlled from the ChatInput toolbar.
 
 Book changes reset messages, prompt state, sessions, and errors. Late events for
 an old book or prompt advance no user-visible state.

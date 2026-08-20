@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 77
-- **Last Active**: 2026-08-19
+- **Total Sessions**: 80
+- **Last Active**: 2026-08-20
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1762 | Active |
+| `journal-1.md` | ~1846 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,9 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 80 | 2026-08-20 | 将思考强度从会话级移到输入框附近(全局级) | `4010b50` | `young-dingo` |
+| 79 | 2026-08-20 | Fix titlebar double-click maximize race | `f75bf30` | `main` |
+| 78 | 2026-08-19 | Fix footnote popup as compact card | `ca623dd` | `main` |
 | 77 | 2026-08-19 | fix: restore minimized window on epub open | `598d2ae` | `glowing-cat` |
 | 76 | 2026-08-19 | Per-session agent system prompt and thinking level | `70851d0` | `wizardly-unicorn` |
 | 75 | 2026-08-19 | Reader footnote popup feature | `4f76378` | `prime-hyena` |

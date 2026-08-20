@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend guideline index; confirm which docs apply before editing reader UI"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Footnote popup convention, foliate-view mount, iframe coords, setStyles injection, chrome visual language"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "Ambient foliate-js.d.ts is add-only; viewSize belongs on FoliateRenderer"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "footnotePopupCss lives next to generateStylesCss; positioning helper stays next to FootnotePopup"}
+{"file": ".trellis/tasks/08-19-fix-footnote-popup/research/footnote-popup-sizing.md", "reason": "viewSize vs body height, CSS overlay, no-background missing in this submodule"}

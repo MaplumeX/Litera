@@ -160,7 +160,7 @@ export const en: { [K in MessageKey]: string } = {
   "chat.copy": "Copy",
   "chat.sessionSettings": "Session settings",
   "chat.sessionConfigTitle": "Session settings",
-  "chat.sessionConfigDescription": "Configure this session's system prompt and thinking level.",
+  "chat.sessionConfigDescription": "Configure this session's system prompt.",
   "chat.systemPrompt": "System prompt",
   "chat.systemPromptHint": "Leave empty to use the default prompt",
   "chat.thinkingLevel": "Thinking level",

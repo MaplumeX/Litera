@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Do not edit foliate-js submodule; keep footnote race guards; do not change main-view setStyles"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "viewSize is optional on FoliateRenderer; no any"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "No CSP/Tauri changes; stay inside existing frontend constraints"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "footnotePopupCss is inner-view only; App generateStylesCss path for the main reader must stay unchanged"}
+{"file": ".trellis/tasks/08-19-fix-footnote-popup/research/footnote-popup-sizing.md", "reason": "Height must use viewSize; background via CSS overlay, not a submodule attribute"}

@@ -12,7 +12,7 @@ import { invokeErrorMessage } from "@/lib/app-error";
 import type { AgentEvent, AgentMessage as UiMessage } from "@/types/agent";
 import type { AnnotationsFile } from "@/types/library";
 
-export interface RuntimeConfig { provider:string; model:string; api:string; baseUrl:string; apiKey:string }
+export interface RuntimeConfig { provider:string; model:string; api:string; baseUrl:string; apiKey:string; thinkingLevel:string }
 type Listener = (event: AgentEvent) => void;
 type RuntimeEventPayload = AgentEvent extends infer Event
   ? Event extends { version: number }
@@ -20,7 +20,6 @@ type RuntimeEventPayload = AgentEvent extends infer Event
     : never
   : never;
 const SYSTEM_PROMPT = "You are Litera, an EPUB reading assistant. Use the book tools when evidence is needed. Highlights and bookmarks are available via list_annotations when the user asks about what they marked; do not call it for ordinary chapter questions. Answer in the user's language.";
-const THINKING_LEVELS=["off","minimal","low","medium","high","xhigh","max"] as const;
 
 async function streamFor(api: string): Promise<StreamFn> {
   if (api === "anthropic-messages") return (await import("@earendil-works/pi-ai/api/anthropic-messages")).streamSimple as unknown as StreamFn;
@@ -49,7 +48,7 @@ export class LiteraAgentRuntime {
   async switchSession(sessionId:string,requestId?:string){if(!this.bookId)return;const bookId=this.bookId;const session=await this.sessions.load(bookId,sessionId);if(this.bookId!==bookId)return;this.session=session;this.agent=null;this.emit({type:"session_switched",bookId,sessionId,requestId,messages:visibleMessages(session)});}
   async deleteSession(sessionId:string,requestId?:string){if(!this.bookId)return;const bookId=this.bookId;await this.sessions.delete(bookId,sessionId);if(this.bookId!==bookId)return;if(this.session?.header.id===sessionId){this.session=null;this.agent=null;}this.emit({type:"session_deleted",bookId,sessionId,requestId});}
   async renameSession(sessionId:string,title:string,requestId?:string){if(!this.bookId)return;const bookId=this.bookId;const clean=title.trim();if(!clean||clean.length>128)throw new Error("Invalid session title");const session=this.session?.header.id===sessionId?this.session:await this.sessions.load(bookId,sessionId);if(this.bookId!==bookId)return;const entry=newEntry("session_info",session.leafId,{name:clean});const leaf=await this.sessions.append(bookId,sessionId,session.leafId,[entry]);if(this.bookId!==bookId)return;session.entries.push(entry);session.leafId=leaf;this.emit({type:"session_renamed",bookId,sessionId,title:clean,requestId});}
-  async updateSessionConfig(sessionId:string,systemPrompt:string,thinkingLevel:string,requestId?:string){if(!this.bookId)throw new Error("No book is open");const bookId=this.bookId;if(systemPrompt.length>16*1024)throw new Error("Invalid system prompt");if(!(THINKING_LEVELS as readonly string[]).includes(thinkingLevel))throw new Error("Invalid thinking level");const session=this.session?.header.id===sessionId?this.session:await this.sessions.load(bookId,sessionId);if(this.bookId!==bookId)return;const entry=newEntry("session_config",session.leafId,{systemPrompt,thinkingLevel});const leaf=await this.sessions.append(bookId,sessionId,session.leafId,[entry]);if(this.bookId!==bookId)return;session.entries.push(entry);session.leafId=leaf;this.agent=null;this.emit({type:"session_config_updated",bookId,sessionId,systemPrompt,thinkingLevel,requestId});}
+  async updateSessionConfig(sessionId:string,systemPrompt:string,requestId?:string){if(!this.bookId)throw new Error("No book is open");const bookId=this.bookId;if(systemPrompt.length>16*1024)throw new Error("Invalid system prompt");const session=this.session?.header.id===sessionId?this.session:await this.sessions.load(bookId,sessionId);if(this.bookId!==bookId)return;const entry=newEntry("session_config",session.leafId,{systemPrompt});const leaf=await this.sessions.append(bookId,sessionId,session.leafId,[entry]);if(this.bookId!==bookId)return;session.entries.push(entry);session.leafId=leaf;this.agent=null;this.emit({type:"session_config_updated",bookId,sessionId,systemPrompt,requestId});}
   abort(_requestId?:string){this.agent?.abort();}
 
   async prompt(text:string,context:{selection?:string;chapterHref?:string},promptId:string=crypto.randomUUID(),requestId?:string,editIndex?:number){
@@ -94,7 +93,7 @@ export class LiteraAgentRuntime {
     }catch{const safeError=new Error("模型请求失败，请检查配置后重试");this.emit({type:"error",scope:"prompt",message:safeError.message,recoverable:true,bookId:promptBookId,sessionId:session?.header.id,promptId});throw safeError;}finally{unsubscribe?.();if(this.promptId===promptId)this.promptId=null;}
   }
 
-  private async ensureAgent(config:RuntimeConfig,session:DecodedPiSession,bookId:string){if(this.agent)return this.agent;const resolvedModel=await resolveRuntimeModel(config);const nativeFetch=createGuardedNativeFetch({baseUrl:resolvedModel.baseUrl});const providerStream=await this.loadStream(resolvedModel.api);const stream:StreamFn=(requestModel,requestContext,options)=>providerStream(requestModel,requestContext,{...options,fetch:nativeFetch,maxRetries:0});const tools=await this.tools(bookId);const configured=sessionConfig(session);return new Agent({initialState:{systemPrompt:configured?.systemPrompt||SYSTEM_PROMPT,model:resolvedModel,thinkingLevel:clampThinkingLevel(resolvedModel,(configured?.thinkingLevel||"off") as ModelThinkingLevel),messages:piContextMessages(session),tools},streamFn:stream,convertToLlm:convertPiContextToLlm,getApiKey:()=>config.apiKey,transport:"sse"});}
+  private async ensureAgent(config:RuntimeConfig,session:DecodedPiSession,bookId:string){if(this.agent)return this.agent;const resolvedModel=await resolveRuntimeModel(config);const nativeFetch=createGuardedNativeFetch({baseUrl:resolvedModel.baseUrl});const providerStream=await this.loadStream(resolvedModel.api);const stream:StreamFn=(requestModel,requestContext,options)=>providerStream(requestModel,requestContext,{...options,fetch:nativeFetch,maxRetries:0});const tools=await this.tools(bookId);const configured=sessionConfig(session);return new Agent({initialState:{systemPrompt:configured?.systemPrompt||SYSTEM_PROMPT,model:resolvedModel,thinkingLevel:clampThinkingLevel(resolvedModel,config.thinkingLevel as ModelThinkingLevel),messages:piContextMessages(session),tools},streamFn:stream,convertToLlm:convertPiContextToLlm,getApiKey:()=>config.apiKey,transport:"sse"});}
 
   /**
    * Compact the session context when it approaches the model context window.

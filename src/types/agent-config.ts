@@ -14,6 +14,7 @@ export interface AgentConfigSnapshot {
   model: string | null;
   hasApiKey: boolean;
   customProviders: CustomProviderEntry[];
+  thinkingLevel: string;
 }
 
 /** Returns true when `id` is a custom provider (prefixes `custom-`). */

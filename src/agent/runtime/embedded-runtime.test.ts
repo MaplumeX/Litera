@@ -15,7 +15,7 @@ describe("LiteraAgentRuntime",()=>{
     const sessions:SessionPort={create:async()=>current,list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,entries)=>{order.push(`append:${entries.map((entry)=>entry.type).join(",")}`);batches.push(entries);return entries[entries.length-1]?.id??null;}};
     const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:1}),toc:async()=>[{index:0,label:"One",hrefs:["one.xhtml"],chars:10}],readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:1,text:"chapter"}),search:async()=>[],close:()=>{}};
     const faux=createFauxCore({tokensPerSecond:10_000});faux.setResponses([fauxAssistantMessage("answer")]);
-    const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret"};
+    const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret",thinkingLevel:"off"};
     const runtime=new LiteraAgentRuntime({sessions,book,loadConfig:async()=>config,loadStream:async()=>((requestModel,context,options)=>{order.push("network");return faux.streamSimple(requestModel,context,options);})});
     await runtime.openBook("book",new ArrayBuffer(1));
     await runtime.prompt("question",{});
@@ -30,7 +30,7 @@ describe("LiteraAgentRuntime",()=>{
     const sessions:SessionPort={create:async()=>current,list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,entries)=>{batches.push(entries);return entries[entries.length-1]?.id??null;}};
     const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:1}),toc:async()=>[],readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:1,text:"chapter"}),search:async()=>[],close:()=>{}};
     const faux=createFauxCore({tokensPerSecond:10_000});faux.setResponses([fauxAssistantMessage("one"),fauxAssistantMessage("two")]);
-    let config:RuntimeConfig={provider:"custom-a",model:"model-a",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret"};
+    let config:RuntimeConfig={provider:"custom-a",model:"model-a",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret",thinkingLevel:"off"};
     const runtime=new LiteraAgentRuntime({sessions,book,loadConfig:async()=>config,loadStream:async()=>((requestModel,context,options)=>{requestedModels.push(requestModel.id);return faux.streamSimple(requestModel,context,options);})});
     await runtime.openBook("book",new ArrayBuffer(1));
     await runtime.prompt("first",{});
@@ -53,7 +53,7 @@ describe("LiteraAgentRuntime",()=>{
     const sessions:SessionPort={create:async()=>current,list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,expected,entries)=>{appends.push({expected,entries});return entries.at(-1)?.id??null;}};
     const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:1}),toc:async()=>[],readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:1,text:"chapter"}),search:async()=>[],close:()=>{}};
     const faux=createFauxCore({tokensPerSecond:10_000});faux.setResponses([fauxAssistantMessage("new answer")]);
-    const config:RuntimeConfig={provider:"custom-a",model:"model-a",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret"};
+    const config:RuntimeConfig={provider:"custom-a",model:"model-a",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret",thinkingLevel:"off"};
     const runtime=new LiteraAgentRuntime({sessions,book,loadConfig:async()=>config,loadStream:async()=>faux.streamSimple});
     await runtime.openBook("book",new ArrayBuffer(1));
     await runtime.switchSession("session-1");
@@ -84,7 +84,7 @@ describe("LiteraAgentRuntime",()=>{
       fauxAssistantMessage("summary of the conversation"),
       fauxAssistantMessage("third answer"),
     ]);
-    const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret"};
+    const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret",thinkingLevel:"off"};
     const runtime=new LiteraAgentRuntime({sessions,book,loadConfig:async()=>config,loadStream:async()=>faux.streamSimple});
     await runtime.openBook("book",new ArrayBuffer(1));
     await runtime.switchSession("session-1");
@@ -103,7 +103,7 @@ describe("LiteraAgentRuntime",()=>{
     const sessions:SessionPort={create:async()=>current,list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,entries)=>{batches.push(entries);return entries[entries.length-1]?.id??null;}};
     const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:1}),toc:async()=>[],readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:1,text:"chapter"}),search:async()=>[],close:()=>{}};
     const faux=createFauxCore({tokensPerSecond:10_000});faux.setResponses([fauxAssistantMessage("answer")]);
-    const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret"};
+    const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret",thinkingLevel:"off"};
     const runtime=new LiteraAgentRuntime({sessions,book,loadConfig:async()=>config,loadStream:async()=>faux.streamSimple});
     await runtime.openBook("book",new ArrayBuffer(1));
     await runtime.prompt("question",{});
@@ -119,7 +119,7 @@ describe("LiteraAgentRuntime",()=>{
       fauxAssistantMessage("first answer"),
       fauxAssistantMessage("x",{stopReason:"error",errorMessage:"prompt is too long: 200000 tokens > 100000 maximum"}),
     ]);
-    const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret"};
+    const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret",thinkingLevel:"off"};
     const runtime=new LiteraAgentRuntime({sessions,book,loadConfig:async()=>config,loadStream:async()=>faux.streamSimple});
     runtime.subscribe((event)=>{events.push(event.type);});
     await runtime.openBook("book",new ArrayBuffer(1));
@@ -151,7 +151,7 @@ describe("LiteraAgentRuntime",()=>{
       fauxAssistantMessage("third answer"),
       fauxAssistantMessage("fourth answer"),
     ]);
-    const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret"};
+    const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret",thinkingLevel:"off"};
     const runtime=new LiteraAgentRuntime({sessions,book,loadConfig:async()=>config,loadStream:async()=>faux.streamSimple});
     await runtime.openBook("book",new ArrayBuffer(1));
     await runtime.switchSession("session-1");
@@ -173,7 +173,7 @@ describe("LiteraAgentRuntime",()=>{
     const first=runtime.prompt("first",{});
     await Promise.resolve();
     await expect(runtime.prompt("second",{})).rejects.toThrow("already active");
-    releaseConfig({provider:"custom-a",model:"model-a",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret"});
+    releaseConfig({provider:"custom-a",model:"model-a",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret",thinkingLevel:"off"});
     await first;
   });
 
@@ -183,7 +183,7 @@ describe("LiteraAgentRuntime",()=>{
     const sessions:SessionPort={create:async()=>current,list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,entries)=>entries.at(-1)?.id??null};
     const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:1}),toc:async()=>[],readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:1,text:"chapter"}),search:async()=>[],close:()=>{}};
     const faux=createFauxCore({tokensPerSecond:10_000});faux.setResponses([fauxAssistantMessage("answer")]);
-    const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret"};
+    const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret",thinkingLevel:"off"};
     const runtime=new LiteraAgentRuntime({sessions,book,loadConfig:async()=>config,loadStream:async()=>((requestModel,context,options)=>{captured.push({systemPrompt:context.systemPrompt,reasoning:options?.reasoning});return faux.streamSimple(requestModel,context,options);})});
     await runtime.openBook("book",new ArrayBuffer(1));
     await runtime.switchSession("session-1");
@@ -198,7 +198,7 @@ describe("LiteraAgentRuntime",()=>{
     const sessions:SessionPort={create:async()=>current,list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,entries)=>entries.at(-1)?.id??null};
     const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:1}),toc:async()=>[],readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:1,text:"chapter"}),search:async()=>[],close:()=>{}};
     const faux=createFauxCore({tokensPerSecond:10_000});faux.setResponses([fauxAssistantMessage("answer")]);
-    const config:RuntimeConfig={provider:"anthropic",model:"claude-opus-4-6",api:"anthropic-messages",baseUrl:"https://api.anthropic.com",apiKey:"secret"};
+    const config:RuntimeConfig={provider:"anthropic",model:"claude-opus-4-6",api:"anthropic-messages",baseUrl:"https://api.anthropic.com",apiKey:"secret",thinkingLevel:"max"};
     const runtime=new LiteraAgentRuntime({sessions,book,loadConfig:async()=>config,loadStream:async()=>((requestModel,context,options)=>{captured.push(options?.reasoning);return faux.streamSimple(requestModel,context,options);})});
     await runtime.openBook("book",new ArrayBuffer(1));
     await runtime.switchSession("session-1");
@@ -211,15 +211,15 @@ describe("LiteraAgentRuntime",()=>{
     const sessions:SessionPort={create:async()=>current,list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,entries)=>{batches.push(entries);return entries.at(-1)?.id??null;}};
     const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:1}),toc:async()=>[],readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:1,text:"chapter"}),search:async()=>[],close:()=>{}};
     const faux=createFauxCore({tokensPerSecond:10_000});faux.setResponses([fauxAssistantMessage("one"),fauxAssistantMessage("two")]);
-    const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret"};
+    const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret",thinkingLevel:"off"};
     const runtime=new LiteraAgentRuntime({sessions,book,loadConfig:async()=>config,loadStream:async()=>((requestModel,context,options)=>{captured.push({systemPrompt:context.systemPrompt,reasoning:options?.reasoning});return faux.streamSimple(requestModel,context,options);})});
     runtime.subscribe((event)=>{events.push(event.type);});
     await runtime.openBook("book",new ArrayBuffer(1));
     await runtime.prompt("first",{});
     expect(captured[0].systemPrompt).not.toBe("新提示词");
-    await runtime.updateSessionConfig("session-1","新提示词","high","req-1");
+    await runtime.updateSessionConfig("session-1","新提示词","req-1");
     const configEntries=batches.flat().filter((entry)=>entry.type==="session_config");
-    expect(configEntries).toMatchObject([{systemPrompt:"新提示词",thinkingLevel:"high"}]);
+    expect(configEntries).toMatchObject([{systemPrompt:"新提示词"}]);
     expect(events).toContain("session_config_updated");
     await runtime.prompt("second",{});
     expect(captured[1].systemPrompt).toBe("新提示词");
@@ -230,12 +230,11 @@ describe("LiteraAgentRuntime",()=>{
     const current=session();
     const sessions:SessionPort={create:async()=>current,list:async()=>[],load:async()=>current,delete:async()=>{},append:async()=>null};
     const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:1}),toc:async()=>[],readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:1,text:"chapter"}),search:async()=>[],close:()=>{}};
-    const config:RuntimeConfig={provider:"custom-test",model:"model",api:"openai-completions",baseUrl:"https://example.test/v1",apiKey:"secret"};
+    const config:RuntimeConfig={provider:"custom-test",model:"model",api:"openai-completions",baseUrl:"https://example.test/v1",apiKey:"secret",thinkingLevel:"off"};
     const runtime=new LiteraAgentRuntime({sessions,book,loadConfig:async()=>config});
-    await expect(runtime.updateSessionConfig("session-1","ok","off")).rejects.toThrow("No book is open");
+    await expect(runtime.updateSessionConfig("session-1","ok")).rejects.toThrow("No book is open");
     await runtime.openBook("book",new ArrayBuffer(1));
-    await expect(runtime.updateSessionConfig("session-1","x".repeat(16*1024+1),"off")).rejects.toThrow("Invalid system prompt");
-    await expect(runtime.updateSessionConfig("session-1","ok","extreme")).rejects.toThrow("Invalid thinking level");
+    await expect(runtime.updateSessionConfig("session-1","x".repeat(16*1024+1))).rejects.toThrow("Invalid system prompt");
   });
 
   it("persists list_annotations bookmarks and highlights as JSON toolResult",async()=>{
@@ -245,7 +244,7 @@ describe("LiteraAgentRuntime",()=>{
     const annotations:AnnotationsFile={schemaVersion:1,bookmarks:[{id:"b1",cfi:"epubcfi(/6/8!/4/2/1:0)",fraction:0.2,createdAt:"2026-08-14T00:00:00.000Z",label:"Loomings"},{id:"b2",cfi:"epubcfi(/6/10!/4/2/1:0)",fraction:0,createdAt:"2026-08-14T00:00:00.000Z"}],highlights:[{id:"h1",cfi:"epubcfi(/6/8!/4/2,/1:12,/1:48)",excerpt:"Call me Ishmael.",createdAt:"2026-08-14T00:00:00.000Z"}]};
     const requested:string[]=[];
     const faux=createFauxCore({tokensPerSecond:10_000});faux.setResponses([fauxAssistantMessage(fauxToolCall("list_annotations",{}),{stopReason:"toolUse"}),fauxAssistantMessage("those marks")]);
-    const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret"};
+    const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret",thinkingLevel:"off"};
     const runtime=new LiteraAgentRuntime({sessions,book,loadConfig:async()=>config,loadStream:async()=>faux.streamSimple,loadAnnotations:async(bookId)=>{requested.push(bookId);return annotations;}});
     await runtime.openBook("book",new ArrayBuffer(1));
     await runtime.prompt("what did I highlight?",{});
@@ -258,7 +257,7 @@ describe("LiteraAgentRuntime",()=>{
     const sessions:SessionPort={create:async()=>current,list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,entries)=>{batches.push(entries);return entries[entries.length-1]?.id??null;}};
     const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:1}),toc:async()=>[],readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:1,text:"chapter"}),search:async()=>[],close:()=>{}};
     const faux=createFauxCore({tokensPerSecond:10_000});faux.setResponses([fauxAssistantMessage(fauxToolCall("list_annotations",{}),{stopReason:"toolUse"}),fauxAssistantMessage("none")]);
-    const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret"};
+    const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret",thinkingLevel:"off"};
     const runtime=new LiteraAgentRuntime({sessions,book,loadConfig:async()=>config,loadStream:async()=>faux.streamSimple,loadAnnotations:async()=>({schemaVersion:1,bookmarks:[],highlights:[]})});
     await runtime.openBook("book",new ArrayBuffer(1));
     await runtime.prompt("any marks?",{});
@@ -270,7 +269,7 @@ describe("LiteraAgentRuntime",()=>{
     const sessions:SessionPort={create:async()=>current,list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,entries)=>{batches.push(entries);return entries[entries.length-1]?.id??null;}};
     const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:1}),toc:async()=>[],readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:1,text:"chapter"}),search:async()=>[],close:()=>{}};
     const faux=createFauxCore({tokensPerSecond:10_000});faux.setResponses([fauxAssistantMessage(fauxToolCall("list_annotations",{}),{stopReason:"toolUse"}),fauxAssistantMessage("could not read marks")]);
-    const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret"};
+    const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret",thinkingLevel:"off"};
     const runtime=new LiteraAgentRuntime({sessions,book,loadConfig:async()=>config,loadStream:async()=>faux.streamSimple,loadAnnotations:async()=>{throw{code:"StorageCorrupt",message:"Failed to parse annotations.json"};}});
     await runtime.openBook("book",new ArrayBuffer(1));
     await runtime.prompt("what did I mark?",{});
@@ -289,7 +288,7 @@ describe("LiteraAgentRuntime",()=>{
     let started!:()=>void;
     const loadStarted=new Promise<void>((resolve)=>{started=resolve;});
     const faux=createFauxCore({tokensPerSecond:10_000});faux.setResponses([fauxAssistantMessage(fauxToolCall("list_annotations",{}),{stopReason:"toolUse"}),fauxAssistantMessage("stale")]);
-    const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret"};
+    const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret",thinkingLevel:"off"};
     const runtime=new LiteraAgentRuntime({sessions,book,loadConfig:async()=>config,loadStream:async()=>faux.streamSimple,loadAnnotations:async()=>{started();return pending;}});
     await runtime.openBook("book-a",new ArrayBuffer(1));
     const prompt=runtime.prompt("what did I mark?",{});

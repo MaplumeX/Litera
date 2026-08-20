@@ -8,30 +8,21 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import type { AgentSessionSummary } from "@/types/agent";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
 
 export type SessionConfigTarget = Pick<
   AgentSessionSummary,
-  "id" | "title" | "systemPrompt" | "thinkingLevel"
+  "id" | "title" | "systemPrompt"
 >;
-
-const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
 
 interface SessionConfigDialogProps {
   open: boolean;
   session: SessionConfigTarget | null;
   isStreaming: boolean;
   onClose: () => void;
-  onSave: (systemPrompt: string, thinkingLevel: string) => void;
+  onSave: (systemPrompt: string) => void;
 }
 
 export function SessionConfigDialog({
@@ -43,19 +34,17 @@ export function SessionConfigDialog({
 }: SessionConfigDialogProps) {
   const { t } = useT();
   const [promptDraft, setPromptDraft] = useState(session?.systemPrompt ?? "");
-  const [levelDraft, setLevelDraft] = useState(session?.thinkingLevel ?? "off");
 
   // Reseed drafts on every open so cancel-then-reopen shows the persisted values.
   useEffect(() => {
     if (open) {
       setPromptDraft(session?.systemPrompt ?? "");
-      setLevelDraft(session?.thinkingLevel ?? "off");
     }
   }, [open, session]);
 
   const handleSave = () => {
     if (isStreaming) return;
-    onSave(promptDraft, levelDraft);
+    onSave(promptDraft);
   };
 
   return (
@@ -93,23 +82,6 @@ export function SessionConfigDialog({
                 disabled={isStreaming}
               />
               <p className="text-xs text-muted-foreground">{t("chat.systemPromptHint")}</p>
-            </div>
-            <div className="space-y-2">
-              <Label className="text-xs font-medium text-muted-foreground">
-                {t("chat.thinkingLevel")}
-              </Label>
-              <Select value={levelDraft} onValueChange={setLevelDraft} disabled={isStreaming}>
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {THINKING_LEVELS.map((level) => (
-                    <SelectItem key={level} value={level}>
-                      {level}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
             </div>
           </div>
         )}

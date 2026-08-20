@@ -272,7 +272,7 @@ if let Some(window) = app.get_webview_window("main") {
 }
 ```
 
-Frontend: `src/lib/platform.ts` (`detectDesktopOs` / `usesCustomWindowControls` from `navigator.userAgent`). `WindowControls` calls `getCurrentWindow().minimize()` / `toggleMaximize()` / `close()`.
+Frontend: `src/lib/platform.ts` (`detectDesktopOs` / `usesCustomWindowControls` from `navigator.userAgent`). `WindowControls` calls `getCurrentWindow().minimize()` / `toggleMaximize()` / `close()`. Title and spacer use `useTitlebarWindowDrag()` → `toggleMaximize()` / `startDragging()`.
 
 ### 3. Contracts
 
@@ -281,29 +281,33 @@ Frontend: `src/lib/platform.ts` (`detectDesktopOs` / `usesCustomWindowControls` 
 - Windows / Linux: `set_decorations(false)` while hidden, then `show()`.
 - Capabilities in `src-tauri/capabilities/default.json`: keep `core:window:allow-destroy`; also grant `allow-start-dragging`, `allow-minimize`, `allow-toggle-maximize`, `allow-close`.
 - Custom close must call `close()`, never `destroy()`. `App.tsx` `onCloseRequested` still `preventDefault` → flush ≤2s → `destroy()`.
-- `data-tauri-drag-region` is **not inherited**. Mark only the title node and the flex spacer. Buttons and search must not have it.
-- Double-click a drag node (`buttons === 1`, `detail === 2`) → `toggleMaximize()`. The attribute alone does not maximize.
+- Do **not** put `data-tauri-drag-region` on title/spacer. That attribute starts a native drag on the first `mousedown`, so a JS `toggleMaximize()` on `detail === 2` races it (double-click silently fails, or restore leaves fullscreen geometry).
+- Mark only the title node and the flex spacer with `data-titlebar-drag` + `select-none` + `useTitlebarWindowDrag()` pointer props. Never on the header root, search, or buttons. The `data-titlebar-drag` flag is not inherited and is not a Tauri attribute.
+- Primary `pointerdown` (`button === 0`) with `detail >= 2` → `preventDefault()` + `toggleMaximize()`, and do not `startDragging()` on that gesture.
+- Primary `pointerdown` with `detail < 2`: record the point; after movement of `TITLEBAR_DRAG_THRESHOLD_PX` (4px, `dx²+dy² >= 16`) call `startDragging()` once. Click without crossing the threshold does not maximize and does not drag.
 - Platform `tauri.*.conf.json` `windows` arrays can replace the shared `windows[0]`. Prefer Rust setup. If JSON is required, copy the full window object.
 - Do not add `@tauri-apps/plugin-os`.
 
 ### 4. Validation & Error Matrix
 
 - `set_title_bar_style` / `set_decorations` / `show` / `set_focus` fail → ignored; setup must not return `Err`.
+- `startDragging()` / `toggleMaximize()` fail → ignored (`void` the promise); do not add a user-visible chrome error.
 - Custom close via `destroy()` → flush skipped (reading progress can be lost).
 - Shared `"decorations": false` → macOS loses traffic lights.
 - Chrome applied after `show()` → native title bar flashes.
+- `data-tauri-drag-region` on the same node as JS maximize → first click starts a native drag; double-click is intermittent.
 
 ### 5. Good/Base/Bad Cases
 
-- Good: launch hidden → Overlay or undecorated → show. macOS traffic lights usable; Win/Linux custom buttons on both headers.
-- Base: drag title / spacer moves the window; search and toolbar buttons still click.
-- Bad: `data-tauri-drag-region` on the header root, or close via `destroy()`.
+- Good: launch hidden → Overlay or undecorated → show. macOS traffic lights usable; Win/Linux custom buttons on both headers. Double-click title/spacer toggles maximize without the first click dragging.
+- Base: press title / spacer and move past 4px → `startDragging()` once; search and toolbar buttons still click.
+- Bad: `data-tauri-drag-region` on title/spacer or the header root; close via `destroy()`.
 
 ### 6. Tests Required
 
 - `platform.ts`: Mac / Win / Linux / unknown UA.
 - `WindowControls`: hidden on Mac UA; visible on Win/Linux; buttons call minimize / toggleMaximize / `close` (not `destroy`).
-- Library + reader: `h-12`; Mac `pl-[72px]` and no custom buttons; title + spacer have drag + `select-none`; search/actions do not; spacer double-click → `toggleMaximize`.
+- Library + reader: `h-12`; Mac `pl-[72px]` and no custom buttons; title + spacer have `data-titlebar-drag` + `select-none` and no `data-tauri-drag-region`; search/actions do not; spacer `pointerDown` `button: 0` `detail: 2` → `toggleMaximize` and not `startDragging`; move past 4px after a primary press → `startDragging` once.
 - Pin Windows UA in chrome tests; do not depend on jsdom's host UA.
 - `npm test` + `npm run build`. Live OS chrome is manual (`npm run tauri dev`).
 
@@ -316,6 +320,7 @@ Frontend: `src/lib/platform.ts` (`detectDesktopOs` / `usesCustomWindowControls` 
 ```tsx
 onClick={() => void getCurrentWindow().destroy()}
 <header data-tauri-drag-region>
+<span data-tauri-drag-region onMouseDown={onTitlebarDragMouseDown}>{title}</span>
 ```
 
 #### Correct
@@ -327,6 +332,6 @@ let _ = window.show();
 ```
 ```tsx
 onClick={() => void getCurrentWindow().close()}
-<span data-tauri-drag-region className="select-none">{title}</span>
-<div data-tauri-drag-region className="min-w-0 flex-1" />
+<span data-titlebar-drag className="select-none" {...titlebarDrag}>{title}</span>
+<div data-titlebar-drag className="min-w-0 flex-1 select-none" {...titlebarDrag} />
 ```

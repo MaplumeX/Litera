@@ -18,7 +18,7 @@ afterEach(() => {
 
 function renderDialog(overrides: {
   open?: boolean;
-  session?: { id: string; title: string; systemPrompt?: string; thinkingLevel?: string } | null;
+  session?: { id: string; title: string; systemPrompt?: string } | null;
   isStreaming?: boolean;
 } = {}) {
   const onClose = vi.fn();
@@ -36,27 +36,25 @@ function renderDialog(overrides: {
 }
 
 describe("SessionConfigDialog", () => {
-  it("prefills the textarea and thinking level from the session config", () => {
+  it("prefills the textarea from the session config", () => {
     const { view } = renderDialog({
-      session: { id: "session-1", title: "古文翻译", systemPrompt: "你是古文翻译助手", thinkingLevel: "high" },
+      session: { id: "session-1", title: "古文翻译", systemPrompt: "你是古文翻译助手" },
     });
     const dialog = view.getByRole("dialog");
     const textarea = within(dialog).getByRole("textbox");
     expect((textarea as HTMLTextAreaElement).value).toBe("你是古文翻译助手");
-    expect(within(dialog).getByRole("combobox").textContent).toContain("high");
   });
 
-  it("defaults to empty prompt and off level when the session has no config", () => {
+  it("defaults to empty prompt when the session has no config", () => {
     const { view } = renderDialog();
     const dialog = view.getByRole("dialog");
     const textarea = within(dialog).getByRole("textbox");
     expect((textarea as HTMLTextAreaElement).value).toBe("");
-    expect(within(dialog).getByRole("combobox").textContent).toContain("off");
   });
 
   it("clears the prompt draft when the clear button is clicked", () => {
     const { view } = renderDialog({
-      session: { id: "session-1", title: "古文翻译", systemPrompt: "你是古文翻译助手", thinkingLevel: "off" },
+      session: { id: "session-1", title: "古文翻译", systemPrompt: "你是古文翻译助手" },
     });
     const dialog = view.getByRole("dialog");
     const textarea = within(dialog).getByRole("textbox");
@@ -74,14 +72,13 @@ describe("SessionConfigDialog", () => {
       within(dialog).getByRole("button", { name: "保存" }).click();
     });
 
-    expect(onSave).toHaveBeenCalledWith("你是翻译助手", "off");
+    expect(onSave).toHaveBeenCalledWith("你是翻译助手");
   });
 
   it("disables save and inputs while streaming", () => {
     const { view, onSave } = renderDialog({ isStreaming: true });
     const dialog = view.getByRole("dialog");
     expect((within(dialog).getByRole("textbox") as HTMLTextAreaElement).disabled).toBe(true);
-    expect((within(dialog).getByRole("combobox") as HTMLButtonElement).disabled).toBe(true);
     expect((within(dialog).getByRole("button", { name: "保存" }) as HTMLButtonElement).disabled).toBe(true);
     act(() => {
       within(dialog).getByRole("button", { name: "保存" }).click();

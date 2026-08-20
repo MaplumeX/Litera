@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Chrome capabilities, close vs destroy, no decorations:false in shared JSON, tests for library+reader headers"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Window buttons, shared helpers, drag only on title/spacer, no second titlebar"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Do not persist chrome/geometry in preferences.json; close path must still flush"}
+{"file": ".trellis/tasks/08-20-fix-titlebar-dblclick-maximize/prd.md", "reason": "AC1–AC7: double-click without first-click drag, threshold startDragging, hit targets, tests"}
+{"file": ".trellis/tasks/08-20-fix-titlebar-dblclick-maximize/design.md", "reason": "No data-tauri-drag-region on dblclick nodes; hook + 4px threshold; startDragging once per gesture"}
+{"file": ".trellis/tasks/08-20-fix-titlebar-dblclick-maximize/research/drag-dblclick-race.md", "reason": "Regression: mixing drag-region with toggleMaximize on the same mousedown is the defect"}

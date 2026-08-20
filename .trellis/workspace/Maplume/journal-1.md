@@ -1781,3 +1781,66 @@ Fixed handle_second_instance to unminimize+show+set_focus so clicking an epub wh
 ### Status
 
 [OK] **Completed**
+
+
+## Session 78: Fix footnote popup as compact card
+
+**Date**: 2026-08-19
+**Task**: Fix footnote popup as compact card
+**Branch**: `main`
+
+### Summary
+
+Fixed the EPUB footnote popup: height from renderer.viewSize, compact overlay CSS after generateStylesCss, center/flip placement next to the reference, and transparent inner-view background so short notes no longer sit in a tall empty page-colored box. Tests 394 + build passed.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ca623dd` | (see git log) |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 79: Fix titlebar double-click maximize race
+
+**Date**: 2026-08-20
+**Task**: Fix titlebar double-click maximize race
+**Branch**: `main`
+
+### Summary
+
+Replaced data-tauri-drag-region + detail===2 maximize with useTitlebarWindowDrag: primary double-click toggles maximize without starting a native drag; movement past 4px calls startDragging once. Updated library/reader headers, tests, chrome specs, and changelog. 399 tests and build passed. Live tauri double-click not manually verified.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f75bf30` | (see git log) |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 80: 将思考强度从会话级移到输入框附近(全局级)
+
+**Date**: 2026-08-20
+**Task**: 将思考强度从会话级移到输入框附近(全局级)
+**Branch**: `young-dingo`
+
+### Summary
+
+把 LLM 思考强度从会话级 SessionConfigDialog 弹窗改为全局级 ChatInput 工具栏 Select 控件。Rust 新增 set_thinking_level command，AgentConfigSnapshot/AgentRuntimeConfig 暴露 thinkingLevel；save_agent_config/switch_provider 保留已有 defaultThinkingLevel；PiSessionSummary 移除 thinking_level。TS 侧 RuntimeConfig 携带 thinkingLevel，ensureAgent 改读 config；updateSessionConfig 去 thinkingLevel；SessionConfigDialog 只保留 systemPrompt；ChatInput 加 7 档 Select；ChatPanel 接线 set_thinking_level + invalidateConfig。旧 session_config.thinkingLevel 读取时忽略。399 前端测试 + 141 Rust 测试全绿。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4010b50` | (see git log) |
+
+### Status
+
+[OK] **Completed**
