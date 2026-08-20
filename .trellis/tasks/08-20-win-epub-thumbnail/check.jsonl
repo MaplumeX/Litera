@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Required gates 检查清单：frontend tests、Rust tests、tauri build --no-bundle"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "验证 compress_cover 错误处理符合 AppResult/AppError 约定"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "验证新增 crate 和 library.rs 修改符合模块组织约定"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "验证 cover.jpg + convertFileSrc 不违反 CSP img-src 约定"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "验证跨层改动的一致性和无遗漏"}
+{"file": ".trellis/tasks/08-20-win-epub-thumbnail/design.md", "reason": "验证实现与设计文档一致"}
