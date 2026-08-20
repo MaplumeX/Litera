@@ -1797,6 +1797,7 @@ Fixed the EPUB footnote popup: height from renderer.viewSize, compact overlay CS
 
 | Hash | Message |
 |------|---------|
+| `4da00ac` | (see git log) |
 | `ca623dd` | (see git log) |
 
 ### Status
@@ -1840,6 +1841,27 @@ Replaced data-tauri-drag-region + detail===2 maximize with useTitlebarWindowDrag
 | Hash | Message |
 |------|---------|
 | `4010b50` | (see git log) |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 81: Settings dialog typography preview
+
+**Date**: 2026-08-20
+**Task**: Settings dialog typography preview
+**Branch**: `civil-impala`
+
+### Summary
+
+Added a live typography preview area at the top of the Settings dialog typography section. New generatePreviewCss() in reader-styles.ts (scoped to .litera-typography-preview, no theme/global background injection) + TypographyPreview component rendering localized example paragraphs with a <style> tag. SettingsDialog wires it in before the slider rows; no props/sizing changes. Added i18n keys (zh-CN/en) and tests covering render, live style updates, cross-section hide, and en locale. All 398 tests pass.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4da00ac` | feat(settings): live typography preview in Settings dialog |
 
 ### Status
 

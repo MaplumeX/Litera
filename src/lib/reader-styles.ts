@@ -266,6 +266,15 @@ export function bookSettingsSnapshot(
   return snapshot;
 }
 
+const PREVIEW_SELECTOR = ".litera-typography-preview";
+
+/** Typography-only preview CSS scoped to `.litera-typography-preview`.
+ *  Strips the THEME_CSS branch so no global html/body background is injected. */
+export function generatePreviewCss(state: ReaderStyleState): string {
+  return `${PREVIEW_SELECTOR} { font-family: ${cssFontFamily(state.fontFamily)}; font-size: ${state.fontSize}px; line-height: ${state.lineHeight}; letter-spacing: ${state.letterSpacing}em; max-width: ${state.contentWidth}em; margin-inline: auto; padding-inline: ${state.pagePadding}rem; text-align: ${state.textAlign}; }
+${PREVIEW_SELECTOR} p { margin-block-end: ${state.paragraphSpacing}em; text-indent: ${state.firstLineIndent}em; }`;
+}
+
 const THEME_CSS: Record<string, string> = {
   light: "",
   dark: `html, body { background: #1a1a1a !important; color: #e0e0e0 !important; }
