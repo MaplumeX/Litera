@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 81
+- **Total Sessions**: 82
 - **Last Active**: 2026-08-20
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1868 | Active |
+| `journal-1.md` | ~1889 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 82 | 2026-08-20 | 为 agent 压缩触发添加 UI 指示 | `7018a53` | `tired-ostrich` |
 | 81 | 2026-08-20 | Settings dialog typography preview | `4da00ac` | `civil-impala` |
 | 80 | 2026-08-20 | 将思考强度从会话级移到输入框附近(全局级) | `4010b50` | `young-dingo` |
 | 79 | 2026-08-20 | Fix titlebar double-click maximize race | `f75bf30` | `main` |

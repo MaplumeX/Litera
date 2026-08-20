@@ -1866,3 +1866,24 @@ Added a live typography preview area at the top of the Settings dialog typograph
 ### Status
 
 [OK] **Completed**
+
+
+## Session 82: 为 agent 压缩触发添加 UI 指示
+
+**Date**: 2026-08-20
+**Task**: 为 agent 压缩触发添加 UI 指示
+**Branch**: `tired-ostrich`
+
+### Summary
+
+研究市面 AI 客户端（Claude Code/Cursor/Cline/agor/t3code）的上下文压缩 UI 指示做法，确认主流方案是聊天流内联时间线 chip。实现：AgentEvent 新增 compaction_started/completed/failed 三个事件，maybeCompact 三阶段 emit，agentReducer 新增 compaction 状态字段，新建 CompactionChip 组件（居中、muted、spinner→完成标记），ChatPanel 渲染。中英文 i18n 齐全。418 测试全通过，tsc 通过。更新 state-management spec。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7018a53` | (see git log) |
+
+### Status
+
+[OK] **Completed**
