@@ -1,6 +1,6 @@
 [package]
 name = "litera"
-version = "0.2.3"
+version = "0.2.4"
 description = "Agent-Enhanced EPUB Reader"
 authors = ["you"]
 edition = "2021"
