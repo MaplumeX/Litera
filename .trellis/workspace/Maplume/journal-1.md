@@ -1781,3 +1781,24 @@ Fixed handle_second_instance to unminimize+show+set_focus so clicking an epub wh
 ### Status
 
 [OK] **Completed**
+
+
+## Session 78: Settings dialog typography preview
+
+**Date**: 2026-08-20
+**Task**: Settings dialog typography preview
+**Branch**: `civil-impala`
+
+### Summary
+
+Added a live typography preview area at the top of the Settings dialog typography section. New generatePreviewCss() in reader-styles.ts (scoped to .litera-typography-preview, no theme/global background injection) + TypographyPreview component rendering localized example paragraphs with a <style> tag. SettingsDialog wires it in before the slider rows; no props/sizing changes. Added i18n keys (zh-CN/en) and tests covering render, live style updates, cross-section hide, and en locale. All 398 tests pass.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `4da00ac` | (see git log) |
+
+### Status
+
+[OK] **Completed**

@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 77
-- **Last Active**: 2026-08-19
+- **Total Sessions**: 78
+- **Last Active**: 2026-08-20
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1762 | Active |
+| `journal-1.md` | ~1804 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 78 | 2026-08-20 | Settings dialog typography preview | `4da00ac` | `civil-impala` |
 | 77 | 2026-08-19 | fix: restore minimized window on epub open | `598d2ae` | `glowing-cat` |
 | 76 | 2026-08-19 | Per-session agent system prompt and thinking level | `70851d0` | `wizardly-unicorn` |
 | 75 | 2026-08-19 | Reader footnote popup feature | `4f76378` | `prime-hyena` |
