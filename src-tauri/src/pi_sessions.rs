@@ -32,7 +32,6 @@ pub struct PiSessionSummary {
     created_at: String,
     updated_at: String,
     system_prompt: Option<String>,
-    thinking_level: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -227,17 +226,12 @@ impl PiSessionStore {
                 .and_then(|entry| entry.get("systemPrompt"))
                 .and_then(Value::as_str)
                 .map(str::to_string);
-            let thinking_level = session_config
-                .and_then(|entry| entry.get("thinkingLevel"))
-                .and_then(Value::as_str)
-                .map(str::to_string);
             summaries.push(PiSessionSummary {
                 id: id.to_string(),
                 title,
                 created_at: created,
                 updated_at: updated,
                 system_prompt,
-                thinking_level,
             });
         }
         summaries.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
@@ -932,8 +926,6 @@ mod tests {
         let summary = &store.list("book").unwrap()[0];
         assert_eq!(summary.id, "one");
         assert_eq!(summary.system_prompt.as_deref(), Some("翻译为古文"));
-        // Latest entry omits thinkingLevel -> absent field is None, not inherited.
-        assert_eq!(summary.thinking_level, None);
     }
 
     #[test]
@@ -951,7 +943,6 @@ mod tests {
         .unwrap();
         let summary = &store.list("book").unwrap()[0];
         assert_eq!(summary.system_prompt, None);
-        assert_eq!(summary.thinking_level, None);
     }
 
     #[cfg(unix)]

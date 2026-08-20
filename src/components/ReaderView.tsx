@@ -17,6 +17,7 @@ import {
 } from "@/lib/reader-paging";
 import { sectionIndexAt } from "@/lib/reader-progress";
 import { TTS_HIGHLIGHT_COLOR, TTS_OVERLAY_KEY } from "@/lib/reader-tts";
+import { footnotePopupCss } from "@/lib/reader-styles";
 import { SelectionToolbar } from "@/components/SelectionToolbar";
 import { FootnotePopup } from "@/components/FootnotePopup";
 import type { HighlightRecord } from "@/types/library";
@@ -198,7 +199,11 @@ type FoliateAnnotator = {
 type FoliateInnerView = HTMLElement & {
   close?: () => void;
   goTo?: (href: string) => void;
-  renderer?: HTMLElement & { setStyles?: (css: string) => void };
+  renderer?: HTMLElement & {
+    setStyles?: (css: string) => void;
+    viewSize?: number;
+    getContents?: () => { doc?: Document }[];
+  };
 };
 
 function isTtsRangeVisible(range: Range, visible?: Range): boolean {
@@ -582,9 +587,12 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         inner.style.display = "block";
         inner.style.width = "100%";
         inner.style.height = "100%";
+        inner.style.background = "transparent";
         inner.renderer?.setAttribute?.("flow", "scrolled");
         inner.renderer?.setAttribute?.("margin", "0");
-        if (stylesCssRef.current) inner.renderer?.setStyles?.(stylesCssRef.current);
+        const stylesCss = stylesCssRef.current;
+        const overlay = footnotePopupCss();
+        inner.renderer?.setStyles?.(stylesCss ? `${stylesCss}\n${overlay}` : overlay);
         // Append the inner view synchronously before foliate runs `goTo(index)`
         // (the paginator measures its container during layout).
         const mount = footnoteMountRef.current;
@@ -624,11 +632,14 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         // The `render` event fires before the paginator lays out and scrolls to
         // the fragment, so measure the content height only after `relocate`.
         inner.addEventListener("relocate", (() => {
-          const innerDoc = (inner as unknown as {
-            renderer?: { getContents?: () => { doc?: Document }[] };
-          })?.renderer?.getContents?.()[0]?.doc;
-          const h = innerDoc?.body?.getBoundingClientRect().height;
-          if (typeof h === "number" && h > 0) setFootnoteHeight(h);
+          const viewSize = inner.renderer?.viewSize;
+          const fallback = inner.renderer
+            ?.getContents?.()?.[0]
+            ?.doc?.body?.getBoundingClientRect().height;
+          const h = typeof viewSize === "number" && viewSize > 0 ? viewSize : fallback;
+          if (typeof h !== "number" || !(h > 0)) return;
+          const rounded = Math.round(h);
+          setFootnoteHeight((prev) => (prev === rounded ? prev : rounded));
         }) as EventListener);
       };
       // One-shot before-render listener per click: captures the click's seq so

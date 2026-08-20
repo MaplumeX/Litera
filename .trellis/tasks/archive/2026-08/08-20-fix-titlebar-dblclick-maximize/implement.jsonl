@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Current chrome contract: drag-region on title/spacer, detail===2 toggleMaximize, capabilities already include start-dragging"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Shared WindowControls helpers; do not fork a second chrome row or put drag on header root"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend guideline map; chrome lives in component + quality docs"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Window chrome stays Overlay vs set_decorations(false); close() not destroy(); no preferences.json geometry"}
+{"file": ".trellis/tasks/archive/2026-08/08-14-remove-native-shell/design.md", "reason": "Original decision: attribute for drag, JS only for double-click; this task replaces that pairing"}
+{"file": ".trellis/tasks/08-20-fix-titlebar-dblclick-maximize/research/drag-dblclick-race.md", "reason": "Why the attribute races toggleMaximize and why threshold + startDragging is the alternative"}

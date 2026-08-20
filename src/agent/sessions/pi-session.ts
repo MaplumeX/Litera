@@ -251,13 +251,12 @@ export function windowCompleteTurns(messages: PiAgentMessage[], maxTurns = 12): 
 
 export interface SessionConfig {
   systemPrompt: string;
-  thinkingLevel: string;
 }
 
 /**
  * Latest session_config entry on the active branch, or null when the session
  * has none. Absent systemPrompt -> "" (empty string means unset -> default
- * SYSTEM_PROMPT at runtime); absent thinkingLevel -> "off".
+ * SYSTEM_PROMPT at runtime).
  */
 export function sessionConfig(session: DecodedPiSession): SessionConfig | null {
   const branch = activeBranch(session);
@@ -266,7 +265,6 @@ export function sessionConfig(session: DecodedPiSession): SessionConfig | null {
     if (entry.type !== "session_config") continue;
     return {
       systemPrompt: string(entry.systemPrompt) ?? "",
-      thinkingLevel: string(entry.thinkingLevel) ?? "off",
     };
   }
   return null;
@@ -279,9 +277,7 @@ export function sessionSummary(value: unknown): AgentSessionSummary {
   }
   const summary: AgentSessionSummary = { id: item.id as string, title: item.title, createdAt: item.createdAt as string, updatedAt: item.updatedAt as string };
   const systemPrompt = string(item.systemPrompt);
-  const thinkingLevel = string(item.thinkingLevel);
   if (systemPrompt !== null) summary.systemPrompt = systemPrompt;
-  if (thinkingLevel !== null) summary.thinkingLevel = thinkingLevel;
   return summary;
 }
 

@@ -194,7 +194,6 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
             createdAt: new Date().toISOString(),
           },
           ...(event.systemPrompt !== undefined ? { systemPrompt: event.systemPrompt } : {}),
-          ...(event.thinkingLevel !== undefined ? { thinkingLevel: event.thinkingLevel } : {}),
           updatedAt: new Date().toISOString(),
         }),
       };

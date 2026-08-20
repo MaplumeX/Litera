@@ -16,6 +16,7 @@ const windowApi = {
   close: vi.fn(async () => {}),
   minimize: vi.fn(async () => {}),
   toggleMaximize: vi.fn(async () => {}),
+  startDragging: vi.fn(async () => {}),
 };
 
 vi.mock("@tauri-apps/api/window", () => ({
@@ -183,6 +184,7 @@ beforeEach(() => {
   windowApi.close.mockClear();
   windowApi.minimize.mockClear();
   windowApi.toggleMaximize.mockClear();
+  windowApi.startDragging.mockClear();
   setupInvoke();
   localStorage.removeItem("litera.chat-panel-width");
   localStorage.removeItem("litera.defaultReaderMode");
@@ -296,8 +298,8 @@ describe("reader annotation chrome", () => {
     const screen = await openReader();
     const header = screen.container.querySelector("header");
     expect(header).toBeTruthy();
-    expect(header!.hasAttribute("data-tauri-drag-region")).toBe(false);
-    expect(header!.querySelectorAll("[data-tauri-drag-region]")).toHaveLength(2);
+    expect(header!.hasAttribute("data-titlebar-drag")).toBe(false);
+    expect(header!.querySelectorAll("[data-titlebar-drag]")).toHaveLength(2);
     const toolbarNames = [
       "返回书库",
       "目录",
@@ -314,17 +316,16 @@ describe("reader annotation chrome", () => {
       toolbarNames,
     );
     for (const name of toolbarNames) {
-      expect(screen.getByRole("button", { name }).hasAttribute("data-tauri-drag-region")).toBe(
-        false,
-      );
+      expect(screen.getByRole("button", { name }).hasAttribute("data-titlebar-drag")).toBe(false);
     }
     fireEvent.click(screen.getByRole("button", { name: "关闭窗口" }));
     expect(windowApi.close).toHaveBeenCalledTimes(1);
     expect(windowApi.destroy).not.toHaveBeenCalled();
 
-    const spacer = header!.querySelectorAll("[data-tauri-drag-region]")[1];
-    fireEvent.mouseDown(spacer, { buttons: 1, detail: 2 });
+    const spacer = header!.querySelectorAll("[data-titlebar-drag]")[1];
+    fireEvent.pointerDown(spacer, { button: 0, detail: 2 });
     expect(windowApi.toggleMaximize).toHaveBeenCalledTimes(1);
+    expect(windowApi.startDragging).not.toHaveBeenCalled();
   });
 
   it("places TOC and annotations next to the book toggle in agent mode", async () => {

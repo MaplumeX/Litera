@@ -221,7 +221,7 @@ describe("ChatPanel session layouts", () => {
       within(dialog).getByRole("button", { name: "保存" }).click();
     });
 
-    expect(updateSessionConfig).toHaveBeenCalledWith("session-1", "你是翻译助手", "off");
+    expect(updateSessionConfig).toHaveBeenCalledWith("session-1", "你是翻译助手");
   });
 });
 

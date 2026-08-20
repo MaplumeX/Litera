@@ -12,8 +12,8 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Button } from "@/components/ui/button";
 import {
   WindowControls,
-  onTitlebarDragMouseDown,
   titlebarClassName,
+  useTitlebarWindowDrag,
 } from "@/components/WindowControls";
 import {
   BookOpen,
@@ -128,6 +128,7 @@ function PersistenceErrorBanner({
 
 function App() {
   const { t } = useT();
+  const titlebarDrag = useTitlebarWindowDrag();
   const [view, setView] = useState<"library" | "reader">("library");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [fileData, setFileData] = useState<FileData | null>(null);
@@ -874,15 +875,15 @@ function App() {
         {readerMode === "reader" ? tocAnnotationButtons : null}
         <h1
           className="min-w-0 shrink truncate select-none text-sm font-medium"
-          data-tauri-drag-region
-          onMouseDown={onTitlebarDragMouseDown}
+          data-titlebar-drag
+          {...titlebarDrag}
         >
           {bookTitle}
         </h1>
         <div
           className="min-h-0 min-w-0 flex-1 select-none self-stretch"
-          data-tauri-drag-region
-          onMouseDown={onTitlebarDragMouseDown}
+          data-titlebar-drag
+          {...titlebarDrag}
         />
         <div className="flex items-center gap-1">
           <Button

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   bookSettingsSnapshot,
+  footnotePopupCss,
   generatePreviewCss,
   generateStylesCss,
   normalizeSettings,
@@ -159,6 +160,45 @@ describe("generateStylesCss", () => {
       firstLineIndent: 0,
     });
     expect(css).toContain('font-family: "Foo\\\\Bar \\"Q\\"", serif');
+  });
+});
+
+const DARK_STYLES = {
+  fontSize: 16,
+  fontFamily: "serif",
+  theme: "dark",
+  lineHeight: 1.7,
+  contentWidth: 42,
+  pagePadding: 1.75,
+  textAlign: "start" as const,
+  letterSpacing: 0,
+  paragraphSpacing: 1,
+  firstLineIndent: 2,
+};
+
+describe("footnotePopupCss", () => {
+  it("clears page chrome and first-line indent", () => {
+    const css = footnotePopupCss();
+    expect(css).toContain("background: transparent !important");
+    expect(css).toContain("min-height: 0 !important");
+    expect(css).toContain("height: auto !important");
+    expect(css).toContain("max-width: none !important");
+    expect(css).toContain("margin-inline: 0 !important");
+    expect(css).toContain("padding: 0.75rem !important");
+    expect(css).toContain("text-indent: 0 !important");
+    expect(css).toContain("margin-block-end: 0.5em !important");
+  });
+
+  it("wins over generateStylesCss text-indent and dark background when appended", () => {
+    const combined = `${generateStylesCss(DARK_STYLES)}\n${footnotePopupCss()}`;
+    expect(combined).toContain("text-indent: 2em !important");
+    expect(combined).toContain("background: #1a1a1a !important");
+    expect(combined.lastIndexOf("text-indent: 0 !important")).toBeGreaterThan(
+      combined.lastIndexOf("text-indent: 2em !important"),
+    );
+    expect(combined.lastIndexOf("background: transparent !important")).toBeGreaterThan(
+      combined.lastIndexOf("background: #1a1a1a !important"),
+    );
   });
 });
 
