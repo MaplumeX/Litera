@@ -8,10 +8,8 @@ use image::{imageops, DynamicImage, Rgba};
 use md5::Md5;
 use std::io::{Cursor, Read, Seek, SeekFrom};
 use std::path::Path;
-use windows::core::PCWSTR;
-use windows::Win32::UI::Shell::{
-    SHGetKnownFolderPath, KF_FLAG_DEFAULT, KnownFolderId,
-};
+use windows::core::GUID;
+use windows::Win32::UI::Shell::{KF_FLAG_DEFAULT, SHGetKnownFolderPath};
 use zip::ZipArchive;
 
 use md5::Digest;
@@ -20,11 +18,16 @@ use md5::Digest;
 // Thumbnail cache directory (per-user)
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// FOLDERID_LocalAppData `{F1B32785-6FBA-4FCF-9D55-7B8E7F157091}`
+const FOLDERID_LOCAL_APP_DATA: GUID =
+    GUID::from_u128(0xF1B32785_6FBA_4FCF_9D55_7B8E7F157091);
+
 /// Resolve the thumbnail cache directory:
 /// `%LOCALAPPDATA%\com.maplume.litera\thumbnails\`
 fn cache_dir() -> Option<std::path::PathBuf> {
     unsafe {
-        let pwsz = SHGetKnownFolderPath(&KnownFolderId::FOLDERID_LocalAppData, KF_FLAG_DEFAULT, None).ok()?;
+        let pwsz =
+            SHGetKnownFolderPath(&FOLDERID_LOCAL_APP_DATA, KF_FLAG_DEFAULT, None).ok()?;
         let path = pwsz.to_string().ok()?;
         let dir = Path::new(&path)
             .join("com.maplume.litera")
