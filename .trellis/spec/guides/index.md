@@ -42,6 +42,8 @@ These guides help you **ask the right questions before coding**.
 - [ ] You want to change the OS title bar / traffic lights / window buttons — merge into existing headers; apply Overlay vs `set_decorations(false)` in `lib.rs` **before** `show()`; custom close must `close()` not `destroy()`; do not mix `data-tauri-drag-region` with JS `toggleMaximize` (see frontend `quality-guidelines.md` "main window chrome")
 - [ ] You want the OS browser to open a URL — Settings → About uses scoped `tauri-plugin-opener` `openUrl`; do not `<a href>` / `window.open` / `npm run tauri add opener` (see frontend `quality-guidelines.md` "Settings About / system browser links")
 - [ ] You want to store a named `fontFamily` — `is_supported` must use `is_valid_font_family`, not a three-value enum, or `ensure_file` resets theme + typography (see backend `tauri-commands.md` "reader system font family")
+- [ ] You want to add highlight color/note — optional fields on `annotations.json` `schemaVersion: 1`, semantic ids not hex; `list_annotations` stays read-only (see backend `tauri-commands.md` "Scenario: highlight color and note")
+- [ ] You want a click on a painted highlight — `pointerup` hitTest must suppress paging before `show-annotation` (see frontend `component-guidelines.md` "highlight click must beat page-turn")
 - [ ] UI / command code starts casting raw payload fields directly
 - [ ] OS / argv / deep-link input can arrive twice or before the WebView mounts (drain a queue; see backend `tauri-commands.md` "OS EPUB open")
 
