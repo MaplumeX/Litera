@@ -1908,3 +1908,24 @@ Reviewed Phase B (cover compression) implementation. Found and fixed a rollback 
 ### Status
 
 [OK] **Completed**
+
+
+## Session 84: Windows EPUB thumbnail provider + cover compression
+
+**Date**: 2026-08-21
+**Task**: Windows EPUB thumbnail provider + cover compression
+**Branch**: `macabre-alpacka`
+
+### Summary
+
+Implemented Windows Shell IThumbnailProvider DLL (isolated cdylib crate at src-tauri/windows-thumbnail/) for .epub files, with independent thumbnail cache (partial MD5, %LOCALAPPDATA%\com.maplume.litera\thumbnails\), Litera icon overlay, HKCU registry registration, NSIS auto-register hooks, and CI DLL build step. Also implemented cover compression in save_book_metadata (Rust image crate, max edge 512px, JPEG q85, cover.jpg) with backward-compatible cover.png fallback and unit tests. DLL code cannot be compiled on Linux; needs Windows CI/manual verification. Spec updated for new crate, cover.jpg format, and build gates.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7dec1af` | (see git log) |
+
+### Status
+
+[OK] **Completed**
