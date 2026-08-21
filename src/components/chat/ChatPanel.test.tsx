@@ -245,7 +245,136 @@ describe("ChatPanel scroll behavior", () => {
     view.rerender(<ChatPanel currentChapterHref="OEBPS/ch1.xhtml" bookId="book-1" />);
     expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth" });
   });
+
+  it("lists only user questions with normalized previews", () => {
+    bridgeState = readyState({
+      messages: [
+        { role: "user", content: "第一行\n  第二行" },
+        { role: "assistant", content: "助手回答不应出现" },
+        { role: "user", content: `${"很长的提问".repeat(15)}结尾` },
+      ],
+    });
+    const view = render(<ChatPanel currentChapterHref="OEBPS/ch1.xhtml" bookId="book-1" />);
+    fireEvent.click(view.getByRole("button", { name: "对话目录" }));
+
+    expect(view.queryByText("助手回答不应出现")).toBeTruthy();
+    const toc = view.getByRole("complementary", { name: "对话目录" });
+    expect(within(toc).getByText("第一行 第二行")).toBeTruthy();
+    expect(within(toc).queryByText("助手回答不应出现")).toBeNull();
+    expect(within(toc).getAllByRole("button", { name: /跳转到第/ })).toHaveLength(2);
+    expect(within(toc).getAllByRole("button", { name: /跳转到第/ })[1].textContent).toContain("…");
+  });
+
+  it("smoothly jumps to a question, suspends streaming follow, and resumes at the bottom", () => {
+    const scrollIntoView = vi.fn();
+    HTMLElement.prototype.scrollIntoView = scrollIntoView;
+    bridgeState = readyState({
+      messages: [
+        { role: "user", content: "第一问" },
+        { role: "assistant", content: "第一答" },
+        { role: "user", content: "第二问" },
+      ],
+    });
+    const view = render(<ChatPanel currentChapterHref="OEBPS/ch1.xhtml" bookId="book-1" />);
+    scrollIntoView.mockClear();
+    fireEvent.click(view.getByRole("button", { name: "对话目录" }));
+    fireEvent.click(view.getByRole("button", { name: "跳转到第 1 条提问：第一问" }));
+
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
+    expect(view.queryByRole("complementary", { name: "对话目录" })).toBeNull();
+    const container = view.getByTestId("chat-message-scroll");
+    Object.defineProperties(container, {
+      scrollHeight: { configurable: true, value: 1000 },
+      clientHeight: { configurable: true, value: 400 },
+      scrollTop: { configurable: true, writable: true, value: 600 },
+    });
+    fireEvent.scroll(container);
+    scrollIntoView.mockClear();
+    bridgeState = readyState({
+      status: "prompting",
+      messages: [
+        { role: "user", content: "第一问" },
+        { role: "assistant", content: "正在继续生成" },
+        { role: "user", content: "第二问" },
+      ],
+    });
+    view.rerender(<ChatPanel currentChapterHref="OEBPS/ch1.xhtml" bookId="book-1" />);
+    expect(scrollIntoView).not.toHaveBeenCalled();
+
+    fireEvent(container, new Event("scrollend"));
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth" });
+  });
+
+  it("updates the current question while scrolling and resumes bottom follow", () => {
+    bridgeState = readyState({
+      messages: [
+        { role: "user", content: "第一问" },
+        { role: "assistant", content: "第一答" },
+        { role: "user", content: "第二问" },
+      ],
+    });
+    const view = render(<ChatPanel currentChapterHref="OEBPS/ch1.xhtml" bookId="book-1" />);
+    const container = view.getByTestId("chat-message-scroll");
+    const first = view.container.querySelector('[data-user-message-index="0"]') as HTMLElement;
+    const second = view.container.querySelector('[data-user-message-index="2"]') as HTMLElement;
+    vi.spyOn(container, "getBoundingClientRect").mockReturnValue(rect(100, 500));
+    vi.spyOn(first, "getBoundingClientRect").mockReturnValue(rect(80, 120));
+    vi.spyOn(second, "getBoundingClientRect").mockReturnValue(rect(160, 200));
+    Object.defineProperties(container, {
+      scrollHeight: { configurable: true, value: 1000 },
+      clientHeight: { configurable: true, value: 400 },
+      scrollTop: { configurable: true, writable: true, value: 200 },
+    });
+    fireEvent.scroll(container);
+    fireEvent.click(view.getByRole("button", { name: "对话目录" }));
+    expect(view.getByRole("button", { name: "跳转到第 1 条提问：第一问" }).getAttribute("aria-current"))
+      .toBe("location");
+
+    fireEvent.click(view.getAllByRole("button", { name: "关闭对话目录" })[1]);
+    container.scrollTop = 600;
+    vi.spyOn(second, "getBoundingClientRect").mockReturnValue(rect(90, 130));
+    fireEvent.scroll(container);
+    fireEvent.click(view.getByRole("button", { name: "对话目录" }));
+    expect(view.getByRole("button", { name: "跳转到第 2 条提问：第二问" }).getAttribute("aria-current"))
+      .toBe("location");
+  });
+
+  it("disables the outline for empty sessions and closes it on session or book switch", () => {
+    bridgeState = readyState({ messages: [] });
+    const view = render(<ChatPanel currentChapterHref="OEBPS/ch1.xhtml" bookId="book-1" />);
+    expect((view.getByRole("button", { name: "对话目录" }) as HTMLButtonElement).disabled).toBe(true);
+
+    bridgeState = readyState({ messages: [{ role: "user", content: "旧会话问题" }] });
+    view.rerender(<ChatPanel currentChapterHref="OEBPS/ch1.xhtml" bookId="book-1" />);
+    fireEvent.click(view.getByRole("button", { name: "对话目录" }));
+    expect(view.getByRole("complementary", { name: "对话目录" })).toBeTruthy();
+    bridgeState = readyState({
+      sessionId: "session-2",
+      messages: [{ role: "user", content: "新会话问题" }],
+    });
+    view.rerender(<ChatPanel currentChapterHref="OEBPS/ch1.xhtml" bookId="book-1" />);
+    expect(view.queryByRole("complementary", { name: "对话目录" })).toBeNull();
+
+    fireEvent.click(view.getByRole("button", { name: "对话目录" }));
+    expect(view.getByRole("complementary", { name: "对话目录" })).toBeTruthy();
+    view.rerender(<ChatPanel currentChapterHref="OEBPS/ch1.xhtml" bookId="book-2" />);
+    expect(view.queryByRole("complementary", { name: "对话目录" })).toBeNull();
+  });
 });
+
+function rect(top: number, bottom: number): DOMRect {
+  return {
+    x: 0,
+    y: top,
+    top,
+    left: 0,
+    right: 200,
+    bottom,
+    width: 200,
+    height: bottom - top,
+    toJSON: () => ({}),
+  };
+}
 
 describe("ChatPanel compaction chip", () => {
   it("renders a compacting chip with spinner text", () => {

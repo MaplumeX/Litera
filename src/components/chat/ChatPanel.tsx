@@ -8,7 +8,7 @@ import {
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Button } from "@/components/ui/button";
-import { MessagesSquare, Settings, AlertCircle } from "lucide-react";
+import { List, MessagesSquare, Settings, AlertCircle } from "lucide-react";
 import { useAgentBridge } from "@/lib/use-agent-bridge";
 import { useAgentConfig } from "@/lib/use-agent-config";
 import { embeddedAgentRuntime } from "@/agent/runtime/embedded-runtime";
@@ -21,6 +21,7 @@ import { SessionConfigDialog, type SessionConfigTarget } from "./SessionConfigDi
 import { SessionList } from "./SessionList";
 import { TypingIndicator } from "./TypingIndicator";
 import { CompactionChip } from "./CompactionChip";
+import { UserMessageToc, userMessagePreview } from "./UserMessageToc";
 import { useT } from "@/lib/i18n";
 
 export interface ChatPanelHandle {
@@ -79,11 +80,16 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     const [editingIndex, setEditingIndex] = useState<number | null>(null);
     const [editDraft, setEditDraft] = useState("");
     const [stickToBottom, setStickToBottom] = useState(true);
+    const [showMessageToc, setShowMessageToc] = useState(false);
+    const [activeUserMessageIndex, setActiveUserMessageIndex] = useState<number | null>(null);
     const { snapshot: configSnapshot, load: loadConfig } = useAgentConfig();
     const thinkingLevel = configSnapshot?.thinkingLevel ?? "medium";
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const scrollContainerRef = useRef<HTMLDivElement>(null);
+    const userMessageRefs = useRef(new Map<number, HTMLDivElement>());
     const inputRef = useRef<HTMLTextAreaElement>(null);
+    const suspendBottomFollowRef = useRef(false);
+    const messageTocJumpTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const autoSwitchRef = useRef<string | null>(null);
     const lastSentRef = useRef<{ text: string; selection?: string; chapterHref?: string } | null>(null);
     const abortedRef = useRef(false);
@@ -92,8 +98,42 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     const bookReady = state.status === "bookReady" || state.status === "prompting";
     const error = invokeError ?? state.error?.message ?? null;
     const lastMessage = state.messages[state.messages.length - 1];
+    const userMessageTocItems = state.messages.flatMap((message, index) =>
+      message.role === "user"
+        ? [{ messageIndex: index, preview: userMessagePreview(message.content) }]
+        : [],
+    );
+
+    const clearMessageTocJumpTimer = useCallback(() => {
+      if (messageTocJumpTimerRef.current === null) return;
+      clearTimeout(messageTocJumpTimerRef.current);
+      messageTocJumpTimerRef.current = null;
+    }, []);
+
+    const updateActiveUserMessage = useCallback(() => {
+      const container = scrollContainerRef.current;
+      if (!container || userMessageRefs.current.size === 0) {
+        setActiveUserMessageIndex(null);
+        return;
+      }
+      const readingTop = container.getBoundingClientRect().top + 24;
+      let activeIndex: number | null = null;
+      const userMessages = [...userMessageRefs.current.entries()].sort(
+        ([left], [right]) => left - right,
+      );
+      for (const [index, element] of userMessages) {
+        if (element.getBoundingClientRect().top <= readingTop) activeIndex = index;
+        else if (activeIndex === null) {
+          activeIndex = index;
+          break;
+        }
+      }
+      setActiveUserMessageIndex(activeIndex);
+    }, []);
 
     const scrollToBottom = useCallback((smooth = true) => {
+      suspendBottomFollowRef.current = false;
+      clearMessageTocJumpTimer();
       setStickToBottom(true);
       if (smooth) {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -101,19 +141,56 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         const container = scrollContainerRef.current;
         if (container) container.scrollTop = container.scrollHeight;
       }
-    }, []);
+    }, [clearMessageTocJumpTimer]);
 
     const handleScroll = useCallback(() => {
       const container = scrollContainerRef.current;
       if (!container) return;
       const distanceFromBottom =
         container.scrollHeight - container.scrollTop - container.clientHeight;
+      if (suspendBottomFollowRef.current) {
+        if (distanceFromBottom >= 48) suspendBottomFollowRef.current = false;
+        setStickToBottom(false);
+      } else {
+        setStickToBottom(distanceFromBottom < 48);
+      }
+      updateActiveUserMessage();
+    }, [updateActiveUserMessage]);
+
+    const finishMessageTocJump = useCallback(() => {
+      clearMessageTocJumpTimer();
+      const container = scrollContainerRef.current;
+      if (!container || !suspendBottomFollowRef.current) return;
+      suspendBottomFollowRef.current = false;
+      const distanceFromBottom =
+        container.scrollHeight - container.scrollTop - container.clientHeight;
       setStickToBottom(distanceFromBottom < 48);
-    }, []);
+      updateActiveUserMessage();
+    }, [clearMessageTocJumpTimer, updateActiveUserMessage]);
+
+    const handleMessageTocOpen = useCallback(() => {
+      updateActiveUserMessage();
+      setShowSessionList(false);
+      setShowMessageToc(true);
+    }, [updateActiveUserMessage]);
+
+    const handleMessageTocGoTo = useCallback((messageIndex: number) => {
+      const target = userMessageRefs.current.get(messageIndex);
+      if (!target) return;
+      suspendBottomFollowRef.current = true;
+      setStickToBottom(false);
+      setActiveUserMessageIndex(messageIndex);
+      setShowMessageToc(false);
+      clearMessageTocJumpTimer();
+      messageTocJumpTimerRef.current = setTimeout(finishMessageTocJump, 600);
+      target.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, [clearMessageTocJumpTimer, finishMessageTocJump]);
 
     useEffect(() => {
       void loadConfig();
     }, [loadConfig]);
+
+    useEffect(() => clearMessageTocJumpTimer, [clearMessageTocJumpTimer]);
 
     useEffect(() => {
       if (stickToBottom && isStreaming) {
@@ -128,7 +205,11 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       setEditingIndex(null);
       setEditDraft("");
       autoSwitchRef.current = null;
-    }, [bookId]);
+      suspendBottomFollowRef.current = false;
+      clearMessageTocJumpTimer();
+      setShowMessageToc(false);
+      setActiveUserMessageIndex(null);
+    }, [bookId, clearMessageTocJumpTimer]);
 
     useEffect(() => {
       if (isWorkspace) setShowSessionList(false);
@@ -137,8 +218,12 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     useEffect(() => {
       setEditingIndex(null);
       setEditDraft("");
+      suspendBottomFollowRef.current = false;
+      clearMessageTocJumpTimer();
+      setShowMessageToc(false);
+      setActiveUserMessageIndex(null);
       scrollToBottom(false);
-    }, [state.sessionId, scrollToBottom]);
+    }, [clearMessageTocJumpTimer, state.sessionId, scrollToBottom]);
 
     useEffect(() => {
       if (state.promptId || state.error) setSubmitting(false);
@@ -366,6 +451,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
               size="icon-xs"
               variant={isWorkspace && railOpen ? "secondary" : "ghost"}
               onClick={() => {
+                setShowMessageToc(false);
                 if (isWorkspace) setRailOpen(!railOpen);
                 else setShowSessionList((value) => !value);
               }}
@@ -384,6 +470,19 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
             </span>
             <Button
               size="icon-xs"
+              variant={showMessageToc ? "secondary" : "ghost"}
+              onClick={() => {
+                if (showMessageToc) setShowMessageToc(false);
+                else handleMessageTocOpen();
+              }}
+              disabled={userMessageTocItems.length === 0}
+              aria-label={t("chat.messageToc")}
+              aria-expanded={showMessageToc}
+            >
+              <List />
+            </Button>
+            <Button
+              size="icon-xs"
               variant="ghost"
               onClick={() => setShowConfig(true)}
               aria-label={t("chat.settings")}
@@ -395,11 +494,14 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 
         {!isWorkspace && showSessionList && sessionList}
 
-        <div
-          ref={scrollContainerRef}
-          onScroll={handleScroll}
-          className="flex-1 space-y-4 overflow-y-auto p-3"
-        >
+        <div className="relative min-h-0 flex-1">
+          <div
+            ref={scrollContainerRef}
+            onScroll={handleScroll}
+            onScrollEnd={finishMessageTocJump}
+            data-testid="chat-message-scroll"
+            className="h-full space-y-4 overflow-y-auto p-3"
+          >
           {configSnapshot && !configSnapshot.configured && (
             <div className="flex items-start gap-2 rounded border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-400">
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -424,7 +526,16 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
             />
           )}
           {state.messages.map((message, index) => (
-            <div key={index}>
+            <div
+              key={index}
+              ref={(element) => {
+                if (message.role !== "user") return;
+                if (element) userMessageRefs.current.set(index, element);
+                else userMessageRefs.current.delete(index);
+              }}
+              className={message.role === "user" ? "scroll-mt-3" : undefined}
+              data-user-message-index={message.role === "user" ? index : undefined}
+            >
               {message.role === "user" && (
                 <MessageBubble
                   message={message}
@@ -461,6 +572,15 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
             <CompactionChip status={state.compaction.status} />
           )}
           <div ref={messagesEndRef} />
+          </div>
+          {showMessageToc && userMessageTocItems.length > 0 && (
+            <UserMessageToc
+              items={userMessageTocItems}
+              activeMessageIndex={activeUserMessageIndex}
+              onGoTo={handleMessageTocGoTo}
+              onClose={() => setShowMessageToc(false)}
+            />
+          )}
         </div>
 
         <ChatInput

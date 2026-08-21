@@ -1,0 +1,4 @@
+{"file":".trellis/spec/frontend/index.md","reason":"Frontend stack, project structure, and relevant guideline routing for the React chat feature."}
+{"file":".trellis/spec/frontend/component-guidelines.md","reason":"Chat layout, icon-button, overlay TOC, current-row visibility, and stick-to-bottom interaction contracts."}
+{"file":".trellis/spec/frontend/hook-guidelines.md","reason":"Ref, effect, callback, and DOM subscription conventions for scroll position tracking."}
+{"file":".trellis/spec/frontend/i18n.md","reason":"Required zh-CN/en catalog parity and accessible UI label conventions."}

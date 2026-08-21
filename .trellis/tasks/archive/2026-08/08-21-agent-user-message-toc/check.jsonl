@@ -1,0 +1,5 @@
+{"file":".trellis/spec/frontend/index.md","reason":"Verify the implementation against the complete frontend guideline map."}
+{"file":".trellis/spec/frontend/component-guidelines.md","reason":"Check chat layout, overlay behavior, active item visibility, accessibility, and auto-scroll regression risks."}
+{"file":".trellis/spec/frontend/hook-guidelines.md","reason":"Check scroll tracking effects, refs, callbacks, and cleanup behavior."}
+{"file":".trellis/spec/frontend/i18n.md","reason":"Check bilingual catalog parity and translated accessible labels."}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"Run frontend quality and regression checks appropriate to the Tauri React application."}
