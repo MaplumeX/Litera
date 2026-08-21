@@ -11,6 +11,9 @@ src-tauri/
 │   ├── agent_config.rs     # provider metadata and credentials
 │   ├── pi_sessions.rs      # Pi v3 append-only session storage
 │   └── open_paths.rs       # argv/OS-open queue
+├── windows-thumbnail/        # isolated cdylib crate: Windows IThumbnailProvider
+│   (own [workspace], built separately on Windows CI)
+├── windows/hooks.nsh        # NSIS install/uninstall hooks for the DLL
 ├── capabilities/default.json
 ├── tauri.conf.json
 └── Cargo.toml
@@ -26,3 +29,10 @@ src/agent/
 - Blocking filesystem work runs through `spawn_blocking`.
 - The desktop bundle has no external Agent binary and does not require Node at runtime.
 - EPUB parsing and search stay off the UI thread in one active module worker.
+- `windows-thumbnail/` is an isolated Cargo workspace (`[workspace]` in its
+  `Cargo.toml`) so its `windows`/`zip`/`image` dependencies do not merge into
+  the main workspace.  It is built separately (`cargo build --release`) on
+  Windows CI before `tauri build`, bundled via `tauri.conf.json`
+  `bundle.resources`, and auto-registered by NSIS hooks.  Non-Windows builds
+  are unaffected; a placeholder DLL keeps `tauri build.rs` resource
+  validation happy on other platforms.

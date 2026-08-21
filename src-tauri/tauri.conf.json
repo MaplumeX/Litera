@@ -23,7 +23,9 @@
       "devCsp": "default-src 'self'; script-src 'self' 'unsafe-inline'; img-src 'self' blob: data: asset: http://asset.localhost; style-src 'self' 'unsafe-inline'; font-src 'self' blob: data:; media-src 'self' blob:; connect-src 'self' ipc: http://ipc.localhost; frame-src 'self' blob:",
       "assetProtocol": {
         "enable": true,
-        "scope": ["$APPDATA/books/**"]
+        "scope": [
+          "$APPDATA/books/**"
+        ]
       }
     }
   },
@@ -39,7 +41,9 @@
     ],
     "fileAssociations": [
       {
-        "ext": ["epub"],
+        "ext": [
+          "epub"
+        ],
         "mimeType": "application/epub+zip",
         "name": "EPUB",
         "description": "EPUB Book",
@@ -49,6 +53,14 @@
     ],
     "macOS": {
       "signingIdentity": "-"
+    },
+    "resources": [
+      "windows-thumbnail/target/release/windows_thumbnail.dll"
+    ],
+    "windows": {
+      "nsis": {
+        "installerHooks": "./windows/hooks.nsh"
+      }
     }
   }
 }

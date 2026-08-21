@@ -1,0 +1,30 @@
+[package]
+name = "windows_thumbnail"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Isolated workspace so this crate's dependencies don't merge into the main
+# src-tauri Cargo workspace.  The DLL is built separately on Windows CI:
+#   cd src-tauri/windows-thumbnail && cargo build --release
+[workspace]
+
+[lib]
+name = "windows_thumbnail"
+path = "src/mod.rs"
+crate-type = ["cdylib"]
+
+[dependencies]
+anyhow = "1"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+md-5 = "0.10"
+zip = { version = "6", default-features = false, features = ["deflate"] }
+windows = { version = "0.62", features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Gdi",
+  "Win32_System_Com",
+  "Win32_System_LibraryLoader",
+  "Win32_System_Registry",
+  "Win32_UI_Shell",
+] }
+windows-core = "0.62"

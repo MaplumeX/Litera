@@ -193,7 +193,7 @@ interface BookRecord {
   id: string;
   title: string;
   author: string;
-  coverPath: string;    // absolute path to app_data/books/<id>/cover.png
+  coverPath: string;    // absolute path to app_data/books/<id>/cover.jpg (new) or cover.png (legacy)
   filePath: string;     // absolute path to app_data/books/<id>/book.epub
   importedAt: string;   // ISO 8601 (RFC3339)
   lastFraction?: number;
@@ -267,7 +267,7 @@ interface AnnotationsFile {
 ├── library.json         # { schemaVersion: 1, books: BookRecord[] }
 ├── books/<bookId>/
 │   ├── book.epub
-│   ├── cover.png
+│   ├── cover.jpg          # compressed JPEG (max edge 512px, q85); legacy books may have cover.png
 │   ├── annotations.json # optional; bookmarks + highlights snapshot
 │   ├── .imports/        # uncommitted exact import bytes
 │   └── .transactions/   # crash-recovery journals (temporary)
@@ -286,6 +286,8 @@ interface AnnotationsFile {
 Do not filter `book.id != incoming_id` when matching `contentHash`. That made same-path unchanged look like `overwrite` and popped a replace dialog on every OS reopen of the same file.
 
 `save_book_metadata` writes `contentHash` from the staged bytes. An overwrite must keep `lastFraction`, `settings`, `lastOpenedAt`, and `lastReaderMode`. Same-path unchanged is a no-op on `library.json` and the committed EPUB. Overwrite also leaves `books/<id>/annotations.json` in place.
+
+**Cover compression**: `save_book_metadata` compresses incoming `cover_bytes` before writing — decode with the `image` crate, downscale so the long edge ≤ 512px (never upscale), re-encode as JPEG quality 85, and write to `cover.jpg` (not `cover.png`). On any decode/encode failure, fall back to the original bytes so a broken cover never blocks an import. `MAX_COVER_BYTES` validates the raw input before compression. Legacy books with `cover.png` are not migrated; validation and transaction rollback accept both extensions. Frontend `convertFileSrc(coverPath)` works with any extension.
 
 **Annotations**: `get_annotations` / `save_annotations` read and replace `books/<bookId>/annotations.json` under the `LibraryStore` gate. Missing file → `{ schemaVersion: 1, bookmarks: [], highlights: [] }`, not corrupt. Invalid JSON / unknown fields / unsupported `schemaVersion` → `StorageCorrupt`. `save_annotations` is a full snapshot replace (same contract as `settings`). Validate unique ids, non-empty `epubcfi(...)` locators, bookmark `fraction` in `0..=1`, and excerpt/label byte caps. Frontend must not `save_annotations` until `get_annotations` for that book succeeded — a failed load must not be treated as empty and written back. Cap highlight excerpts to the same UTF-8 byte limit on the client before save. Do not add annotation fields to `BookRecord`. Do not add WebView `fs` permission.
 
@@ -771,7 +773,7 @@ interface CustomProviderEntry {
 
 - Every `library.json` read/modify/write and every related file transition is inside the shared `LibraryStore` gate.
 - `library.json` writes use a same-directory temporary file, flush + `sync_all`, atomic persist, and parent-directory sync. Post-persist failures restore the prior complete bytes.
-- Stored `filePath` must equal `<appData>/books/<bookId>/book.epub`; non-empty `coverPath` must equal `<appData>/books/<bookId>/cover.png`. Commands derive operational paths again from the trusted root and never follow stored paths.
+- Stored `filePath` must equal `<appData>/books/<bookId>/book.epub`; non-empty `coverPath` must equal `<appData>/books/<bookId>/cover.jpg` or `<appData>/books/<bookId>/cover.png` (legacy). Commands derive operational paths again from the trusted root and never follow stored paths.
 - `books`, `.trash`, `sessions`, book directories, `.imports`, and `.transactions` must be real directories, not symlinks. EPUB/cover/transaction files must be regular files. Fresh initialization and legacy reset both create the real `sessions` root before agent use.
 - Delete revalidates `.trash` immediately before renaming the book directory into it, then commits metadata. A write failure renames it back; startup also restores an interrupted pre-commit staged deletion. Committed trash is retained for an explicit future retention policy.
 - Startup moves an unregistered real book directory (for example, a crash during first import before `library.json` commit) into `.trash/orphan-*`; it rejects unregistered files and symlinks instead of following them.
