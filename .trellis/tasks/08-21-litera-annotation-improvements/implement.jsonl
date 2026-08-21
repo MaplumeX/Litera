@@ -1,0 +1,12 @@
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend layer index and pre-development checklist"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Annotation drawer chrome, selection toolbar, do not remount ReaderView"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "Process-only drawer flags; annotations snapshot in App"}
+{"file": ".trellis/spec/frontend/i18n.md", "reason": "New editor / color / note strings"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "HighlightRecord must match Rust serde"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "annotations.json schemaVersion 1; optional fields without library bump"}
+{"file": ".trellis/spec/backend/tauri-commands.md", "reason": "get/save_annotations full-replace contract and validation"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Missing vs corrupt annotations file"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "list_annotations read-only payload and bookCall gate"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "color/note must stay aligned across Rust, TS, paint, and agent"}
+{"file": ".trellis/tasks/archive/2026-08/08-14-reader-annotate-and-progress/research/foliate-annotations.md", "reason": "show-annotation, draw-annotation, overlay pointer-events"}
+{"file": ".trellis/tasks/archive/2026-08/08-14-reader-annotate-and-progress/research/annotation-persistence.md", "reason": "deny_unknown_fields and per-book file layout"}
