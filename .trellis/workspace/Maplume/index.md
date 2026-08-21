@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 85
+- **Total Sessions**: 86
 - **Last Active**: 2026-08-21
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1952 | Active |
+| `journal-1.md` | ~1975 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 86 | 2026-08-21 | Publish Litera 0.2.5 | `9ac4927`, `6344147`, `38c42d0` | `main` |
 | 85 | 2026-08-21 | Fix phantom scrollbar in footnote popup | `d1e168b` | `main` |
 | 84 | 2026-08-21 | Windows EPUB thumbnail provider + cover compression | `7dec1af` | `macabre-alpacka` |
 | 83 | 2026-08-21 | Phase B cover compression: check + rollback fix | `20311aa` | `macabre-alpacka` |

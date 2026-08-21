@@ -1950,3 +1950,26 @@ Diagnosed why the footnote popup always showed a scrollbar: content height was m
 ### Status
 
 [OK] **Completed**
+
+
+## Session 86: Publish Litera 0.2.5
+
+**Date**: 2026-08-21
+**Task**: Publish Litera 0.2.5
+**Branch**: `main`
+
+### Summary
+
+Bumped to 0.2.5, wrote changelog, and shipped the GitHub release after two CI fixes: Windows thumbnail DLL moved to tauri.windows.conf.json so non-Windows cargo test no longer requires the file, and windows 0.62 compile errors (Win32_Security + FOLDERID GUID) were fixed. All three platform jobs succeeded; draft notes filled; release published with AppImage, deb, dmg, and NSIS exe.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9ac4927` | (see git log) |
+| `6344147` | (see git log) |
+| `38c42d0` | (see git log) |
+
+### Status
+
+[OK] **Completed**
