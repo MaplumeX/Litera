@@ -5,13 +5,16 @@
 ## State ownership
 
 - Rust owns durable library metadata, preferences, annotations, Agent config,
-  and Pi v3 session files. Per-book last reader/Agent mode is `BookRecord.lastReaderMode`.
+  and Pi v3 session files. Per-book last reader/Agent mode is
+  `BookRecord.lastReaderMode`. Per-book chrome layout is
+  `BookRecord.lastLayout` (`chatCollapsed`, `bookCollapsed`,
+  `sessionRailOpen`).
 - React owns route/layout/form state and the reducer projection used by chat UI.
   App default mode (`litera.defaultReaderMode`) and pane widths live in `localStorage`.
   TTS rate/voice live in `localStorage` (`litera.ttsRate` / `litera.ttsVoice`);
   playing/paused is process-only and must not be persisted.
-  `chatCollapsed`, `bookCollapsed`, `sessionRailOpen`, `tocVisible`, and
-  `annotationsVisible` are process-only.
+  `tocVisible` and `annotationsVisible` are process-only. Do not persist them.
+  Switching Reader ↔ Agent must not reset `lastLayout` flags.
 - `LiteraAgentRuntime` owns the active book worker, model stream, session leaf,
   and monotonically increasing local event version.
 - The EPUB worker owns extracted chapter text and search indexes for the currently
@@ -63,10 +66,11 @@ locators, and do not keep a second reader-location store in chat state.
 ## Durable writes
 
 Library/preferences/annotation mutations go through Tauri commands. Reading
-position, typography settings, and `lastReaderMode` are debounced but flush on
-navigation/unmount. Changing the Settings default mode must not call
-`update_reading_state`. Pi session appends include the expected leaf id; stale
-writers fail rather than overwrite a new branch.
+position, typography settings, `lastReaderMode`, and `lastLayout` are
+debounced but flush on navigation/unmount. Changing the Settings default mode
+must not call `update_reading_state`. Pane widths stay in `localStorage`; do
+not send them on this command. Pi session appends include the expected leaf
+id; stale writers fail rather than overwrite a new branch.
 
 ## Configuration
 

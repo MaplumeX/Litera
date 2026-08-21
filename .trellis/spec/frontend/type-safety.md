@@ -36,6 +36,8 @@ export interface BookRecord {
   settings?: ReadingSettings;
   lastOpenedAt?: string;
   contentHash?: string;
+  lastReaderMode?: "reader" | "agent";
+  lastLayout?: ReaderLayout;
 }
 
 // books/<id>/annotations.json — not fields on BookRecord
