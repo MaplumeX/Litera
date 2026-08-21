@@ -68,3 +68,25 @@ Persisted chat pane, Agent book pane, and session-rail open state per book as la
 ### Status
 
 [OK] **Completed**
+
+## Session 90: Highlight colors, notes, and in-page editor
+
+**Date**: 2026-08-21
+**Task**: Highlight colors, notes, and in-page editor
+**Branch**: `feat/litera-annotation-improvements`
+
+### Summary
+
+Shipped multi-color highlights, notes, and click-to-edit on painted marks. One-click highlight uses last-used color (process-only); list_annotations now returns color and optional note, still read-only. Specs record the optional annotations.json fields and the pointerup-vs-show-annotation paging gotcha.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `126f5da` | (see git log) |
+| `46ac9cb` | (see git log) |
+| `7f745ea` | (see git log) |
+
+### Status
+
+[OK] **Completed**

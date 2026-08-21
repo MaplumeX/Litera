@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~70 | Active |
+| `journal-2.md` | ~92 | Active |
 | `journal-1.md` | ~1996 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 90 | 2026-08-21 | Highlight colors, notes, and in-page editor | `126f5da`, `46ac9cb`, `7f745ea` | `feat/litera-annotation-improvements` |
 | 90 | 2026-08-21 | Persist per-book reader layout | `820fd41` | `fix/reader-ai-dialog-open-state` |
 | 89 | 2026-08-21 | Agent 用户消息目录 | `5016841` | `feat/litera-agent-jump-user-messages` |
 | 88 | 2026-08-21 | Remove minimal thinking level from chat input | `4bd19fb` | `main` |
