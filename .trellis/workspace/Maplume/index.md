@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 84
+- **Total Sessions**: 85
 - **Last Active**: 2026-08-21
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1931 | Active |
+| `journal-1.md` | ~1952 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 85 | 2026-08-21 | Fix phantom scrollbar in footnote popup | `d1e168b` | `main` |
 | 84 | 2026-08-21 | Windows EPUB thumbnail provider + cover compression | `7dec1af` | `macabre-alpacka` |
 | 83 | 2026-08-21 | Phase B cover compression: check + rollback fix | `20311aa` | `macabre-alpacka` |
 | 82 | 2026-08-20 | 为 agent 压缩触发添加 UI 指示 | `7018a53` | `tired-ostrich` |

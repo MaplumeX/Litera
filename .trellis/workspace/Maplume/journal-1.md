@@ -1929,3 +1929,24 @@ Implemented Windows Shell IThumbnailProvider DLL (isolated cdylib crate at src-t
 ### Status
 
 [OK] **Completed**
+
+
+## Session 85: Fix phantom scrollbar in footnote popup
+
+**Date**: 2026-08-21
+**Task**: Fix phantom scrollbar in footnote popup
+**Branch**: `main`
+
+### Summary
+
+Diagnosed why the footnote popup always showed a scrollbar: content height was measured via Math.round, which could round a fractional height down (e.g. 143.4 -> 143), leaving the inner scrolled container (overflow: auto) a fraction of a pixel taller than the fixed popup. Changed to Math.ceil in ReaderView.tsx relocate handler so the popup is always at least as tall as the content. All FootnotePopup tests pass; tsc clean. Archived 08-19-reader-footnotes.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d1e168b` | (see git log) |
+
+### Status
+
+[OK] **Completed**
