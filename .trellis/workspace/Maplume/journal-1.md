@@ -1887,3 +1887,45 @@ Added a live typography preview area at the top of the Settings dialog typograph
 ### Status
 
 [OK] **Completed**
+
+
+## Session 83: Phase B cover compression: check + rollback fix
+
+**Date**: 2026-08-21
+**Task**: Phase B cover compression: check + rollback fix
+**Branch**: `macabre-alpacka`
+
+### Summary
+
+Reviewed Phase B (cover compression) implementation. Found and fixed a rollback consistency bug: restore_import_transaction always wrote cover.png, but new books use cover.jpg — after rollback the library record would point to a dangling cover.jpg. Added cover_name field to ImportTransactionManifest so rollback restores to the correct path. Also switched validate_library_files from .exists() to symlink_metadata for consistency with the existing symlink-aware validation. All 144 Rust tests + 418 frontend tests + tsc pass.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `20311aa` | (see git log) |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 84: Windows EPUB thumbnail provider + cover compression
+
+**Date**: 2026-08-21
+**Task**: Windows EPUB thumbnail provider + cover compression
+**Branch**: `macabre-alpacka`
+
+### Summary
+
+Implemented Windows Shell IThumbnailProvider DLL (isolated cdylib crate at src-tauri/windows-thumbnail/) for .epub files, with independent thumbnail cache (partial MD5, %LOCALAPPDATA%\com.maplume.litera\thumbnails\), Litera icon overlay, HKCU registry registration, NSIS auto-register hooks, and CI DLL build step. Also implemented cover compression in save_book_metadata (Rust image crate, max edge 512px, JPEG q85, cover.jpg) with backward-compatible cover.png fallback and unit tests. DLL code cannot be compiled on Linux; needs Windows CI/manual verification. Spec updated for new crate, cover.jpg format, and build gates.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7dec1af` | (see git log) |
+
+### Status
+
+[OK] **Completed**

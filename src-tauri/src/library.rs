@@ -13,6 +13,7 @@ use tauri_plugin_dialog::DialogExt;
 use tempfile::NamedTempFile;
 
 use crate::error::{AppError, AppResult};
+use image::ImageEncoder;
 
 const SCHEMA_VERSION: u32 = 1;
 const ANNOTATIONS_SCHEMA_VERSION: u32 = 1;
@@ -23,6 +24,8 @@ const MAX_EXCERPT_BYTES: usize = 4 * 1024;
 const MAX_LABEL_BYTES: usize = 4 * 1024;
 const MAX_ANNOTATION_ID_BYTES: usize = 128;
 const MAX_COVER_BYTES: usize = 20 * 1024 * 1024;
+const COVER_MAX_EDGE: u32 = 512;
+const COVER_JPEG_QUALITY: u8 = 85;
 const FONT_SIZE_RANGE: (f64, f64) = (12.0, 32.0);
 const LINE_HEIGHT_RANGE: (f64, f64) = (1.2, 2.4);
 const CONTENT_WIDTH_RANGE: (f64, f64) = (28.0, 60.0);
@@ -288,6 +291,9 @@ struct LibraryData {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ImportTransactionManifest {
     had_cover: bool,
+    /// The file name of the existing cover (e.g. "cover.jpg" or "cover.png")
+    /// so that rollback restores it to the correct path.
+    cover_name: Option<String>,
 }
 
 impl LibraryData {
@@ -558,8 +564,10 @@ impl LibraryStore {
 
         let book_dir = self.book_dir(book_id)?;
         let epub_path = book_dir.join("book.epub");
-        let cover_path = book_dir.join("cover.png");
-        let new_cover = cover_bytes.filter(|bytes| !bytes.is_empty());
+        let cover_path = book_dir.join("cover.jpg");
+        let new_cover = cover_bytes
+            .filter(|bytes| !bytes.is_empty())
+            .map(|bytes| compress_cover(&bytes));
         let old_cover = read_optional_regular_file(&cover_path, "existing cover")?;
 
         let pending = self.pending_import_path(book_id, import_id)?;
@@ -1431,8 +1439,13 @@ fn validate_library_records(root: &Path, data: &LibraryData) -> AppResult<()> {
                 book.id
             )));
         }
-        let expected_cover = book_dir.join("cover.png");
-        if !book.cover_path.is_empty() && Path::new(&book.cover_path) != expected_cover {
+        let expected_covers = [
+            book_dir.join("cover.jpg"),
+            book_dir.join("cover.png"),
+        ];
+        if !book.cover_path.is_empty()
+            && !expected_covers.iter().any(|c| Path::new(&book.cover_path) == c)
+        {
             return Err(AppError::storage_corrupt(format!(
                 "coverPath for book {} is outside its controlled storage path",
                 book.id
@@ -1469,7 +1482,13 @@ fn validate_library_files(root: &Path, data: &LibraryData) -> AppResult<()> {
         require_real_directory(&book_dir, "stored book directory")?;
         require_regular_file(&book_dir.join("book.epub"), "stored EPUB")?;
         if !book.cover_path.is_empty() {
-            require_regular_file(&book_dir.join("cover.png"), "stored cover")?;
+            let cover_jpg = book_dir.join("cover.jpg");
+            let cover_png = book_dir.join("cover.png");
+            if fs::symlink_metadata(&cover_jpg).is_ok() {
+                require_regular_file(&cover_jpg, "stored cover")?;
+            } else {
+                require_regular_file(&cover_png, "stored cover")?;
+            }
         }
         for (name, label) in [
             (".imports", "pending import directory"),
@@ -1712,6 +1731,42 @@ fn book_id_for_source(source_path: &Path) -> String {
     format!("{:x}", hasher.finish())
 }
 
+fn compress_cover(raw: &[u8]) -> Vec<u8> {
+    match image::load_from_memory(raw) {
+        Ok(img) => {
+            // Only downscale — never upscale a small cover.
+            let need_resize = img.width() > COVER_MAX_EDGE || img.height() > COVER_MAX_EDGE;
+            let processed = if need_resize {
+                img.thumbnail(COVER_MAX_EDGE, COVER_MAX_EDGE)
+            } else {
+                img
+            };
+            let rgb = processed.to_rgb8();
+            let mut buf = Vec::new();
+            let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(
+                &mut buf,
+                COVER_JPEG_QUALITY,
+            );
+            match encoder.write_image(
+                &rgb,
+                rgb.width(),
+                rgb.height(),
+                image::ExtendedColorType::Rgb8,
+            ) {
+                Ok(()) => buf,
+                Err(error) => {
+                    eprintln!("[library] Cover re-encode failed, using original: {error}");
+                    raw.to_vec()
+                }
+            }
+        }
+        Err(error) => {
+            eprintln!("[library] Cover decode failed, using original: {error}");
+            raw.to_vec()
+        }
+    }
+}
+
 fn sha256_hex(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
@@ -1884,8 +1939,22 @@ fn prepare_import_transaction(book_dir: &Path, import_id: &str) -> AppResult<Pat
             "EPUB rollback",
         )?;
 
-        let cover_path = book_dir.join("cover.png");
-        let old_cover = read_optional_regular_file(&cover_path, "current cover")?;
+        let cover_jpg = book_dir.join("cover.jpg");
+        let cover_png = book_dir.join("cover.png");
+        let (old_cover, cover_name) = match read_optional_regular_file(&cover_jpg, "current cover") {
+            Ok(Some(data)) => (Some(data), Some("cover.jpg".to_string())),
+            Ok(None) => (None, None),
+            Err(_) => {
+                // cover.jpg is corrupt/non-regular — try cover.png (legacy books).
+                let png_data = read_optional_regular_file(&cover_png, "current cover")?;
+                let name = if png_data.is_some() {
+                    Some("cover.png".to_string())
+                } else {
+                    None
+                };
+                (png_data, name)
+            }
+        };
         let had_cover = old_cover.is_some();
         if let Some(old_cover) = old_cover {
             atomic_write(
@@ -1895,9 +1964,8 @@ fn prepare_import_transaction(book_dir: &Path, import_id: &str) -> AppResult<Pat
             )?;
         }
         let manifest =
-            serde_json::to_vec(&ImportTransactionManifest { had_cover }).map_err(|error| {
-                AppError::storage_io(format!("Failed to serialize import journal: {error}"))
-            })?;
+            serde_json::to_vec(&ImportTransactionManifest { had_cover, cover_name })
+                .map_err(|error| AppError::storage_io(format!("Failed to serialize import journal: {error}")))?;
         atomic_write(
             &transaction_dir.join("manifest.json"),
             &manifest,
@@ -1930,18 +1998,27 @@ fn restore_import_transaction(transaction_dir: &Path, book_dir: &Path) -> AppRes
         .map_err(|error| AppError::storage_io(format!("Failed to read EPUB rollback: {error}")))?;
     atomic_write(&book_dir.join("book.epub"), &old_epub, "restored EPUB")?;
 
-    let cover_path = book_dir.join("cover.png");
+    let cover_jpg = book_dir.join("cover.jpg");
+    let cover_png = book_dir.join("cover.png");
     if manifest.had_cover {
         let old_cover_path = transaction_dir.join("old.cover");
         require_regular_file(&old_cover_path, "cover rollback")?;
         let old_cover = fs::read(&old_cover_path).map_err(|error| {
             AppError::storage_io(format!("Failed to read cover rollback: {error}"))
         })?;
-        atomic_write(&cover_path, &old_cover, "restored cover")?;
-    } else if fs::symlink_metadata(&cover_path).is_ok() {
-        fs::remove_file(&cover_path).map_err(|error| {
-            AppError::storage_io(format!("Failed to remove uncommitted cover: {error}"))
-        })?;
+        // Remove any cover left by the failed import, then restore the backup to its
+        // original path (recorded in the manifest).
+        let _ = fs::remove_file(&cover_jpg);
+        let _ = fs::remove_file(&cover_png);
+        let restore_name = manifest.cover_name.as_deref().unwrap_or("cover.png");
+        atomic_write(&book_dir.join(restore_name), &old_cover, "restored cover")?;
+    } else {
+        let _ = fs::remove_file(&cover_jpg);
+        if fs::symlink_metadata(&cover_png).is_ok() {
+            fs::remove_file(&cover_png).map_err(|error| {
+                AppError::storage_io(format!("Failed to remove uncommitted cover: {error}"))
+            })?;
+        }
         sync_parent_directory(book_dir, "restored cover directory")?;
     }
     Ok(())
@@ -2632,7 +2709,7 @@ mod tests {
             b"version-one"
         );
         assert_eq!(
-            fs::read(book_dir.join("cover.png")).expect("old cover"),
+            fs::read(book_dir.join("cover.jpg")).expect("old cover"),
             [1, 2, 3]
         );
         let record = store.list_books().expect("old library").remove(0);
@@ -2652,7 +2729,7 @@ mod tests {
         prepare_import_transaction(&book_dir, staged_import_id(&result)).expect("prepare journal");
         atomic_write(&book_dir.join("book.epub"), b"version-two", "EPUB")
             .expect("replace epub before simulated crash");
-        atomic_write(&book_dir.join("cover.png"), &[4, 5, 6], "cover")
+        atomic_write(&book_dir.join("cover.jpg"), &[4, 5, 6], "cover")
             .expect("replace cover before simulated crash");
         drop(store);
 
@@ -2664,7 +2741,7 @@ mod tests {
             b"version-one"
         );
         assert_eq!(
-            fs::read(book_dir.join("cover.png")).expect("old cover"),
+            fs::read(book_dir.join("cover.jpg")).expect("old cover"),
             [1, 2, 3]
         );
         let record = recovered.list_books().expect("old library").remove(0);
@@ -3628,5 +3705,40 @@ mod tests {
         assert!(store.list_books().expect("list").is_empty());
         let error = store.get_annotations(&id).expect_err("book gone");
         assert_eq!(error.code, AppErrorCode::BookNotFound);
+    }
+
+    fn make_png_bytes(width: u32, height: u32, rgba: [u8; 4]) -> Vec<u8> {
+        let img = image::RgbaImage::from_pixel(width, height, image::Rgba(rgba));
+        let mut buf = Vec::new();
+        image::DynamicImage::ImageRgba8(img)
+            .write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Png)
+            .expect("encode test png");
+        buf
+    }
+
+    #[test]
+    fn compress_cover_does_not_upscale_small_images() {
+        let raw = make_png_bytes(100, 80, [255, 0, 0, 255]);
+        let compressed = compress_cover(&raw);
+        let decoded = image::load_from_memory(&compressed).expect("decode compressed");
+        assert!(decoded.width() <= 100);
+        assert!(decoded.height() <= 80);
+    }
+
+    #[test]
+    fn compress_cover_scales_down_large_images() {
+        let raw = make_png_bytes(2000, 3000, [0, 0, 255, 255]);
+        let compressed = compress_cover(&raw);
+        let decoded = image::load_from_memory(&compressed).expect("decode compressed");
+        assert!(decoded.width() <= COVER_MAX_EDGE);
+        assert!(decoded.height() <= COVER_MAX_EDGE);
+        assert_eq!(decoded.color().has_alpha(), false);
+    }
+
+    #[test]
+    fn compress_cover_returns_original_on_invalid_bytes() {
+        let raw = vec![0u8; 64];
+        let compressed = compress_cover(&raw);
+        assert_eq!(compressed, raw);
     }
 }
