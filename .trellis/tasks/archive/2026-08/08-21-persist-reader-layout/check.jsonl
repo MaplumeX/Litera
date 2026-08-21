@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "Layout flags must become per-book durable state; widths and drawers must stay out of this change."}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Frontend quality bar for App chrome and persistence flush behavior."}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "New ReaderLayout / lastLayout fields must match Rust serde exactly."}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "Partial update independence, strict validation, no schemaVersion bump."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Backend quality bar for library command changes."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Catch missing mapping between BookRecord, open context, and App restore."}

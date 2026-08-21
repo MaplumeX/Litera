@@ -1,0 +1,28 @@
+{
+  "id": "persist-reader-layout",
+  "name": "persist-reader-layout",
+  "title": "Persist per-book reader layout panel states",
+  "description": "",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "Maplume",
+  "assignee": "Maplume",
+  "createdAt": "2026-08-21",
+  "completedAt": "2026-08-21",
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "description": "Persist per-book chat/book/session-rail open state via lastLayout on BookRecord."
+  }
+}

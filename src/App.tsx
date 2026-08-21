@@ -70,6 +70,7 @@ import type {
   BookmarkRecord,
   BookRecord,
   HighlightRecord,
+  ReaderLayout,
   ReadingSettings,
 } from "@/types/library";
 import { useDebouncedCallback } from "@/lib/use-debounced-callback";
@@ -95,6 +96,7 @@ import {
   resolveReaderMode,
   type ReaderMode,
 } from "@/lib/reader-mode";
+import { isReaderLayout, resolveReaderLayout } from "@/lib/reader-layout";
 import { chapterNavAt } from "@/lib/toc-items";
 import { useReaderTts } from "@/lib/use-reader-tts";
 
@@ -250,6 +252,14 @@ function App() {
     reportPersistenceError,
   );
 
+  const persistLayout = useDebouncedCallback(
+    async (bookId: string, lastLayout: ReaderLayout) => {
+      await invoke("update_reading_state", { bookId, lastLayout });
+    },
+    500,
+    reportPersistenceError,
+  );
+
   const flushReadingState = useCallback(
     async () => {
       try {
@@ -257,6 +267,7 @@ function App() {
           persistFraction.flush(),
           persistSettings.flush(),
           persistReaderMode.flush(),
+          persistLayout.flush(),
           flushPreferences(),
         ]);
       } catch (error) {
@@ -264,7 +275,23 @@ function App() {
         throw error;
       }
     },
-    [persistFraction, persistSettings, persistReaderMode, reportPersistenceError, flushPreferences],
+    [
+      persistFraction,
+      persistSettings,
+      persistReaderMode,
+      persistLayout,
+      reportPersistenceError,
+      flushPreferences,
+    ],
+  );
+
+  const schedulePersistLayout = useCallback(
+    (lastLayout: ReaderLayout) => {
+      const bookId = fileData?.bookId ?? currentBook?.id;
+      if (!bookId) return;
+      persistLayout.schedule(bookId, lastLayout);
+    },
+    [currentBook?.id, fileData?.bookId, persistLayout],
   );
 
   useEffect(() => {
@@ -432,11 +459,13 @@ function App() {
         lastReaderMode: isReaderMode(context.lastReaderMode)
           ? context.lastReaderMode
           : undefined,
+        lastLayout: isReaderLayout(context.lastLayout) ? context.lastLayout : undefined,
       });
       setReaderMode(resolveReaderMode(context.lastReaderMode));
-      setChatCollapsed(true);
-      setSessionRailOpen(true);
-      setBookCollapsed(false);
+      const layout = resolveReaderLayout(context.lastLayout);
+      setChatCollapsed(layout.chatCollapsed);
+      setSessionRailOpen(layout.sessionRailOpen);
+      setBookCollapsed(layout.bookCollapsed);
       setAnnotations(emptyAnnotations());
       annotationsWritableRef.current = false;
 
@@ -516,6 +545,11 @@ function App() {
     if (chatCollapsed) {
       pendingCaptureRef.current = capture;
       setChatCollapsed(false);
+      schedulePersistLayout({
+        chatCollapsed: false,
+        bookCollapsed,
+        sessionRailOpen,
+      });
       return;
     }
     if (chatRef.current) {
@@ -523,15 +557,11 @@ function App() {
     } else {
       pendingCaptureRef.current = capture;
     }
-  }, [bookCollapsed, chatCollapsed, readerMode]);
+  }, [bookCollapsed, chatCollapsed, readerMode, schedulePersistLayout, sessionRailOpen]);
 
   const handleReaderModeChange = useCallback(
     (mode: ReaderMode) => {
       setReaderMode(mode);
-      if (mode === "agent") {
-        setSessionRailOpen(true);
-        setBookCollapsed(false);
-      }
       setCurrentBook((current) => (current ? { ...current, lastReaderMode: mode } : current));
       const bookId = fileData?.bookId ?? currentBook?.id;
       if (bookId) persistReaderMode.schedule(bookId, mode);
@@ -800,7 +830,14 @@ function App() {
           const next = !tocVisible;
           setTocVisible(next);
           setAnnotationsVisible(false);
-          if (next) setBookCollapsed(false);
+          if (next && bookCollapsed) {
+            setBookCollapsed(false);
+            schedulePersistLayout({
+              chatCollapsed,
+              bookCollapsed: false,
+              sessionRailOpen,
+            });
+          }
         }}
         aria-label={t("reader.toc")}
       >
@@ -813,7 +850,14 @@ function App() {
           const next = !annotationsVisible;
           setAnnotationsVisible(next);
           setTocVisible(false);
-          if (next) setBookCollapsed(false);
+          if (next && bookCollapsed) {
+            setBookCollapsed(false);
+            schedulePersistLayout({
+              chatCollapsed,
+              bookCollapsed: false,
+              sessionRailOpen,
+            });
+          }
         }}
         aria-label={t("reader.annotations")}
       >
@@ -925,7 +969,15 @@ function App() {
             <Button
               size="icon-sm"
               variant={chatCollapsed ? "ghost" : "secondary"}
-              onClick={() => setChatCollapsed((v) => !v)}
+              onClick={() => {
+                const next = !chatCollapsed;
+                setChatCollapsed(next);
+                schedulePersistLayout({
+                  chatCollapsed: next,
+                  bookCollapsed,
+                  sessionRailOpen,
+                });
+              }}
               aria-label={chatCollapsed ? t("reader.showChat") : t("reader.hideChat")}
             >
               <MessageSquare />
@@ -934,7 +986,15 @@ function App() {
             <Button
               size="icon-sm"
               variant={bookCollapsed ? "ghost" : "secondary"}
-              onClick={() => setBookCollapsed((v) => !v)}
+              onClick={() => {
+                const next = !bookCollapsed;
+                setBookCollapsed(next);
+                schedulePersistLayout({
+                  chatCollapsed,
+                  bookCollapsed: next,
+                  sessionRailOpen,
+                });
+              }}
               aria-label={bookCollapsed ? t("reader.showBook") : t("reader.hideBook")}
             >
               <BookText />
@@ -1084,7 +1144,14 @@ function App() {
             bookId={fileData?.bookId ?? ""}
             variant={readerMode === "agent" ? "workspace" : "docked"}
             sessionRailOpen={sessionRailOpen}
-            onSessionRailOpenChange={setSessionRailOpen}
+            onSessionRailOpenChange={(open) => {
+              setSessionRailOpen(open);
+              schedulePersistLayout({
+                chatCollapsed,
+                bookCollapsed,
+                sessionRailOpen: open,
+              });
+            }}
           />
         </div>
         {!sideCollapsed && (

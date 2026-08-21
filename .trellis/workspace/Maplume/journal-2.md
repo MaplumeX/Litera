@@ -47,3 +47,24 @@ Removed 'minimal' from THINKING_LEVELS in ChatInput.tsx; thinking levels now off
 ### Status
 
 [OK] **Completed**
+
+
+## Session 90: Persist per-book reader layout
+
+**Date**: 2026-08-21
+**Task**: Persist per-book reader layout
+**Branch**: `fix/reader-ai-dialog-open-state`
+
+### Summary
+
+Persisted chat pane, Agent book pane, and session-rail open state per book as lastLayout on BookRecord via update_reading_state. Restore on open; do not reset on Reader/Agent switch. Specs updated for the shelf contract.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `820fd41` | (see git log) |
+
+### Status
+
+[OK] **Completed**

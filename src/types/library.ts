@@ -13,6 +13,13 @@ export interface ReadingSettings {
   firstLineIndent?: number;
 }
 
+/** Per-book reader chrome open/closed snapshot. */
+export interface ReaderLayout {
+  chatCollapsed: boolean;
+  bookCollapsed: boolean;
+  sessionRailOpen: boolean;
+}
+
 /** A book record stored in library.json. */
 export interface BookRecord {
   id: string;
@@ -26,6 +33,7 @@ export interface BookRecord {
   lastOpenedAt?: string;
   contentHash?: string;
   lastReaderMode?: "reader" | "agent";
+  lastLayout?: ReaderLayout;
 }
 
 export type ImportStatus = "new" | "overwrite" | "duplicate";
@@ -48,6 +56,7 @@ export interface BookOpenContext {
   lastFraction?: number;
   settings?: ReadingSettings;
   lastReaderMode?: "reader" | "agent";
+  lastLayout?: ReaderLayout;
 }
 
 /** A page bookmark stored in books/<id>/annotations.json — not on BookRecord. */

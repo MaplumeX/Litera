@@ -48,9 +48,14 @@ vi.mock("@/lib/use-book-import", () => ({
 
 vi.mock("@/components/LibraryView", () => ({
   LibraryView: ({ onOpenBook }: { onOpenBook: (id: string) => void }) => (
-    <button type="button" onClick={() => onOpenBook("book1")}>
-      open-book
-    </button>
+    <>
+      <button type="button" onClick={() => onOpenBook("book1")}>
+        open-book
+      </button>
+      <button type="button" onClick={() => onOpenBook("book2")}>
+        open-book-2
+      </button>
+    </>
   ),
 }));
 
@@ -155,6 +160,14 @@ const openContext: BookOpenContext = {
   lastFraction: 0.1,
 };
 
+const openContextB: BookOpenContext = {
+  name: "book-b.epub",
+  title: "另一本书",
+  bookId: "book2",
+  contentVersion: "v1",
+  lastFraction: 0.2,
+};
+
 const emptyFile: AnnotationsFile = {
   schemaVersion: 1,
   bookmarks: [],
@@ -162,8 +175,12 @@ const emptyFile: AnnotationsFile = {
 };
 
 function setupInvoke() {
-  invokeMock.mockImplementation((cmd: string) => {
-    if (cmd === "get_book_open_context") return Promise.resolve({ ...openContext });
+  invokeMock.mockImplementation((cmd: string, args?: unknown) => {
+    if (cmd === "get_book_open_context") {
+      const bookId = (args as { bookId?: string } | undefined)?.bookId;
+      if (bookId === "book2") return Promise.resolve({ ...openContextB });
+      return Promise.resolve({ ...openContext });
+    }
     if (cmd === "open_book_bytes") return Promise.resolve(new ArrayBuffer(8));
     if (cmd === "get_annotations") return Promise.resolve(emptyFile);
     if (cmd === "save_annotations") return Promise.resolve(undefined);
@@ -191,6 +208,8 @@ beforeEach(() => {
   vi.mocked(readerHandle.goToTocItem).mockClear();
   vi.mocked(readerHandle.goToFraction).mockClear();
   openContext.lastReaderMode = undefined;
+  openContext.lastLayout = undefined;
+  openContextB.lastLayout = undefined;
   bridgeState = {
     ...createAgentState("book1"),
     status: "bookReady",
@@ -419,17 +438,97 @@ describe("reader / agent mode", () => {
     expect(screen.getByLabelText("关闭目录")).toBeTruthy();
   });
 
-  it("re-entering agent mode opens the list and the book", async () => {
+  it("keeps collapsed book and session rail when switching modes", async () => {
     const screen = await openReader();
     fireEvent.click(screen.getByLabelText("切换到 Agent 模式"));
     fireEvent.click(screen.getByLabelText("会话列表"));
     fireEvent.click(screen.getByLabelText("隐藏书籍"));
     fireEvent.click(screen.getByLabelText("切换到阅读模式"));
     fireEvent.click(screen.getByLabelText("切换到 Agent 模式"));
-    expect(screen.getByLabelText("会话列表")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "新建会话" })).toBeNull();
+    expect(screen.getByLabelText("显示书籍")).toBeTruthy();
+    expect(screen.getByTestId("reader-shell").style.gridTemplateColumns).toBe("1fr 0px");
+  });
+
+  it("restores the saved per-book layout on open", async () => {
+    openContext.lastLayout = {
+      chatCollapsed: false,
+      bookCollapsed: true,
+      sessionRailOpen: false,
+    };
+    const screen = await openReader();
+    expect(screen.getByLabelText("隐藏对话")).toBeTruthy();
+    fireEvent.click(screen.getByLabelText("切换到 Agent 模式"));
+    expect(screen.getByLabelText("显示书籍")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "新建会话" })).toBeNull();
+  });
+
+  it("does not inherit another book's layout", async () => {
+    openContext.lastLayout = {
+      chatCollapsed: false,
+      bookCollapsed: true,
+      sessionRailOpen: false,
+    };
+    const screen = await openReader();
+    expect(screen.getByLabelText("隐藏对话")).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText("返回书库"));
+    });
+    await waitFor(() => {
+      expect(screen.getByText("open-book-2")).toBeTruthy();
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByText("open-book-2"));
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("reader-view")).toBeTruthy();
+    });
+    expect(screen.getByLabelText("显示对话")).toBeTruthy();
+  });
+
+  it("uses first-open layout defaults when the book has no lastLayout", async () => {
+    const screen = await openReader();
+    expect(screen.getByLabelText("显示对话")).toBeTruthy();
+    fireEvent.click(screen.getByLabelText("切换到 Agent 模式"));
     expect(screen.getByLabelText("隐藏书籍")).toBeTruthy();
     expect(screen.getByRole("button", { name: "新建会话" })).toBeTruthy();
-    expect(screen.getByTestId("reader-shell").style.gridTemplateColumns).toBe("1fr 38%");
+  });
+
+  it("persists lastLayout without rewriting other reading state", async () => {
+    const screen = await openReader();
+    fireEvent.click(screen.getByLabelText("显示对话"));
+    await waitFor(
+      () => {
+        expect(invokeMock).toHaveBeenCalledWith(
+          "update_reading_state",
+          expect.objectContaining({
+            bookId: "book1",
+            lastLayout: {
+              chatCollapsed: false,
+              bookCollapsed: false,
+              sessionRailOpen: true,
+            },
+          }),
+        );
+      },
+      { timeout: 1500 },
+    );
+    const layoutCalls = invokeMock.mock.calls.filter(
+      (call) =>
+        call[0] === "update_reading_state" &&
+        Boolean((call[1] as { lastLayout?: unknown } | undefined)?.lastLayout),
+    );
+    expect(layoutCalls.length).toBeGreaterThan(0);
+    for (const call of layoutCalls) {
+      const args = call[1] as {
+        lastFraction?: number;
+        settings?: unknown;
+        lastReaderMode?: string;
+      };
+      expect(args.lastFraction).toBeUndefined();
+      expect(args.settings).toBeUndefined();
+      expect(args.lastReaderMode).toBeUndefined();
+    }
   });
 });
 

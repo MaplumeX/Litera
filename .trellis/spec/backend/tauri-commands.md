@@ -165,7 +165,7 @@ async fn open_book_bytes(app: AppHandle, store: State<'_, LibraryStore>, book_id
 #[tauri::command]
 async fn delete_book(store: State<'_, LibraryStore>, book_id: String) -> AppResult<()>
 
-// Update reading position/settings/mode (relocate debounce + settings debounce + mode toggle)
+// Update reading position/settings/mode/layout (relocate debounce + settings debounce + mode toggle + layout toggle)
 #[tauri::command]
 async fn update_reading_state(
     store: State<'_, LibraryStore>,
@@ -173,6 +173,7 @@ async fn update_reading_state(
     last_fraction: Option<f64>,
     settings: Option<ReadingSettings>,
     last_reader_mode: Option<String>,
+    last_layout: Option<ReaderLayout>,
 ) -> AppResult<()>
 
 // Per-book bookmarks + highlights (not BookRecord / library.json)
@@ -201,6 +202,13 @@ interface BookRecord {
   lastOpenedAt?: string;  // RFC3339; missing = never opened
   contentHash?: string;   // SHA-256 hex of committed EPUB bytes
   lastReaderMode?: "reader" | "agent";  // missing = no memory; do not put on settings
+  lastLayout?: ReaderLayout;            // missing = no memory; do not put on settings
+}
+
+interface ReaderLayout {
+  chatCollapsed: boolean;
+  bookCollapsed: boolean;
+  sessionRailOpen: boolean;
 }
 
 interface ReadingSettings {
@@ -233,6 +241,7 @@ interface BookOpenContext {
   lastFraction?: number;
   settings?: ReadingSettings;
   lastReaderMode?: "reader" | "agent";
+  lastLayout?: ReaderLayout;
 }
 
 interface BookmarkRecord {
@@ -318,6 +327,7 @@ async fn update_reading_state(
     last_fraction: Option<f64>,
     settings: Option<ReadingSettings>,
     last_reader_mode: Option<String>,
+    last_layout: Option<ReaderLayout>,
 ) -> AppResult<()>
 
 // BookOpenContext / BookRecord include:
@@ -326,15 +336,15 @@ async fn update_reading_state(
 
 ### 3. Contracts
 
-- Request: `lastReaderMode` is omitted, `"reader"`, or `"agent"`. Independent of `lastFraction` and `settings`. At least one of the three Options is required.
+- Request: `lastReaderMode` is omitted, `"reader"`, or `"agent"`. Independent of `lastFraction`, `settings`, and `lastLayout`. At least one of the four Options is required.
 - Response: `BookOpenContext.lastReaderMode` is omitted when the book has no memory.
 - Environment: none. App default is WebView-only: `localStorage["litera.defaultReaderMode"]`.
-- Overwrite import keeps `lastReaderMode` with `lastFraction` / `settings` / `lastOpenedAt`.
+- Overwrite import keeps `lastReaderMode` with `lastFraction` / `settings` / `lastOpenedAt` / `lastLayout`.
 - Changing the Settings default must not call this command and must not patch existing books.
 
 ### 4. Validation & Error Matrix
 
-- all three Options `None` → `InvalidInput` ("At least one reading state field is required")
+- all four Options `None` → `InvalidInput` ("At least one reading state field is required")
 - `lastReaderMode` present and not `"reader"` / `"agent"` → `InvalidInput` on write
 - stored `lastReaderMode` present and not `"reader"` / `"agent"` → `StorageCorrupt` on read
 - missing field on old `library.json` → valid (`None`)
@@ -365,6 +375,85 @@ await invoke("update_reading_state", { bookId, settings: { lastReaderMode: "agen
 ```ts
 localStorage.setItem("litera.defaultReaderMode", "agent");
 await invoke("update_reading_state", { bookId, lastReaderMode: "agent" });
+```
+
+## Scenario: lastLayout
+
+### 1. Scope / Trigger
+
+Cross-layer reading-state field. The WebView owns reader chrome open/closed flags; Rust persists one per-book snapshot on the shelf record. Pane widths and TOC/annotation drawers must not go through this field.
+
+### 2. Signatures
+
+```rust
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ReaderLayout {
+    chat_collapsed: bool,
+    book_collapsed: bool,
+    session_rail_open: bool,
+}
+
+async fn update_reading_state(
+    store: State<'_, LibraryStore>,
+    book_id: String,
+    last_fraction: Option<f64>,
+    settings: Option<ReadingSettings>,
+    last_reader_mode: Option<String>,
+    last_layout: Option<ReaderLayout>,
+) -> AppResult<()>
+
+// BookOpenContext / BookRecord include:
+// last_layout: Option<ReaderLayout>  // wire name lastLayout
+```
+
+### 3. Contracts
+
+- Request: `lastLayout` is omitted or `{ chatCollapsed, bookCollapsed, sessionRailOpen }` all bools. Independent of fraction / settings / mode. `Some` **replaces** the whole snapshot.
+- Response: `BookOpenContext.lastLayout` is omitted when the book has no memory. Frontend `resolveReaderLayout` then uses `{ chatCollapsed: true, bookCollapsed: false, sessionRailOpen: true }`.
+- Environment: none. Do not use `localStorage` or `preferences.json` for these three flags. Widths stay `litera.chat-panel-width` / `litera.agent-book-width`.
+- Overwrite import keeps `lastLayout` with the other shelf fields.
+- Switching Reader ↔ Agent must not reset the three flags. Opening TOC/标注 may expand the book; persist the resulting snapshot.
+
+### 4. Validation & Error Matrix
+
+- all four Options `None` → `InvalidInput` ("At least one reading state field is required")
+- write payload not a `ReaderLayout` object (IPC/serde) → command deserialize failure
+- stored `lastLayout` not an object, missing/extra key, or non-bool → `StorageCorrupt` on read
+- missing field on old `library.json` → valid (`None`)
+- unknown book → `BookNotFound`
+
+### 5. Good/Base/Bad Cases
+
+- Good: `{ lastLayout: { chatCollapsed: false, bookCollapsed: true, sessionRailOpen: false } }` writes only layout; fraction, settings, and mode stay.
+- Base: omitted field on an old book; open uses first-open defaults above.
+- Bad: stuffing the flags into `ReadingSettings`, a global `localStorage` key, or resetting them when switching to Agent.
+
+### 6. Tests Required
+
+- Missing field loads and is omitted from JSON; write/read round-trip; `BookOpenContext` returns the value.
+- Layout update does not clobber fraction / settings / mode; those updates do not clobber layout.
+- Invalid stored object (non-object, missing key, extra key, non-bool) is `StorageCorrupt`.
+- Overwrite import keeps `lastLayout`.
+- Frontend: restore on reopen; book B does not inherit book A; mode switch does not expand a collapsed book/rail; invoke sends `lastLayout` only.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+```ts
+localStorage.setItem("litera.chatCollapsed", "false");
+await invoke("update_reading_state", { bookId, settings: { chatCollapsed: false } });
+setSessionRailOpen(true); // on switch to Agent
+setBookCollapsed(false);
+```
+
+#### Correct
+```ts
+await invoke("update_reading_state", {
+  bookId,
+  lastLayout: { chatCollapsed: false, bookCollapsed: true, sessionRailOpen: false },
+});
+const layout = resolveReaderLayout(context.lastLayout);
 ```
 
 ## Scenario: OS EPUB open
