@@ -83,7 +83,7 @@ fn update_reading_state(&self, book_id: &str, fraction: Option<f64>, settings: O
 └── sessions/<bookId>/        # Rust-managed Pi v3 JSONL session files
 ```
 
-**Per-book annotations**: `books/<bookId>/annotations.json` holds bookmarks and single-color highlights. It has its own `schemaVersion: 1` and is **not** part of `library.json` / `BookRecord`. Do not bump the library schema for marks. Missing file = empty lists. Present but invalid JSON / unsupported schema / unknown fields = `StorageCorrupt`. Overwrite leaves the file in place; `delete_book` removes the whole directory. Do not require this file in `validate_library_files`.
+**Per-book annotations**: `books/<bookId>/annotations.json` holds bookmarks and highlights (closed color ids + optional notes). It has its own `schemaVersion: 1` and is **not** part of `library.json` / `BookRecord`. Do not bump the library schema — or this file's schema — for optional `color` / `note`. Missing file = empty lists. Present but invalid JSON / unsupported schema / unknown fields / unknown `color` = `StorageCorrupt`. Overwrite leaves the file in place; `delete_book` removes the whole directory. Do not require this file in `validate_library_files`. See backend `tauri-commands.md` "Scenario: highlight color and note".
 
 ### bookId Generation
 

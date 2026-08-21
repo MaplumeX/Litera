@@ -68,12 +68,16 @@ export interface BookmarkRecord {
   label?: string;
 }
 
-/** A single-color highlight stored in books/<id>/annotations.json — not on BookRecord. */
+export type HighlightColor = "yellow" | "green" | "blue" | "pink" | "orange";
+
+/** A highlight stored in books/<id>/annotations.json — not on BookRecord. */
 export interface HighlightRecord {
   id: string;
   cfi: string;
   excerpt: string;
   createdAt: string;
+  color?: HighlightColor;
+  note?: string;
 }
 
 export interface AnnotationsFile {

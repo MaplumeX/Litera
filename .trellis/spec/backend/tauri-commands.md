@@ -257,6 +257,8 @@ interface HighlightRecord {
   cfi: string;
   excerpt: string;
   createdAt: string;
+  color?: string;         // "yellow" | "green" | "blue" | "pink" | "orange"; omit = yellow
+  note?: string;          // plain text; omit / empty = no note
 }
 
 interface AnnotationsFile {
@@ -298,7 +300,7 @@ Do not filter `book.id != incoming_id` when matching `contentHash`. That made sa
 
 **Cover compression**: `save_book_metadata` compresses incoming `cover_bytes` before writing — decode with the `image` crate, downscale so the long edge ≤ 512px (never upscale), re-encode as JPEG quality 85, and write to `cover.jpg` (not `cover.png`). On any decode/encode failure, fall back to the original bytes so a broken cover never blocks an import. `MAX_COVER_BYTES` validates the raw input before compression. Legacy books with `cover.png` are not migrated; validation and transaction rollback accept both extensions. Frontend `convertFileSrc(coverPath)` works with any extension.
 
-**Annotations**: `get_annotations` / `save_annotations` read and replace `books/<bookId>/annotations.json` under the `LibraryStore` gate. Missing file → `{ schemaVersion: 1, bookmarks: [], highlights: [] }`, not corrupt. Invalid JSON / unknown fields / unsupported `schemaVersion` → `StorageCorrupt`. `save_annotations` is a full snapshot replace (same contract as `settings`). Validate unique ids, non-empty `epubcfi(...)` locators, bookmark `fraction` in `0..=1`, and excerpt/label byte caps. Frontend must not `save_annotations` until `get_annotations` for that book succeeded — a failed load must not be treated as empty and written back. Cap highlight excerpts to the same UTF-8 byte limit on the client before save. Do not add annotation fields to `BookRecord`. Do not add WebView `fs` permission.
+**Annotations**: `get_annotations` / `save_annotations` read and replace `books/<bookId>/annotations.json` under the `LibraryStore` gate. Missing file → `{ schemaVersion: 1, bookmarks: [], highlights: [] }`, not corrupt. Invalid JSON / unknown fields / unsupported `schemaVersion` → `StorageCorrupt`. `save_annotations` is a full snapshot replace (same contract as `settings`). Validate unique ids, non-empty `epubcfi(...)` locators, bookmark `fraction` in `0..=1`, excerpt/label/note byte caps (4KiB), and highlight `color` in `{ yellow, green, blue, pink, orange }`. Persist color as the semantic id, not hex. Omit empty `color` / `note` on write. Do not bump `schemaVersion` for these optional fields. Frontend must not `save_annotations` until `get_annotations` for that book succeeded — a failed load must not be treated as empty and written back. Cap highlight excerpts and notes to the same UTF-8 byte limits on the client before save. Do not add annotation fields to `BookRecord`. Do not add WebView `fs` permission. See **Scenario: highlight color and note**.
 
 **list_books order**: `lastOpenedAt` descending (missing last), then `importedAt` descending. Frontend search filters; it does not re-sort.
 
@@ -311,6 +313,67 @@ Do not filter `book.id != incoming_id` when matching `contentHash`. That made sa
 **Drag-drop paths**: `import_paths` accepts only OS drop / picker-equivalent absolute paths. Reject non-`.epub`, symlinks, and non-regular files. Do not add `dialog` / `fs` / `opener` permissions to the WebView capability.
 
 **OS file open**: system "Open With" / double-click is a third path source. It must reuse `import_paths` after `take_pending_open_paths`. See "Scenario: OS EPUB open" below.
+
+## Scenario: highlight color and note
+
+### 1. Scope / Trigger
+
+Cross-layer `annotations.json` fields. Rust validates optional `color` / `note` on highlights; the WebView paints, edits, and maps them into `list_annotations`. Do not bump `schemaVersion` for these keys.
+
+### 2. Signatures
+
+```rust
+async fn get_annotations(store: State<'_, LibraryStore>, book_id: String) -> AppResult<AnnotationsFile>
+async fn save_annotations(store: State<'_, LibraryStore>, book_id: String, data: AnnotationsFile) -> AppResult<()>
+
+// HighlightRecord:
+// color: Option<String>  // "yellow" | "green" | "blue" | "pink" | "orange"
+// note: Option<String>   // omit empty; 4KiB cap
+```
+
+### 3. Contracts
+
+- Request/response: same `AnnotationsFile` snapshot as before. `schemaVersion` stays `1`.
+- `color` missing on an old highlight is valid (paint and `list_annotations` treat it as `"yellow"`). Persist the semantic id, never a hex string.
+- `note` missing or empty is valid (no note). Empty values are omitted on write (`skip_serializing_if`).
+- Hex table and last-used color live in the WebView (`src/lib/annotations.ts`). Last-used color is process-only; do not write it to `preferences.json` or `localStorage`.
+- `list_annotations` always returns highlight `color` (default `"yellow"`) and includes `note` only when non-empty. Still `get_annotations` only.
+
+### 4. Validation & Error Matrix
+
+- missing `annotations.json` → empty lists, not corrupt
+- unknown JSON field / bad `schemaVersion` → `StorageCorrupt`
+- `color` present and not in the five ids → `InvalidInput` on save, `StorageCorrupt` on load
+- `note` over 4KiB → `InvalidInput` on save
+- empty `color` / `note` → treated as omitted
+
+### 5. Good/Base/Bad Cases
+
+- Good: `{ color: "green", note: "why this sentence" }` round-trips; paint uses `#4ade80`.
+- Base: old highlight with only `id` / `cfi` / `excerpt` / `createdAt` still loads and draws yellow.
+- Bad: `{ color: "#ff00ff" }` or bumping `schemaVersion` to 2 for these fields.
+
+### 6. Tests Required
+
+- Old file without `color`/`note` loads; round-trip with both fields; empty note omitted from JSON.
+- Unknown color rejected on save; unknown stored color is `StorageCorrupt`.
+- Frontend: `createHighlight` stamps last-used or yellow; `updateHighlight` after delete on the same tick must not resurrect the row (use `annotationsRef`).
+- `list_annotations` maps default `"yellow"` and omits blank notes; never calls `save_annotations`.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+```ts
+highlight.color = "#fbbf24";
+await invoke("save_annotations", { bookId, data: emptyAnnotations() }); // after a failed get
+```
+
+#### Correct
+```ts
+highlight.color = "yellow";
+const data = await invoke<AnnotationsFile>("get_annotations", { bookId });
+await invoke("save_annotations", { bookId, data: updateHighlight(data, id, { color: "green" }) });
+```
 
 ## Scenario: lastReaderMode
 

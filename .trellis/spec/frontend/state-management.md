@@ -15,6 +15,11 @@
   playing/paused is process-only and must not be persisted.
   `tocVisible` and `annotationsVisible` are process-only. Do not persist them.
   Switching Reader ↔ Agent must not reset `lastLayout` flags.
+  Last-used highlight color is process-only
+  (`src/lib/annotations.ts` module state); do not persist it. Mutate the open
+  book's annotation snapshot through `annotationsRef` so a HighlightEditor
+  unmount (delete, then note flush) cannot resurrect a just-removed row from a
+  stale React state closure.
 - `LiteraAgentRuntime` owns the active book worker, model stream, session leaf,
   and monotonically increasing local event version.
 - The EPUB worker owns extracted chapter text and search indexes for the currently

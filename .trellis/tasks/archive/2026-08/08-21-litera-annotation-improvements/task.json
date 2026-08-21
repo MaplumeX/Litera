@@ -1,0 +1,28 @@
+{
+  "id": "litera-annotation-improvements",
+  "name": "litera-annotation-improvements",
+  "title": "Improve Litera annotation features",
+  "description": "",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "Maplume",
+  "assignee": "Maplume",
+  "createdAt": "2026-08-21",
+  "completedAt": "2026-08-21",
+  "branch": "feat/litera-annotation-improvements",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "description": "Improve incomplete reader annotation UX beyond the bookmark + single-color highlight MVP"
+  }
+}

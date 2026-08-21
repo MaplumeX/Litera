@@ -22,9 +22,11 @@
   via `get_annotations`. It is not injected into `bookSnapshot` or
   `readingContext`. Return `{ bookmarks, highlights }` JSON text: each item
   keeps `id`, `cfi`, `createdAt`; bookmarks also `fraction` and optional
-  `label`; highlights keep `excerpt`. Omit `label` when unset. Empty arrays are
-  success. Do not call `save_annotations`. Do not invent chapter titles. Gate
-  with the same `bookCall` / `bookId` check as the text tools.
+  `label`; highlights keep `excerpt`, always include `color` (missing →
+  `"yellow"`), and include `note` only when non-empty. Omit `label` when unset.
+  Empty arrays are success. Do not call `save_annotations`. Do not invent
+  chapter titles. Gate with the same `bookCall` / `bookId` check as the text
+  tools.
 - Tool results are read-only in chat; there is no clickable tool-result →
   reader-location jump, so no runtime `chapterIndex` → href resolution is needed.
   Reader jumps stay chrome-owned (`goToChapterHref` / `goToTocItem` for TOC and

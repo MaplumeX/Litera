@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
+  bindPointerPaging,
   consumeWheelDelta,
   hitFromClientX,
   pageLocalX,
@@ -145,6 +146,59 @@ describe("shouldIgnoreSpaceTarget", () => {
   it("allows ordinary reading targets", () => {
     expect(shouldIgnoreSpaceTarget(document.createElement("p"))).toBe(false);
     expect(shouldIgnoreSpaceTarget(null)).toBe(false);
+  });
+});
+
+describe("bindPointerPaging", () => {
+  function click(target: HTMLElement, clientX: number) {
+    target.dispatchEvent(
+      new PointerEvent("pointerdown", { button: 0, clientX, clientY: 10, bubbles: true }),
+    );
+    target.dispatchEvent(
+      new PointerEvent("pointerup", { button: 0, clientX, clientY: 10, bubbles: true }),
+    );
+  }
+
+  it("does not page when shouldIgnore is true for a highlight hit", () => {
+    const target = document.createElement("div");
+    const pageLeft = vi.fn();
+    const pageRight = vi.fn();
+    const onIdlePointerUp = vi.fn();
+    const unbind = bindPointerPaging(
+      target,
+      (event) => event.clientX,
+      () => 300,
+      () => null,
+      pageLeft,
+      pageRight,
+      { shouldIgnore: () => true, onIdlePointerUp },
+    );
+    click(target, 10);
+    expect(pageLeft).not.toHaveBeenCalled();
+    expect(pageRight).not.toHaveBeenCalled();
+    expect(onIdlePointerUp).not.toHaveBeenCalled();
+    unbind();
+  });
+
+  it("pages left and reports a blank click when shouldIgnore is false", () => {
+    const target = document.createElement("div");
+    const pageLeft = vi.fn();
+    const pageRight = vi.fn();
+    const onIdlePointerUp = vi.fn();
+    const unbind = bindPointerPaging(
+      target,
+      (event) => event.clientX,
+      () => 300,
+      () => null,
+      pageLeft,
+      pageRight,
+      { shouldIgnore: () => false, onIdlePointerUp },
+    );
+    click(target, 10);
+    expect(onIdlePointerUp).toHaveBeenCalledOnce();
+    expect(pageLeft).toHaveBeenCalledOnce();
+    expect(pageRight).not.toHaveBeenCalled();
+    unbind();
   });
 });
 

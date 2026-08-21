@@ -1,0 +1,10 @@
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend quality check entry"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Drawer, selection toolbar, paging ownership"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "Rust↔TS HighlightRecord contract"}
+{"file": ".trellis/spec/frontend/i18n.md", "reason": "zh-CN and en strings must ship together"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend quality check entry"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "schemaVersion 1; optional color/note; no BookRecord fields"}
+{"file": ".trellis/spec/backend/tauri-commands.md", "reason": "save_annotations validation and load-before-save"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "list_annotations stays read-only"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Cross-layer color/note payload check"}
+{"file": ".trellis/tasks/archive/2026-08/08-14-reader-annotate-and-progress/research/foliate-annotations.md", "reason": "Click-to-edit must use show-annotation without paging"}

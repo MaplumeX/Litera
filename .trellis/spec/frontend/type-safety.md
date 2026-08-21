@@ -41,6 +41,15 @@ export interface BookRecord {
 }
 
 // books/<id>/annotations.json — not fields on BookRecord
+type HighlightColor = "yellow" | "green" | "blue" | "pink" | "orange";
+interface HighlightRecord {
+  id: string;
+  cfi: string;
+  excerpt: string;
+  createdAt: string;
+  color?: HighlightColor; // omit = yellow; persist the id, not hex
+  note?: string;          // omit / empty = no note
+}
 interface AnnotationsFile {
   schemaVersion: number;
   bookmarks: BookmarkRecord[];

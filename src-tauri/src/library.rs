@@ -23,6 +23,7 @@ const MAX_CFI_BYTES: usize = 8 * 1024;
 const MAX_EXCERPT_BYTES: usize = 4 * 1024;
 const MAX_LABEL_BYTES: usize = 4 * 1024;
 const MAX_ANNOTATION_ID_BYTES: usize = 128;
+const VALID_HIGHLIGHT_COLORS: [&str; 5] = ["yellow", "green", "blue", "pink", "orange"];
 const MAX_COVER_BYTES: usize = 20 * 1024 * 1024;
 const COVER_MAX_EDGE: u32 = 512;
 const COVER_JPEG_QUALITY: u8 = 85;
@@ -262,6 +263,13 @@ pub struct BookmarkRecord {
     pub label: Option<String>,
 }
 
+fn skip_none_or_empty(value: &Option<String>) -> bool {
+    match value {
+        None => true,
+        Some(s) => s.is_empty(),
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct HighlightRecord {
@@ -269,6 +277,10 @@ pub struct HighlightRecord {
     pub cfi: String,
     pub excerpt: String,
     pub created_at: String,
+    #[serde(default, skip_serializing_if = "skip_none_or_empty")]
+    pub color: Option<String>,
+    #[serde(default, skip_serializing_if = "skip_none_or_empty")]
+    pub note: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -1662,6 +1674,16 @@ fn validate_annotations(data: &AnnotationsFile) -> AppResult<()> {
         }
         validate_text("excerpt", &highlight.excerpt, MAX_EXCERPT_BYTES, false)?;
         validate_created_at(&highlight.created_at)?;
+        if let Some(color) = &highlight.color {
+            if !VALID_HIGHLIGHT_COLORS.contains(&color.as_str()) {
+                return Err(AppError::invalid_input("Unsupported highlight color"));
+            }
+        }
+        if let Some(note) = &highlight.note {
+            if !note.is_empty() {
+                validate_text("note", note, MAX_LABEL_BYTES, true)?;
+            }
+        }
     }
     Ok(())
 }
@@ -3749,6 +3771,8 @@ mod tests {
                 cfi: "epubcfi(/6/8!/4/2,/1:12,/1:48)".into(),
                 excerpt: "selected sentence".into(),
                 created_at: "2026-08-14T12:01:00+00:00".into(),
+                color: None,
+                note: None,
             }],
         }
     }
@@ -3902,6 +3926,113 @@ mod tests {
         assert!(store.list_books().expect("list").is_empty());
         let error = store.get_annotations(&id).expect_err("book gone");
         assert_eq!(error.code, AppErrorCode::BookNotFound);
+    }
+
+    #[test]
+    fn old_highlights_without_color_or_note_still_load() {
+        let (directory, store) = test_store();
+        let id = import_test_book(&store, Path::new("/source/annotations-legacy-highlight.epub"));
+        let path = directory
+            .path()
+            .join("books")
+            .join(&id)
+            .join("annotations.json");
+        fs::write(
+            &path,
+            br#"{"schemaVersion":1,"bookmarks":[],"highlights":[{"id":"h_01hxyz","cfi":"epubcfi(/6/8!/4/2,/1:12,/1:48)","excerpt":"selected sentence","createdAt":"2026-08-14T12:01:00+00:00"}]}"#,
+        )
+        .expect("legacy highlight");
+        let loaded = store.get_annotations(&id).expect("legacy loads");
+        assert_eq!(loaded.highlights[0].color, None);
+        assert_eq!(loaded.highlights[0].note, None);
+        assert_eq!(loaded.highlights[0].excerpt, "selected sentence");
+    }
+
+    #[test]
+    fn annotations_round_trip_with_color_and_note() {
+        let (directory, store) = test_store();
+        let id = import_test_book(&store, Path::new("/source/annotations-color-note.epub"));
+        let mut data = sample_annotations();
+        data.highlights[0].color = Some("green".into());
+        data.highlights[0].note = Some("why I marked this".into());
+        store.save_annotations(&id, data.clone()).expect("save");
+        let loaded = store.get_annotations(&id).expect("load");
+        assert_eq!(loaded, data);
+        let bytes = fs::read(
+            directory
+                .path()
+                .join("books")
+                .join(&id)
+                .join("annotations.json"),
+        )
+        .expect("read file");
+        let value: serde_json::Value = serde_json::from_slice(&bytes).expect("json");
+        assert_eq!(value["schemaVersion"], 1);
+        assert_eq!(value["highlights"][0]["color"], "green");
+        assert_eq!(value["highlights"][0]["note"], "why I marked this");
+    }
+
+    #[test]
+    fn save_annotations_rejects_unknown_highlight_color() {
+        let (_directory, store) = test_store();
+        let id = import_test_book(&store, Path::new("/source/annotations-bad-color.epub"));
+        let mut data = sample_annotations();
+        data.highlights[0].color = Some("#ff00ff".into());
+        let error = store.save_annotations(&id, data).expect_err("unknown color");
+        assert_eq!(error.code, AppErrorCode::InvalidInput);
+        let loaded = store.get_annotations(&id).expect("still empty");
+        assert!(loaded.highlights.is_empty());
+    }
+
+    #[test]
+    fn unknown_stored_highlight_color_is_storage_corrupt() {
+        let (directory, store) = test_store();
+        let id = import_test_book(&store, Path::new("/source/annotations-corrupt-color.epub"));
+        let path = directory
+            .path()
+            .join("books")
+            .join(&id)
+            .join("annotations.json");
+        fs::write(
+            &path,
+            br#"{"schemaVersion":1,"bookmarks":[],"highlights":[{"id":"h_01hxyz","cfi":"epubcfi(/6/8!/4/2,/1:12,/1:48)","excerpt":"selected sentence","createdAt":"2026-08-14T12:01:00+00:00","color":"purple"}]}"#,
+        )
+        .expect("unknown color");
+        let error = store.get_annotations(&id).expect_err("corrupt color");
+        assert_eq!(error.code, AppErrorCode::StorageCorrupt);
+    }
+
+    #[test]
+    fn save_annotations_rejects_oversized_note() {
+        let (_directory, store) = test_store();
+        let id = import_test_book(&store, Path::new("/source/annotations-note-cap.epub"));
+        let mut data = sample_annotations();
+        data.highlights[0].note = Some("x".repeat(MAX_LABEL_BYTES + 1));
+        let error = store.save_annotations(&id, data).expect_err("note cap");
+        assert_eq!(error.code, AppErrorCode::InvalidInput);
+    }
+
+    #[test]
+    fn empty_highlight_note_is_omitted_from_disk() {
+        let (directory, store) = test_store();
+        let id = import_test_book(&store, Path::new("/source/annotations-empty-note.epub"));
+        let mut data = sample_annotations();
+        data.highlights[0].color = Some("yellow".into());
+        data.highlights[0].note = Some(String::new());
+        store.save_annotations(&id, data).expect("save");
+        let bytes = fs::read(
+            directory
+                .path()
+                .join("books")
+                .join(&id)
+                .join("annotations.json"),
+        )
+        .expect("read file");
+        let value: serde_json::Value = serde_json::from_slice(&bytes).expect("json");
+        assert!(value["highlights"][0].get("note").is_none());
+        assert_eq!(value["highlights"][0]["color"], "yellow");
+        let loaded = store.get_annotations(&id).expect("load");
+        assert_eq!(loaded.highlights[0].note, None);
     }
 
     fn make_png_bytes(width: u32, height: u32, rgba: [u8; 4]) -> Vec<u8> {

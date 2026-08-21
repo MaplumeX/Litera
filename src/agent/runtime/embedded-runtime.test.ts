@@ -274,7 +274,7 @@ describe("LiteraAgentRuntime",()=>{
     const current=session();const batches:PiSessionEntry[][]=[];
     const sessions:SessionPort={create:async()=>current,list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,entries)=>{batches.push(entries);return entries[entries.length-1]?.id??null;}};
     const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:1}),toc:async()=>[],readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:1,text:"chapter"}),search:async()=>[],close:()=>{}};
-    const annotations:AnnotationsFile={schemaVersion:1,bookmarks:[{id:"b1",cfi:"epubcfi(/6/8!/4/2/1:0)",fraction:0.2,createdAt:"2026-08-14T00:00:00.000Z",label:"Loomings"},{id:"b2",cfi:"epubcfi(/6/10!/4/2/1:0)",fraction:0,createdAt:"2026-08-14T00:00:00.000Z"}],highlights:[{id:"h1",cfi:"epubcfi(/6/8!/4/2,/1:12,/1:48)",excerpt:"Call me Ishmael.",createdAt:"2026-08-14T00:00:00.000Z"}]};
+    const annotations:AnnotationsFile={schemaVersion:1,bookmarks:[{id:"b1",cfi:"epubcfi(/6/8!/4/2/1:0)",fraction:0.2,createdAt:"2026-08-14T00:00:00.000Z",label:"Loomings"},{id:"b2",cfi:"epubcfi(/6/10!/4/2/1:0)",fraction:0,createdAt:"2026-08-14T00:00:00.000Z"}],highlights:[{id:"h1",cfi:"epubcfi(/6/8!/4/2,/1:12,/1:48)",excerpt:"Call me Ishmael.",createdAt:"2026-08-14T00:00:00.000Z",color:"green",note:"opening line"},{id:"h2",cfi:"epubcfi(/6/10!/4/2,/1:0,/1:12)",excerpt:"Some years ago",createdAt:"2026-08-14T00:00:00.000Z"}]};
     const requested:string[]=[];
     const faux=createFauxCore({tokensPerSecond:10_000});faux.setResponses([fauxAssistantMessage(fauxToolCall("list_annotations",{}),{stopReason:"toolUse"}),fauxAssistantMessage("those marks")]);
     const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret",thinkingLevel:"off"};
@@ -282,7 +282,7 @@ describe("LiteraAgentRuntime",()=>{
     await runtime.openBook("book",new ArrayBuffer(1));
     await runtime.prompt("what did I highlight?",{});
     expect(requested).toEqual(["book"]);
-    expect(listAnnotationsPayload(batches)).toEqual({bookmarks:[{id:"b1",cfi:"epubcfi(/6/8!/4/2/1:0)",fraction:0.2,createdAt:"2026-08-14T00:00:00.000Z",label:"Loomings"},{id:"b2",cfi:"epubcfi(/6/10!/4/2/1:0)",fraction:0,createdAt:"2026-08-14T00:00:00.000Z"}],highlights:[{id:"h1",cfi:"epubcfi(/6/8!/4/2,/1:12,/1:48)",excerpt:"Call me Ishmael.",createdAt:"2026-08-14T00:00:00.000Z"}]});
+    expect(listAnnotationsPayload(batches)).toEqual({bookmarks:[{id:"b1",cfi:"epubcfi(/6/8!/4/2/1:0)",fraction:0.2,createdAt:"2026-08-14T00:00:00.000Z",label:"Loomings"},{id:"b2",cfi:"epubcfi(/6/10!/4/2/1:0)",fraction:0,createdAt:"2026-08-14T00:00:00.000Z"}],highlights:[{id:"h1",cfi:"epubcfi(/6/8!/4/2,/1:12,/1:48)",excerpt:"Call me Ishmael.",createdAt:"2026-08-14T00:00:00.000Z",color:"green",note:"opening line"},{id:"h2",cfi:"epubcfi(/6/10!/4/2,/1:0,/1:12)",excerpt:"Some years ago",createdAt:"2026-08-14T00:00:00.000Z",color:"yellow"}]});
   });
 
   it("returns empty bookmark and highlight arrays when the annotations file is empty",async()=>{

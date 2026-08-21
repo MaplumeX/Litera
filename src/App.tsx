@@ -53,6 +53,7 @@ import {
   emptyAnnotations,
   removeBookmark,
   removeHighlight,
+  updateHighlight,
 } from "@/lib/annotations";
 import { SettingsDialog } from "@/components/settings/SettingsDialog";
 import {
@@ -69,6 +70,7 @@ import type {
   BookOpenContext,
   BookmarkRecord,
   BookRecord,
+  HighlightColor,
   HighlightRecord,
   ReaderLayout,
   ReadingSettings,
@@ -154,6 +156,8 @@ function App() {
   const [tocWidth, setTocWidth] = useState(loadTocWidth);
   const [annotationsVisible, setAnnotationsVisible] = useState(false);
   const [annotations, setAnnotations] = useState<AnnotationsFile>(emptyAnnotations);
+  const annotationsRef = useRef(annotations);
+  annotationsRef.current = annotations;
   const [toc, setToc] = useState<TocItem[]>([]);
   const [sectionTicks, setSectionTicks] = useState<number[]>([]);
   const [persistenceError, setPersistenceError] = useState<string | null>(null);
@@ -403,15 +407,17 @@ function App() {
     async (next: AnnotationsFile) => {
       const bookId = fileData?.bookId;
       if (!bookId || !annotationsWritableRef.current) return;
-      const previous = annotations;
+      const previous = annotationsRef.current;
+      annotationsRef.current = next;
       setAnnotations(next);
       try {
         await persistAnnotations(bookId, next);
       } catch {
+        annotationsRef.current = previous;
         setAnnotations(previous);
       }
     },
-    [annotations, fileData?.bookId, persistAnnotations],
+    [fileData?.bookId, persistAnnotations],
   );
 
   const handleOpenBook = useCallback(async (bookId: string) => {
@@ -467,6 +473,7 @@ function App() {
       setSessionRailOpen(layout.sessionRailOpen);
       setBookCollapsed(layout.bookCollapsed);
       setAnnotations(emptyAnnotations());
+      annotationsRef.current = emptyAnnotations();
       annotationsWritableRef.current = false;
 
       setView("reader");
@@ -476,6 +483,7 @@ function App() {
         });
         if (!request.isLatest()) return;
         setAnnotations(data);
+        annotationsRef.current = data;
         annotationsWritableRef.current = true;
       } catch (error) {
         if (request.isLatest()) reportPersistenceError(error);
@@ -517,6 +525,7 @@ function App() {
     setTocVisible(false);
     setAnnotationsVisible(false);
     setAnnotations(emptyAnnotations());
+    annotationsRef.current = emptyAnnotations();
     setReaderMode("reader");
     setChatCollapsed(true);
     setSessionRailOpen(true);
@@ -744,16 +753,17 @@ function App() {
   const handleAddBookmark = useCallback(() => {
     const location = readerRef.current?.getLocation();
     if (!location?.cfi) return;
-    const next = appendBookmark(annotations, createBookmark(location));
-    if (next === annotations) return;
+    const current = annotationsRef.current;
+    const next = appendBookmark(current, createBookmark(location));
+    if (next === current) return;
     void commitAnnotations(next);
-  }, [annotations, commitAnnotations]);
+  }, [commitAnnotations]);
 
   const handleDeleteBookmark = useCallback(
     (id: string) => {
-      void commitAnnotations(removeBookmark(annotations, id));
+      void commitAnnotations(removeBookmark(annotationsRef.current, id));
     },
-    [annotations, commitAnnotations],
+    [commitAnnotations],
   );
 
   const handleJumpBookmark = useCallback(
@@ -765,20 +775,31 @@ function App() {
 
   const handleAddHighlight = useCallback(
     (selection: SelectionCfi) => {
-      const next = appendHighlight(annotations, createHighlight(selection));
-      if (next === annotations) return;
+      const current = annotationsRef.current;
+      const next = appendHighlight(current, createHighlight(selection));
+      if (next === current) return;
       void commitAnnotations(next);
     },
-    [annotations, commitAnnotations],
+    [commitAnnotations],
   );
 
   const handleDeleteHighlight = useCallback(
     (id: string) => {
-      const { next, removed } = removeHighlight(annotations, id);
+      const { next, removed } = removeHighlight(annotationsRef.current, id);
       if (removed) readerRef.current?.removeHighlight(removed.cfi);
       void commitAnnotations(next);
     },
-    [annotations, commitAnnotations],
+    [commitAnnotations],
+  );
+
+  const handleUpdateHighlight = useCallback(
+    (id: string, patch: { color?: HighlightColor; note?: string | null }) => {
+      const current = annotationsRef.current;
+      const next = updateHighlight(current, id, patch);
+      if (next === current) return;
+      void commitAnnotations(next);
+    },
+    [commitAnnotations],
   );
 
   const handleJumpHighlight = useCallback(
@@ -1034,6 +1055,8 @@ function App() {
                 onRelocate={handleRelocate}
                 onSelectionCapture={handleSelectionCapture}
                 onHighlight={handleAddHighlight}
+                onUpdateHighlight={handleUpdateHighlight}
+                onDeleteHighlight={handleDeleteHighlight}
                 highlights={annotations.highlights}
                 initialFraction={currentBook?.lastFraction}
                 onBookReady={handleBookReady}

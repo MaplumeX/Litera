@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AnnotationsFile, BookOpenContext } from "@/types/library";
 import type { ReaderViewHandle } from "@/components/ReaderView";
+import { resetLastUsedHighlightColor } from "@/lib/annotations";
 
 const invokeMock = vi.fn();
 
@@ -96,6 +97,12 @@ vi.mock("@/components/ReaderView", async () => {
       props: {
         onHighlight?: (selection: { cfi: string; excerpt: string }) => void;
         onSelectionCapture?: (capture: { text: string; chapterHref?: string }) => void;
+        onUpdateHighlight?: (
+          id: string,
+          patch: { color?: "yellow" | "green" | "blue" | "pink" | "orange"; note?: string | null },
+        ) => void;
+        onDeleteHighlight?: (id: string) => void;
+        highlights?: { id: string; excerpt: string }[];
       },
       ref: React.ForwardedRef<ReaderViewHandle>,
     ) {
@@ -119,6 +126,36 @@ vi.mock("@/components/ReaderView", async () => {
           >
             fake-ask
           </button>
+          {props.highlights?.map((highlight) => (
+            <span key={highlight.id}>
+              <button
+                type="button"
+                onClick={() =>
+                  props.onUpdateHighlight?.(highlight.id, { color: "green", note: "why I marked" })
+                }
+              >
+                fake-edit
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  props.onUpdateHighlight?.(highlight.id, { note: "why I marked" });
+                  props.onUpdateHighlight?.(highlight.id, { color: "green" });
+                }}
+              >
+                fake-edit-split
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  props.onDeleteHighlight?.(highlight.id);
+                  props.onUpdateHighlight?.(highlight.id, { note: "late" });
+                }}
+              >
+                fake-delete-then-note
+              </button>
+            </span>
+          ))}
         </>
       );
     }),
@@ -177,6 +214,7 @@ async function openReader() {
 }
 
 beforeEach(() => {
+  resetLastUsedHighlightColor();
   invokeMock.mockReset();
   fillInput.mockReset();
   windowApi.onCloseRequested.mockClear();
@@ -385,11 +423,84 @@ describe("reader annotation chrome", () => {
               expect.objectContaining({
                 cfi: "epubcfi(/6/8!/4/2,/1:12,/1:48)",
                 excerpt: "selected sentence",
+                color: "yellow",
               }),
             ],
           }),
         }),
       );
+    });
+  });
+
+  it("saves color and note updates from the in-page editor", async () => {
+    const screen = await openReader();
+    await act(async () => {
+      fireEvent.click(screen.getByText("fake-highlight"));
+    });
+    await waitFor(() => {
+      expect(screen.getByText("fake-edit")).toBeTruthy();
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByText("fake-edit"));
+    });
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith(
+        "save_annotations",
+        expect.objectContaining({
+          bookId: "book1",
+          data: expect.objectContaining({
+            highlights: [
+              expect.objectContaining({
+                color: "green",
+                note: "why I marked",
+              }),
+            ],
+          }),
+        }),
+      );
+    });
+  });
+
+  it("keeps both patches when note and color commit in the same tick", async () => {
+    const screen = await openReader();
+    await act(async () => {
+      fireEvent.click(screen.getByText("fake-highlight"));
+    });
+    await waitFor(() => {
+      expect(screen.getByText("fake-edit-split")).toBeTruthy();
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByText("fake-edit-split"));
+    });
+    await waitFor(() => {
+      const payload = invokeMock.mock.calls
+        .filter((call) => call[0] === "save_annotations")
+        .at(-1)?.[1] as { data: AnnotationsFile };
+      expect(payload.data.highlights).toEqual([
+        expect.objectContaining({
+          color: "green",
+          note: "why I marked",
+        }),
+      ]);
+    });
+  });
+
+  it("does not resurrect a highlight when a note commit races with delete", async () => {
+    const screen = await openReader();
+    await act(async () => {
+      fireEvent.click(screen.getByText("fake-highlight"));
+    });
+    await waitFor(() => {
+      expect(screen.getByText("fake-delete-then-note")).toBeTruthy();
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByText("fake-delete-then-note"));
+    });
+    await waitFor(() => {
+      const payload = invokeMock.mock.calls
+        .filter((call) => call[0] === "save_annotations")
+        .at(-1)?.[1] as { data: AnnotationsFile };
+      expect(payload.data.highlights).toEqual([]);
     });
   });
 
