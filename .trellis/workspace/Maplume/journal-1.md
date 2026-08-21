@@ -1973,3 +1973,24 @@ Bumped to 0.2.5, wrote changelog, and shipped the GitHub release after two CI fi
 ### Status
 
 [OK] **Completed**
+
+
+## Session 87: Fix Windows titlebar double-click maximize dead
+
+**Date**: 2026-08-21
+**Task**: Fix Windows titlebar double-click maximize dead
+**Branch**: `fix/double-click-window-resize`
+
+### Summary
+
+Windows WebView2 pointer capture interferes with event.detail on second click (Chromium #40675080), breaking double-click maximize. Replaced event.detail dependency with self-tracked double-click (500ms + 10px thresholds via Date.now and clientX/Y). Updated 4 test files and frontend quality spec. 421 tests passed. Real Windows verification pending user confirmation.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `145c2b1` | (see git log) |
+
+### Status
+
+[OK] **Completed**
