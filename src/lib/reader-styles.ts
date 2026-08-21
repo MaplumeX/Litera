@@ -277,7 +277,7 @@ ${PREVIEW_SELECTOR} p { margin-block-end: ${state.paragraphSpacing}em; text-inde
 
 const THEME_CSS: Record<string, string> = {
   light: "",
-  dark: `html, body { background: #1a1a1a !important; color: #e0e0e0 !important; }
+  dark: `html, body { background: #1a1a1a !important; color: #c8c8c8 !important; }
 a { color: #6db4ff !important; }
 img { filter: brightness(0.8) !important; }`,
 };
