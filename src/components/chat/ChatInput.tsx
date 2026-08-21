@@ -104,7 +104,7 @@ export function ChatInput({
               <SelectTrigger className="h-6 w-auto gap-1 border-none bg-transparent px-1.5 text-[10px] text-muted-foreground shadow-none focus:ring-0" aria-label={t("chat.thinkingLevel")}>
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent position="popper" side="top" align="start">
                 {THINKING_LEVELS.map((level) => (
                   <SelectItem key={level} value={level}>{level}</SelectItem>
                 ))}
