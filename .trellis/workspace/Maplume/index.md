@@ -7,8 +7,8 @@
 ## Current Status
 
 <!-- @@@auto:current-status -->
-- **Active File**: `journal-1.md`
-- **Total Sessions**: 87
+- **Active File**: `journal-2.md`
+- **Total Sessions**: 88
 - **Last Active**: 2026-08-21
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,8 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1996 | Active |
+| `journal-2.md` | ~28 | Active |
+| `journal-1.md` | ~1996 | Archived |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 88 | 2026-08-21 | Remove minimal thinking level from chat input | `4bd19fb` | `main` |
 | 87 | 2026-08-21 | Fix Windows titlebar double-click maximize dead | `145c2b1` | `fix/double-click-window-resize` |
 | 86 | 2026-08-21 | Publish Litera 0.2.5 | `9ac4927`, `6344147`, `38c42d0` | `main` |
 | 85 | 2026-08-21 | Fix phantom scrollbar in footnote popup | `d1e168b` | `main` |
