@@ -638,7 +638,10 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
             ?.doc?.body?.getBoundingClientRect().height;
           const h = typeof viewSize === "number" && viewSize > 0 ? viewSize : fallback;
           if (typeof h !== "number" || !(h > 0)) return;
-          const rounded = Math.round(h);
+          // Ceil so sub-pixel fractions never leave the content a hair taller
+          // than the popup (the inner scrolled container has overflow: auto,
+          // so a 1px deficit shows a permanent scrollbar).
+          const rounded = Math.ceil(h);
           setFootnoteHeight((prev) => (prev === rounded ? prev : rounded));
         }) as EventListener);
       };
