@@ -1,11 +1,61 @@
 import type {
   AnnotationsFile,
   BookmarkRecord,
+  HighlightColor,
   HighlightRecord,
 } from "@/types/library";
 
 export const ANNOTATIONS_SCHEMA_VERSION = 1;
 export const MAX_EXCERPT_BYTES = 4 * 1024;
+export const MAX_NOTE_BYTES = 4 * 1024;
+export const DEFAULT_HIGHLIGHT_COLOR: HighlightColor = "yellow";
+
+export const HIGHLIGHT_COLORS: readonly HighlightColor[] = [
+  "yellow",
+  "green",
+  "blue",
+  "pink",
+  "orange",
+];
+
+export const HIGHLIGHT_COLOR_HEX: Record<HighlightColor, string> = {
+  yellow: "#fbbf24",
+  green: "#4ade80",
+  blue: "#60a5fa",
+  pink: "#f472b6",
+  orange: "#fb923c",
+};
+
+let lastUsedHighlightColor: HighlightColor | null = null;
+
+export function isHighlightColor(value: unknown): value is HighlightColor {
+  return HIGHLIGHT_COLORS.includes(value as HighlightColor);
+}
+
+export function resolveHighlightColor(color?: string): HighlightColor {
+  return isHighlightColor(color) ? color : DEFAULT_HIGHLIGHT_COLOR;
+}
+
+export function highlightColorHex(color?: string): string {
+  return HIGHLIGHT_COLOR_HEX[resolveHighlightColor(color)];
+}
+
+export function getLastUsedHighlightColor(): HighlightColor {
+  return lastUsedHighlightColor ?? DEFAULT_HIGHLIGHT_COLOR;
+}
+
+export function setLastUsedHighlightColor(color: HighlightColor): void {
+  lastUsedHighlightColor = color;
+}
+
+export function resetLastUsedHighlightColor(): void {
+  lastUsedHighlightColor = null;
+}
+
+/** Overlay keys for user highlights are CFI strings; TTS / search use other prefixes. */
+export function isHighlightOverlayKey(value: string | undefined): boolean {
+  return Boolean(value?.startsWith("epubcfi("));
+}
 
 export function truncateUtf8Bytes(value: string, maxBytes: number): string {
   const bytes = new TextEncoder().encode(value);
@@ -48,6 +98,7 @@ export function createHighlight(selection: {
     cfi: selection.cfi,
     excerpt: truncateUtf8Bytes(selection.excerpt, MAX_EXCERPT_BYTES),
     createdAt: new Date().toISOString(),
+    color: getLastUsedHighlightColor(),
   };
 }
 
@@ -65,6 +116,44 @@ export function appendHighlight(
 ): AnnotationsFile {
   if (data.highlights.some((item) => item.cfi === highlight.cfi)) return data;
   return { ...data, highlights: [...data.highlights, highlight] };
+}
+
+export function updateHighlight(
+  data: AnnotationsFile,
+  id: string,
+  patch: { color?: HighlightColor; note?: string | null },
+): AnnotationsFile {
+  const index = data.highlights.findIndex((item) => item.id === id);
+  if (index < 0) return data;
+  const current = data.highlights[index];
+  if (patch.color) setLastUsedHighlightColor(patch.color);
+
+  const color = patch.color ?? current.color ?? DEFAULT_HIGHLIGHT_COLOR;
+  let note: string | undefined;
+  if (patch.note !== undefined) {
+    const trimmed = patch.note?.trim() ?? "";
+    note = trimmed ? truncateUtf8Bytes(trimmed, MAX_NOTE_BYTES) : undefined;
+  } else {
+    note = current.note;
+  }
+
+  const nextItem: HighlightRecord = {
+    id: current.id,
+    cfi: current.cfi,
+    excerpt: current.excerpt,
+    createdAt: current.createdAt,
+    color,
+    ...(note ? { note } : {}),
+  };
+  if (
+    nextItem.color === current.color &&
+    nextItem.note === current.note
+  ) {
+    return data;
+  }
+  const highlights = data.highlights.slice();
+  highlights[index] = nextItem;
+  return { ...data, highlights };
 }
 
 export function removeBookmark(

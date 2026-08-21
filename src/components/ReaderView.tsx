@@ -7,8 +7,8 @@ import {
   useState,
 } from "react";
 import {
+  bindPointerPaging,
   consumeWheelDelta,
-  hitFromClientX,
   pageLocalX,
   pageWidthOf,
   shouldIgnorePagingTarget,
@@ -18,77 +18,22 @@ import {
 import { sectionIndexAt } from "@/lib/reader-progress";
 import { TTS_HIGHLIGHT_COLOR, TTS_OVERLAY_KEY } from "@/lib/reader-tts";
 import { footnotePopupCss } from "@/lib/reader-styles";
+import {
+  getLastUsedHighlightColor,
+  highlightColorHex,
+  isHighlightOverlayKey,
+  resolveHighlightColor,
+} from "@/lib/annotations";
 import { SelectionToolbar } from "@/components/SelectionToolbar";
+import { HighlightEditor } from "@/components/HighlightEditor";
 import { FootnotePopup } from "@/components/FootnotePopup";
-import type { HighlightRecord } from "@/types/library";
+import type { HighlightColor, HighlightRecord } from "@/types/library";
 
 // foliate.js view.js defines the <foliate-view> custom element.
 // Importing the module registers it with the customElements registry.
 import "../foliate-js/view.js";
 import { FootnoteHandler } from "../foliate-js/footnotes.js";
 import { Overlayer } from "../foliate-js/overlayer.js";
-
-const HIGHLIGHT_COLOR = "#fbbf24";
-
-const CLICK_SLOP_PX = 5;
-
-function hasHrefTarget(target: EventTarget | null): boolean {
-  if (target == null || typeof target !== "object") return false;
-  const node = target as {
-    nodeType?: number;
-    parentElement?: EventTarget | null;
-    closest?: (selector: string) => unknown;
-  };
-  if (node.nodeType === 3) return hasHrefTarget(node.parentElement ?? null);
-  return Boolean(node.closest?.("a[href]"));
-}
-
-function bindPointerPaging(
-  target: EventTarget,
-  getX: (event: PointerEvent) => number,
-  getWidth: () => number,
-  getSelection: () => Selection | null,
-  pageLeft: () => void,
-  pageRight: () => void,
-): () => void {
-  let startX = 0;
-  let startY = 0;
-  let armed = false;
-  let hadSelection = false;
-
-  const onDown = (event: Event) => {
-    const pe = event as PointerEvent;
-    if (pe.button !== 0) return;
-    startX = pe.clientX;
-    startY = pe.clientY;
-    armed = true;
-    const sel = getSelection();
-    hadSelection = Boolean(sel && !sel.isCollapsed);
-  };
-
-  const onUp = (event: Event) => {
-    if (!armed) return;
-    armed = false;
-    const pe = event as PointerEvent;
-    if (pe.button !== 0) return;
-    if (Math.hypot(pe.clientX - startX, pe.clientY - startY) >= CLICK_SLOP_PX) return;
-    if (hasHrefTarget(pe.target)) return;
-    // pointerdown typically collapses an existing range; don't page on that click.
-    if (hadSelection) return;
-    const sel = getSelection();
-    if (sel && !sel.isCollapsed) return;
-    const zone = hitFromClientX(getX(pe), getWidth());
-    if (zone === "left") pageLeft();
-    else if (zone === "right") pageRight();
-  };
-
-  target.addEventListener("pointerdown", onDown);
-  target.addEventListener("pointerup", onUp);
-  return () => {
-    target.removeEventListener("pointerdown", onDown);
-    target.removeEventListener("pointerup", onUp);
-  };
-}
 
 interface RelocateDetail {
   fraction?: number;
@@ -151,6 +96,10 @@ interface ReaderViewProps {
   onSelectionCapture?: (capture: SelectionCapture) => void;
   /** Called when the user clicks highlight on a selection. */
   onHighlight?: (selection: SelectionCfi) => void;
+  /** Called when the in-page editor changes color or note. */
+  onUpdateHighlight?: (id: string, patch: { color?: HighlightColor; note?: string | null }) => void;
+  /** Called when the in-page editor deletes a highlight. */
+  onDeleteHighlight?: (id: string) => void;
   /** Highlights to paint on create-overlay / after snapshot load. */
   highlights?: HighlightRecord[];
   /** Last reading fraction to restore (0-1), from library persistence. */
@@ -168,6 +117,7 @@ interface ReaderViewProps {
 type FoliateOverlayer = {
   add(key: string, range: Range, draw: unknown, options?: { color?: string }): void;
   remove(key: string): void;
+  hitTest?(point: { x: number; y: number }): [string, Range] | [] | undefined;
 };
 
 type FoliateTtsEngine = {
@@ -181,7 +131,10 @@ type FoliateTtsEngine = {
 
 type FoliateAnnotator = {
   getCFI?: (index: number, range?: Range) => string;
-  addAnnotation?: (annotation: { value: string }, remove?: boolean) => Promise<unknown>;
+  addAnnotation?: (
+    annotation: { value: string; color?: string },
+    remove?: boolean,
+  ) => Promise<unknown>;
   deleteAnnotation?: (annotation: { value: string }) => Promise<unknown>;
   goTo?: (target: string) => Promise<unknown>;
   tts?: FoliateTtsEngine | null;
@@ -251,13 +204,19 @@ function selectionOverlayPos(doc: Document, range: Range): { x: number; y: numbe
   };
 }
 
-function paintHighlight(view: FoliateAnnotator, cfi: string, remove = false) {
+function paintHighlight(view: FoliateAnnotator, cfi: string, color?: string, remove = false) {
   const task = remove
     ? view.deleteAnnotation?.({ value: cfi })
-    : view.addAnnotation?.({ value: cfi });
+    : view.addAnnotation?.({ value: cfi, color });
   void Promise.resolve(task).catch((err: unknown) =>
     console.error(remove ? "deleteAnnotation error:" : "addAnnotation error:", err),
   );
+}
+
+function rangeOwnerDocument(range: Range): Document | null {
+  return range.startContainer.nodeType === Node.DOCUMENT_NODE
+    ? (range.startContainer as Document)
+    : range.startContainer.ownerDocument;
 }
 
 function readIframeSelection(view: FoliateAnnotator): SelectionCfi | null {
@@ -283,6 +242,8 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       onRelocate,
       onSelectionCapture,
       onHighlight,
+      onUpdateHighlight,
+      onDeleteHighlight,
       highlights = [],
       initialFraction,
       onBookReady,
@@ -383,6 +344,21 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       y: number;
       text: string;
     } | null>(null);
+    const [editor, setEditor] = useState<{
+      id: string;
+      cfi: string;
+      x: number;
+      y: number;
+      color: HighlightColor;
+      note: string;
+    } | null>(null);
+    const closeHighlightEditorRef = useRef(() => {});
+    const closeHighlightEditor = useCallback(() => setEditor(null), []);
+    closeHighlightEditorRef.current = closeHighlightEditor;
+    const onUpdateHighlightRef = useRef(onUpdateHighlight);
+    const onDeleteHighlightRef = useRef(onDeleteHighlight);
+    onUpdateHighlightRef.current = onUpdateHighlight;
+    onDeleteHighlightRef.current = onDeleteHighlight;
 
     // Mount the <foliate-view> custom element once.
     useEffect(() => {
@@ -415,16 +391,44 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       const handleCreateOverlay = () => {
         const view = el as unknown as FoliateAnnotator;
         for (const highlight of highlightsRef.current) {
-          paintHighlight(view, highlight.cfi);
+          paintHighlight(view, highlight.cfi, highlightColorHex(highlight.color));
         }
         if (ttsRangeRef.current) applyTtsHighlightRef.current(ttsRangeRef.current);
       };
       const handleDrawAnnotation = (e: Event) => {
-        const detail = (e as CustomEvent<{ draw?: (fn: unknown, opts: { color: string }) => void }>).detail;
-        detail.draw?.(Overlayer.highlight, { color: HIGHLIGHT_COLOR });
+        const detail = (
+          e as CustomEvent<{
+            draw?: (fn: unknown, opts: { color: string }) => void;
+            annotation?: { color?: string };
+          }>
+        ).detail;
+        const color = detail.annotation?.color ?? highlightColorHex();
+        detail.draw?.(Overlayer.highlight, { color });
+      };
+      const handleShowAnnotation = (e: Event) => {
+        const detail = (
+          e as CustomEvent<{ value?: string; range?: Range }>
+        ).detail;
+        if (!isHighlightOverlayKey(detail?.value)) return;
+        const highlight = highlightsRef.current.find((item) => item.cfi === detail.value);
+        if (!highlight || !detail.range) return;
+        const doc = rangeOwnerDocument(detail.range);
+        if (!doc) return;
+        const pos = selectionOverlayPos(doc, detail.range);
+        if (!pos) return;
+        setSelectionPos(null);
+        setEditor({
+          id: highlight.id,
+          cfi: highlight.cfi,
+          x: pos.x,
+          y: pos.y,
+          color: resolveHighlightColor(highlight.color),
+          note: highlight.note ?? "",
+        });
       };
       el.addEventListener("create-overlay", handleCreateOverlay as EventListener);
       el.addEventListener("draw-annotation", handleDrawAnnotation as EventListener);
+      el.addEventListener("show-annotation", handleShowAnnotation as EventListener);
 
       type FoliatePager = {
         goLeft?: () => void | Promise<void>;
@@ -470,6 +474,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         if (ke.key === "Escape") {
           // The footnote popup listens on window, but keydown from the chapter
           // iframe never reaches it; close the popup here when focus is inside.
+          closeHighlightEditorRef.current();
           if (footnoteOpenRef.current) {
             ke.preventDefault();
             closeFootnote();
@@ -499,6 +504,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         () => window.getSelection(),
         pageLeft,
         pageRight,
+        { onIdlePointerUp: () => closeHighlightEditorRef.current() },
       );
       el.addEventListener("wheel", handleWheel, { passive: false });
       window.addEventListener("keydown", handleKeyDown);
@@ -524,6 +530,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
           return;
         }
         lastSelectionDocRef.current = doc;
+        closeHighlightEditorRef.current();
         setSelectionPos({ x: pos.x, y: pos.y, text });
       };
       const handleLoad = (e: Event) => {
@@ -538,6 +545,18 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
           () => doc.getSelection(),
           pageLeft,
           pageRight,
+          {
+            shouldIgnore: (ev) => {
+              const contents =
+                (el as unknown as FoliateAnnotator).renderer?.getContents?.() ?? [];
+              for (const { overlayer } of contents) {
+                const hit = overlayer?.hitTest?.({ x: ev.clientX, y: ev.clientY });
+                if (isHighlightOverlayKey(hit?.[0])) return true;
+              }
+              return false;
+            },
+            onIdlePointerUp: () => closeHighlightEditorRef.current(),
+          },
         );
         const onSelectionChange = () => handleIframeSelection(doc);
         doc.addEventListener("keydown", handleKeyDown);
@@ -718,6 +737,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         el.removeEventListener("relocate", handleRelocate as EventListener);
         el.removeEventListener("create-overlay", handleCreateOverlay as EventListener);
         el.removeEventListener("draw-annotation", handleDrawAnnotation as EventListener);
+        el.removeEventListener("show-annotation", handleShowAnnotation as EventListener);
         el.removeEventListener("load", handleLoad as EventListener);
         el.removeEventListener("link", handleLink as EventListener);
         closeFootnote();
@@ -741,6 +761,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       suppressUserRelocateRef.current = 0;
       paintedCfisRef.current = new Set();
       setSelectionPos(null);
+      setEditor(null);
       closeFootnote();
       if (!fileData || !viewRef.current) return;
       const view = viewRef.current as unknown as {
@@ -782,12 +803,16 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       if (!view) return;
       const next = new Set(highlights.map((item) => item.cfi));
       for (const cfi of paintedCfisRef.current) {
-        if (!next.has(cfi)) paintHighlight(view, cfi, true);
+        if (!next.has(cfi)) paintHighlight(view, cfi, undefined, true);
       }
       for (const highlight of highlights) {
-        paintHighlight(view, highlight.cfi);
+        paintHighlight(view, highlight.cfi, highlightColorHex(highlight.color));
       }
       paintedCfisRef.current = next;
+      setEditor((current) => {
+        if (!current) return current;
+        return highlights.some((item) => item.id === current.id) ? current : null;
+      });
     }, [highlights]);
 
     const clearIframeSelection = useCallback(() => {
@@ -795,6 +820,17 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       lastSelectionDocRef.current = null;
       setSelectionPos(null);
     }, []);
+
+    useEffect(() => {
+      if (!editor) return;
+      const onKeyDown = (event: KeyboardEvent) => {
+        if (event.key !== "Escape") return;
+        event.preventDefault();
+        closeHighlightEditor();
+      };
+      window.addEventListener("keydown", onKeyDown);
+      return () => window.removeEventListener("keydown", onKeyDown);
+    }, [editor, closeHighlightEditor]);
 
     const handleAskAgent = useCallback(() => {
       if (!selectionPos) return;
@@ -811,7 +847,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       if (!view) return;
       const selection = readIframeSelection(view);
       if (!selection) return;
-      paintHighlight(view, selection.cfi);
+      paintHighlight(view, selection.cfi, highlightColorHex(getLastUsedHighlightColor()));
       onHighlight?.(selection);
       clearIframeSelection();
     }, [onHighlight, clearIframeSelection]);
@@ -872,11 +908,13 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
     }, []);
     const addHighlight = useCallback((cfi: string) => {
       const view = viewRef.current as unknown as FoliateAnnotator | null;
-      if (view) paintHighlight(view, cfi);
+      if (!view) return;
+      const record = highlightsRef.current.find((item) => item.cfi === cfi);
+      paintHighlight(view, cfi, highlightColorHex(record?.color));
     }, []);
     const removeHighlight = useCallback((cfi: string) => {
       const view = viewRef.current as unknown as FoliateAnnotator | null;
-      if (view) paintHighlight(view, cfi, true);
+      if (view) paintHighlight(view, cfi, undefined, true);
     }, []);
 
     const clearTtsHighlight = useCallback(() => {
@@ -992,12 +1030,33 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       <div data-testid="reader-view" className="relative h-full w-full">
         <div ref={containerRef} className="h-full w-full" />
 
-        {selectionPos && (
+        {selectionPos && !editor && (
           <SelectionToolbar
             x={selectionPos.x}
             y={selectionPos.y}
             onHighlight={handleHighlightSelection}
             onAskAgent={handleAskAgent}
+          />
+        )}
+
+        {editor && (
+          <HighlightEditor
+            x={editor.x}
+            y={editor.y}
+            color={editor.color}
+            note={editor.note}
+            highlightId={editor.id}
+            onColorChange={(color) => {
+              setEditor((current) => (current ? { ...current, color } : current));
+              onUpdateHighlightRef.current?.(editor.id, { color });
+            }}
+            onNoteCommit={(id, note) => {
+              onUpdateHighlightRef.current?.(id, { note: note.trim() ? note : null });
+            }}
+            onDelete={() => {
+              onDeleteHighlightRef.current?.(editor.id);
+              closeHighlightEditor();
+            }}
           />
         )}
 

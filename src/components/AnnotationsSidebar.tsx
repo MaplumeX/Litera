@@ -1,5 +1,6 @@
 import { BookmarkPlus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { highlightColorHex } from "@/lib/annotations";
 import { useT } from "@/lib/i18n";
 import type { BookmarkRecord, HighlightRecord } from "@/types/library";
 
@@ -95,7 +96,21 @@ export function AnnotationsSidebar({
                   title={highlight.excerpt}
                   onClick={() => onJumpHighlight(highlight)}
                 >
-                  <span className="line-clamp-2">{highlight.excerpt}</span>
+                  <span className="flex items-start gap-2">
+                    <span
+                      className="mt-1 size-2.5 shrink-0 rounded-full"
+                      style={{ backgroundColor: highlightColorHex(highlight.color) }}
+                      aria-hidden
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="line-clamp-2">{highlight.excerpt}</span>
+                      {highlight.note?.trim() ? (
+                        <span className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
+                          {highlight.note}
+                        </span>
+                      ) : null}
+                    </span>
+                  </span>
                 </button>
                 <Button
                   type="button"

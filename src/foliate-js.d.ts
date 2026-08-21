@@ -60,6 +60,7 @@ declare module "*/foliate-js/view.js" {
     overlayer?: {
       add(key: string, range: Range, draw: unknown, options?: { color?: string }): void;
       remove(key: string): void;
+      hitTest?(point: { x: number; y: number }): [string, Range] | [];
     };
   }
 
@@ -84,7 +85,7 @@ declare module "*/foliate-js/view.js" {
       range?: Range,
     ): { tocItem?: { label?: string; href?: string }; pageItem?: unknown };
     getCFI(index: number, range?: Range): string;
-    addAnnotation(annotation: { value: string }, remove?: boolean): Promise<unknown>;
+    addAnnotation(annotation: { value: string; color?: string }, remove?: boolean): Promise<unknown>;
     deleteAnnotation(annotation: { value: string }): Promise<unknown>;
     prev(): Promise<void>;
     next(): Promise<void>;
@@ -149,6 +150,7 @@ declare module "*/foliate-js/tts.js" {
 
 declare module "*/foliate-js/overlayer.js" {
   export class Overlayer {
+    hitTest(point: { x: number; y: number }): [string, Range] | [];
     static highlight(
       rects: DOMRectList | ArrayLike<DOMRect>,
       options?: { color?: string },

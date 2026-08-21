@@ -88,6 +88,21 @@ describe("AnnotationsSidebar", () => {
     expect(onDeleteHighlight).toHaveBeenCalledWith("h1");
   });
 
+  it("shows a color swatch and note excerpt on highlight rows", () => {
+    const noted = {
+      ...highlight,
+      color: "green" as const,
+      note: "这段很重要",
+    };
+    const { getByText, container } = render(
+      <AnnotationsSidebar bookmarks={[]} highlights={[noted]} {...noop} />,
+    );
+    expect(getByText("选中的句子")).toBeTruthy();
+    expect(getByText("这段很重要")).toBeTruthy();
+    const swatch = container.querySelector("span[aria-hidden]") as HTMLElement | null;
+    expect(swatch?.style.backgroundColor).toBe("rgb(74, 222, 128)");
+  });
+
   it("switches the empty copy when the locale is en", () => {
     setLocale("en");
     const { getByText, getByLabelText } = render(
