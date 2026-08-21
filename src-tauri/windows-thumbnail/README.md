@@ -28,7 +28,7 @@ cd src-tauri/windows-thumbnail
 cargo build --release
 ```
 
-The resulting `windows_thumbnail.dll` is bundled via `tauri.conf.json`
+The resulting `windows_thumbnail.dll` is bundled via `tauri.windows.conf.json`
 `bundle.resources` and auto-registered by the NSIS installer hooks.
 
 ## Manual registration (development)

@@ -1,0 +1,7 @@
+{
+  "bundle": {
+    "resources": [
+      "windows-thumbnail/target/release/windows_thumbnail.dll"
+    ]
+  }
+}

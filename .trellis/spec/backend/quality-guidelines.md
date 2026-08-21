@@ -52,7 +52,7 @@ Run frontend tests/type-check/build, Rust tests, `tauri build --no-bundle`, and
 the stale-reference audit before release.
 
 On Windows CI, the `windows-thumbnail` cdylib must be built (`cargo build
---release` in `src-tauri/windows-thumbnail/`) before `tauri build` so the
-`bundle.resources` DLL exists.  Non-Windows builds use a placeholder DLL to
-satisfy `tauri build.rs` resource-path validation; the real DLL is never compiled
-on macOS/Linux.
+--release` in `src-tauri/windows-thumbnail/`) before `cargo test` and
+`tauri build` so the `tauri.windows.conf.json` `bundle.resources` DLL exists.
+Non-Windows builds never list that path, so `tauri build.rs` does not require
+the file; the real DLL is never compiled on macOS/Linux.

@@ -54,9 +54,6 @@
     "macOS": {
       "signingIdentity": "-"
     },
-    "resources": [
-      "windows-thumbnail/target/release/windows_thumbnail.dll"
-    ],
     "windows": {
       "nsis": {
         "installerHooks": "./windows/hooks.nsh"

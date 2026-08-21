@@ -65,17 +65,17 @@ jobs:
         id: version
         run: node scripts/bump-version.mjs --check
 
+      - name: Build Windows thumbnail DLL
+        if: matrix.platform == 'windows-latest'
+        working-directory: src-tauri/windows-thumbnail
+        run: cargo build --release
+
       - name: Test
         run: |
           npm test -- --run
           npx tsc --noEmit
           npx vite build
           cargo test --locked --manifest-path src-tauri/Cargo.toml
-
-      - name: Build Windows thumbnail DLL
-        if: matrix.platform == 'windows-latest'
-        working-directory: src-tauri/windows-thumbnail
-        run: cargo build --release
 
       - uses: tauri-apps/tauri-action@v1
         env:

@@ -16,6 +16,7 @@ src-tauri/
 ├── windows/hooks.nsh        # NSIS install/uninstall hooks for the DLL
 ├── capabilities/default.json
 ├── tauri.conf.json
+├── tauri.windows.conf.json  # Windows-only bundle.resources (thumbnail DLL)
 └── Cargo.toml
 
 src/agent/
@@ -32,7 +33,7 @@ src/agent/
 - `windows-thumbnail/` is an isolated Cargo workspace (`[workspace]` in its
   `Cargo.toml`) so its `windows`/`zip`/`image` dependencies do not merge into
   the main workspace.  It is built separately (`cargo build --release`) on
-  Windows CI before `tauri build`, bundled via `tauri.conf.json`
-  `bundle.resources`, and auto-registered by NSIS hooks.  Non-Windows builds
-  are unaffected; a placeholder DLL keeps `tauri build.rs` resource
-  validation happy on other platforms.
+  Windows CI before `cargo test` / `tauri build`, bundled via
+  `tauri.windows.conf.json` `bundle.resources`, and auto-registered by NSIS
+  hooks.  Non-Windows builds do not list the DLL, so `tauri build.rs` does
+  not require the file.
