@@ -1,0 +1,2 @@
+{"file": ".trellis/tasks/08-21-fix-win-titlebar-dblclick/prd.md", "reason": "AC1-AC6 acceptance criteria"}
+{"file": ".trellis/tasks/08-21-fix-win-titlebar-dblclick/design.md", "reason": "Implementation contract: self-tracked double-click, 500ms + 10px thresholds"}

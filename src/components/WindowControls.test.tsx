@@ -26,6 +26,19 @@ function TitlebarDragTarget() {
   return <div data-testid="titlebar-drag" {...drag} />;
 }
 
+function pressPrimary(target: HTMLElement, x = 10, y = 10) {
+  // Simulate the real Windows WebView2 sequence where pointer capture makes
+  // every pointerdown report detail: 1, even the second click of a double-click.
+  fireEvent.pointerDown(target, {
+    button: 0,
+    detail: 1,
+    pointerId: 1,
+    clientX: x,
+    clientY: y,
+  });
+  fireEvent.pointerUp(target, { pointerId: 1, clientX: x, clientY: y });
+}
+
 function mockUserAgent(ua: string) {
   vi.spyOn(window.navigator, "userAgent", "get").mockReturnValue(ua);
 }
@@ -105,15 +118,41 @@ describe("titlebar helpers", () => {
 
   it("toggles maximize on a primary double-click without dragging", () => {
     const { getByTestId } = render(<TitlebarDragTarget />);
-    fireEvent.pointerDown(getByTestId("titlebar-drag"), {
-      button: 0,
-      detail: 2,
-      pointerId: 1,
-      clientX: 10,
-      clientY: 10,
-    });
+    const target = getByTestId("titlebar-drag");
+    pressPrimary(target);
+    pressPrimary(target);
     expect(windowApi.toggleMaximize).toHaveBeenCalledTimes(1);
     expect(windowApi.startDragging).not.toHaveBeenCalled();
+  });
+
+  it("treats presses more than 500ms apart as two single clicks", () => {
+    const { getByTestId } = render(<TitlebarDragTarget />);
+    const target = getByTestId("titlebar-drag");
+    const now = vi.spyOn(Date, "now");
+    now.mockReturnValue(1_000);
+    pressPrimary(target);
+    now.mockReturnValue(1_600);
+    pressPrimary(target);
+    expect(windowApi.toggleMaximize).not.toHaveBeenCalled();
+    expect(windowApi.startDragging).not.toHaveBeenCalled();
+  });
+
+  it("treats presses more than 10px apart as two single clicks", () => {
+    const { getByTestId } = render(<TitlebarDragTarget />);
+    const target = getByTestId("titlebar-drag");
+    pressPrimary(target, 10, 10);
+    pressPrimary(target, 30, 10); // 20px away, outside the 10px radius
+    expect(windowApi.toggleMaximize).not.toHaveBeenCalled();
+    expect(windowApi.startDragging).not.toHaveBeenCalled();
+  });
+
+  it("does not toggle maximize twice on a triple-click", () => {
+    const { getByTestId } = render(<TitlebarDragTarget />);
+    const target = getByTestId("titlebar-drag");
+    pressPrimary(target);
+    pressPrimary(target);
+    pressPrimary(target);
+    expect(windowApi.toggleMaximize).toHaveBeenCalledTimes(1);
   });
 
   it("does not toggle maximize or drag on a primary press", () => {
@@ -164,9 +203,10 @@ describe("titlebar helpers", () => {
   it("does not start dragging after a maximize gesture", () => {
     const { getByTestId } = render(<TitlebarDragTarget />);
     const target = getByTestId("titlebar-drag");
+    pressPrimary(target);
     fireEvent.pointerDown(target, {
       button: 0,
-      detail: 2,
+      detail: 1,
       pointerId: 1,
       clientX: 10,
       clientY: 10,

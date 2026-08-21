@@ -8,12 +8,20 @@ import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 export const TITLEBAR_DRAG_THRESHOLD_PX = 4;
+const DOUBLE_CLICK_WINDOW_MS = 500;
+const DOUBLE_CLICK_DISTANCE_SQ_PX = 100; // 10px
 
 type TitlebarDragSession = {
   pointerId: number;
   startX: number;
   startY: number;
   dragging: boolean;
+};
+
+type LastPointerDown = {
+  time: number;
+  x: number;
+  y: number;
 };
 
 export function titlebarClassName(): string {
@@ -29,15 +37,28 @@ export function shouldStartTitlebarDrag(dx: number, dy: number): boolean {
 
 export function useTitlebarWindowDrag() {
   const sessionRef = useRef<TitlebarDragSession | null>(null);
+  // Track double-click ourselves: Windows WebView2 may report detail=1 for the
+  // second pointerdown when pointer capture was set on the first click.
+  const lastDownRef = useRef<LastPointerDown | null>(null);
 
   const onPointerDown = useCallback((event: PointerEvent<HTMLElement>) => {
     if (event.button !== 0) return;
-    if (event.detail >= 2) {
+    const now = Date.now();
+    const last = lastDownRef.current;
+    if (
+      last !== null &&
+      now - last.time < DOUBLE_CLICK_WINDOW_MS &&
+      (event.clientX - last.x) ** 2 + (event.clientY - last.y) ** 2 <
+        DOUBLE_CLICK_DISTANCE_SQ_PX
+    ) {
       event.preventDefault();
       sessionRef.current = null;
+      // Reset so a triple-click does not trigger maximize twice.
+      lastDownRef.current = null;
       void getCurrentWindow().toggleMaximize();
       return;
     }
+    lastDownRef.current = { time: now, x: event.clientX, y: event.clientY };
     sessionRef.current = {
       pointerId: event.pointerId,
       startX: event.clientX,

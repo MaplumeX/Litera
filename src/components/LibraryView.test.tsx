@@ -357,7 +357,11 @@ describe("LibraryView", () => {
     expect(windowApi.destroy).not.toHaveBeenCalled();
 
     const spacer = header!.querySelectorAll("[data-titlebar-drag]")[1];
-    fireEvent.pointerDown(spacer, { button: 0, detail: 2 });
+    // Double-click detection is time/position based (Windows WebView2 reports
+    // detail: 1 for every pointerdown once pointer capture is involved).
+    fireEvent.pointerDown(spacer, { button: 0, pointerId: 1, clientX: 10, clientY: 10 });
+    fireEvent.pointerUp(spacer, { pointerId: 1, clientX: 10, clientY: 10 });
+    fireEvent.pointerDown(spacer, { button: 0, detail: 1, pointerId: 1, clientX: 10, clientY: 10 });
     expect(windowApi.toggleMaximize).toHaveBeenCalledTimes(1);
     expect(windowApi.startDragging).not.toHaveBeenCalled();
   });

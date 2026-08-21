@@ -283,8 +283,8 @@ Frontend: `src/lib/platform.ts` (`detectDesktopOs` / `usesCustomWindowControls` 
 - Custom close must call `close()`, never `destroy()`. `App.tsx` `onCloseRequested` still `preventDefault` → flush ≤2s → `destroy()`.
 - Do **not** put `data-tauri-drag-region` on title/spacer. That attribute starts a native drag on the first `mousedown`, so a JS `toggleMaximize()` on `detail === 2` races it (double-click silently fails, or restore leaves fullscreen geometry).
 - Mark only the title node and the flex spacer with `data-titlebar-drag` + `select-none` + `useTitlebarWindowDrag()` pointer props. Never on the header root, search, or buttons. The `data-titlebar-drag` flag is not inherited and is not a Tauri attribute.
-- Primary `pointerdown` (`button === 0`) with `detail >= 2` → `preventDefault()` + `toggleMaximize()`, and do not `startDragging()` on that gesture.
-- Primary `pointerdown` with `detail < 2`: record the point; after movement of `TITLEBAR_DRAG_THRESHOLD_PX` (4px, `dx²+dy² >= 16`) call `startDragging()` once. Click without crossing the threshold does not maximize and does not drag.
+- Primary `pointerdown` (`button === 0`): `useTitlebarWindowDrag` tracks double-click itself (`Date.now()` + client coords, < 500ms and < 10px) because Windows WebView2 may report `detail === 1` for the second press once pointer capture is involved (Chromium issue #40675080). A double-press → `preventDefault()` + `toggleMaximize()`, resets the tracker (a third press does not re-trigger), and must not `startDragging()` on that gesture. Do not reintroduce an `event.detail >= 2` check.
+- Other primary `pointerdown`: record the point; after movement of `TITLEBAR_DRAG_THRESHOLD_PX` (4px, `dx²+dy² >= 16`) call `startDragging()` once. Click without crossing the threshold does not maximize and does not drag.
 - Platform `tauri.*.conf.json` `windows` arrays can replace the shared `windows[0]`. Prefer Rust setup. If JSON is required, copy the full window object.
 - Do not add `@tauri-apps/plugin-os`.
 
@@ -307,7 +307,7 @@ Frontend: `src/lib/platform.ts` (`detectDesktopOs` / `usesCustomWindowControls` 
 
 - `platform.ts`: Mac / Win / Linux / unknown UA.
 - `WindowControls`: hidden on Mac UA; visible on Win/Linux; buttons call minimize / toggleMaximize / `close` (not `destroy`).
-- Library + reader: `h-12`; Mac `pl-[72px]` and no custom buttons; title + spacer have `data-titlebar-drag` + `select-none` and no `data-tauri-drag-region`; search/actions do not; spacer `pointerDown` `button: 0` `detail: 2` → `toggleMaximize` and not `startDragging`; move past 4px after a primary press → `startDragging` once.
+- Library + reader: `h-12`; Mac `pl-[72px]` and no custom buttons; title + spacer have `data-titlebar-drag` + `select-none` and no `data-tauri-drag-region`; search/actions do not; two primary spacer presses within 500ms/10px (both `detail: 1`) → `toggleMaximize` and not `startDragging`; move past 4px after a primary press → `startDragging` once.
 - Pin Windows UA in chrome tests; do not depend on jsdom's host UA.
 - `npm test` + `npm run build`. Live OS chrome is manual (`npm run tauri dev`).
 
