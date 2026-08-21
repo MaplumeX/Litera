@@ -238,6 +238,29 @@ scrollToAnchor(range, false); // only if off-screen
 
 **Related**: `src/components/chat/ChatPanel.tsx`.
 
+### Convention: chat user-message outline is a transient overlay
+
+**What**: `ChatPanel` derives a conversation outline from the current session's user messages. The header `List` button opens `UserMessageToc` as an absolute overlay inside the message region, so it covers neither the chat header nor `ChatInput`. Rows use the source array index as their locator, show a whitespace-normalized 60-character preview, and mark the current question with `aria-current="location"`.
+
+**Why**: Long Agent conversations need TOC-like navigation without adding another permanent column beside the session rail, chat, and book. Deriving the outline from `state.messages` keeps it synchronized with prompt edits and session rewinds without adding a persistence or protocol contract.
+
+**Rules**:
+- Include only `role === "user"`; do not persist outline items or mix in assistant/tool/compaction entries.
+- Keep user-message DOM refs keyed by the original message-array index. Determine the active question from the last user message at or above a small probe below the scroll container's top; if none has crossed it, use the first user message.
+- Opening the conversation outline closes the docked session overlay. Close the outline on backdrop, close button, Escape, row click, session change, or book change. A row click smooth-scrolls the target with `block: "start"` and then closes the overlay.
+- A TOC jump is explicit reading intent: set `stickToBottom` false before scrolling. Reconcile bottom stickiness on `scrollend`, with a short timeout fallback for WebViews that do not emit it; clear that timer on session/book changes, explicit bottom scrolls, and unmount.
+- Keep the current outline row in view using the same fully-visible check and manual centered `scrollTop` adjustment as reader TOC. Do not unconditionally recenter it.
+- The header icon, aside, close controls, and rows use `useT()` labels in both catalogs. Empty sessions keep the outline button disabled.
+
+```tsx
+target.scrollIntoView({ behavior: "smooth", block: "start" });
+// scrollend (or the fallback timer) then recomputes whether bottom-follow resumes.
+```
+
+**Tests required**: user-only preview derivation; smooth jump + automatic close; streaming follow suppression and recovery at bottom; active-row tracking/recentering; session/book reset; Escape and bilingual accessible names.
+
+**Related**: `src/components/chat/ChatPanel.tsx`; `src/components/chat/UserMessageToc.tsx`; the stick-to-bottom convention above.
+
 ### Convention: chat message action rows reserve height
 
 **What**: User-message edit and assistant-message copy live in a fixed-height row **below** the bubble / markdown (`h-6`). Hover may change icon contrast. Editing replaces that row with save/cancel; the bubble becomes a textarea.
