@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "Current ownership: chatCollapsed/bookCollapsed/sessionRailOpen are process-only; lastReaderMode is the per-book durable pattern to follow."}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "Rust↔TS serde contract for BookRecord / BookOpenContext; new lastLayout must stay camelCase and typed."}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "library.json strict reads, independent Option updates, no schemaVersion bump for optional shelf fields."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Adding a persisted shelf field crosses WebView, Tauri command, and library.json."}
