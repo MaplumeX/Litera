@@ -305,9 +305,9 @@ target.scrollIntoView({ behavior: "smooth", block: "start" });
 
 ### Convention: settings exclusive choices are a segmented control
 
-**What**: Theme, language, and text-align in `SettingsDialog` share a local `SegmentedControl` (`src/components/settings/SettingsDialog.tsx`). Layout is label above, control full width (`PresetRow`). The track is `bg-muted`; the selected segment is `bg-background shadow-xs`. The group is `role="radiogroup"`; each option is `role="radio"` with `aria-checked`. Arrow keys move focus; Space / Enter select.
+**What**: Theme, language, text-align, and the typography override on/off rows in `SettingsDialog` share a local `SegmentedControl` (`src/components/settings/SettingsDialog.tsx`). Layout is label above, control full width (`PresetRow`). The track is `bg-muted`; the selected segment is `bg-background shadow-xs`. The group is `role="radiogroup"`; each option is `role="radio"` with `aria-checked`. Arrow keys move focus; Space / Enter select.
 
-**Why**: Separate bordered `ChoiceButton`s read as three action buttons, not one exclusive choice. A filled `bg-primary` selected state looks like a CTA. `src/components/ui/` is shadcn-owned — do not drop this control there, and do not add `toggle-group` just for these three rows.
+**Why**: Separate bordered `ChoiceButton`s read as three action buttons, not one exclusive choice. A filled `bg-primary` selected state looks like a CTA. `src/components/ui/` is shadcn-owned — do not drop this control there, and do not add `Switch` / `toggle-group` for exclusive on/off rows.
 
 **Don't**:
 - Rebuild these rows as independent `rounded border` buttons with `gap-1`.
@@ -524,7 +524,13 @@ const css = generateStylesCss(styleState)
 readerRef.current?.setStyles(css)
 ```
 
-`generateStylesCss` writes `font-family`, `font-size`, `line-height`, `letter-spacing`, `max-width`, `padding-inline`, and `text-align` on `html, body`, plus `p { margin-block-end; text-indent }` with `!important` so EPUB chapter CSS does not win. Each `setStyles` call replaces the full stylesheet (not additive).
+`generateStylesCss` writes `font-family`, `font-size`, `line-height`, `letter-spacing`, `max-width`, `padding-inline`, and `text-align` on `html, body`, plus `p { margin-block-end; text-indent }` with `!important` so EPUB chapter CSS does not win on those paragraph rules. Each `setStyles` call replaces the full stylesheet (not additive).
+
+Publisher chapter CSS and `@font-face` still win on `font-family` / most typography unless the user turns on `overrideFont` / `overrideLayout` (Settings → Typography, two `SegmentedControl` rows after the preview). Both flags default off; both off must keep this baseline stylesheet bit-for-bit (do not weaken existing `!important`). Do not strip publisher stylesheets.
+
+- `overrideFont`: user `font-family !important` on body text **and** `h1–h6`; `code, kbd, pre, samp { font-family: monospace !important }`. Still use `cssFontFamily`.
+- `overrideLayout`: `font-size`, `line-height`, `letter-spacing`, `text-align` with `!important` on `html, body, p, div, li, blockquote` — not headings. `max-width` / `padding-inline` always apply.
+- Persist with the other reader typography keys (`preferences.json` + per-book `ReadingSettings`). Book `false` is a real override. Do not use `localStorage`. See backend `tauri-commands.md` "Scenario: override publisher font and layout".
 
 `font-family` must go through `cssFontFamily`: generics (`serif` / `sans-serif` / `monospace`) stay unquoted; named faces are quoted/escaped and followed by `, serif`. Do not interpolate a raw user-facing family name into the stylesheet.
 
