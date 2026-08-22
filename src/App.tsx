@@ -214,8 +214,8 @@ function App() {
   const openBookControllerRef = useRef(createLatestSerializedTaskController());
   // Drag can fire goToFraction faster than foliate finishes; keep latest-wins.
   const seekControllerRef = useRef(createLatestSerializedTaskController());
-  // Latest fraction for open-book / relocate; do not write it into currentBook
-  // on every relocate or ReaderView's [fileData, initialFraction] effect re-opens.
+  // Latest fraction for open-book / relocate; do not write lastFraction / lastCfi
+  // into currentBook on every relocate or ReaderView's open effect re-opens.
   const lastKnownFractionRef = useRef<number | undefined>(undefined);
   // Do not save until get_annotations succeeds; a failed/in-flight load
   // must not replace books/<id>/annotations.json with an empty snapshot.
@@ -230,10 +230,14 @@ function App() {
     setPersistenceError(invokeErrorMessage(error));
   }, []);
 
-  // Persist reading position (debounced).
-  const persistFraction = useDebouncedCallback(
-    async (bookId: string, fraction: number) => {
-      await invoke("update_reading_state", { bookId, lastFraction: fraction });
+  // Persist reading position (debounced). One invoke for fraction + CFI.
+  const persistPosition = useDebouncedCallback(
+    async (bookId: string, fraction: number, cfi?: string) => {
+      await invoke("update_reading_state", {
+        bookId,
+        lastFraction: fraction,
+        ...(cfi ? { lastCfi: cfi } : {}),
+      });
     },
     500,
     reportPersistenceError,
@@ -268,7 +272,7 @@ function App() {
     async () => {
       try {
         await Promise.all([
-          persistFraction.flush(),
+          persistPosition.flush(),
           persistSettings.flush(),
           persistReaderMode.flush(),
           persistLayout.flush(),
@@ -280,7 +284,7 @@ function App() {
       }
     },
     [
-      persistFraction,
+      persistPosition,
       persistSettings,
       persistReaderMode,
       persistLayout,
@@ -444,7 +448,7 @@ function App() {
         bookId: context.bookId,
       });
 
-      // Build a partial BookRecord for passing lastFraction + settings to ReaderView.
+      // Build a partial BookRecord for passing lastFraction / lastCfi / settings to ReaderView.
       // The full record is fetched from list_books; this context stays lightweight.
       lastKnownFractionRef.current = context.lastFraction;
       setProgress({
@@ -461,6 +465,7 @@ function App() {
         filePath: "",
         importedAt: "",
         lastFraction: context.lastFraction,
+        lastCfi: context.lastCfi,
         settings: context.settings,
         lastReaderMode: isReaderMode(context.lastReaderMode)
           ? context.lastReaderMode
@@ -534,15 +539,15 @@ function App() {
   }, [flushReadingState, tts.stop]);
 
   const handleRelocate = useCallback(
-    (index: number, fraction: number, label?: string, chapterHref?: string) => {
+    (index: number, fraction: number, label?: string, chapterHref?: string, cfi?: string) => {
       lastKnownFractionRef.current = fraction;
       setProgress({ index, fraction, label, chapterHref });
-      // Persist reading position.
+      // Persist reading position. Do not write lastCfi / lastFraction into currentBook.
       if (fileData?.bookId) {
-        persistFraction.schedule(fileData.bookId, fraction);
+        persistPosition.schedule(fileData.bookId, fraction, cfi);
       }
     },
-    [fileData?.bookId, persistFraction],
+    [fileData?.bookId, persistPosition],
   );
 
   const handleSelectionCapture = useCallback((capture: SelectionCapture) => {
@@ -1059,6 +1064,7 @@ function App() {
                 onDeleteHighlight={handleDeleteHighlight}
                 highlights={annotations.highlights}
                 initialFraction={currentBook?.lastFraction}
+                initialCfi={currentBook?.lastCfi}
                 onBookReady={handleBookReady}
                 onTtsToggle={tts.toggle}
                 onUserRelocate={tts.onUserRelocate}

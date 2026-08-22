@@ -8,7 +8,10 @@
   and Pi v3 session files. Per-book last reader/Agent mode is
   `BookRecord.lastReaderMode`. Per-book chrome layout is
   `BookRecord.lastLayout` (`chatCollapsed`, `bookCollapsed`,
-  `sessionRailOpen`).
+  `sessionRailOpen`). Per-book reopen locator is `BookRecord.lastCfi`;
+  `lastFraction` is percent for the library card and scrubber, not a page
+  locator. Do not put `lastCfi` on `ReadingSettings`, `annotations.json`, or
+  `localStorage`.
 - React owns route/layout/form state and the reducer projection used by chat UI.
   App default mode (`litera.defaultReaderMode`) and pane widths live in `localStorage`.
   TTS rate/voice live in `localStorage` (`litera.ttsRate` / `litera.ttsVoice`);
@@ -71,10 +74,12 @@ locators, and do not keep a second reader-location store in chat state.
 ## Durable writes
 
 Library/preferences/annotation mutations go through Tauri commands. Reading
-position, typography settings, `lastReaderMode`, and `lastLayout` are
-debounced but flush on navigation/unmount. Changing the Settings default mode
-must not call `update_reading_state`. Pane widths stay in `localStorage`; do
-not send them on this command. Pi session appends include the expected leaf
+position (`lastFraction` + `lastCfi` in one relocate invoke), typography
+settings, `lastReaderMode`, and `lastLayout` are debounced but flush on
+navigation/unmount. Do not write `lastCfi` / `lastFraction` into `currentBook`
+on every relocate — that re-opens `ReaderView`. Changing the Settings default
+mode must not call `update_reading_state`. Pane widths stay in `localStorage`;
+do not send them on this command. Pi session appends include the expected leaf
 id; stale writers fail rather than overwrite a new branch.
 
 ## Configuration

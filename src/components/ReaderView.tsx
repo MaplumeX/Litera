@@ -91,7 +91,13 @@ interface ReaderViewProps {
   /** Bytes of an opened EPUB file, or null when no file is loaded. */
   fileData: { bytes: Uint8Array<ArrayBuffer>; name: string } | null;
   /** Called when the reader relocates (page turn / scroll). */
-  onRelocate?: (index: number, fraction: number, label?: string, chapterHref?: string) => void;
+  onRelocate?: (
+    index: number,
+    fraction: number,
+    label?: string,
+    chapterHref?: string,
+    cfi?: string,
+  ) => void;
   /** Called when the user clicks the ask-agent button on a selection. */
   onSelectionCapture?: (capture: SelectionCapture) => void;
   /** Called when the user clicks highlight on a selection. */
@@ -104,6 +110,8 @@ interface ReaderViewProps {
   highlights?: HighlightRecord[];
   /** Last reading fraction to restore (0-1), from library persistence. */
   initialFraction?: number;
+  /** Last visible CFI to restore; takes precedence over initialFraction. */
+  initialCfi?: string;
   /** Called after the book is opened and toc is available. */
   onBookReady?: (toc: TocItem[]) => void;
   /** Space play/pause while the chapter iframe or window is focused. */
@@ -246,6 +254,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       onDeleteHighlight,
       highlights = [],
       initialFraction,
+      initialCfi,
       onBookReady,
       onTtsToggle,
       onUserRelocate,
@@ -381,7 +390,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         if (detail.cfi) {
           lastLocationRef.current = { cfi: detail.cfi, fraction, label };
         }
-        onRelocateRef.current?.(index, fraction, label, chapterHref);
+        onRelocateRef.current?.(index, fraction, label, chapterHref, detail.cfi);
         if (suppressUserRelocateRef.current === 0) {
           onUserRelocateRef.current?.();
         }
@@ -768,11 +777,13 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         open: (file: File) => Promise<void>;
         init: (opts: Record<string, unknown>) => Promise<void>;
         goToFraction: (frac: number) => Promise<void>;
+        resolveNavigation?: (target: string) => unknown;
         close?: () => void;
       };
       const { bytes, name } = fileData;
       const file = new File([bytes], name);
       const fractionToRestore = initialFraction;
+      const cfiToRestore = initialCfi;
       // Close any previous renderer before opening a new book so foliate does
       // not stack multiple paginators in the shadow root (duplicate opens would
       // otherwise leave the visible renderer stale while paging hits the new one).
@@ -780,15 +791,30 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       view
         .open(file)
         .then(async () => {
-          await view.init({}).catch((err: unknown) =>
-            console.error("foliate init error:", err),
-          );
-          // Restore reading position after init completes (init internally calls
-          // next(), so goToFraction must run after to avoid conflicting navigation).
-          if (fractionToRestore != null && fractionToRestore > 0) {
-            await view.goToFraction(fractionToRestore).catch((err: unknown) =>
-              console.error("foliate goToFraction error:", err),
-            );
+          const restoreFraction = async () => {
+            if (fractionToRestore != null && fractionToRestore > 0) {
+              await view.goToFraction(fractionToRestore).catch((err: unknown) =>
+                console.error("foliate goToFraction error:", err),
+              );
+            }
+          };
+          try {
+            if (cfiToRestore) {
+              const resolved = view.resolveNavigation?.(cfiToRestore);
+              if (resolved) {
+                // Do not init({}) then goTo(cfi): init without lastLocation calls next().
+                await view.init({ lastLocation: cfiToRestore });
+              } else {
+                await view.init({});
+                await restoreFraction();
+              }
+            } else {
+              await view.init({});
+              await restoreFraction();
+            }
+          } catch (err: unknown) {
+            console.error("foliate restore error:", err);
+            await restoreFraction();
           }
           // Notify App that the book is ready and toc is available.
           const book = (view as unknown as { book?: { toc?: TocItem[] } }).book;
@@ -796,7 +822,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         })
         .catch((err: unknown) => console.error("foliate open error:", err));
       // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [fileData, initialFraction]);
+    }, [fileData, initialFraction, initialCfi]);
 
     useEffect(() => {
       const view = viewRef.current as unknown as FoliateAnnotator | null;

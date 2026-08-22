@@ -165,7 +165,7 @@ async fn open_book_bytes(app: AppHandle, store: State<'_, LibraryStore>, book_id
 #[tauri::command]
 async fn delete_book(store: State<'_, LibraryStore>, book_id: String) -> AppResult<()>
 
-// Update reading position/settings/mode/layout (relocate debounce + settings debounce + mode toggle + layout toggle)
+// Update reading position/settings/mode/layout/cfi (relocate debounce + settings debounce + mode toggle + layout toggle)
 #[tauri::command]
 async fn update_reading_state(
     store: State<'_, LibraryStore>,
@@ -174,6 +174,7 @@ async fn update_reading_state(
     settings: Option<ReadingSettings>,
     last_reader_mode: Option<String>,
     last_layout: Option<ReaderLayout>,
+    last_cfi: Option<String>,
 ) -> AppResult<()>
 
 // Per-book bookmarks + highlights (not BookRecord / library.json)
@@ -197,12 +198,13 @@ interface BookRecord {
   coverPath: string;    // absolute path to app_data/books/<id>/cover.jpg (new) or cover.png (legacy)
   filePath: string;     // absolute path to app_data/books/<id>/book.epub
   importedAt: string;   // ISO 8601 (RFC3339)
-  lastFraction?: number;
+  lastFraction?: number;  // percent for cards/scrubber; not a page locator
   settings?: ReadingSettings;
   lastOpenedAt?: string;  // RFC3339; missing = never opened
   contentHash?: string;   // SHA-256 hex of committed EPUB bytes
   lastReaderMode?: "reader" | "agent";  // missing = no memory; do not put on settings
   lastLayout?: ReaderLayout;            // missing = no memory; do not put on settings
+  lastCfi?: string;                     // epubcfi(...); reopen locator; not annotations.json
 }
 
 interface ReaderLayout {
@@ -242,6 +244,7 @@ interface BookOpenContext {
   settings?: ReadingSettings;
   lastReaderMode?: "reader" | "agent";
   lastLayout?: ReaderLayout;
+  lastCfi?: string;
 }
 
 interface BookmarkRecord {
@@ -296,7 +299,7 @@ interface AnnotationsFile {
 
 Do not filter `book.id != incoming_id` when matching `contentHash`. That made same-path unchanged look like `overwrite` and popped a replace dialog on every OS reopen of the same file.
 
-`save_book_metadata` writes `contentHash` from the staged bytes. An overwrite must keep `lastFraction`, `settings`, `lastOpenedAt`, and `lastReaderMode`. Same-path unchanged is a no-op on `library.json` and the committed EPUB. Overwrite also leaves `books/<id>/annotations.json` in place.
+`save_book_metadata` writes `contentHash` from the staged bytes. An overwrite must keep `lastFraction`, `lastCfi`, `settings`, `lastOpenedAt`, `lastReaderMode`, and `lastLayout`. Same-path unchanged is a no-op on `library.json` and the committed EPUB. Overwrite also leaves `books/<id>/annotations.json` in place.
 
 **Cover compression**: `save_book_metadata` compresses incoming `cover_bytes` before writing — decode with the `image` crate, downscale so the long edge ≤ 512px (never upscale), re-encode as JPEG quality 85, and write to `cover.jpg` (not `cover.png`). On any decode/encode failure, fall back to the original bytes so a broken cover never blocks an import. `MAX_COVER_BYTES` validates the raw input before compression. Legacy books with `cover.png` are not migrated; validation and transaction rollback accept both extensions. Frontend `convertFileSrc(coverPath)` works with any extension.
 
@@ -391,6 +394,7 @@ async fn update_reading_state(
     settings: Option<ReadingSettings>,
     last_reader_mode: Option<String>,
     last_layout: Option<ReaderLayout>,
+    last_cfi: Option<String>,
 ) -> AppResult<()>
 
 // BookOpenContext / BookRecord include:
@@ -399,15 +403,15 @@ async fn update_reading_state(
 
 ### 3. Contracts
 
-- Request: `lastReaderMode` is omitted, `"reader"`, or `"agent"`. Independent of `lastFraction`, `settings`, and `lastLayout`. At least one of the four Options is required.
+- Request: `lastReaderMode` is omitted, `"reader"`, or `"agent"`. Independent of `lastFraction`, `settings`, `lastLayout`, and `lastCfi`. At least one of the five Options is required.
 - Response: `BookOpenContext.lastReaderMode` is omitted when the book has no memory.
 - Environment: none. App default is WebView-only: `localStorage["litera.defaultReaderMode"]`.
-- Overwrite import keeps `lastReaderMode` with `lastFraction` / `settings` / `lastOpenedAt` / `lastLayout`.
+- Overwrite import keeps `lastReaderMode` with `lastFraction` / `lastCfi` / `settings` / `lastOpenedAt` / `lastLayout`.
 - Changing the Settings default must not call this command and must not patch existing books.
 
 ### 4. Validation & Error Matrix
 
-- all four Options `None` → `InvalidInput` ("At least one reading state field is required")
+- all five Options `None` → `InvalidInput` ("At least one reading state field is required")
 - `lastReaderMode` present and not `"reader"` / `"agent"` → `InvalidInput` on write
 - stored `lastReaderMode` present and not `"reader"` / `"agent"` → `StorageCorrupt` on read
 - missing field on old `library.json` → valid (`None`)
@@ -464,6 +468,7 @@ async fn update_reading_state(
     settings: Option<ReadingSettings>,
     last_reader_mode: Option<String>,
     last_layout: Option<ReaderLayout>,
+    last_cfi: Option<String>,
 ) -> AppResult<()>
 
 // BookOpenContext / BookRecord include:
@@ -472,7 +477,7 @@ async fn update_reading_state(
 
 ### 3. Contracts
 
-- Request: `lastLayout` is omitted or `{ chatCollapsed, bookCollapsed, sessionRailOpen }` all bools. Independent of fraction / settings / mode. `Some` **replaces** the whole snapshot.
+- Request: `lastLayout` is omitted or `{ chatCollapsed, bookCollapsed, sessionRailOpen }` all bools. Independent of fraction / settings / mode / cfi. `Some` **replaces** the whole snapshot.
 - Response: `BookOpenContext.lastLayout` is omitted when the book has no memory. Frontend `resolveReaderLayout` then uses `{ chatCollapsed: true, bookCollapsed: false, sessionRailOpen: true }`.
 - Environment: none. Do not use `localStorage` or `preferences.json` for these three flags. Widths stay `litera.chat-panel-width` / `litera.agent-book-width`.
 - Overwrite import keeps `lastLayout` with the other shelf fields.
@@ -480,7 +485,7 @@ async fn update_reading_state(
 
 ### 4. Validation & Error Matrix
 
-- all four Options `None` → `InvalidInput` ("At least one reading state field is required")
+- all five Options `None` → `InvalidInput` ("At least one reading state field is required")
 - write payload not a `ReaderLayout` object (IPC/serde) → command deserialize failure
 - stored `lastLayout` not an object, missing/extra key, or non-bool → `StorageCorrupt` on read
 - missing field on old `library.json` → valid (`None`)
@@ -488,7 +493,7 @@ async fn update_reading_state(
 
 ### 5. Good/Base/Bad Cases
 
-- Good: `{ lastLayout: { chatCollapsed: false, bookCollapsed: true, sessionRailOpen: false } }` writes only layout; fraction, settings, and mode stay.
+- Good: `{ lastLayout: { chatCollapsed: false, bookCollapsed: true, sessionRailOpen: false } }` writes only layout; fraction, CFI, settings, and mode stay.
 - Base: omitted field on an old book; open uses first-open defaults above.
 - Bad: stuffing the flags into `ReadingSettings`, a global `localStorage` key, or resetting them when switching to Agent.
 
@@ -517,6 +522,75 @@ await invoke("update_reading_state", {
   lastLayout: { chatCollapsed: false, bookCollapsed: true, sessionRailOpen: false },
 });
 const layout = resolveReaderLayout(context.lastLayout);
+```
+
+## Scenario: lastCfi
+
+### 1. Scope / Trigger
+
+Cross-layer reading-position locator. `lastFraction` is percent for the library card and scrubber. Reopening a book must restore the last visible passage via CFI, not `goToFraction` (end-of-page fraction + page rounding lands on the next page). Do not put the locator on `ReadingSettings`, `annotations.json`, or `localStorage`.
+
+### 2. Signatures
+
+```rust
+async fn update_reading_state(
+    store: State<'_, LibraryStore>,
+    book_id: String,
+    last_fraction: Option<f64>,
+    settings: Option<ReadingSettings>,
+    last_reader_mode: Option<String>,
+    last_layout: Option<ReaderLayout>,
+    last_cfi: Option<String>,
+) -> AppResult<()>
+
+// BookOpenContext / BookRecord include:
+// last_cfi: Option<String>  // wire name lastCfi
+```
+
+### 3. Contracts
+
+- Request: `lastCfi` is omitted or an `epubcfi(...)` string (same `validate_cfi` as bookmarks: non-empty, ≤ 8 KiB, reject `foliate-search:`). Independent of the other four Options. `Some` replaces only that field.
+- Relocate debounce writes `{ lastFraction, lastCfi }` in **one** invoke when CFI is present; fraction-only if CFI is missing.
+- Response: `BookOpenContext.lastCfi` is omitted when the book has no locator.
+- Restore: `ReaderView` `init({ lastLocation: lastCfi })`. Do **not** `init({})` then `goTo(cfi)` — `init` without `lastLocation` calls `next()` (first page) and can persist that relocate. No CFI → existing `goToFraction(lastFraction)` when `> 0`. Resolve/init failure → `goToFraction`, then start.
+- Do not write `lastCfi` / `lastFraction` into `currentBook` on every relocate (`[fileData, initialFraction, initialCfi]` would re-open).
+- Environment: none. Scrubber seek still uses `goToFraction`. Library cards still show `lastFraction`.
+- Overwrite import keeps `lastCfi` with the other shelf fields. Do not bump `schemaVersion`.
+
+### 4. Validation & Error Matrix
+
+- all five Options `None` → `InvalidInput` ("At least one reading state field is required")
+- empty / too long / not `epubcfi(` / `foliate-search:` → write: `InvalidInput`; stored: `StorageCorrupt`
+- missing field on old `library.json` → valid (`None`)
+- unknown book → `BookNotFound`
+
+### 5. Good/Base/Bad Cases
+
+- Good: `{ lastFraction: 0.42, lastCfi: "epubcfi(/6/8!/4/2/2/1:0)" }` writes both; settings/mode/layout stay.
+- Base: omitted `lastCfi` on an old book; open uses `goToFraction(lastFraction)`.
+- Bad: stuffing CFI into `ReadingSettings` or `annotations.json`; `init({})` then `goTo(cfi)`; restoring only with `goToFraction`.
+
+### 6. Tests Required
+
+- Missing field loads and is omitted from JSON; write/read round-trip; `BookOpenContext` returns the value.
+- CFI update does not clobber fraction / settings / mode / layout; those updates do not clobber CFI.
+- Invalid stored CFI is `StorageCorrupt`. Invalid write is `InvalidInput`.
+- Overwrite import keeps `lastCfi`.
+- Frontend: reopen calls `init({ lastLocation })`; fraction-only books still `goToFraction`; failed CFI falls back; relocate invoke includes both fields; `currentBook.lastCfi` is not updated on relocate.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+```ts
+await view.init({});
+await view.goTo(cfi);
+await invoke("update_reading_state", { bookId, settings: { lastCfi: cfi } });
+```
+
+#### Correct
+```ts
+await view.init({ lastLocation: cfi });
+await invoke("update_reading_state", { bookId, lastFraction, lastCfi: cfi });
 ```
 
 ## Scenario: OS EPUB open

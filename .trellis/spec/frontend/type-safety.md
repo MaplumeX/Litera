@@ -38,6 +38,7 @@ export interface BookRecord {
   contentHash?: string;
   lastReaderMode?: "reader" | "agent";
   lastLayout?: ReaderLayout;
+  lastCfi?: string;       // epubcfi(...); optional; skip when unset
 }
 
 // books/<id>/annotations.json — not fields on BookRecord
@@ -100,6 +101,8 @@ struct BookRecord {
     imported_at: String,
     #[serde(rename = "lastFraction", skip_serializing_if = "Option::is_none")]
     last_fraction: Option<f64>,
+    #[serde(rename = "lastCfi", skip_serializing_if = "Option::is_none")]
+    last_cfi: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     settings: Option<ReadingSettings>,  // no rename needed — already camelCase
 }
@@ -112,6 +115,7 @@ interface BookRecord {
   filePath: string;
   importedAt: string;
   lastFraction?: number;      // Option<T> → optional field (?:)
+  lastCfi?: string;
   settings?: ReadingSettings;
 }
 ```

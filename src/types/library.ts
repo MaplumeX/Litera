@@ -31,6 +31,7 @@ export interface BookRecord {
   filePath: string;
   importedAt: string;
   lastFraction?: number;
+  lastCfi?: string;
   settings?: ReadingSettings;
   lastOpenedAt?: string;
   contentHash?: string;
@@ -56,6 +57,7 @@ export interface BookOpenContext {
   bookId: string;
   contentVersion: string;
   lastFraction?: number;
+  lastCfi?: string;
   settings?: ReadingSettings;
   lastReaderMode?: "reader" | "agent";
   lastLayout?: ReaderLayout;
