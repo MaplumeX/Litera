@@ -112,3 +112,24 @@ Added independent overrideFont and overrideLayout settings so user type can beat
 ### Status
 
 [OK] **Completed**
+
+
+## Session 92: Publish Litera 0.2.6
+
+**Date**: 2026-08-23
+**Task**: Publish Litera 0.2.6
+**Branch**: `main`
+
+### Summary
+
+Bumped to 0.2.6, wrote changelog, tagged v0.2.6, and published the GitHub release after all three platform jobs succeeded. Draft notes filled; published with AppImage, deb, dmg, and NSIS exe.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e5f8155` | (see git log) |
+
+### Status
+
+[OK] **Completed**
