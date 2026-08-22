@@ -21,7 +21,9 @@ export type TypographyKey =
   | "textAlign"
   | "letterSpacing"
   | "paragraphSpacing"
-  | "firstLineIndent";
+  | "firstLineIndent"
+  | "overrideFont"
+  | "overrideLayout";
 
 export const TYPOGRAPHY_KEYS: TypographyKey[] = [
   "fontSize",
@@ -33,6 +35,8 @@ export const TYPOGRAPHY_KEYS: TypographyKey[] = [
   "letterSpacing",
   "paragraphSpacing",
   "firstLineIndent",
+  "overrideFont",
+  "overrideLayout",
 ];
 
 export const TYPOGRAPHY_RANGES = {
@@ -57,6 +61,8 @@ export const DEFAULT_TEXT_ALIGN: TextAlignValue = "start";
 export const DEFAULT_LETTER_SPACING = 0;
 export const DEFAULT_PARAGRAPH_SPACING = 1;
 export const DEFAULT_FIRST_LINE_INDENT = 0;
+export const DEFAULT_OVERRIDE_FONT = false;
+export const DEFAULT_OVERRIDE_LAYOUT = false;
 
 const LINE_HEIGHT_ENUM: Record<string, number> = {
   compact: 1.4,
@@ -80,6 +86,8 @@ export interface TypographyDefaults {
   letterSpacing: number;
   paragraphSpacing: number;
   firstLineIndent: number;
+  overrideFont: boolean;
+  overrideLayout: boolean;
 }
 
 export const DEFAULT_TYPOGRAPHY: TypographyDefaults = {
@@ -92,6 +100,8 @@ export const DEFAULT_TYPOGRAPHY: TypographyDefaults = {
   letterSpacing: DEFAULT_LETTER_SPACING,
   paragraphSpacing: DEFAULT_PARAGRAPH_SPACING,
   firstLineIndent: DEFAULT_FIRST_LINE_INDENT,
+  overrideFont: DEFAULT_OVERRIDE_FONT,
+  overrideLayout: DEFAULT_OVERRIDE_LAYOUT,
 };
 
 export interface ReaderStyleState extends TypographyDefaults {
@@ -213,14 +223,19 @@ export function normalizeSettings(
       "firstLineIndent",
       settings?.firstLineIndent ?? preferences?.firstLineIndent,
     ),
+    overrideFont: settings?.overrideFont ?? preferences?.overrideFont ?? DEFAULT_OVERRIDE_FONT,
+    overrideLayout:
+      settings?.overrideLayout ?? preferences?.overrideLayout ?? DEFAULT_OVERRIDE_LAYOUT,
   };
 }
 
+type TypographyValue = number | string | boolean;
+
 function materializeOverrides(
   overrides?: ReadingSettings,
-): Partial<Record<TypographyKey, number | string>> {
+): Partial<Record<TypographyKey, TypographyValue>> {
   if (!overrides) return {};
-  const result: Partial<Record<TypographyKey, number | string>> = {};
+  const result: Partial<Record<TypographyKey, TypographyValue>> = {};
   if (overrides.fontSize != null) result.fontSize = overrides.fontSize;
   if (overrides.fontFamily) result.fontFamily = overrides.fontFamily;
   const lineHeight = migrateLineHeight(overrides.lineHeight);
@@ -234,6 +249,8 @@ function materializeOverrides(
   if (overrides.letterSpacing != null) result.letterSpacing = overrides.letterSpacing;
   if (overrides.paragraphSpacing != null) result.paragraphSpacing = overrides.paragraphSpacing;
   if (overrides.firstLineIndent != null) result.firstLineIndent = overrides.firstLineIndent;
+  if (overrides.overrideFont != null) result.overrideFont = overrides.overrideFont;
+  if (overrides.overrideLayout != null) result.overrideLayout = overrides.overrideLayout;
   return result;
 }
 
@@ -260,7 +277,7 @@ export function bookSettingsSnapshot(
   for (const key of TYPOGRAPHY_KEYS) {
     const value = next[key];
     if (value != null) {
-      (snapshot as Record<string, number | string>)[key] = value;
+      (snapshot as Record<string, TypographyValue>)[key] = value;
     }
   }
   return snapshot;
@@ -284,8 +301,15 @@ img { filter: brightness(0.8) !important; }`,
 
 /** Combine font + typography + theme into a single CSS string for `view.renderer.setStyles`. */
 export function generateStylesCss(state: ReaderStyleState): string {
-  const fontCss = `html, body { font-family: ${cssFontFamily(state.fontFamily)}; font-size: ${state.fontSize}px !important; line-height: ${state.lineHeight}; letter-spacing: ${state.letterSpacing}em; max-width: ${state.contentWidth}em; margin-inline: auto; padding-inline: ${state.pagePadding}rem; text-align: ${state.textAlign}; }
+  let fontCss = `html, body { font-family: ${cssFontFamily(state.fontFamily)}; font-size: ${state.fontSize}px !important; line-height: ${state.lineHeight}; letter-spacing: ${state.letterSpacing}em; max-width: ${state.contentWidth}em; margin-inline: auto; padding-inline: ${state.pagePadding}rem; text-align: ${state.textAlign}; }
 p { margin-block-end: ${state.paragraphSpacing}em !important; text-indent: ${state.firstLineIndent}em !important; }`;
+  if (state.overrideFont) {
+    fontCss += `\nhtml, body, p, div, span, li, blockquote, td, th, a, h1, h2, h3, h4, h5, h6 { font-family: ${cssFontFamily(state.fontFamily)} !important; }
+code, kbd, pre, samp { font-family: monospace !important; }`;
+  }
+  if (state.overrideLayout) {
+    fontCss += `\nhtml, body, p, div, li, blockquote { font-size: ${state.fontSize}px !important; line-height: ${state.lineHeight} !important; letter-spacing: ${state.letterSpacing}em !important; text-align: ${state.textAlign} !important; }`;
+  }
   const themeCss = THEME_CSS[state.theme] ?? "";
   return themeCss ? `${fontCss}\n${themeCss}` : fontCss;
 }

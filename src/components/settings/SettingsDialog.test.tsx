@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SettingsDialog } from "./SettingsDialog";
 import type { ReaderStyleState } from "@/lib/reader-styles";
@@ -73,6 +73,8 @@ const styleState: ReaderStyleState = {
   letterSpacing: 0,
   paragraphSpacing: 1,
   firstLineIndent: 0,
+  overrideFont: false,
+  overrideLayout: false,
 };
 
 const noop = () => {};
@@ -193,6 +195,80 @@ describe("SettingsDialog", () => {
     expect(styleEl).not.toBeNull();
     expect(styleEl!.textContent).toContain(".litera-typography-preview");
     expect(styleEl!.textContent).toContain("font-size: 16px");
+  });
+
+  it("renders independent override font and layout segmented controls after the preview", () => {
+    const onChange = vi.fn();
+    const { getByRole } = render(
+      <SettingsDialog
+        open
+        onClose={noop}
+        bookTitle={null}
+        hasBook={false}
+        styleState={styleState}
+        onTypographyChange={onChange}
+        onRestoreDefault={noop}
+        overriddenKeys={[]}
+        theme="light"
+        onThemeChange={noop}
+      />,
+    );
+
+    const fontGroup = getByRole("radiogroup", { name: "覆盖字体" });
+    const layoutGroup = getByRole("radiogroup", { name: "覆盖排版" });
+    expect(within(fontGroup).getByRole("radio", { name: "关" }).getAttribute("aria-checked")).toBe(
+      "true",
+    );
+    expect(within(fontGroup).getByRole("radio", { name: "开" }).getAttribute("aria-checked")).toBe(
+      "false",
+    );
+    expect(within(layoutGroup).getByRole("radio", { name: "关" }).getAttribute("aria-checked")).toBe(
+      "true",
+    );
+
+    act(() => {
+      within(fontGroup).getByRole("radio", { name: "开" }).click();
+    });
+    expect(onChange).toHaveBeenCalledWith("overrideFont", true);
+    expect(onChange).not.toHaveBeenCalledWith("overrideLayout", expect.anything());
+
+    onChange.mockClear();
+    act(() => {
+      within(layoutGroup).getByRole("radio", { name: "开" }).click();
+    });
+    expect(onChange).toHaveBeenCalledWith("overrideLayout", true);
+    expect(onChange).not.toHaveBeenCalledWith("overrideFont", expect.anything());
+
+    onChange.mockClear();
+    act(() => {
+      within(fontGroup).getByRole("radio", { name: "关" }).click();
+    });
+    expect(onChange).toHaveBeenCalledWith("overrideFont", false);
+    expect(onChange).not.toHaveBeenCalledWith("overrideLayout", expect.anything());
+  });
+
+  it("shows restore-default on override rows when those keys are overridden", () => {
+    const onRestore = vi.fn();
+    const { getByText } = render(
+      <SettingsDialog
+        open
+        onClose={noop}
+        bookTitle="测试书"
+        hasBook={true}
+        styleState={{ ...styleState, overrideFont: false }}
+        onTypographyChange={noop}
+        onRestoreDefault={onRestore}
+        overriddenKeys={["overrideFont"]}
+        theme="light"
+        onThemeChange={noop}
+      />,
+    );
+
+    const fontLabel = getByText("覆盖字体");
+    act(() => {
+      within(fontLabel.parentElement as HTMLElement).getByText("恢复默认").click();
+    });
+    expect(onRestore).toHaveBeenCalledWith("overrideFont");
   });
 
   it("updates the preview CSS when fontSize changes", () => {

@@ -98,7 +98,7 @@ export interface SettingsDialogProps {
   bookTitle: string | null;
   hasBook: boolean;
   styleState: ReaderStyleState;
-  onTypographyChange: (key: TypographyKey, value: number | string) => void;
+  onTypographyChange: (key: TypographyKey, value: number | string | boolean) => void;
   onRestoreDefault: (key: TypographyKey) => void;
   overriddenKeys: TypographyKey[];
   theme: string;
@@ -510,6 +510,44 @@ export function SettingsDialog({
           {section === "typography" && (
             <div className="max-w-md space-y-5">
               <TypographyPreview styleState={styleState} />
+
+              <PresetRow
+                label={t("settings.overrideFont")}
+                restore={{
+                  show: canRestore("overrideFont"),
+                  onClick: () => onRestoreDefault("overrideFont"),
+                  label: restoreLabel,
+                }}
+              >
+                <SegmentedControl
+                  value={styleState.overrideFont ? "on" : "off"}
+                  options={[
+                    { value: "off", label: t("settings.override.off") },
+                    { value: "on", label: t("settings.override.on") },
+                  ]}
+                  onChange={(next) => onTypographyChange("overrideFont", next === "on")}
+                  ariaLabel={t("settings.overrideFont")}
+                />
+              </PresetRow>
+
+              <PresetRow
+                label={t("settings.overrideLayout")}
+                restore={{
+                  show: canRestore("overrideLayout"),
+                  onClick: () => onRestoreDefault("overrideLayout"),
+                  label: restoreLabel,
+                }}
+              >
+                <SegmentedControl
+                  value={styleState.overrideLayout ? "on" : "off"}
+                  options={[
+                    { value: "off", label: t("settings.override.off") },
+                    { value: "on", label: t("settings.override.on") },
+                  ]}
+                  onChange={(next) => onTypographyChange("overrideLayout", next === "on")}
+                  ariaLabel={t("settings.overrideLayout")}
+                />
+              </PresetRow>
 
               {SLIDER_ROWS.slice(0, 1).map((row) => (
                 <SliderRow
