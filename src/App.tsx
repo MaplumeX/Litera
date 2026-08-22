@@ -612,7 +612,7 @@ function App() {
   );
 
   const handleTypographyChange = useCallback(
-    (key: TypographyKey, value: number | string) => {
+    (key: TypographyKey, value: number | string | boolean) => {
       if (view === "reader") {
         if (!currentBook) return;
         const nextSettings = bookSettingsSnapshot(currentBook.settings, { [key]: value });

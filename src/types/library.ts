@@ -11,6 +11,8 @@ export interface ReadingSettings {
   letterSpacing?: number;
   paragraphSpacing?: number;
   firstLineIndent?: number;
+  overrideFont?: boolean;
+  overrideLayout?: boolean;
 }
 
 /** Per-book reader chrome open/closed snapshot. */

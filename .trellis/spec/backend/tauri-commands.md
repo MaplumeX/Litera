@@ -812,6 +812,81 @@ font-family: ${cssFontFamily(state.fontFamily)};
 // named  → "Noto Serif CJK SC", serif
 ```
 
+## Scenario: override publisher font and layout
+
+### 1. Scope / Trigger
+
+- Trigger: Settings → Typography can force user `fontFamily` / typography over EPUB chapter CSS and `@font-face`.
+- Cross-layer: `overrideFont` / `overrideLayout` on `save_preferences` and per-book `ReadingSettings` → `normalizeSettings` → `generateStylesCss` → `view.renderer.setStyles`. Do not strip publisher stylesheets or patch foliate-js.
+
+### 2. Signatures
+
+```rust
+// ReadingSettings — optional; omit = follow global
+pub override_font: Option<bool>    // json: overrideFont
+pub override_layout: Option<bool>  // json: overrideLayout
+
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+async fn save_preferences(
+    // ...existing typography args...
+    override_font: Option<bool>,
+    override_layout: Option<bool>,
+) -> AppResult<()>
+```
+
+`get_preferences` returns both as `bool` (stored default `false`). `schemaVersion` stays 1. `#[serde(default)]` on the raw prefs fields.
+
+### 3. Contracts
+
+- Effective value: book override ?? `preferences.json` ?? `false`. Missing keys are off.
+- Book `Some(false)` is a real override (global on, this book off). Restore-default omits the key. `isTypographyOverridden` uses `!= null`, not truthiness. Snapshot must serialize `false`.
+- Both off: `generateStylesCss` matches the baseline user stylesheet (do not weaken existing `font-size` / `p` `!important`).
+- `overrideFont` on: user `font-family !important` on body text **and** `h1–h6`; `code, kbd, pre, samp` stay `monospace !important`. Still run the family through `cssFontFamily`.
+- `overrideLayout` on: `font-size`, `line-height`, `letter-spacing`, `text-align` with `!important` on `html, body, p, div, li, blockquote` — **not** headings. `p` indent/spacing stay as today. `max-width` / `padding-inline` always apply.
+- Do not persist these keys in `localStorage`. Do not bump schema. New keys once written reset old builds (`deny_unknown_fields`), same as other typography fields.
+
+### 4. Validation & Error Matrix
+
+| Condition | Required result |
+|-----------|-----------------|
+| missing keys in old v1 files | load as off; do not rewrite |
+| prefs `true` / `false` | accept; `save_preferences` `if let Some(bool)` must persist `false` |
+| book `{ "overrideFont": false }` | keep `Some(false)`; not empty |
+| non-bool | `StorageCorrupt` / `InvalidInput` |
+
+### 5. Good/Base/Bad Cases
+
+- **Good**: library turns override font on → new books use the user face over `@font-face`; one poetry book sets `overrideFont: false` and keeps publisher type.
+- **Base**: never written → both switches off; reading CSS identical to pre-feature output.
+- **Bad**: `if settings.overrideFont` / skip `false` in the snapshot → restore-default never shows and the book cannot opt out of a global on.
+
+### 6. Tests Required
+
+- Frontend: flags off → baseline CSS; font-only → headings + `code` exception; layout-only → no `h1` `font-size !important`; both on; `false` is overridden.
+- Settings: two `SegmentedControl` rows after preview; on/off call `onTypographyChange` with booleans; explicit book `false` still shows restore.
+- Rust: prefs persist `true` then `false`; theme-only file still loads; `ReadingSettings` `false` is not `is_empty`; empty snapshot clears the keys.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```ts
+if (overrides.overrideFont) result.overrideFont = overrides.overrideFont;
+// false is dropped → book cannot opt out
+* { font-family: … !important; } // restyles code blocks
+```
+
+#### Correct
+
+```ts
+if (overrides.overrideFont != null) result.overrideFont = overrides.overrideFont;
+html, body, p, div, span, li, blockquote, td, th, a, h1, h2, h3, h4, h5, h6 {
+  font-family: ${cssFontFamily(state.fontFamily)} !important;
+}
+code, kbd, pre, samp { font-family: monospace !important; }
+```
+
 ### Agent Config Commands
 
 **Scope / Trigger**: LLM provider / API key / default model configuration for the embedded agent. Read/write the Litera-owned `<app_data>/agent/` directory.

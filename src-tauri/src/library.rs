@@ -71,6 +71,18 @@ pub struct ReadingSettings {
     pub paragraph_spacing: Option<f64>,
     #[serde(rename = "firstLineIndent", skip_serializing_if = "Option::is_none")]
     pub first_line_indent: Option<f64>,
+    #[serde(
+        rename = "overrideFont",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub override_font: Option<bool>,
+    #[serde(
+        rename = "overrideLayout",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub override_layout: Option<bool>,
 }
 
 impl ReadingSettings {
@@ -86,6 +98,8 @@ impl ReadingSettings {
             && self.letter_spacing.is_none()
             && self.paragraph_spacing.is_none()
             && self.first_line_indent.is_none()
+            && self.override_font.is_none()
+            && self.override_layout.is_none()
     }
 }
 
@@ -3068,6 +3082,75 @@ mod tests {
         assert!(stored.line_height.is_none());
         assert!(stored.page_margin.is_none());
         assert!(stored.text_align.is_none());
+        assert!(stored.override_font.is_none());
+        assert!(stored.override_layout.is_none());
+    }
+
+    #[test]
+    fn reading_settings_persists_override_flags() {
+        let (_directory, store) = test_store();
+        let id = import_test_book(&store, Path::new("/source/override-flags.epub"));
+        store
+            .update_reading_state(
+                &id,
+                None,
+                Some(ReadingSettings {
+                    override_font: Some(true),
+                    override_layout: Some(true),
+                    ..ReadingSettings::default()
+                }),
+                None,
+                None,
+            )
+            .expect("persist override flags");
+        let settings = store
+            .list_books()
+            .expect("list")
+            .remove(0)
+            .settings
+            .expect("settings");
+        assert_eq!(settings.override_font, Some(true));
+        assert_eq!(settings.override_layout, Some(true));
+    }
+
+    #[test]
+    fn reading_settings_keeps_explicit_override_false() {
+        let (_directory, store) = test_store();
+        let id = import_test_book(&store, Path::new("/source/override-false.epub"));
+        store
+            .update_reading_state(
+                &id,
+                None,
+                Some(ReadingSettings {
+                    override_font: Some(false),
+                    override_layout: Some(false),
+                    ..ReadingSettings::default()
+                }),
+                None,
+                None,
+            )
+            .expect("persist explicit false");
+        let settings = store
+            .list_books()
+            .expect("list")
+            .remove(0)
+            .settings
+            .expect("settings");
+        assert_eq!(settings.override_font, Some(false));
+        assert_eq!(settings.override_layout, Some(false));
+
+        let json = serde_json::to_value(&settings).expect("serialize");
+        assert_eq!(json["overrideFont"], false);
+        assert_eq!(json["overrideLayout"], false);
+    }
+
+    #[test]
+    fn reading_settings_missing_override_keys_are_none() {
+        let settings: ReadingSettings =
+            serde_json::from_str(r#"{"fontSize":18.0}"#).expect("old settings json");
+        validate_settings(&settings).expect("old snapshot valid");
+        assert!(settings.override_font.is_none());
+        assert!(settings.override_layout.is_none());
     }
 
     #[test]

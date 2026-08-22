@@ -30,6 +30,8 @@ interface PreferencesResponse {
   letterSpacing?: number;
   paragraphSpacing?: number;
   firstLineIndent?: number;
+  overrideFont?: boolean;
+  overrideLayout?: boolean;
 }
 
 export const DEFAULT_PREFERENCES: AppPreferences = {
@@ -51,6 +53,8 @@ function normalizePreferences(response: PreferencesResponse | null | undefined):
     letterSpacing: response?.letterSpacing,
     paragraphSpacing: response?.paragraphSpacing,
     firstLineIndent: response?.firstLineIndent,
+    overrideFont: response?.overrideFont,
+    overrideLayout: response?.overrideLayout,
   });
   const { theme: nextTheme, ...typography } = normalized;
   return { theme: nextTheme, ...typography };
@@ -74,6 +78,8 @@ export function usePreferences() {
         letterSpacing: next.letterSpacing,
         paragraphSpacing: next.paragraphSpacing,
         firstLineIndent: next.firstLineIndent,
+        overrideFont: next.overrideFont,
+        overrideLayout: next.overrideLayout,
       });
     },
     300,

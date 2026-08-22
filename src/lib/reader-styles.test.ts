@@ -4,6 +4,7 @@ import {
   footnotePopupCss,
   generatePreviewCss,
   generateStylesCss,
+  isTypographyOverridden,
   normalizeSettings,
 } from "./reader-styles";
 
@@ -20,6 +21,8 @@ describe("normalizeSettings", () => {
       letterSpacing: 0,
       paragraphSpacing: 1,
       firstLineIndent: 0,
+      overrideFont: false,
+      overrideLayout: false,
     });
   });
 
@@ -40,6 +43,8 @@ describe("normalizeSettings", () => {
       letterSpacing: 0,
       paragraphSpacing: 1,
       firstLineIndent: 0,
+      overrideFont: false,
+      overrideLayout: false,
     });
   });
 
@@ -99,6 +104,28 @@ describe("normalizeSettings", () => {
       fontFamily: "serif",
     });
   });
+
+  it("resolves override flags as book ?? preferences ?? false", () => {
+    expect(normalizeSettings()).toMatchObject({
+      overrideFont: false,
+      overrideLayout: false,
+    });
+    expect(
+      normalizeSettings({}, { overrideFont: true, overrideLayout: true }),
+    ).toMatchObject({
+      overrideFont: true,
+      overrideLayout: true,
+    });
+    expect(
+      normalizeSettings(
+        { overrideFont: false, overrideLayout: true },
+        { overrideFont: true, overrideLayout: false },
+      ),
+    ).toMatchObject({
+      overrideFont: false,
+      overrideLayout: true,
+    });
+  });
 });
 
 describe("generateStylesCss", () => {
@@ -114,6 +141,8 @@ describe("generateStylesCss", () => {
       letterSpacing: 0.02,
       paragraphSpacing: 1.1,
       firstLineIndent: 2,
+      overrideFont: false,
+      overrideLayout: false,
     });
     expect(css).toContain("font-family: serif;");
     expect(css).not.toContain("font-family: serif,");
@@ -141,6 +170,8 @@ describe("generateStylesCss", () => {
       letterSpacing: 0,
       paragraphSpacing: 1,
       firstLineIndent: 0,
+      overrideFont: false,
+      overrideLayout: false,
     });
     expect(css).toContain('font-family: "Noto Sans", serif');
     expect(css).not.toContain("font-family: Noto Sans;");
@@ -158,8 +189,153 @@ describe("generateStylesCss", () => {
       letterSpacing: 0,
       paragraphSpacing: 1,
       firstLineIndent: 0,
+      overrideFont: false,
+      overrideLayout: false,
     });
     expect(css).toContain('font-family: "Foo\\\\Bar \\"Q\\"", serif');
+  });
+
+  it("keeps today's stylesheet when both override flags are off", () => {
+    const css = generateStylesCss({
+      fontSize: 16,
+      fontFamily: "serif",
+      theme: "light",
+      lineHeight: 2,
+      contentWidth: 36,
+      pagePadding: 1.25,
+      textAlign: "justify",
+      letterSpacing: 0.02,
+      paragraphSpacing: 1.1,
+      firstLineIndent: 2,
+      overrideFont: false,
+      overrideLayout: false,
+    });
+    expect(css).toBe(
+      "html, body { font-family: serif; font-size: 16px !important; line-height: 2; letter-spacing: 0.02em; max-width: 36em; margin-inline: auto; padding-inline: 1.25rem; text-align: justify; }\n" +
+        "p { margin-block-end: 1.1em !important; text-indent: 2em !important; }",
+    );
+    expect(css).not.toContain("font-family: serif !important");
+    expect(css).not.toContain("code, kbd, pre, samp");
+    expect(css).not.toContain("line-height: 2 !important");
+    expect(css).not.toContain("Geist");
+  });
+
+  it("forces the user font on body text and headings, keeping code monospace", () => {
+    const css = generateStylesCss({
+      fontSize: 16,
+      fontFamily: "Noto Sans",
+      theme: "light",
+      lineHeight: 1.7,
+      contentWidth: 42,
+      pagePadding: 1.75,
+      textAlign: "start",
+      letterSpacing: 0,
+      paragraphSpacing: 1,
+      firstLineIndent: 0,
+      overrideFont: true,
+      overrideLayout: false,
+    });
+    expect(css).toContain(
+      'html, body, p, div, span, li, blockquote, td, th, a, h1, h2, h3, h4, h5, h6 { font-family: "Noto Sans", serif !important; }',
+    );
+    expect(css).toContain("code, kbd, pre, samp { font-family: monospace !important; }");
+    expect(css).toContain("max-width: 42em");
+    expect(css).toContain("padding-inline: 1.75rem");
+    expect(css).not.toContain("line-height: 1.7 !important");
+    expect(css).not.toContain("Geist");
+  });
+
+  it("forces layout on body-text elements without flattening headings", () => {
+    const css = generateStylesCss({
+      fontSize: 18,
+      fontFamily: "serif",
+      theme: "light",
+      lineHeight: 2,
+      contentWidth: 36,
+      pagePadding: 1.25,
+      textAlign: "justify",
+      letterSpacing: 0.02,
+      paragraphSpacing: 1.1,
+      firstLineIndent: 2,
+      overrideFont: false,
+      overrideLayout: true,
+    });
+    expect(css).toContain(
+      "html, body, p, div, li, blockquote { font-size: 18px !important; line-height: 2 !important; letter-spacing: 0.02em !important; text-align: justify !important; }",
+    );
+    expect(css).toContain("margin-block-end: 1.1em !important");
+    expect(css).toContain("text-indent: 2em !important");
+    expect(css).toContain("max-width: 36em");
+    expect(css).toContain("padding-inline: 1.25rem");
+    expect(css).not.toContain("h1, h2, h3, h4, h5, h6");
+    expect(css).not.toContain("code, kbd, pre, samp");
+    expect(css).not.toContain("font-family: serif !important");
+    expect(css).not.toContain("Geist");
+  });
+
+  it("can enable font override without layout override and the reverse", () => {
+    const fontOnly = generateStylesCss({
+      fontSize: 16,
+      fontFamily: "serif",
+      theme: "light",
+      lineHeight: 1.7,
+      contentWidth: 42,
+      pagePadding: 1.75,
+      textAlign: "start",
+      letterSpacing: 0,
+      paragraphSpacing: 1,
+      firstLineIndent: 0,
+      overrideFont: true,
+      overrideLayout: false,
+    });
+    expect(fontOnly).toContain("h1, h2, h3, h4, h5, h6");
+    expect(fontOnly).toContain("code, kbd, pre, samp");
+    expect(fontOnly).not.toContain("line-height: 1.7 !important");
+
+    const layoutOnly = generateStylesCss({
+      fontSize: 16,
+      fontFamily: "serif",
+      theme: "light",
+      lineHeight: 1.7,
+      contentWidth: 42,
+      pagePadding: 1.75,
+      textAlign: "start",
+      letterSpacing: 0,
+      paragraphSpacing: 1,
+      firstLineIndent: 0,
+      overrideFont: false,
+      overrideLayout: true,
+    });
+    expect(layoutOnly).toContain("line-height: 1.7 !important");
+    expect(layoutOnly).not.toContain("h1, h2, h3, h4, h5, h6");
+    expect(layoutOnly).not.toContain("code, kbd, pre, samp");
+  });
+
+  it("applies font and layout overrides together without flattening headings or code", () => {
+    const css = generateStylesCss({
+      fontSize: 16,
+      fontFamily: "serif",
+      theme: "light",
+      lineHeight: 1.7,
+      contentWidth: 42,
+      pagePadding: 1.75,
+      textAlign: "start",
+      letterSpacing: 0,
+      paragraphSpacing: 1,
+      firstLineIndent: 0,
+      overrideFont: true,
+      overrideLayout: true,
+    });
+    expect(css).toContain(
+      "html, body, p, div, span, li, blockquote, td, th, a, h1, h2, h3, h4, h5, h6 { font-family: serif !important; }",
+    );
+    expect(css).toContain("code, kbd, pre, samp { font-family: monospace !important; }");
+    expect(css).toContain(
+      "html, body, p, div, li, blockquote { font-size: 16px !important; line-height: 1.7 !important; letter-spacing: 0em !important; text-align: start !important; }",
+    );
+    expect(css).toContain("max-width: 42em");
+    expect(css).toContain("padding-inline: 1.75rem");
+    expect(css).not.toContain("Geist");
   });
 });
 
@@ -174,6 +350,8 @@ const DARK_STYLES = {
   letterSpacing: 0,
   paragraphSpacing: 1,
   firstLineIndent: 2,
+  overrideFont: false,
+  overrideLayout: false,
 };
 
 describe("footnotePopupCss", () => {
@@ -231,6 +409,23 @@ describe("bookSettingsSnapshot", () => {
       textAlign: "justify",
     });
   });
+
+  it("treats book false as a real override and can omit it", () => {
+    expect(isTypographyOverridden({ overrideFont: false }, "overrideFont")).toBe(true);
+    expect(isTypographyOverridden({ overrideLayout: true }, "overrideLayout")).toBe(true);
+    expect(isTypographyOverridden({}, "overrideFont")).toBe(false);
+    expect(
+      bookSettingsSnapshot({ overrideFont: false, overrideLayout: true }),
+    ).toEqual({
+      overrideFont: false,
+      overrideLayout: true,
+    });
+    expect(
+      bookSettingsSnapshot({ overrideFont: false, textAlign: "justify" }, undefined, "overrideFont"),
+    ).toEqual({
+      textAlign: "justify",
+    });
+  });
 });
 
 describe("generatePreviewCss", () => {
@@ -246,6 +441,8 @@ describe("generatePreviewCss", () => {
       letterSpacing: 0.02,
       paragraphSpacing: 1.1,
       firstLineIndent: 2,
+      overrideFont: true,
+      overrideLayout: true,
     });
     expect(css).toContain(".litera-typography-preview {");
     expect(css).toContain(".litera-typography-preview p {");
@@ -273,6 +470,8 @@ describe("generatePreviewCss", () => {
       letterSpacing: 0,
       paragraphSpacing: 1,
       firstLineIndent: 0,
+      overrideFont: true,
+      overrideLayout: true,
     });
     expect(css).not.toContain("html, body");
     expect(css).not.toContain("html,body");
@@ -292,6 +491,8 @@ describe("generatePreviewCss", () => {
       letterSpacing: 0,
       paragraphSpacing: 1,
       firstLineIndent: 0,
+      overrideFont: true,
+      overrideLayout: false,
     });
     expect(css).toContain('font-family: "Noto Sans", serif');
     expect(css).not.toContain("Geist");

@@ -56,6 +56,14 @@ fn default_first_line_indent() -> f64 {
     0.0
 }
 
+fn default_override_font() -> bool {
+    false
+}
+
+fn default_override_layout() -> bool {
+    false
+}
+
 fn clamp_or_default(value: Option<f64>, min: f64, max: f64, default: f64) -> f64 {
     match value {
         Some(number) if number.is_finite() => number.clamp(min, max),
@@ -87,6 +95,10 @@ struct PreferencesDataRaw {
     #[serde(default)]
     first_line_indent: Option<f64>,
     #[serde(default)]
+    override_font: Option<bool>,
+    #[serde(default)]
+    override_layout: Option<bool>,
+    #[serde(default)]
     page_margin: Option<String>,
 }
 
@@ -104,6 +116,8 @@ struct PreferencesData {
     letter_spacing: f64,
     paragraph_spacing: f64,
     first_line_indent: f64,
+    override_font: bool,
+    override_layout: bool,
 }
 
 impl From<PreferencesDataRaw> for PreferencesData {
@@ -162,6 +176,8 @@ impl From<PreferencesDataRaw> for PreferencesData {
                 FIRST_LINE_INDENT_RANGE.1,
                 default_first_line_indent(),
             ),
+            override_font: raw.override_font.unwrap_or_else(default_override_font),
+            override_layout: raw.override_layout.unwrap_or_else(default_override_layout),
         }
     }
 }
@@ -189,6 +205,8 @@ impl Default for PreferencesData {
             letter_spacing: default_letter_spacing(),
             paragraph_spacing: default_paragraph_spacing(),
             first_line_indent: default_first_line_indent(),
+            override_font: default_override_font(),
+            override_layout: default_override_layout(),
         }
     }
 }
@@ -215,6 +233,8 @@ pub struct PreferencesResponse {
     pub letter_spacing: f64,
     pub paragraph_spacing: f64,
     pub first_line_indent: f64,
+    pub override_font: bool,
+    pub override_layout: bool,
 }
 
 impl From<PreferencesData> for PreferencesResponse {
@@ -230,6 +250,8 @@ impl From<PreferencesData> for PreferencesResponse {
             letter_spacing: data.letter_spacing,
             paragraph_spacing: data.paragraph_spacing,
             first_line_indent: data.first_line_indent,
+            override_font: data.override_font,
+            override_layout: data.override_layout,
         }
     }
 }
@@ -246,6 +268,8 @@ struct PreferencesPatch {
     letter_spacing: Option<f64>,
     paragraph_spacing: Option<f64>,
     first_line_indent: Option<f64>,
+    override_font: Option<bool>,
+    override_layout: Option<bool>,
 }
 
 impl PreferencesPatch {
@@ -260,6 +284,8 @@ impl PreferencesPatch {
             && self.letter_spacing.is_none()
             && self.paragraph_spacing.is_none()
             && self.first_line_indent.is_none()
+            && self.override_font.is_none()
+            && self.override_layout.is_none()
     }
 }
 
@@ -415,6 +441,12 @@ impl PreferencesStore {
         if let Some(first_line_indent) = patch.first_line_indent {
             data.first_line_indent = first_line_indent;
         }
+        if let Some(override_font) = patch.override_font {
+            data.override_font = override_font;
+        }
+        if let Some(override_layout) = patch.override_layout {
+            data.override_layout = override_layout;
+        }
         self.write_unlocked(&data)
     }
 }
@@ -528,6 +560,8 @@ pub async fn save_preferences(
     letter_spacing: Option<f64>,
     paragraph_spacing: Option<f64>,
     first_line_indent: Option<f64>,
+    override_font: Option<bool>,
+    override_layout: Option<bool>,
 ) -> AppResult<()> {
     let store = store.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
@@ -542,6 +576,8 @@ pub async fn save_preferences(
             letter_spacing,
             paragraph_spacing,
             first_line_indent,
+            override_font,
+            override_layout,
         })
     })
     .await
@@ -594,6 +630,8 @@ mod tests {
         assert_eq!(data.letter_spacing, 0.0);
         assert_eq!(data.paragraph_spacing, 1.0);
         assert_eq!(data.first_line_indent, 0.0);
+        assert!(!data.override_font);
+        assert!(!data.override_layout);
 
         let value: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&path).expect("read")).expect("parse raw");
@@ -703,6 +741,8 @@ mod tests {
         assert_eq!(prefs.letter_spacing, 0.0);
         assert_eq!(prefs.paragraph_spacing, 1.0);
         assert_eq!(prefs.first_line_indent, 0.0);
+        assert!(!prefs.override_font);
+        assert!(!prefs.override_layout);
 
         let raw = std::fs::read_to_string(&path).expect("read");
         let value: serde_json::Value = serde_json::from_str(&raw).expect("parse");
@@ -712,6 +752,8 @@ mod tests {
         assert!(value.get("pageMargin").is_none());
         assert!(value.get("contentWidth").is_none());
         assert!(value.get("textAlign").is_none());
+        assert!(value.get("overrideFont").is_none());
+        assert!(value.get("overrideLayout").is_none());
     }
 
     #[test]
@@ -956,5 +998,80 @@ mod tests {
         assert_eq!(value["fontFamily"], "monospace");
         assert_eq!(value["theme"], "dark");
         assert!(value.get("fontSize").is_none());
+    }
+
+    #[test]
+    fn save_override_flags_persist_true() {
+        let (directory, store) = test_store();
+        store
+            .save(PreferencesPatch {
+                override_font: Some(true),
+                override_layout: Some(true),
+                ..PreferencesPatch::default()
+            })
+            .expect("save override flags");
+
+        let prefs = store.get().expect("get");
+        assert!(prefs.override_font);
+        assert!(prefs.override_layout);
+
+        drop(store);
+        let recovered =
+            PreferencesStore::initialize(directory.path().to_path_buf()).expect("reinit");
+        let prefs = recovered.get().expect("get recovered");
+        assert!(prefs.override_font);
+        assert!(prefs.override_layout);
+
+        let value: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(directory.path().join("preferences.json")).expect("read"),
+        )
+        .expect("parse");
+        assert_eq!(value["overrideFont"], true);
+        assert_eq!(value["overrideLayout"], true);
+    }
+
+    #[test]
+    fn save_override_flags_persist_false() {
+        let (_directory, store) = test_store();
+        store
+            .save(PreferencesPatch {
+                override_font: Some(true),
+                override_layout: Some(true),
+                ..PreferencesPatch::default()
+            })
+            .expect("save override flags on");
+        store
+            .save(PreferencesPatch {
+                override_font: Some(false),
+                override_layout: Some(false),
+                ..PreferencesPatch::default()
+            })
+            .expect("save override flags off");
+
+        let prefs = store.get().expect("get");
+        assert!(!prefs.override_font);
+        assert!(!prefs.override_layout);
+    }
+
+    #[test]
+    fn missing_override_keys_load_as_false() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join("preferences.json");
+        std::fs::write(
+            &path,
+            br#"{"schemaVersion":1,"theme":"dark","fontSize":18}"#,
+        )
+        .expect("write without override keys");
+
+        let store =
+            PreferencesStore::initialize(directory.path().to_path_buf()).expect("init");
+        let prefs = store.get().expect("get");
+        assert!(!prefs.override_font);
+        assert!(!prefs.override_layout);
+
+        let value: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).expect("read")).expect("parse");
+        assert!(value.get("overrideFont").is_none());
+        assert!(value.get("overrideLayout").is_none());
     }
 }

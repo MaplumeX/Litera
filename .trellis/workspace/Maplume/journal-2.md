@@ -90,3 +90,25 @@ Shipped multi-color highlights, notes, and click-to-edit on painted marks. One-c
 ### Status
 
 [OK] **Completed**
+
+
+## Session 91: Override book fonts and typography
+
+**Date**: 2026-08-22
+**Task**: Override book fonts and typography
+**Branch**: `feat/book-font-and-layout-override-settings`
+
+### Summary
+
+Added independent overrideFont and overrideLayout settings so user type can beat EPUB chapter CSS and embedded fonts. Defaults off; library is global, reader is per-book. Specs record Option<bool> false-as-override and the CSS selector split.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d465ea8` | (see git log) |
+| `94bcd62` | (see git log) |
+
+### Status
+
+[OK] **Completed**
