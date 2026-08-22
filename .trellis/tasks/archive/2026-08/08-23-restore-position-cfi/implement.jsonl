@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "Reading position is durable library state via update_reading_state; do not put lastCfi in localStorage, ReadingSettings, or process-only flags."}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "Rust↔TS serde contract for BookRecord / BookOpenContext; lastCfi must stay camelCase optional string."}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Scrubber and library cards stay on lastFraction; restore must not remount ReaderView on every relocate."}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "library.json strict reads, independent Option updates, no schemaVersion bump for optional shelf fields."}
+{"file": ".trellis/spec/backend/tauri-commands.md", "reason": "update_reading_state / BookOpenContext / overwrite-keeps-progress contract to extend with lastCfi."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "New persisted shelf field crosses WebView, Tauri command, and library.json."}

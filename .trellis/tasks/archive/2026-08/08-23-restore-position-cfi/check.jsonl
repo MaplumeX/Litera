@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "lastCfi must be per-book durable state; widths, drawers, and lastFraction display stay out of this change."}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "lastCfi on BookRecord / BookOpenContext must match Rust serde exactly."}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Progress scrubber and BookCard still use lastFraction; do not persist TOC/annotation drawers."}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "Partial update independence, validate_cfi, no schemaVersion bump."}
+{"file": ".trellis/spec/backend/tauri-commands.md", "reason": "Command arity, overwrite keep, independent Options, BookOpenContext mapping."}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Backend quality bar for library command changes."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Catch missing mapping between BookRecord, open context, persist, and ReaderView init."}
