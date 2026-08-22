@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "setStyles CSS injection, Settings dialog patterns, no new chrome font path"}
+{"file": ".trellis/spec/frontend/i18n.md", "reason": "new settings labels must be catalog keys; do not put flags in localStorage"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "ReadingSettings TS must match Rust camelCase serde"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "ReadingSettings full-object replace, preferences serde(default), no schema bump"}
+{"file": ".trellis/spec/backend/tauri-commands.md", "reason": "save_preferences patch shape and named fontFamily contract"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "flags flow preferences + library + CSS; deny_unknown_fields trap"}
+{"file": ".trellis/tasks/08-21-book-font-layout-override/research/override-css-and-persistence.md", "reason": "chosen CSS selectors and persistence Option<bool> semantics"}
