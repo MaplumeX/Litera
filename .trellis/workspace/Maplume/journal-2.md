@@ -133,3 +133,24 @@ Bumped to 0.2.6, wrote changelog, tagged v0.2.6, and published the GitHub releas
 ### Status
 
 [OK] **Completed**
+
+
+## Session 93: Restore reading position via CFI
+
+**Date**: 2026-08-23
+**Task**: Restore reading position via CFI
+**Branch**: `main`
+
+### Summary
+
+Reopening a book now restores via lastCfi (foliate init lastLocation) instead of goToFraction, which was landing on the next page. lastFraction remains the library-card/scrubber percent. Specs record the fifth update_reading_state Option and the init({})+goTo trap.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `38ff0aa` | (see git log) |
+
+### Status
+
+[OK] **Completed**

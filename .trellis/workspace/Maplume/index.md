@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 92
+- **Total Sessions**: 93
 - **Last Active**: 2026-08-23
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~135 | Active |
+| `journal-2.md` | ~156 | Active |
 | `journal-1.md` | ~1996 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 93 | 2026-08-23 | Restore reading position via CFI | `38ff0aa` | `main` |
 | 92 | 2026-08-23 | Publish Litera 0.2.6 | `e5f8155` | `main` |
 | 91 | 2026-08-22 | Override book fonts and typography | `d465ea8`, `94bcd62` | `feat/book-font-and-layout-override-settings` |
 | 90 | 2026-08-21 | Highlight colors, notes, and in-page editor | `126f5da`, `46ac9cb`, `7f745ea` | `feat/litera-annotation-improvements` |
