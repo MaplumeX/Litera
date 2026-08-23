@@ -240,3 +240,24 @@ Replaced the header-button overlay conversation TOC with a Paseo-style left-edge
 ### Status
 
 [OK] **Completed**
+
+
+## Session 96: Rewrite bilingual README
+
+**Date**: 2026-08-24
+**Task**: Rewrite bilingual README
+**Branch**: `main`
+
+### Summary
+
+Replaced the default README with an English version covering library, reader, assistant, install, and development; added README.zh-CN.md with the same content in Simplified Chinese.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b7d45ee` | (see git log) |
+
+### Status
+
+[OK] **Completed**
