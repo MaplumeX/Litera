@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/frontend/index.md", "reason": "Quality Check entry for frontend layer after TocSidebar/App changes."}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Verify overlay chrome, current-row centering, title-row density, and no nested-button / remount regressions."}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "Expand state must stay process-only; drawers and lastLayout must not pick up new persisted fields."}
+{"file": ".trellis/spec/frontend/i18n.md", "reason": "Catalog key parity and useT() for new collapse chrome strings."}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Frontend quality bar: no forbidden persistence, no foliate submodule edits."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Confirm expand helpers reused from toc-items.ts instead of inline tree walks."}
