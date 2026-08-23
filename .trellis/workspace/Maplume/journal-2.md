@@ -198,3 +198,35 @@ Planned and shipped library metadata editing (title/author/cover via update_book
 ### Status
 
 [OK] **Completed**
+
+
+## Session 95: Add nested collapse to the reader TOC sidebar
+
+**Date**: 2026-08-23
+**Task**: Add nested collapse to the reader TOC sidebar
+**Branch**: `feat/collapse-headings-with-subtitles`
+
+### Summary
+
+Reader TOC now collapses nested headings via chevrons, defaults to the current chapter path, remembers expand state while the book is open, and offers expand-all / collapse-all. Specs record path keys in App.tocExpanded (process-only, not href, not persisted).
+
+### Main Changes
+
+- Chevron vs title click; empty href never goTo empty string
+- tocExpanded lives in App so drawer remount keeps expansions; book switch resets
+- currentHref change unions ancestor keys; collapse-all keeps current path
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a6ef219` | (see git log) |
+
+### Testing
+
+- [OK] npx vitest run: 53 files, 520 tests passed
+- [OK] npm run build (tsc && vite build) passed
+
+### Status
+
+[OK] **Completed**
