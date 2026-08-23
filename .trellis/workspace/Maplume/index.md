@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~232 | Active |
+| `journal-2.md` | ~242 | Active |
 | `journal-1.md` | ~1996 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 95 | 2026-08-23 | Paseo-style workspace conversation outline rail | `1f4c2c1` | `feat/chatgpt-web-style-conversation-toc` |
 | 95 | 2026-08-23 | Add nested collapse to the reader TOC sidebar | `a6ef219` | `feat/collapse-headings-with-subtitles` |
 | 94 | 2026-08-23 | Improve library shelf management | `837e33c`, `9f9f4db`, `c7dfb4d` | `feat/continue-improving-book-library` |
 | 94 | 2026-08-23 | Keep typography preview visible in settings | `afc40e0` | `fix/settings-layout-preview-text-hidden-on-scroll` |
