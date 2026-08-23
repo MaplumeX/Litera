@@ -175,3 +175,26 @@ Split Settings → Typography into a left compact inspector (steppers and inline
 ### Status
 
 [OK] **Completed**
+
+
+## Session 94: Improve library shelf management
+
+**Date**: 2026-08-23
+**Task**: Improve library shelf management
+**Branch**: `feat/continue-improving-book-library`
+
+### Summary
+
+Planned and shipped library metadata editing (title/author/cover via update_book_metadata), five-way sort, grid/list views, card menus plus details dialog, and a continue-reading strip of up to four recently opened books. Specs record that post-import edits must not reuse save_book_metadata and that sort/view live in localStorage.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `837e33c` | (see git log) |
+| `9f9f4db` | (see git log) |
+| `c7dfb4d` | (see git log) |
+
+### Status
+
+[OK] **Completed**
