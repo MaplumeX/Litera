@@ -151,6 +151,10 @@ export const zhCN = {
 
   "toc.title": "目录",
   "toc.empty": "无目录",
+  "toc.expandAll": "全部展开",
+  "toc.collapseAll": "全部折叠",
+  "toc.expand": "展开",
+  "toc.collapse": "折叠",
 
   "annotations.title": "标注",
   "annotations.bookmarks": "书签",

@@ -48,6 +48,7 @@ These guides help you **ask the right questions before coding**.
 - [ ] You want to add highlight color/note — optional fields on `annotations.json` `schemaVersion: 1`, semantic ids not hex; `list_annotations` stays read-only (see backend `tauri-commands.md` "Scenario: highlight color and note")
 - [ ] You want a click on a painted highlight — `pointerup` hitTest must suppress paging before `show-annotation` (see frontend `component-guidelines.md` "highlight click must beat page-turn")
 - [ ] You want to add or restyle a Settings → Typography control — keep the 768px shell; inspector left + preview right, each scrolling; continuous fields are steppers (`clampSnap`), not sliders; Escape in a stepper must `onEscapeKeyDown` preventDefault or the dialog closes (see frontend `component-guidelines.md` "typography continuous fields are steppers")
+- [ ] You want TOC rows to collapse — path keys in `App.tocExpanded`, helpers in `toc-items.ts`; do not persist; do not key by href; `currentHref` change unions ancestors (see frontend `component-guidelines.md` "TOC nested collapse uses path keys in App")
 - [ ] UI / command code starts casting raw payload fields directly
 - [ ] OS / argv / deep-link input can arrive twice or before the WebView mounts (drain a queue; see backend `tauri-commands.md` "OS EPUB open")
 

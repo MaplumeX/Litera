@@ -16,7 +16,10 @@
   App default mode (`litera.defaultReaderMode`) and pane widths live in `localStorage`.
   TTS rate/voice live in `localStorage` (`litera.ttsRate` / `litera.ttsVoice`);
   playing/paused is process-only and must not be persisted.
-  `tocVisible` and `annotationsVisible` are process-only. Do not persist them.
+  `tocVisible`, `tocExpanded`, and `annotationsVisible` are process-only.
+  Do not persist them. `tocExpanded` is sibling-index path keys for the open
+  book's TOC tree; reset it on book switch / back to library, not on drawer
+  close. Do not key it by href.
   Switching Reader ↔ Agent must not reset `lastLayout` flags.
   Last-used highlight color is process-only
   (`src/lib/annotations.ts` module state); do not persist it. Mutate the open

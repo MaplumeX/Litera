@@ -153,6 +153,10 @@ export const en: { [K in MessageKey]: string } = {
 
   "toc.title": "Contents",
   "toc.empty": "No contents",
+  "toc.expandAll": "Expand all",
+  "toc.collapseAll": "Collapse all",
+  "toc.expand": "Expand",
+  "toc.collapse": "Collapse",
 
   "annotations.title": "Annotations",
   "annotations.bookmarks": "Bookmarks",

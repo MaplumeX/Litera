@@ -153,6 +153,42 @@ list.scrollTop +=
 
 **Related**: `src/components/TocSidebar.tsx`; overlay TOC in "reader chrome is reading-first".
 
+### Convention: TOC nested collapse uses path keys in App
+
+**What**: Parent TOC rows collapse. `App` holds `tocExpanded: string[]` (sibling-index path keys such as `"0.2.1"`). `TocSidebar` receives `expanded` / `onToggle` / `onExpandAll` / `onCollapseAll`. Chevron toggles expand only. Title click with a non-empty href still `onGoTo` (drawer still closes). Empty href is not a navigation control and must not call `goTo("")`.
+
+**Why**: The drawer remounts on every open, so expand state cannot live only in `TocSidebar`. EPUB hrefs repeat and can be empty, so keys cannot be hrefs. `currentHref` often arrives after `setToc`; first relocate must still reveal the current row.
+
+**How**:
+```ts
+setToc(bookToc);
+setTocExpanded(ancestorKeysForHref(bookToc, progressRef.current.chapterHref));
+// later currentHref:
+setTocExpanded((current) =>
+  unionKeys(current, ancestorKeysForHref(toc, progress.chapterHref)),
+);
+```
+
+**Rules**:
+- Helpers live in `src/lib/toc-items.ts`: `tocPathKey`, `collapsibleKeys`, `ancestorKeysForHref`, `unionKeys`. Do not walk the tree inline in `App`.
+- `ancestorKeysForHref` returns collapsible **ancestors** of every `item.href === href` match, not the matching row. Missing/unmatched href → `[]` (all collapsed).
+- On `setToc(bookToc)` apply current-path ancestors. When `chapterHref` changes, **union** those keys; do not auto-collapse extra expansions.
+- Expand-all = `collapsibleKeys(toc)`. Collapse-all = `ancestorKeysForHref(toc, chapterHref)` (current path only, not a fully closed tree).
+- Reset `tocExpanded` wherever `setToc([])` / back-to-library runs. Closing the drawer must not reset it.
+- Do not persist expand state (`localStorage`, `preferences.json`, `update_reading_state`).
+- Split chevron and title — no nested `<button>`. Leaf rows use a `w-6` spacer. Title bar stays `h-12`; expand-all / collapse-all are `icon-xs` ghost (`ChevronsUpDown` / `ChevronsDownUp`) with `toc.expandAll` / `toc.collapseAll`.
+- Render `subitems` only when the parent key is in `expanded`. Nested flags under a collapsed parent stay in the array.
+- Keep current-row highlight + list-viewport centering. Prev/next still uses `flattenToc` / `chapterNavAt` and ignores expand state.
+
+**Don't**:
+```ts
+expanded.has(item.href);          // hrefs collide and can be empty
+{tocVisible && <TocSidebar />}    // expand state inside the sidebar — remount wipes it
+setTocExpanded(ancestorKeysForHref(toc, href)); // on chapter change — drops extra expansions
+```
+
+**Related**: overlay TOC + current-row viewport conventions; frontend `state-management.md` (`tocExpanded` is process-only).
+
 ### Convention: reader TTS is Web Speech + a reserved overlay
 
 **What**: In-reader read-aloud lives in `useReaderTts` + `ReaderView` + `ReaderTtsBar`. The header has one play/pause icon. A bar appears above `ReaderProgressBar` only while `status !== "idle"`. Rate/voice persist as `localStorage` `litera.ttsRate` / `litera.ttsVoice`.
@@ -214,16 +250,16 @@ scrollToAnchor(range, false); // only if off-screen
 - The book cell is full-bleed: `ReaderView` fills the area above the progress bar. Do not wrap it in `bg-muted/40` or a `p-3` inset, and do not add a paper well or inner border. Do not paint warm paper on app chrome, and do not put Geist into `generateStylesCss`.
 - The only page/chrome seam under the book is the progress bar's `border-t`. When the side pane is open, put `border-l` on the visible right-hand cell (reader: chat; agent: book). Do not paint the 6px resize handle as the seam, and do not put `border-l` on a hidden/collapsed cell.
 - Docked `ChatPanel` (`variant="docked"`) has no header `border-b` — the window titlebar already supplies that line. Workspace keeps `border-b`. TOC / 标注 drawer titles are `flex h-12 items-center border-b px-3 text-sm font-medium`, not `py-3`.
-- Flatten TOC and prev/next chapter via `src/lib/toc-items.ts` (`flattenToc`, `chapterNavAt`). `ReaderViewHandle.getSectionFractions` / `previewLabelAt` wrap the mounted foliate-view. Do not import `src/foliate-js/progress.js` into React, and do not walk the TOC tree inline in `App`.
+- Flatten TOC and prev/next chapter via `src/lib/toc-items.ts` (`flattenToc`, `chapterNavAt`). Nested collapse keys also live there (`tocPathKey`, `collapsibleKeys`, `ancestorKeysForHref`, `unionKeys`). `ReaderViewHandle.getSectionFractions` / `previewLabelAt` wrap the mounted foliate-view. Do not import `src/foliate-js/progress.js` into React, and do not walk the TOC tree inline in `App`.
 - Progress is always visible at the **bottom of the book cell** in both modes. Do not mount it under the header or stretch it across chat. Click seeks immediately; drag updates a local draft (thumb, fill, preview) and seeks on release. Map pointer x / width with `fractionFromPointer` and wrap seeks in `createLatestSerializedTaskController` (latest-wins). Section ticks come from `readerRef.getSectionFractions()`. Prev/next chapter walk the flattened TOC by `chapterHref` via `goToTocItem` — not previous/next page. Do not put percent in the header icon cluster, and do not add hover-only bars, remaining-time, or footer page numbers. `App` still keeps `progress` as relocate state: `chapterHref` goes to `ChatPanel`; `fraction` persists as `lastFraction` (percent). The reopen locator is `lastCfi`: `ReaderView` must `init({ lastLocation: cfi })` — do not `init({})` then `goTo(cfi)` (`init` without `lastLocation` calls `next()`). Library-card percent stays on `BookCard`.
-- TOC is an absolute left drawer over `ReaderView` (backdrop / Esc / chapter click close). Do not insert a `w-56 shrink-0` column beside the reader. If the Agent book cell is collapsed, opening TOC/标注 must expand the book first. `App` may listen for `Escape` to close TOC; do not handle `ArrowLeft` / `ArrowRight` in `App` (ReaderView owns paging on the chapter iframe). The drawer width is user-resizable via a right-edge drag handle (pointer events, `cursor-col-resize`, `hover:bg-primary/30`) and persisted to `localStorage` key `toc-sidebar-width` (default 224px, min 160px, clamped to the reader container). Width helpers live in `src/lib/toc-sidebar-width.ts`; do not hardcode `w-56` on the TOC drawer.
+- TOC is an absolute left drawer over `ReaderView` (backdrop / Esc / chapter click close). Do not insert a `w-56 shrink-0` column beside the reader. If the Agent book cell is collapsed, opening TOC/标注 must expand the book first. `App` may listen for `Escape` to close TOC; do not handle `ArrowLeft` / `ArrowRight` in `App` (ReaderView owns paging on the chapter iframe). The drawer width is user-resizable via a right-edge drag handle (pointer events, `cursor-col-resize`, `hover:bg-primary/30`) and persisted to `localStorage` key `toc-sidebar-width` (default 224px, min 160px, clamped to the reader container). Width helpers live in `src/lib/toc-sidebar-width.ts`; do not hardcode `w-56` on the TOC drawer. Nested expand state is `App.tocExpanded` (path keys, process-only); see “TOC nested collapse uses path keys in App”. Title click still closes the drawer; chevron click must not.
 - 标注 is the same overlay chrome as TOC (`w-56`, backdrop, Esc). TOC / 标注 are book-owned: they follow the book pane, not the window's left edge. Reader: immediately after back, left of the title. Agent: after the 1px rule, immediately before mode + book. Aa stays left of the rule in both modes. Share one button pair / one set of handlers; do not fork click logic per mode. Agent sessions toggle lives only in `ChatPanel`. Opening 标注 closes TOC and vice versa. The open flag is process-only (`annotationsVisible` in `App`); do not persist it. Clicking a list row jumps then closes the drawer (does not open the in-page editor). Do not remount `ReaderView` when toggling either drawer. 标注 keeps its fixed `w-56`; only TOC is resizable. Sidebar rows show a color swatch and a note summary; color/note editing is the host `HighlightEditor` over the book, not a second form in the drawer. Selection toolbar stays 「高亮」then「问 agent」— one-click highlight, then click the painted mark to edit.
 - Mount exactly one `ReaderView` and one `ChatPanel`. Keep both mounted when a pane is collapsed (`hidden` + width 0). Do not branch two copies. Do not swap them between two `Group` trees — that remounts. Session rail in Agent mode is a flex sibling **inside** `ChatPanel` (`variant="workspace"`, ~240px, not `absolute` overlay). Docked/reader chat keeps the overlay list. Clear the overlay flag when entering workspace.
 - Chat open size is ~22% (`litera.chat-panel-width`). Agent book open size is ~38% (`litera.agent-book-width`, clamp 22–60). Session rail width is fixed. Do not bind layout default/min size to collapse flags. Session-rail / book / chat collapse is per-book `lastLayout` via `update_reading_state`; widths stay global `localStorage`. Switching Reader ↔ Agent must not force-open the rail or book. Missing `lastLayout` uses `{ chatCollapsed: true, bookCollapsed: false, sessionRailOpen: true }`. Helpers: `src/lib/reader-layout.ts`.
 - Mode resolution: book `lastReaderMode` → `localStorage` `litera.defaultReaderMode` → `"reader"`. Toolbar switch persists via `update_reading_state({ lastReaderMode })`. Settings default writes localStorage only — never `preferences.json`, never a library patch. Helpers: `src/lib/reader-mode.ts`.
 - 「问 agent」 while reader-mode chat is collapsed: store a pending capture, expand the panel, then `fillInput` after layout. Do not call `fillInput` on a `display:none` panel. In Agent mode the chat cell is visible — `fillInput` immediately. Opening TOC/标注 while the book cell is hidden expands the book; the resulting `bookCollapsed: false` is the last layout and is persisted.
 
-**Related**: [State Management](./state-management.md) for process-only `tocVisible` / `annotationsVisible` vs durable `lastLayout`. Backend `tauri-commands.md` "Scenario: lastReaderMode", "Scenario: lastLayout", and "Scenario: lastCfi".
+**Related**: [State Management](./state-management.md) for process-only `tocVisible` / `tocExpanded` / `annotationsVisible` vs durable `lastLayout`. Backend `tauri-commands.md` "Scenario: lastReaderMode", "Scenario: lastLayout", and "Scenario: lastCfi".
 
 ### Convention: chat auto-scroll respects user position (stick-to-bottom)
 
