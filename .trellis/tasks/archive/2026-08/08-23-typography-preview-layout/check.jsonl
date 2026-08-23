@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/frontend/index.md", "reason": "Quality check entry for frontend layer"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Must use shadcn Input/Button, not native form controls; Appearance slider must remain"}
+{"file": ".trellis/spec/frontend/i18n.md", "reason": "New stepper aria-label keys must exist in both catalogs"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "General frontend quality bar for the settings UI change"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Confirm clampSnap and SegmentedControl reuse instead of new primitives"}
