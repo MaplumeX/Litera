@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend spec index and pre-dev checklist for library persistence commands"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "library.json atomic write, deny_unknown_fields, no schema bump, optional shelf fields"}
+{"file": ".trellis/spec/backend/tauri-commands.md", "reason": "Typed WebView-Rust command contracts; spawn_blocking; do not add preferences keys"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "AppError kinds for invalid input vs storage failures on metadata update"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend spec index for LibraryView, dialogs, and local state"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "shadcn-only chrome, add dropdown/context-menu, no window.confirm, cool product-tool visual language"}
+{"file": ".trellis/spec/frontend/i18n.md", "reason": "zh-CN/en catalogs; library chrome strings; localStorage UI prefs not preferences.json"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "New command + cover bytes + BookRecord fields must stay aligned across Rust and React"}

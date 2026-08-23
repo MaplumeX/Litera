@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~177 | Active |
+| `journal-2.md` | ~200 | Active |
 | `journal-1.md` | ~1996 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 94 | 2026-08-23 | Improve library shelf management | `837e33c`, `9f9f4db`, `c7dfb4d` | `feat/continue-improving-book-library` |
 | 94 | 2026-08-23 | Keep typography preview visible in settings | `afc40e0` | `fix/settings-layout-preview-text-hidden-on-scroll` |
 | 93 | 2026-08-23 | Restore reading position via CFI | `38ff0aa` | `main` |
 | 92 | 2026-08-23 | Publish Litera 0.2.6 | `e5f8155` | `main` |

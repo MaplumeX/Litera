@@ -707,6 +707,71 @@ impl LibraryStore {
         Ok(updated)
     }
 
+    pub fn update_book_metadata(
+        &self,
+        book_id: &str,
+        title: String,
+        author: String,
+        cover_bytes: Option<Vec<u8>>,
+    ) -> AppResult<BookRecord> {
+        validate_book_id(book_id)?;
+        validate_text("title", &title, MAX_TITLE_BYTES, false)?;
+        validate_text("author", &author, MAX_AUTHOR_BYTES, true)?;
+        if let Some(bytes) = &cover_bytes {
+            if bytes.is_empty() {
+                return Err(AppError::invalid_input("cover is empty"));
+            }
+            if bytes.len() > MAX_COVER_BYTES {
+                return Err(AppError::invalid_input(format!(
+                    "cover exceeds {MAX_COVER_BYTES} bytes"
+                )));
+            }
+        }
+
+        let _guard = self.transaction()?;
+        let mut library = self.read_library()?;
+        let record_index = library
+            .books
+            .iter()
+            .position(|book| book.id == book_id)
+            .ok_or_else(|| AppError::book_not_found(book_id))?;
+
+        let book_dir = self.book_dir(book_id)?;
+        let cover_path = book_dir.join("cover.jpg");
+        let new_cover = cover_bytes.as_ref().map(|bytes| compress_cover(bytes));
+        let old_cover = if new_cover.is_some() {
+            read_optional_regular_file(&cover_path, "existing cover")?
+        } else {
+            None
+        };
+
+        if let Some(bytes) = &new_cover {
+            if let Err(error) = atomic_write(&cover_path, bytes, "cover") {
+                restore_file(&cover_path, old_cover.as_deref(), "cover", &error)?;
+                return Err(error);
+            }
+        }
+
+        {
+            let record = &mut library.books[record_index];
+            record.title = title;
+            record.author = author;
+            if new_cover.is_some() {
+                record.cover_path = cover_path.to_string_lossy().into_owned();
+            }
+        }
+        let updated = library.books[record_index].clone();
+
+        if let Err(error) = self.write_library(&library) {
+            if new_cover.is_some() {
+                restore_file(&cover_path, old_cover.as_deref(), "cover", &error)?;
+            }
+            return Err(error);
+        }
+
+        Ok(updated)
+    }
+
     pub fn read_import_bytes(&self, book_id: &str, import_id: &str) -> AppResult<Vec<u8>> {
         validate_book_id(book_id)?;
         validate_import_id(import_id)?;
@@ -2268,6 +2333,18 @@ pub async fn save_book_metadata(
 }
 
 #[tauri::command]
+pub async fn update_book_metadata(
+    store: tauri::State<'_, LibraryStore>,
+    book_id: String,
+    title: String,
+    author: String,
+    cover_bytes: Option<Vec<u8>>,
+) -> AppResult<BookRecord> {
+    let store = store.inner().clone();
+    run_blocking(move || store.update_book_metadata(&book_id, title, author, cover_bytes)).await
+}
+
+#[tauri::command]
 pub async fn list_books(store: tauri::State<'_, LibraryStore>) -> AppResult<Vec<BookRecord>> {
     let store = store.inner().clone();
     run_blocking(move || store.list_books()).await
@@ -2687,6 +2764,134 @@ mod tests {
         assert_eq!(error.code, AppErrorCode::StorageCorrupt);
         assert!(!outside.path().join("book.epub").exists());
         assert!(!outside.path().join(".imports").exists());
+    }
+
+    #[test]
+    fn update_book_metadata_title_only_keeps_cover_and_progress() {
+        let (directory, store) = test_store();
+        let source = Path::new("/source/edit-title.epub");
+        let id = import_test_book(&store, source);
+        store
+            .update_reading_state(&id, Some(0.42), None, None, None, None)
+            .expect("progress");
+        let before = store.list_books().expect("list").remove(0);
+        let cover_path = PathBuf::from(&before.cover_path);
+        let cover_before = fs::read(&cover_path).expect("cover");
+        let epub_before =
+            fs::read(directory.path().join("books").join(&id).join("book.epub")).expect("epub");
+
+        let updated = store
+            .update_book_metadata(&id, "Renamed".to_string(), "Author One".to_string(), None)
+            .expect("title-only update");
+
+        assert_eq!(updated.title, "Renamed");
+        assert_eq!(updated.author, "Author One");
+        assert_eq!(updated.cover_path, before.cover_path);
+        assert_eq!(updated.last_fraction, Some(0.42));
+        assert_eq!(updated.last_opened_at, before.last_opened_at);
+        assert_eq!(updated.imported_at, before.imported_at);
+        assert_eq!(updated.file_path, before.file_path);
+        assert_eq!(updated.content_hash, before.content_hash);
+        assert_eq!(updated.id, id);
+        assert_eq!(fs::read(&cover_path).expect("cover after"), cover_before);
+        assert_eq!(
+            fs::read(directory.path().join("books").join(&id).join("book.epub"))
+                .expect("epub after"),
+            epub_before
+        );
+    }
+
+    #[test]
+    fn update_book_metadata_cover_write_failure_rolls_back() {
+        let (directory, store) = test_store();
+        let id = import_test_book(&store, Path::new("/source/edit-cover-rollback.epub"));
+        let book_dir = directory.path().join("books").join(&id);
+        let cover_path = book_dir.join("cover.jpg");
+        let cover_before = fs::read(&cover_path).expect("cover");
+        store.fail_next_library_write();
+
+        let error = store
+            .update_book_metadata(
+                &id,
+                "Version Two".to_string(),
+                "Author Two".to_string(),
+                Some(vec![4, 5, 6]),
+            )
+            .expect_err("library write must fail");
+
+        assert_eq!(error.code, AppErrorCode::StorageIo);
+        assert_eq!(fs::read(&cover_path).expect("restored cover"), cover_before);
+        let record = store.list_books().expect("old library").remove(0);
+        assert_eq!(record.title, "Version One");
+        assert_eq!(record.author, "Author One");
+    }
+
+    #[test]
+    fn update_book_metadata_rejects_empty_title() {
+        let (_directory, store) = test_store();
+        let id = import_test_book(&store, Path::new("/source/edit-empty-title.epub"));
+
+        let error = store
+            .update_book_metadata(&id, "   ".to_string(), "Author".to_string(), None)
+            .expect_err("empty title");
+
+        assert_eq!(error.code, AppErrorCode::InvalidInput);
+        let record = store.list_books().expect("unchanged").remove(0);
+        assert_eq!(record.title, "Version One");
+    }
+
+    #[test]
+    fn update_book_metadata_rejects_empty_cover_bytes() {
+        let (_directory, store) = test_store();
+        let id = import_test_book(&store, Path::new("/source/edit-empty-cover.epub"));
+
+        let error = store
+            .update_book_metadata(
+                &id,
+                "Version One".to_string(),
+                "Author One".to_string(),
+                Some(vec![]),
+            )
+            .expect_err("empty cover");
+
+        assert_eq!(error.code, AppErrorCode::InvalidInput);
+        let record = store.list_books().expect("unchanged").remove(0);
+        assert_eq!(record.title, "Version One");
+        assert_eq!(fs::read(&record.cover_path).expect("cover"), [1, 2, 3]);
+    }
+
+    #[test]
+    fn update_book_metadata_replaces_cover_and_keeps_other_fields() {
+        let (directory, store) = test_store();
+        let id = import_test_book(&store, Path::new("/source/edit-cover.epub"));
+        store
+            .update_reading_state(&id, Some(0.3), None, None, None, None)
+            .expect("progress");
+        let before = store.list_books().expect("list").remove(0);
+        let cover_path = PathBuf::from(&before.cover_path);
+        let epub_before =
+            fs::read(directory.path().join("books").join(&id).join("book.epub")).expect("epub");
+
+        let updated = store
+            .update_book_metadata(
+                &id,
+                "Version One".to_string(),
+                "Author One".to_string(),
+                Some(vec![4, 5, 6]),
+            )
+            .expect("cover replace");
+
+        assert_eq!(updated.cover_path, before.cover_path);
+        assert_eq!(updated.last_fraction, Some(0.3));
+        assert_eq!(updated.file_path, before.file_path);
+        assert_eq!(updated.content_hash, before.content_hash);
+        assert_eq!(updated.id, id);
+        assert_eq!(fs::read(&cover_path).expect("new cover"), [4, 5, 6]);
+        assert_eq!(
+            fs::read(directory.path().join("books").join(&id).join("book.epub"))
+                .expect("epub after"),
+            epub_before
+        );
     }
 
     #[test]
