@@ -99,7 +99,12 @@ import {
   type ReaderMode,
 } from "@/lib/reader-mode";
 import { isReaderLayout, resolveReaderLayout } from "@/lib/reader-layout";
-import { chapterNavAt } from "@/lib/toc-items";
+import {
+  ancestorKeysForHref,
+  chapterNavAt,
+  collapsibleKeys,
+  unionKeys,
+} from "@/lib/toc-items";
 import { useReaderTts } from "@/lib/use-reader-tts";
 
 interface FileData {
@@ -159,6 +164,7 @@ function App() {
   const annotationsRef = useRef(annotations);
   annotationsRef.current = annotations;
   const [toc, setToc] = useState<TocItem[]>([]);
+  const [tocExpanded, setTocExpanded] = useState<string[]>([]);
   const [sectionTicks, setSectionTicks] = useState<number[]>([]);
   const [persistenceError, setPersistenceError] = useState<string | null>(null);
   const [openingBookId, setOpeningBookId] = useState<string | null>(null);
@@ -217,6 +223,8 @@ function App() {
   // Latest fraction for open-book / relocate; do not write lastFraction / lastCfi
   // into currentBook on every relocate or ReaderView's open effect re-opens.
   const lastKnownFractionRef = useRef<number | undefined>(undefined);
+  const progressRef = useRef(progress);
+  progressRef.current = progress;
   // Do not save until get_annotations succeeds; a failed/in-flight load
   // must not replace books/<id>/annotations.json with an empty snapshot.
   const annotationsWritableRef = useRef(false);
@@ -456,6 +464,7 @@ function App() {
         fraction: context.lastFraction ?? 0,
       });
       setToc([]);
+      setTocExpanded([]);
       setSectionTicks([]);
       setCurrentBook({
         id: context.bookId,
@@ -526,6 +535,7 @@ function App() {
     setCurrentBook(null);
     setProgress({ index: 0, fraction: 0 });
     setToc([]);
+    setTocExpanded([]);
     setSectionTicks([]);
     setTocVisible(false);
     setAnnotationsVisible(false);
@@ -593,10 +603,18 @@ function App() {
 
   const handleBookReady = useCallback((bookToc: TocItem[]) => {
     setToc(bookToc);
+    setTocExpanded(ancestorKeysForHref(bookToc, progressRef.current.chapterHref));
     setSectionTicks(readerRef.current?.getSectionFractions() ?? []);
     // Apply saved styles now that the renderer exists.
     readerRef.current?.setStyles(generateStylesCss(styleStateRef.current));
   }, []);
+
+  useEffect(() => {
+    if (toc.length === 0) return;
+    setTocExpanded((current) =>
+      unionKeys(current, ancestorKeysForHref(toc, progress.chapterHref)),
+    );
+  }, [progress.chapterHref, toc]);
 
   const handleCloseSettings = useCallback(async () => {
     try {
@@ -654,6 +672,20 @@ function App() {
     goToChapterHref(href);
     setTocVisible(false);
   }, [goToChapterHref]);
+
+  const handleTocToggle = useCallback((key: string) => {
+    setTocExpanded((current) =>
+      current.includes(key) ? current.filter((item) => item !== key) : [...current, key],
+    );
+  }, []);
+
+  const handleTocExpandAll = useCallback(() => {
+    setTocExpanded(collapsibleKeys(toc));
+  }, [toc]);
+
+  const handleTocCollapseAll = useCallback(() => {
+    setTocExpanded(ancestorKeysForHref(toc, progress.chapterHref));
+  }, [progress.chapterHref, toc]);
 
   const handlePrevChapter = useCallback(() => {
     const href = chapterNavAt(toc, progress.chapterHref).prevHref;
@@ -1087,6 +1119,10 @@ function App() {
                   <TocSidebar
                     toc={toc}
                     currentHref={progress.chapterHref}
+                    expanded={tocExpanded}
+                    onToggle={handleTocToggle}
+                    onExpandAll={handleTocExpandAll}
+                    onCollapseAll={handleTocCollapseAll}
                     onGoTo={handleTocGoTo}
                   />
                 </div>

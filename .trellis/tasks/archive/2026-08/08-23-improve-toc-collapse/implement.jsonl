@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend layer index and pre-development checklist for React chrome work."}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "TOC overlay, remount-on-open, current-row viewport centering, h-12 drawer title, lucide + shadcn button sizes."}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "tocVisible is process-only; expand state must not go to localStorage, preferences.json, or update_reading_state."}
+{"file": ".trellis/spec/frontend/i18n.md", "reason": "New toc.* chrome strings need matching zh-CN/en keys and useT(); no preferences.json locale field."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Tree walk and prev/next already live in toc-items.ts; do not fork a second TOC walk in App."}

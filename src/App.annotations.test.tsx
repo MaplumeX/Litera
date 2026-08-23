@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AnnotationsFile, BookOpenContext } from "@/types/library";
 import type { ReaderViewHandle } from "@/components/ReaderView";
@@ -43,9 +43,14 @@ vi.mock("@/lib/use-book-import", () => ({
 
 vi.mock("@/components/LibraryView", () => ({
   LibraryView: ({ onOpenBook }: { onOpenBook: (id: string) => void }) => (
-    <button type="button" onClick={() => onOpenBook("book1")}>
-      open-book
-    </button>
+    <>
+      <button type="button" onClick={() => onOpenBook("book1")}>
+        open-book
+      </button>
+      <button type="button" onClick={() => onOpenBook("book2")}>
+        open-book-2
+      </button>
+    </>
   ),
 }));
 
@@ -92,9 +97,36 @@ const readerHandle: ReaderViewHandle = {
 
 vi.mock("@/components/ReaderView", async () => {
   const React = await import("react");
+  const nestedToc = [
+    {
+      href: "p1",
+      label: "第一部分",
+      subitems: [{ href: "c1", label: "第一章" }],
+    },
+    {
+      href: "p2",
+      label: "第二部分",
+      subitems: [{ href: "c3", label: "第三章" }],
+    },
+  ];
   return {
     ReaderView: React.forwardRef(function MockReader(
       props: {
+        fileData?: { bookId: string };
+        onBookReady?: (
+          toc: {
+            href: string;
+            label: string;
+            subitems?: { href: string; label: string }[];
+          }[],
+        ) => void;
+        onRelocate?: (
+          index: number,
+          fraction: number,
+          label?: string,
+          chapterHref?: string,
+          cfi?: string,
+        ) => void;
         onHighlight?: (selection: { cfi: string; excerpt: string }) => void;
         onSelectionCapture?: (capture: { text: string; chapterHref?: string }) => void;
         onUpdateHighlight?: (
@@ -107,6 +139,9 @@ vi.mock("@/components/ReaderView", async () => {
       ref: React.ForwardedRef<ReaderViewHandle>,
     ) {
       React.useImperativeHandle(ref, () => readerHandle);
+      React.useEffect(() => {
+        props.onBookReady?.(nestedToc);
+      }, [props.fileData?.bookId, props.onBookReady]);
       return (
         <>
           <button
@@ -125,6 +160,18 @@ vi.mock("@/components/ReaderView", async () => {
             onClick={() => props.onSelectionCapture?.({ text: "quoted" })}
           >
             fake-ask
+          </button>
+          <button
+            type="button"
+            onClick={() => props.onRelocate?.(0, 0.2, "第一章", "c1")}
+          >
+            fake-relocate-c1
+          </button>
+          <button
+            type="button"
+            onClick={() => props.onRelocate?.(1, 0.8, "第三章", "c3")}
+          >
+            fake-relocate-c3
           </button>
           {props.highlights?.map((highlight) => (
             <span key={highlight.id}>
@@ -192,8 +239,19 @@ const emptyFile: AnnotationsFile = {
 };
 
 function setupInvoke() {
-  invokeMock.mockImplementation((cmd: string) => {
-    if (cmd === "get_book_open_context") return Promise.resolve(openContext);
+  invokeMock.mockImplementation((cmd: string, args?: unknown) => {
+    if (cmd === "get_book_open_context") {
+      const bookId = (args as { bookId?: string } | undefined)?.bookId;
+      if (bookId === "book2") {
+        return Promise.resolve({
+          ...openContext,
+          bookId: "book2",
+          title: "另一本书",
+          name: "book2.epub",
+        });
+      }
+      return Promise.resolve(openContext);
+    }
     if (cmd === "open_book_bytes") return Promise.resolve(new ArrayBuffer(8));
     if (cmd === "get_annotations") return Promise.resolve(emptyFile);
     if (cmd === "save_annotations") return Promise.resolve(undefined);
@@ -617,5 +675,96 @@ describe("reader TOC drawer resize", () => {
       ".absolute.inset-y-0.left-0.z-30",
     ) as HTMLElement | null;
     expect(reopened?.style.width).toBe("324px");
+  });
+});
+
+describe("reader TOC nested collapse", () => {
+  function tocNav(screen: ReturnType<typeof render>) {
+    const nav = screen.getByText("目录").closest("nav");
+    if (!nav) throw new Error("expected TOC nav");
+    return nav;
+  }
+
+  async function openTocDrawer(screen: ReturnType<typeof render>) {
+    fireEvent.click(screen.getByLabelText("目录"));
+    await waitFor(() => {
+      expect(within(tocNav(screen)).getByText("第一部分")).toBeTruthy();
+    });
+    return tocNav(screen);
+  }
+
+  it("keeps extra expansions after closing and reopening the drawer", async () => {
+    const screen = await openReader();
+    let nav = await openTocDrawer(screen);
+    expect(within(nav).queryByText("第一章")).toBeNull();
+    vi.mocked(readerHandle.goToTocItem).mockClear();
+    fireEvent.click(within(nav).getAllByLabelText("展开")[0]);
+    expect(within(nav).getByText("第一章")).toBeTruthy();
+    expect(readerHandle.goToTocItem).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByLabelText("目录"));
+    expect(screen.queryByText("第一部分")).toBeNull();
+
+    nav = await openTocDrawer(screen);
+    expect(within(nav).getByText("第一章")).toBeTruthy();
+  });
+
+  it("jumps and closes the drawer when a title with href is clicked", async () => {
+    const screen = await openReader();
+    fireEvent.click(screen.getByText("fake-relocate-c1"));
+    const nav = await openTocDrawer(screen);
+    vi.mocked(readerHandle.goToTocItem).mockClear();
+    fireEvent.click(within(nav).getByText("第一章"));
+    expect(readerHandle.goToTocItem).toHaveBeenCalledWith("c1");
+    expect(screen.queryByText("第一部分")).toBeNull();
+  });
+
+  it("resets expansions when switching books", async () => {
+    const screen = await openReader();
+    const nav = await openTocDrawer(screen);
+    fireEvent.click(within(nav).getAllByLabelText("展开")[0]);
+    expect(within(nav).getByText("第一章")).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText("返回书库"));
+    });
+    await waitFor(() => {
+      expect(screen.getByText("open-book-2")).toBeTruthy();
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByText("open-book-2"));
+    });
+    await waitFor(() => {
+      expect(screen.getByLabelText("标注")).toBeTruthy();
+    });
+
+    const nextNav = await openTocDrawer(screen);
+    expect(within(nextNav).queryByText("第一章")).toBeNull();
+  });
+
+  it("expands the current chapter path without collapsing extra branches", async () => {
+    const screen = await openReader();
+    fireEvent.click(screen.getByText("fake-relocate-c1"));
+    const nav = await openTocDrawer(screen);
+    expect(within(nav).getByText("第一章")).toBeTruthy();
+    expect(within(nav).queryByText("第三章")).toBeNull();
+
+    fireEvent.click(screen.getByText("fake-relocate-c3"));
+    expect(within(nav).getByText("第一章")).toBeTruthy();
+    expect(within(nav).getByText("第三章")).toBeTruthy();
+  });
+
+  it("expand-all reveals the tree and collapse-all keeps the current path", async () => {
+    const screen = await openReader();
+    fireEvent.click(screen.getByText("fake-relocate-c1"));
+    const nav = await openTocDrawer(screen);
+    expect(within(nav).queryByText("第三章")).toBeNull();
+
+    fireEvent.click(within(nav).getByLabelText("全部展开"));
+    expect(within(nav).getByText("第三章")).toBeTruthy();
+
+    fireEvent.click(within(nav).getByLabelText("全部折叠"));
+    expect(within(nav).getByText("第一章")).toBeTruthy();
+    expect(within(nav).queryByText("第三章")).toBeNull();
   });
 });
