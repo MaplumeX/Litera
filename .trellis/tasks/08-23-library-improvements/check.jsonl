@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Quality check for backend library commands and persistence"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "Must not bump schemaVersion; cover/metadata writes must be recoverable"}
+{"file": ".trellis/spec/backend/tauri-commands.md", "reason": "New command must match existing IPC/error/blocking patterns"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "New library chrome must use shadcn, t(), and existing visual language"}
+{"file": ".trellis/spec/frontend/i18n.md", "reason": "New strings must exist in both locale catalogs"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "No extra WebView fs/dialog permissions; CSP and window chrome unchanged"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Cross-layer contract for update_book_metadata and shelf prefs"}
