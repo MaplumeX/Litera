@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **对话目录**：Agent 工作区改为消息列左缘刻度轨，悬停预览、点击跳转；阅读器侧栏不再提供该入口。
+
 ## [0.2.6] - 2026-08-23
 
 ### Added

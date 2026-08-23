@@ -8,7 +8,7 @@ import {
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Button } from "@/components/ui/button";
-import { List, MessagesSquare, Settings, AlertCircle } from "lucide-react";
+import { MessagesSquare, Settings, AlertCircle } from "lucide-react";
 import { useAgentBridge } from "@/lib/use-agent-bridge";
 import { useAgentConfig } from "@/lib/use-agent-config";
 import { embeddedAgentRuntime } from "@/agent/runtime/embedded-runtime";
@@ -21,7 +21,7 @@ import { SessionConfigDialog, type SessionConfigTarget } from "./SessionConfigDi
 import { SessionList } from "./SessionList";
 import { TypingIndicator } from "./TypingIndicator";
 import { CompactionChip } from "./CompactionChip";
-import { UserMessageToc, userMessagePreview } from "./UserMessageToc";
+import { ChatOutlineRail, userMessagePreview } from "./ChatOutlineRail";
 import { useT } from "@/lib/i18n";
 
 export interface ChatPanelHandle {
@@ -80,7 +80,6 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     const [editingIndex, setEditingIndex] = useState<number | null>(null);
     const [editDraft, setEditDraft] = useState("");
     const [stickToBottom, setStickToBottom] = useState(true);
-    const [showMessageToc, setShowMessageToc] = useState(false);
     const [activeUserMessageIndex, setActiveUserMessageIndex] = useState<number | null>(null);
     const { snapshot: configSnapshot, load: loadConfig } = useAgentConfig();
     const thinkingLevel = configSnapshot?.thinkingLevel ?? "medium";
@@ -168,19 +167,12 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       updateActiveUserMessage();
     }, [clearMessageTocJumpTimer, updateActiveUserMessage]);
 
-    const handleMessageTocOpen = useCallback(() => {
-      updateActiveUserMessage();
-      setShowSessionList(false);
-      setShowMessageToc(true);
-    }, [updateActiveUserMessage]);
-
     const handleMessageTocGoTo = useCallback((messageIndex: number) => {
       const target = userMessageRefs.current.get(messageIndex);
       if (!target) return;
       suspendBottomFollowRef.current = true;
       setStickToBottom(false);
       setActiveUserMessageIndex(messageIndex);
-      setShowMessageToc(false);
       clearMessageTocJumpTimer();
       messageTocJumpTimerRef.current = setTimeout(finishMessageTocJump, 600);
       target.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -207,7 +199,6 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       autoSwitchRef.current = null;
       suspendBottomFollowRef.current = false;
       clearMessageTocJumpTimer();
-      setShowMessageToc(false);
       setActiveUserMessageIndex(null);
     }, [bookId, clearMessageTocJumpTimer]);
 
@@ -220,7 +211,6 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       setEditDraft("");
       suspendBottomFollowRef.current = false;
       clearMessageTocJumpTimer();
-      setShowMessageToc(false);
       setActiveUserMessageIndex(null);
       scrollToBottom(false);
     }, [clearMessageTocJumpTimer, state.sessionId, scrollToBottom]);
@@ -451,7 +441,6 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
               size="icon-xs"
               variant={isWorkspace && railOpen ? "secondary" : "ghost"}
               onClick={() => {
-                setShowMessageToc(false);
                 if (isWorkspace) setRailOpen(!railOpen);
                 else setShowSessionList((value) => !value);
               }}
@@ -468,19 +457,6 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
             <span className="text-[10px] text-muted-foreground">
               {bookReady ? t("chat.ready") : t("chat.waitingBook")}
             </span>
-            <Button
-              size="icon-xs"
-              variant={showMessageToc ? "secondary" : "ghost"}
-              onClick={() => {
-                if (showMessageToc) setShowMessageToc(false);
-                else handleMessageTocOpen();
-              }}
-              disabled={userMessageTocItems.length === 0}
-              aria-label={t("chat.messageToc")}
-              aria-expanded={showMessageToc}
-            >
-              <List />
-            </Button>
             <Button
               size="icon-xs"
               variant="ghost"
@@ -573,12 +549,12 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
           )}
           <div ref={messagesEndRef} />
           </div>
-          {showMessageToc && userMessageTocItems.length > 0 && (
-            <UserMessageToc
+          {isWorkspace && userMessageTocItems.length >= 2 && (
+            <ChatOutlineRail
+              key={`${bookId}:${state.sessionId ?? ""}`}
               items={userMessageTocItems}
               activeMessageIndex={activeUserMessageIndex}
               onGoTo={handleMessageTocGoTo}
-              onClose={() => setShowMessageToc(false)}
             />
           )}
         </div>

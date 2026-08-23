@@ -178,7 +178,6 @@ export const en: { [K in MessageKey]: string } = {
   "chat.title": "Reading assistant",
   "chat.sessions": "Sessions",
   "chat.messageToc": "Conversation outline",
-  "chat.messageTocClose": "Close conversation outline",
   "chat.messageTocItem": "Jump to question {number}: {preview}",
   "chat.settings": "Settings",
   "chat.ready": "Ready",
