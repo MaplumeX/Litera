@@ -11,6 +11,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Command,
   CommandEmpty,
@@ -30,6 +31,7 @@ import {
   TEXT_ALIGNS,
   THEMES,
   TYPOGRAPHY_RANGES,
+  clampSnap,
   cssFontFamily,
   formatTypographyValue,
   isGenericFontFamily,
@@ -82,7 +84,7 @@ const ALIGN_LABEL_KEYS: Record<(typeof TEXT_ALIGNS)[number]["value"], MessageKey
   justify: "settings.align.justify",
 };
 
-const SLIDER_ROWS: { key: ContinuousKey; labelKey: MessageKey }[] = [
+const STEPPER_ROWS: { key: ContinuousKey; labelKey: MessageKey }[] = [
   { key: "fontSize", labelKey: "settings.slider.fontSize" },
   { key: "lineHeight", labelKey: "settings.slider.lineHeight" },
   { key: "contentWidth", labelKey: "settings.slider.contentWidth" },
@@ -91,6 +93,25 @@ const SLIDER_ROWS: { key: ContinuousKey; labelKey: MessageKey }[] = [
   { key: "paragraphSpacing", labelKey: "settings.slider.paragraphSpacing" },
   { key: "firstLineIndent", labelKey: "settings.slider.firstLineIndent" },
 ];
+
+const TRAILING_UNIT = /(?:px|em|rem)$/i;
+
+function parseStepperInput(raw: string): number | null {
+  let text = raw.trim();
+  if (!text) return null;
+  text = text.replace(TRAILING_UNIT, "").trim();
+  if (!text) return null;
+  const parsed = Number.parseFloat(text);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function stepperDisplay(field: ContinuousKey, value: number): string {
+  const spec = TYPOGRAPHY_RANGES[field];
+  const formatted = formatTypographyValue(field, value);
+  return spec.unit && formatted.endsWith(spec.unit)
+    ? formatted.slice(0, formatted.length - spec.unit.length)
+    : formatted;
+}
 
 export interface SettingsDialogProps {
   open: boolean;
@@ -105,37 +126,60 @@ export interface SettingsDialogProps {
   onThemeChange: (theme: string) => void;
 }
 
+function RestoreButton({
+  restore,
+}: {
+  restore?: { show: boolean; onClick: () => void; label: string };
+}) {
+  if (!restore?.show) return null;
+  return (
+    <button
+      type="button"
+      onClick={restore.onClick}
+      className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+    >
+      {restore.label}
+    </button>
+  );
+}
+
 function PresetRow({
   label,
   restore,
   children,
   contentClassName,
+  inline = false,
 }: {
   label: string;
   restore?: { show: boolean; onClick: () => void; label: string };
   children: ReactNode;
   contentClassName?: string;
+  inline?: boolean;
 }) {
+  if (inline) {
+    return (
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0 text-xs font-medium text-muted-foreground">{label}</div>
+        <div className="flex shrink-0 items-center gap-2">
+          <div className={cn("flex gap-1", contentClassName)}>{children}</div>
+          <RestoreButton restore={restore} />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div>
       <div className="mb-1.5 flex items-center justify-between gap-2">
         <div className="text-xs font-medium text-muted-foreground">{label}</div>
-        {restore?.show && (
-          <button
-            type="button"
-            onClick={restore.onClick}
-            className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-          >
-            {restore.label}
-          </button>
-        )}
+        <RestoreButton restore={restore} />
       </div>
       <div className={cn("flex gap-1", contentClassName)}>{children}</div>
     </div>
   );
 }
 
-function SliderRow({
+function StepperRow({
   label,
   field,
   value,
@@ -148,36 +192,88 @@ function SliderRow({
   restore?: { show: boolean; onClick: () => void; label: string };
   onChange: (value: number) => void;
 }) {
+  const { t } = useT();
   const spec = TYPOGRAPHY_RANGES[field];
+  const display = stepperDisplay(field, value);
+  const [draft, setDraft] = useState<string | null>(null);
+  const ignoreBlurRef = useRef(false);
+
+  function commit(raw: string) {
+    const parsed = parseStepperInput(raw);
+    if (parsed == null) return;
+    const next = clampSnap(parsed, spec.min, spec.max, spec.step);
+    if (next !== value) onChange(next);
+  }
+
+  function stepBy(delta: number) {
+    const next = clampSnap(value + delta, spec.min, spec.max, spec.step);
+    if (next !== value) onChange(next);
+  }
+
   return (
-    <div>
-      <div className="mb-1.5 flex items-center justify-between gap-2">
-        <div className="text-xs font-medium text-muted-foreground">{label}</div>
-        <div className="flex items-center gap-2">
-          <span className="text-xs tabular-nums text-foreground">
-            {formatTypographyValue(field, value)}
-          </span>
-          {restore?.show && (
-            <button
-              type="button"
-              onClick={restore.onClick}
-              className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-            >
-              {restore.label}
-            </button>
-          )}
-        </div>
+    <div className="flex items-center justify-between gap-2">
+      <div className="min-w-0 text-xs font-medium text-muted-foreground">{label}</div>
+      <div className="flex shrink-0 items-center gap-1">
+        <Button
+          type="button"
+          variant="outline"
+          size="icon-xs"
+          aria-label={t("settings.stepper.decrease", { label })}
+          disabled={value <= spec.min}
+          onClick={() => stepBy(-spec.step)}
+        >
+          −
+        </Button>
+        <Input
+          type="text"
+          data-typography-stepper=""
+          aria-label={label}
+          inputMode="decimal"
+          value={draft ?? display}
+          onFocus={() => setDraft(display)}
+          onChange={(event) => setDraft(event.target.value)}
+          onBlur={(event) => {
+            if (ignoreBlurRef.current) {
+              ignoreBlurRef.current = false;
+              setDraft(null);
+              return;
+            }
+            const raw = event.currentTarget.value;
+            setDraft(null);
+            commit(raw);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              ignoreBlurRef.current = true;
+              const raw = event.currentTarget.value;
+              setDraft(null);
+              commit(raw);
+              event.currentTarget.blur();
+            } else if (event.key === "Escape") {
+              event.preventDefault();
+              ignoreBlurRef.current = true;
+              setDraft(null);
+              event.currentTarget.blur();
+            }
+          }}
+          className="h-6 w-14 px-1 text-center text-xs tabular-nums md:text-xs"
+        />
+        <Button
+          type="button"
+          variant="outline"
+          size="icon-xs"
+          aria-label={t("settings.stepper.increase", { label })}
+          disabled={value >= spec.max}
+          onClick={() => stepBy(spec.step)}
+        >
+          +
+        </Button>
+        {spec.unit ? (
+          <span className="text-xs tabular-nums text-muted-foreground">{spec.unit}</span>
+        ) : null}
+        <RestoreButton restore={restore} />
       </div>
-      <Slider
-        aria-label={label}
-        value={[value]}
-        min={spec.min}
-        max={spec.max}
-        step={spec.step}
-        onValueChange={([next]) => {
-          if (typeof next === "number") onChange(next);
-        }}
-      />
     </div>
   );
 }
@@ -361,11 +457,13 @@ function SegmentedControl<T extends string>({
   options,
   onChange,
   ariaLabel,
+  fullWidth = true,
 }: {
   value: T;
   options: readonly SegmentedOption<T>[];
   onChange: (value: T) => void;
   ariaLabel: string;
+  fullWidth?: boolean;
 }) {
   const buttonRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
@@ -378,7 +476,7 @@ function SegmentedControl<T extends string>({
     <div
       role="radiogroup"
       aria-label={ariaLabel}
-      className="inline-flex w-full rounded-md bg-muted p-0.5"
+      className={cn("inline-flex rounded-md bg-muted p-0.5", fullWidth && "w-full")}
     >
       {options.map((option, index) => {
         const selected = option.value === value;
@@ -406,7 +504,8 @@ function SegmentedControl<T extends string>({
               }
             }}
             className={cn(
-              "flex-1 rounded-sm border px-2 py-1 text-xs transition-colors duration-200 motion-reduce:transition-none",
+              "rounded-sm border px-2 py-1 text-xs transition-colors duration-200 motion-reduce:transition-none",
+              fullWidth && "flex-1",
               selected
                 ? "border-border bg-background text-foreground"
                 : "border-transparent text-muted-foreground hover:text-foreground",
@@ -476,7 +575,15 @@ export function SettingsDialog({
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
-      <DialogContent className="flex h-[40rem] w-[768px] max-h-[85vh] gap-0 overflow-hidden p-0 sm:max-w-[calc(100%-2rem)]">
+      <DialogContent
+        className="flex h-[40rem] w-[768px] max-h-[85vh] gap-0 overflow-hidden p-0 sm:max-w-[calc(100%-2rem)]"
+        onEscapeKeyDown={(event) => {
+          const target = event.target;
+          if (target instanceof HTMLElement && target.closest("[data-typography-stepper]")) {
+            event.preventDefault();
+          }
+        }}
+      >
         <aside className="flex w-48 shrink-0 flex-col border-r">
           <DialogHeader className="gap-0 p-0 text-left">
             <DialogTitle className="px-4 py-3 text-sm font-semibold">
@@ -502,231 +609,244 @@ export function SettingsDialog({
           </nav>
         </aside>
 
-        <div className="min-h-0 flex-1 overflow-y-auto p-6">
-          <DialogDescription className="mb-5">
-            {section === "about" ? t("settings.about.description") : scopeCopy}
-          </DialogDescription>
+        <div className="@container flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+          {section === "typography" ? (
+            <div className="flex min-h-0 flex-1 flex-row overflow-hidden @max-[519px]:flex-col-reverse">
+              <div className="min-h-0 w-64 shrink-0 overflow-y-auto p-6 @max-[519px]:w-auto @max-[519px]:flex-1">
+                <DialogDescription className="mb-5">{scopeCopy}</DialogDescription>
+                <div className="space-y-5">
+                  <PresetRow
+                    inline
+                    label={t("settings.overrideFont")}
+                    restore={{
+                      show: canRestore("overrideFont"),
+                      onClick: () => onRestoreDefault("overrideFont"),
+                      label: restoreLabel,
+                    }}
+                  >
+                    <SegmentedControl
+                      fullWidth={false}
+                      value={styleState.overrideFont ? "on" : "off"}
+                      options={[
+                        { value: "off", label: t("settings.override.off") },
+                        { value: "on", label: t("settings.override.on") },
+                      ]}
+                      onChange={(next) => onTypographyChange("overrideFont", next === "on")}
+                      ariaLabel={t("settings.overrideFont")}
+                    />
+                  </PresetRow>
 
-          {section === "typography" && (
-            <div className="max-w-md space-y-5">
-              <TypographyPreview styleState={styleState} />
+                  <PresetRow
+                    inline
+                    label={t("settings.overrideLayout")}
+                    restore={{
+                      show: canRestore("overrideLayout"),
+                      onClick: () => onRestoreDefault("overrideLayout"),
+                      label: restoreLabel,
+                    }}
+                  >
+                    <SegmentedControl
+                      fullWidth={false}
+                      value={styleState.overrideLayout ? "on" : "off"}
+                      options={[
+                        { value: "off", label: t("settings.override.off") },
+                        { value: "on", label: t("settings.override.on") },
+                      ]}
+                      onChange={(next) => onTypographyChange("overrideLayout", next === "on")}
+                      ariaLabel={t("settings.overrideLayout")}
+                    />
+                  </PresetRow>
 
-              <PresetRow
-                label={t("settings.overrideFont")}
-                restore={{
-                  show: canRestore("overrideFont"),
-                  onClick: () => onRestoreDefault("overrideFont"),
-                  label: restoreLabel,
-                }}
-              >
-                <SegmentedControl
-                  value={styleState.overrideFont ? "on" : "off"}
-                  options={[
-                    { value: "off", label: t("settings.override.off") },
-                    { value: "on", label: t("settings.override.on") },
-                  ]}
-                  onChange={(next) => onTypographyChange("overrideFont", next === "on")}
-                  ariaLabel={t("settings.overrideFont")}
-                />
-              </PresetRow>
+                  {STEPPER_ROWS.slice(0, 1).map((row) => (
+                    <StepperRow
+                      key={row.key}
+                      label={t(row.labelKey)}
+                      field={row.key}
+                      value={styleState[row.key]}
+                      restore={{
+                        show: canRestore(row.key),
+                        onClick: () => onRestoreDefault(row.key),
+                        label: restoreLabel,
+                      }}
+                      onChange={(value) => onTypographyChange(row.key, value)}
+                    />
+                  ))}
 
-              <PresetRow
-                label={t("settings.overrideLayout")}
-                restore={{
-                  show: canRestore("overrideLayout"),
-                  onClick: () => onRestoreDefault("overrideLayout"),
-                  label: restoreLabel,
-                }}
-              >
-                <SegmentedControl
-                  value={styleState.overrideLayout ? "on" : "off"}
-                  options={[
-                    { value: "off", label: t("settings.override.off") },
-                    { value: "on", label: t("settings.override.on") },
-                  ]}
-                  onChange={(next) => onTypographyChange("overrideLayout", next === "on")}
-                  ariaLabel={t("settings.overrideLayout")}
-                />
-              </PresetRow>
+                  <PresetRow
+                    label={t("settings.font")}
+                    contentClassName="w-full"
+                    restore={{
+                      show: canRestore("fontFamily"),
+                      onClick: () => onRestoreDefault("fontFamily"),
+                      label: restoreLabel,
+                    }}
+                  >
+                    <FontFamilyPicker
+                      value={styleState.fontFamily}
+                      onChange={(name) => onTypographyChange("fontFamily", name)}
+                    />
+                  </PresetRow>
 
-              {SLIDER_ROWS.slice(0, 1).map((row) => (
-                <SliderRow
-                  key={row.key}
-                  label={t(row.labelKey)}
-                  field={row.key}
-                  value={styleState[row.key]}
-                  restore={{
-                    show: canRestore(row.key),
-                    onClick: () => onRestoreDefault(row.key),
-                    label: restoreLabel,
-                  }}
-                  onChange={(value) => onTypographyChange(row.key, value)}
-                />
-              ))}
+                  {STEPPER_ROWS.slice(1).map((row) => (
+                    <StepperRow
+                      key={row.key}
+                      label={t(row.labelKey)}
+                      field={row.key}
+                      value={styleState[row.key]}
+                      restore={{
+                        show: canRestore(row.key),
+                        onClick: () => onRestoreDefault(row.key),
+                        label: restoreLabel,
+                      }}
+                      onChange={(value) => onTypographyChange(row.key, value)}
+                    />
+                  ))}
 
-              <PresetRow
-                label={t("settings.font")}
-                contentClassName="w-full"
-                restore={{
-                  show: canRestore("fontFamily"),
-                  onClick: () => onRestoreDefault("fontFamily"),
-                  label: restoreLabel,
-                }}
-              >
-                <FontFamilyPicker
-                  value={styleState.fontFamily}
-                  onChange={(name) => onTypographyChange("fontFamily", name)}
-                />
-              </PresetRow>
-
-              {SLIDER_ROWS.slice(1).map((row) => (
-                <SliderRow
-                  key={row.key}
-                  label={t(row.labelKey)}
-                  field={row.key}
-                  value={styleState[row.key]}
-                  restore={{
-                    show: canRestore(row.key),
-                    onClick: () => onRestoreDefault(row.key),
-                    label: restoreLabel,
-                  }}
-                  onChange={(value) => onTypographyChange(row.key, value)}
-                />
-              ))}
-
-              <PresetRow
-                label={t("settings.align")}
-                restore={{
-                  show: canRestore("textAlign"),
-                  onClick: () => onRestoreDefault("textAlign"),
-                  label: restoreLabel,
-                }}
-              >
-                <SegmentedControl
-                  value={styleState.textAlign}
-                  options={TEXT_ALIGNS.map((item) => ({
-                    value: item.value,
-                    label: t(ALIGN_LABEL_KEYS[item.value]),
-                  }))}
-                  onChange={(next) => onTypographyChange("textAlign", next)}
-                  ariaLabel={t("settings.align")}
-                />
-              </PresetRow>
+                  <PresetRow
+                    inline
+                    label={t("settings.align")}
+                    restore={{
+                      show: canRestore("textAlign"),
+                      onClick: () => onRestoreDefault("textAlign"),
+                      label: restoreLabel,
+                    }}
+                  >
+                    <SegmentedControl
+                      fullWidth={false}
+                      value={styleState.textAlign}
+                      options={TEXT_ALIGNS.map((item) => ({
+                        value: item.value,
+                        label: t(ALIGN_LABEL_KEYS[item.value]),
+                      }))}
+                      onChange={(next) => onTypographyChange("textAlign", next)}
+                      ariaLabel={t("settings.align")}
+                    />
+                  </PresetRow>
+                </div>
+              </div>
+              <div className="min-h-0 min-w-0 flex-1 overflow-y-auto p-6 @max-[519px]:max-h-[40%] @max-[519px]:flex-none">
+                <TypographyPreview styleState={styleState} />
+              </div>
             </div>
-          )}
-
-          {section === "appearance" && (
-            <div className="max-w-md space-y-5">
-              <PresetRow label={t("settings.theme")}>
-                <SegmentedControl
-                  value={theme}
-                  options={THEMES.map((item) => ({
-                    value: item,
-                    label: t(THEME_LABEL_KEYS[item]),
-                  }))}
-                  onChange={onThemeChange}
-                  ariaLabel={t("settings.theme")}
-                />
-              </PresetRow>
-              <PresetRow label={t("settings.chrome.font")} contentClassName="w-full">
-                <FontFamilyPicker
-                  includeGeist
-                  value={uiFontFamily}
-                  onChange={(name) => {
-                    saveUiFontFamily(name);
-                    setUiFontFamily(name);
-                    applyUiChrome(uiFontSize, name);
-                  }}
-                />
-              </PresetRow>
-              <div>
-                <div className="mb-1.5 flex items-center justify-between gap-2">
-                  <div className="text-xs font-medium text-muted-foreground">
-                    {t("settings.chrome.fontSize")}
+          ) : (
+            <div className="min-h-0 flex-1 overflow-y-auto p-6">
+              <DialogDescription className="mb-5">
+                {section === "about" ? t("settings.about.description") : scopeCopy}
+              </DialogDescription>
+              {section === "appearance" && (
+                <div className="max-w-md space-y-5">
+                  <PresetRow label={t("settings.theme")}>
+                    <SegmentedControl
+                      value={theme}
+                      options={THEMES.map((item) => ({
+                        value: item,
+                        label: t(THEME_LABEL_KEYS[item]),
+                      }))}
+                      onChange={onThemeChange}
+                      ariaLabel={t("settings.theme")}
+                    />
+                  </PresetRow>
+                  <PresetRow label={t("settings.chrome.font")} contentClassName="w-full">
+                    <FontFamilyPicker
+                      includeGeist
+                      value={uiFontFamily}
+                      onChange={(name) => {
+                        saveUiFontFamily(name);
+                        setUiFontFamily(name);
+                        applyUiChrome(uiFontSize, name);
+                      }}
+                    />
+                  </PresetRow>
+                  <div>
+                    <div className="mb-1.5 flex items-center justify-between gap-2">
+                      <div className="text-xs font-medium text-muted-foreground">
+                        {t("settings.chrome.fontSize")}
+                      </div>
+                      <span className="text-xs tabular-nums text-foreground">
+                        {`${uiFontSize}px`}
+                      </span>
+                    </div>
+                    <Slider
+                      aria-label={t("settings.chrome.fontSize")}
+                      value={[uiFontSize]}
+                      min={UI_FONT_SIZE_RANGE.min}
+                      max={UI_FONT_SIZE_RANGE.max}
+                      step={UI_FONT_SIZE_RANGE.step}
+                      onValueChange={([next]) => {
+                        if (typeof next !== "number") return;
+                        saveUiFontSize(next);
+                        setUiFontSize(next);
+                        applyUiChrome(next, uiFontFamily);
+                      }}
+                    />
                   </div>
-                  <span className="text-xs tabular-nums text-foreground">
-                    {`${uiFontSize}px`}
-                  </span>
+                  <PresetRow label={t("settings.language")}>
+                    <SegmentedControl
+                      value={locale}
+                      options={[
+                        { value: "zh-CN", label: "中文" },
+                        { value: "en", label: "English" },
+                      ]}
+                      onChange={setLocale}
+                      ariaLabel={t("settings.language")}
+                    />
+                  </PresetRow>
+                  <PresetRow label={t("settings.defaultMode")}>
+                    <SegmentedControl
+                      value={defaultReaderMode}
+                      options={[
+                        { value: "reader" as ReaderMode, label: t("settings.defaultMode.reader") },
+                        { value: "agent" as ReaderMode, label: t("settings.defaultMode.agent") },
+                      ]}
+                      onChange={(next) => {
+                        saveDefaultReaderMode(next);
+                        setDefaultReaderMode(next);
+                      }}
+                      ariaLabel={t("settings.defaultMode")}
+                    />
+                  </PresetRow>
                 </div>
-                <Slider
-                  aria-label={t("settings.chrome.fontSize")}
-                  value={[uiFontSize]}
-                  min={UI_FONT_SIZE_RANGE.min}
-                  max={UI_FONT_SIZE_RANGE.max}
-                  step={UI_FONT_SIZE_RANGE.step}
-                  onValueChange={([next]) => {
-                    if (typeof next !== "number") return;
-                    saveUiFontSize(next);
-                    setUiFontSize(next);
-                    applyUiChrome(next, uiFontFamily);
-                  }}
-                />
-              </div>
-              <PresetRow label={t("settings.language")}>
-                <SegmentedControl
-                  value={locale}
-                  options={[
-                    { value: "zh-CN", label: "中文" },
-                    { value: "en", label: "English" },
-                  ]}
-                  onChange={setLocale}
-                  ariaLabel={t("settings.language")}
-                />
-              </PresetRow>
-              <PresetRow label={t("settings.defaultMode")}>
-                <SegmentedControl
-                  value={defaultReaderMode}
-                  options={[
-                    { value: "reader" as ReaderMode, label: t("settings.defaultMode.reader") },
-                    { value: "agent" as ReaderMode, label: t("settings.defaultMode.agent") },
-                  ]}
-                  onChange={(next) => {
-                    saveDefaultReaderMode(next);
-                    setDefaultReaderMode(next);
-                  }}
-                  ariaLabel={t("settings.defaultMode")}
-                />
-              </PresetRow>
-            </div>
-          )}
+              )}
 
-          {section === "ai" && (
-            <div className="max-w-md">
-              <AgentConfigForm />
-            </div>
-          )}
-
-          {section === "about" && (
-            <div className="max-w-md space-y-5">
-              <div>
-                <div className="text-base font-medium">Litera</div>
-                <div className="mt-2 flex items-baseline gap-2">
-                  <span className="text-xs font-medium text-muted-foreground">
-                    {t("settings.about.version")}
-                  </span>
-                  <span className="text-sm tabular-nums">
-                    {version ?? t("settings.about.versionUnavailable")}
-                  </span>
+              {section === "ai" && (
+                <div className="max-w-md">
+                  <AgentConfigForm />
                 </div>
-              </div>
-              <div className="flex flex-col items-start gap-1">
-                <Button
-                  type="button"
-                  variant="link"
-                  className="h-auto px-0"
-                  onClick={() => openAboutUrl(ABOUT_REPO_URL)}
-                >
-                  {t("settings.about.repo")}
-                </Button>
-                <Button
-                  type="button"
-                  variant="link"
-                  className="h-auto px-0"
-                  onClick={() => openAboutUrl(ABOUT_RELEASES_URL)}
-                >
-                  {t("settings.about.releases")}
-                </Button>
-              </div>
+              )}
+
+              {section === "about" && (
+                <div className="max-w-md space-y-5">
+                  <div>
+                    <div className="text-base font-medium">Litera</div>
+                    <div className="mt-2 flex items-baseline gap-2">
+                      <span className="text-xs font-medium text-muted-foreground">
+                        {t("settings.about.version")}
+                      </span>
+                      <span className="text-sm tabular-nums">
+                        {version ?? t("settings.about.versionUnavailable")}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="flex flex-col items-start gap-1">
+                    <Button
+                      type="button"
+                      variant="link"
+                      className="h-auto px-0"
+                      onClick={() => openAboutUrl(ABOUT_REPO_URL)}
+                    >
+                      {t("settings.about.repo")}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="link"
+                      className="h-auto px-0"
+                      onClick={() => openAboutUrl(ABOUT_RELEASES_URL)}
+                    >
+                      {t("settings.about.releases")}
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>

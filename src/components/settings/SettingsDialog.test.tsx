@@ -4,7 +4,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { SettingsDialog } from "./SettingsDialog";
 import type { ReaderStyleState } from "@/lib/reader-styles";
 import { setLocale } from "@/lib/i18n";
-import { generatePreviewCss } from "@/lib/reader-styles";
 import { DEFAULT_READER_MODE_KEY } from "@/lib/reader-mode";
 import {
   DEFAULT_UI_FONT_FAMILY,
@@ -167,8 +166,8 @@ describe("SettingsDialog", () => {
     expect(dialog.className).not.toContain("sm:max-w-lg");
   });
 
-  it("renders a typography preview above the controls in the typography section", () => {
-    const { getByText } = render(
+  it("keeps the typography preview visible after focusing a lower control", () => {
+    const { getByText, getByRole, queryByRole } = render(
       <SettingsDialog
         open
         onClose={noop}
@@ -183,21 +182,39 @@ describe("SettingsDialog", () => {
       />,
     );
 
-    // Preview label
     expect(getByText("预览")).toBeTruthy();
-    // Preview container with scoped class
     const previewEl = document.body.querySelector(".litera-typography-preview");
     expect(previewEl).not.toBeNull();
-    // Two example paragraphs
     expect(previewEl!.querySelectorAll("p").length).toBe(2);
-    // Injected <style> with generated CSS
     const styleEl = document.body.querySelector("style");
     expect(styleEl).not.toBeNull();
     expect(styleEl!.textContent).toContain(".litera-typography-preview");
     expect(styleEl!.textContent).toContain("font-size: 16px");
+    expect(queryByRole("slider")).toBeNull();
+
+    const previewCol = previewEl!.closest(".overflow-y-auto") as HTMLElement;
+    const split = previewCol.parentElement as HTMLElement;
+    expect(split.className).toContain("flex-row");
+    expect(split.className).toContain("@max-[519px]:flex-col-reverse");
+    const inspector = split.children[0] as HTMLElement;
+    expect(inspector.className).toContain("w-64");
+    expect(inspector.className).toContain("overflow-y-auto");
+    expect(previewCol.className).toContain("flex-1");
+    expect(previewCol.className).toContain("overflow-y-auto");
+    expect(
+      inspector.compareDocumentPosition(previewCol) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    const indent = getByRole("textbox", { name: "首行缩进" });
+    act(() => {
+      indent.focus();
+      fireEvent.change(indent, { target: { value: "1" } });
+    });
+    expect(document.body.querySelector(".litera-typography-preview")).not.toBeNull();
+    expect(getByText("预览")).toBeTruthy();
   });
 
-  it("renders independent override font and layout segmented controls after the preview", () => {
+  it("renders independent override font and layout segmented controls", () => {
     const onChange = vi.fn();
     const { getByRole } = render(
       <SettingsDialog
@@ -216,6 +233,8 @@ describe("SettingsDialog", () => {
 
     const fontGroup = getByRole("radiogroup", { name: "覆盖字体" });
     const layoutGroup = getByRole("radiogroup", { name: "覆盖排版" });
+    expect(fontGroup.className).not.toContain("w-full");
+    expect(layoutGroup.className).not.toContain("w-full");
     expect(within(fontGroup).getByRole("radio", { name: "关" }).getAttribute("aria-checked")).toBe(
       "true",
     );
@@ -386,6 +405,45 @@ describe("SettingsDialog", () => {
     expect(styleEl!.textContent).toContain("text-align: justify");
   });
 
+  it("updates the preview CSS when lineHeight changes", () => {
+    const { rerender } = render(
+      <SettingsDialog
+        open
+        onClose={noop}
+        bookTitle={null}
+        hasBook={false}
+        styleState={styleState}
+        onTypographyChange={noop}
+        onRestoreDefault={noop}
+        overriddenKeys={[]}
+        theme="light"
+        onThemeChange={noop}
+      />,
+    );
+
+    let styleEl = document.body.querySelector("style");
+    expect(styleEl!.textContent).toContain("line-height: 1.7");
+
+    rerender(
+      <SettingsDialog
+        open
+        onClose={noop}
+        bookTitle={null}
+        hasBook={false}
+        styleState={{ ...styleState, lineHeight: 2 }}
+        onTypographyChange={noop}
+        onRestoreDefault={noop}
+        overriddenKeys={[]}
+        theme="light"
+        onThemeChange={noop}
+      />,
+    );
+
+    styleEl = document.body.querySelector("style");
+    expect(styleEl!.textContent).toContain("line-height: 2");
+    expect(styleEl!.textContent).not.toContain("line-height: 1.7");
+  });
+
   it("hides the preview when switching to the appearance section", () => {
     const { getByRole, queryByText } = render(
       <SettingsDialog
@@ -438,7 +496,7 @@ describe("SettingsDialog", () => {
   });
 
   it("switches left-nav sections and enables fonts without a book", () => {
-    const { getByRole, getByText, queryByText } = render(
+    const { getByRole, getByText, queryByText, queryByRole } = render(
       <SettingsDialog
         open
         onClose={noop}
@@ -454,8 +512,10 @@ describe("SettingsDialog", () => {
     );
 
     expect(getByText("正在编辑默认排版")).toBeTruthy();
-    expect(getByRole("slider", { name: "字体大小" })).toBeTruthy();
-    expect(getByText("16px")).toBeTruthy();
+    expect(getByRole("textbox", { name: "字体大小" })).toHaveProperty("value", "16");
+    expect(getByRole("button", { name: "减小字体大小" })).toBeTruthy();
+    expect(getByRole("button", { name: "增大字体大小" })).toBeTruthy();
+    expect(queryByRole("slider")).toBeNull();
     expect(getByRole("combobox")).toHaveProperty("disabled", false);
     expect(getByText("衬线")).toBeTruthy();
     expect(queryByText("打开书籍后生效")).toBeNull();
@@ -465,6 +525,7 @@ describe("SettingsDialog", () => {
       getByRole("button", { name: "外观" }).click();
     });
     expect(getByRole("radio", { name: "白天" })).toBeTruthy();
+    expect(getByRole("slider", { name: "界面字号" })).toBeTruthy();
     expect(queryByText("字体大小")).toBeNull();
 
     act(() => {
@@ -516,9 +577,9 @@ describe("SettingsDialog", () => {
     expect(getByText("正在编辑《这本书》的排版")).toBeTruthy();
   });
 
-  it("exposes a slider and current value for a continuous field", () => {
+  it("exposes stepper buttons and an editable value for a continuous field", () => {
     const onChange = vi.fn();
-    const { getByRole, getByText } = render(
+    const { getByRole } = render(
       <SettingsDialog
         open
         onClose={noop}
@@ -533,8 +594,129 @@ describe("SettingsDialog", () => {
       />,
     );
 
-    expect(getByText("1.2em")).toBeTruthy();
-    expect(getByRole("slider", { name: "首行缩进" }).getAttribute("aria-valuenow")).toBe("1.2");
+    expect(getByRole("textbox", { name: "首行缩进" })).toHaveProperty("value", "1.2");
+    expect(getByRole("button", { name: "减小首行缩进" })).toBeTruthy();
+    expect(getByRole("button", { name: "增大首行缩进" })).toBeTruthy();
+  });
+
+  it("steps font size with plus and does not go below the minimum", () => {
+    const onChange = vi.fn();
+    const { getByRole, rerender } = render(
+      <SettingsDialog
+        open
+        onClose={noop}
+        bookTitle={null}
+        hasBook={false}
+        styleState={styleState}
+        onTypographyChange={onChange}
+        onRestoreDefault={noop}
+        overriddenKeys={[]}
+        theme="light"
+        onThemeChange={noop}
+      />,
+    );
+
+    act(() => {
+      getByRole("button", { name: "增大字体大小" }).click();
+    });
+    expect(onChange).toHaveBeenCalledWith("fontSize", 17);
+
+    onChange.mockClear();
+    rerender(
+      <SettingsDialog
+        open
+        onClose={noop}
+        bookTitle={null}
+        hasBook={false}
+        styleState={{ ...styleState, fontSize: 12 }}
+        onTypographyChange={onChange}
+        onRestoreDefault={noop}
+        overriddenKeys={[]}
+        theme="light"
+        onThemeChange={noop}
+      />,
+    );
+
+    const decrease = getByRole("button", { name: "减小字体大小" });
+    expect(decrease).toHaveProperty("disabled", true);
+    act(() => {
+      decrease.click();
+    });
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("reverts invalid typed values and clamps out-of-range input", () => {
+    const onChange = vi.fn();
+    const { getByRole } = render(
+      <SettingsDialog
+        open
+        onClose={noop}
+        bookTitle={null}
+        hasBook={false}
+        styleState={styleState}
+        onTypographyChange={onChange}
+        onRestoreDefault={noop}
+        overriddenKeys={[]}
+        theme="light"
+        onThemeChange={noop}
+      />,
+    );
+
+    const input = getByRole("textbox", { name: "字体大小" }) as HTMLInputElement;
+    act(() => {
+      fireEvent.change(input, { target: { value: "abc" } });
+      fireEvent.blur(input);
+    });
+    expect(onChange).not.toHaveBeenCalled();
+    expect(input.value).toBe("16");
+
+    act(() => {
+      fireEvent.change(input, { target: { value: "999" } });
+      fireEvent.blur(input);
+    });
+    expect(onChange).toHaveBeenCalledWith("fontSize", 32);
+  });
+
+  it("commits a typed value on Enter and reverts on Escape without closing", () => {
+    const onClose = vi.fn();
+    const onChange = vi.fn();
+    const { getByRole } = render(
+      <SettingsDialog
+        open
+        onClose={onClose}
+        bookTitle={null}
+        hasBook={false}
+        styleState={styleState}
+        onTypographyChange={onChange}
+        onRestoreDefault={noop}
+        overriddenKeys={[]}
+        theme="light"
+        onThemeChange={noop}
+      />,
+    );
+
+    const input = getByRole("textbox", { name: "字体大小" }) as HTMLInputElement;
+    act(() => {
+      fireEvent.focus(input);
+      fireEvent.change(input, { target: { value: "20" } });
+    });
+    act(() => {
+      fireEvent.keyDown(input, { key: "Enter" });
+    });
+    expect(onChange).toHaveBeenCalledWith("fontSize", 20);
+
+    onChange.mockClear();
+    act(() => {
+      fireEvent.focus(input);
+      fireEvent.change(input, { target: { value: "22" } });
+    });
+    act(() => {
+      fireEvent.keyDown(input, { key: "Escape" });
+    });
+    expect(onChange).not.toHaveBeenCalled();
+    expect(input.value).toBe("16");
+    expect(onClose).not.toHaveBeenCalled();
+    expect(getByRole("dialog")).toBeTruthy();
   });
 
   it("switches visible copy to English from the appearance language row", () => {
@@ -582,6 +764,7 @@ describe("SettingsDialog", () => {
     );
 
     expect(getByRole("radiogroup", { name: "对齐" })).toBeTruthy();
+    expect(getByRole("radiogroup", { name: "对齐" }).className).not.toContain("w-full");
     expect(getByRole("radio", { name: "左齐" }).getAttribute("aria-checked")).toBe("true");
     expect(getByRole("radio", { name: "两端" }).getAttribute("aria-checked")).toBe("false");
 

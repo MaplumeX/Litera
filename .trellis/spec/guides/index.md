@@ -46,6 +46,7 @@ These guides help you **ask the right questions before coding**.
 - [ ] You want user type to beat EPUB `@font-face` / chapter CSS — `overrideFont` / `overrideLayout` on `preferences.json` + per-book `ReadingSettings` (`Option<bool>`; `false` is a real override). Strengthen `generateStylesCss`; do not strip publisher sheets or use `localStorage` (see backend `tauri-commands.md` "Scenario: override publisher font and layout")
 - [ ] You want to add highlight color/note — optional fields on `annotations.json` `schemaVersion: 1`, semantic ids not hex; `list_annotations` stays read-only (see backend `tauri-commands.md` "Scenario: highlight color and note")
 - [ ] You want a click on a painted highlight — `pointerup` hitTest must suppress paging before `show-annotation` (see frontend `component-guidelines.md` "highlight click must beat page-turn")
+- [ ] You want to add or restyle a Settings → Typography control — keep the 768px shell; inspector left + preview right, each scrolling; continuous fields are steppers (`clampSnap`), not sliders; Escape in a stepper must `onEscapeKeyDown` preventDefault or the dialog closes (see frontend `component-guidelines.md` "typography continuous fields are steppers")
 - [ ] UI / command code starts casting raw payload fields directly
 - [ ] OS / argv / deep-link input can arrive twice or before the WebView mounts (drain a queue; see backend `tauri-commands.md` "OS EPUB open")
 

@@ -120,6 +120,8 @@ export const en: { [K in MessageKey]: string } = {
   "settings.slider.letterSpacing": "Letter spacing",
   "settings.slider.paragraphSpacing": "Paragraph spacing",
   "settings.slider.firstLineIndent": "First-line indent",
+  "settings.stepper.decrease": "Decrease {label}",
+  "settings.stepper.increase": "Increase {label}",
   "settings.preview": "Preview",
   "settings.preview.paragraph1": "The morning mist had not yet lifted, and the distant hills loomed faintly behind a veil of grey. Walking along the cobblestone path, old trees on either side had begun to bud, their tender leaves trembling gently in the breeze. A sparrow darted overhead now and then, its sharp call breaking the silence of the quiet morning.",
   "settings.preview.paragraph2": "At the end of the lane the view opened wide. A broad meadow stretched ahead, dotted with wild flowers; dewdrops rolled off the petals and caught the first sunlight, glinting like scattered glass. He drew a deep breath, the air rich with the scent of earth and grass — a smell only the countryside could hold. This day, he knew, would not be like the ones before it.",

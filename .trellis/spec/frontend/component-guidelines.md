@@ -65,7 +65,7 @@ import "./index.css";
 - `dialog.tsx` — modal overlays (used by `AgentConfigDialog` and `SettingsDialog`)
 - `alert-dialog.tsx` — destructive confirms (library delete / overwrite / custom provider delete)
 - `select.tsx` — dropdown selectors (used by `AgentConfigForm` provider picker)
-- `slider.tsx` — continuous typography controls on `SettingsDialog`
+- `slider.tsx` — Appearance chrome font size on `SettingsDialog` (typography continuous fields use `−` / `Input` / `+`, not this slider)
 - `popover.tsx` + `command.tsx` — searchable combobox (reader font picker; custom LLM model picker)
 - `input.tsx` — text/password inputs
 - `label.tsx` — form labels
@@ -299,13 +299,15 @@ target.scrollIntoView({ behavior: "smooth", block: "start" });
 
 **Rule**: Do not add an `onOpenSettings` callback to `ChatPanel`. Chat settings stay local. General settings is a centered `SettingsDialog` overlay (`settingsOpen`); `view` stays `"library" | "reader"` so the current page stays mounted. Closing the dialog must not call `close_book` / `handleBackToLibrary`. Flush failure on close leaves the dialog open. Typography scope is `view === "reader"` (book override) vs library (global defaults).
 
-**Shell**: `SettingsDialog` `DialogContent` is a fixed box (`w-[768px] h-[40rem] max-h-[85vh] sm:max-w-[calc(100%-2rem)]`). Right pane scrolls (`min-h-0 flex-1 overflow-y-auto`). Do not size with max-only classes such as `sm:max-w-3xl` and no explicit height — typography is much taller than appearance, so the box jumps when switching sections.
+**Shell**: `SettingsDialog` `DialogContent` is a fixed box (`w-[768px] h-[40rem] max-h-[85vh] sm:max-w-[calc(100%-2rem)]`). Do not widen it for the typography preview. Do not size with max-only classes such as `sm:max-w-3xl` and no explicit height — the box must not jump when switching sections.
+
+Appearance / AI / About keep a single scrolling column (`max-w-md`). Typography splits the right pane into two independently scrolling columns: compact inspector left (`w-64`), live preview right (`flex-1`). Do not put the preview in the inspector scrollport. Below ~520px inner width (`@container` + `@max-[519px]:flex-col-reverse`) stack preview above controls and cap preview height. Do not use `react-resizable-panels` here.
 
 > **Warning**: shadcn `DialogContent` defaults to `w-full max-w-[calc(100%-2rem)] sm:max-w-lg`. A later `max-w-[calc(100%-2rem)]` does **not** override `sm:max-w-lg`; use `sm:max-w-[calc(100%-2rem)]`. Tests that only `toContain("max-w-[calc(100%-2rem)]")` match the default class and miss a missing `sm:` override.
 
 ### Convention: settings exclusive choices are a segmented control
 
-**What**: Theme, language, text-align, and the typography override on/off rows in `SettingsDialog` share a local `SegmentedControl` (`src/components/settings/SettingsDialog.tsx`). Layout is label above, control full width (`PresetRow`). The track is `bg-muted`; the selected segment is `bg-background shadow-xs`. The group is `role="radiogroup"`; each option is `role="radio"` with `aria-checked`. Arrow keys move focus; Space / Enter select.
+**What**: Theme, language, text-align, and the typography override on/off rows in `SettingsDialog` share a local `SegmentedControl` (`src/components/settings/SettingsDialog.tsx`). Appearance rows stay label above, control full width (`PresetRow`). Typography override and alignment sit inline (`PresetRow inline`, `fullWidth={false}`) so the inspector stays ~260px. The track is `bg-muted`; the selected segment is `bg-background shadow-xs`. The group is `role="radiogroup"`; each option is `role="radio"` with `aria-checked`. Arrow keys move focus; Space / Enter select.
 
 **Why**: Separate bordered `ChoiceButton`s read as three action buttons, not one exclusive choice. A filled `bg-primary` selected state looks like a CTA. `src/components/ui/` is shadcn-owned — do not drop this control there, and do not add `Switch` / `toggle-group` for exclusive on/off rows.
 
@@ -316,6 +318,21 @@ target.scrollIntoView({ behavior: "smooth", block: "start" });
 - Put `locale` on `preferences.json` when touching the language row (see `i18n.md`).
 
 **Tests**: Query these options as `radio`, not `button`. Assert the group name and the current value's `aria-checked`.
+
+### Convention: typography continuous fields are steppers
+
+**What**: Settings → Typography continuous fields (`fontSize`, `lineHeight`, `contentWidth`, `pagePadding`, `letterSpacing`, `paragraphSpacing`, `firstLineIndent`) use a local `StepperRow`: `Button` `−` / shadcn `Input` / `Button` `+`, plus a unit suffix. Step, clamp, and snap go through `clampSnap` + `TYPOGRAPHY_RANGES`. The input is `type="text"` `inputMode="decimal"` (not `type="number"`). Commit on Enter or blur; Escape restores the last committed value; empty/NaN reverts; out-of-range clamps. `−` disables at min, `+` at max. Aria-labels are `settings.stepper.decrease` / `increase` with `{label}`.
+
+**Why**: Full-width sliders forced a ~448px column, so the live preview scrolled away. Compact steppers keep the 768px shell and leave room for a always-visible preview. Typed values are also more precise than a short slider.
+
+**Don't**:
+- Put a `Slider` back on the Typography section. Appearance 界面字号 stays a `Slider`.
+- Put the unit inside the input (suffix text beside it).
+- Widen the dialog to keep sliders + preview.
+
+> **Warning**: Radix Dialog listens for Escape on `document` in the capture phase. A focused stepper's `onKeyDown` cannot stop the dialog from closing. Handle Escape with `DialogContent` `onEscapeKeyDown`: if `event.target.closest("[data-typography-stepper]")`, `preventDefault()` so the row can revert the draft instead.
+
+**Tests**: Typography has no `slider` named 字体大小 / 首行缩进. `+` from 16px font size calls `onTypographyChange("fontSize", 17)`. Invalid blur reverts. Appearance still exposes `slider` 界面字号. Scrolling the inspector must not unmount `.litera-typography-preview`.
 
 ### Convention: library confirms and selection mode
 
