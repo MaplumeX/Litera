@@ -1,23 +1,45 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import type { BookRecord } from "@/types/library";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   WindowControls,
   titlebarClassName,
   useTitlebarWindowDrag,
 } from "@/components/WindowControls";
-import { Plus, Settings } from "lucide-react";
-import { BookCard } from "@/components/BookCard";
+import { LayoutGrid, List, Plus, Settings } from "lucide-react";
+import { BookCard, BookListRow } from "@/components/BookCard";
+import { BookDetailsDialog } from "@/components/BookDetailsDialog";
 import {
   BookImportConfirmDialog,
   BookImportNotices,
 } from "@/components/BookImportFeedback";
 import { invokeErrorMessage } from "@/lib/app-error";
 import { useBookImport } from "@/lib/use-book-import";
-import { useT } from "@/lib/i18n";
+import { useT, type MessageKey } from "@/lib/i18n";
+import {
+  filterBooks,
+  sortBooks,
+  takeRecent,
+  type LibrarySortKey,
+} from "@/lib/library-shelf";
+import {
+  loadLibrarySort,
+  loadLibraryView,
+  parseLibrarySort,
+  saveLibrarySort,
+  saveLibraryView,
+  type LibraryViewMode,
+} from "@/lib/library-shelf-prefs";
 
 interface LibraryViewProps {
   onOpenBook: (bookId: string) => void | Promise<void>;
@@ -29,6 +51,14 @@ function isEpubPath(path: string): boolean {
   return path.toLowerCase().endsWith(".epub");
 }
 
+const SORT_OPTIONS: { value: LibrarySortKey; labelKey: MessageKey }[] = [
+  { value: "recent", labelKey: "library.sort.recent" },
+  { value: "title", labelKey: "library.sort.title" },
+  { value: "author", labelKey: "library.sort.author" },
+  { value: "imported", labelKey: "library.sort.imported" },
+  { value: "progress", labelKey: "library.sort.progress" },
+];
+
 export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }: LibraryViewProps) {
   const { t } = useT();
   const titlebarDrag = useTitlebarWindowDrag();
@@ -37,6 +67,10 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [sort, setSort] = useState<LibrarySortKey>(loadLibrarySort);
+  const [view, setView] = useState<LibraryViewMode>(loadLibraryView);
+  const [detailsBook, setDetailsBook] = useState<BookRecord | null>(null);
+  const [coverRev, setCoverRev] = useState<Record<string, number>>({});
   const {
     notices,
     dismissNotice,
@@ -56,7 +90,6 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
     setSelectedIds(new Set());
   }, []);
 
-  // Load books from the library on mount.
   const refreshBooks = useCallback(async () => {
     try {
       const list = await invoke<BookRecord[]>("list_books");
@@ -81,9 +114,6 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
   const handleDroppedPaths = useCallback(async (paths: string[]) => {
     const epubs = paths.filter(isEpubPath);
     if (epubs.length === 0 || importingRef.current) return;
-    // One file at a time so a confirmed overwrite hash is visible to the
-    // next path (same-batch overwrite-then-duplicate) and a later failure
-    // still lets earlier files finish metadata commit.
     await importFromPaths(epubs);
     await refreshBooks();
   }, [importFromPaths, importingRef, refreshBooks]);
@@ -149,7 +179,7 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
         message: t("library.deleteFailed", { titles: failures.join(t("common.listJoin")) }),
       });
     }
-  }, [askConfirm, exitSelectMode, pushNotice, refreshBooks, selectMode]);
+  }, [askConfirm, exitSelectMode, pushNotice, refreshBooks, selectMode, t]);
 
   const handleDelete = useCallback(
     (bookId: string) => {
@@ -169,22 +199,50 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
     });
   }, []);
 
-  // Filter books by search query (title or author).
-  const filtered = search.trim()
-    ? books.filter((b) => {
-        const q = search.toLowerCase();
-        return (
-          b.title.toLowerCase().includes(q) ||
-          b.author.toLowerCase().includes(q)
-        );
-      })
-    : books;
+  const handleSortChange = useCallback((value: string) => {
+    const next = parseLibrarySort(value);
+    setSort(next);
+    saveLibrarySort(next);
+  }, []);
+
+  const handleViewChange = useCallback((next: LibraryViewMode) => {
+    setView(next);
+    saveLibraryView(next);
+  }, []);
+
+  const handleDetailsSaved = useCallback((record: BookRecord, coverChanged: boolean) => {
+    setBooks((current) =>
+      current.map((item) => (item.id === record.id ? record : item)),
+    );
+    if (coverChanged) {
+      setCoverRev((current) => ({ ...current, [record.id]: Date.now() }));
+    }
+  }, []);
+
+  const searching = search.trim().length > 0;
+  const recents = useMemo(
+    () => (searching ? [] : takeRecent(books)),
+    [books, searching],
+  );
+  const visible = useMemo(
+    () => sortBooks(filterBooks(books, search), sort),
+    [books, search, sort],
+  );
   const selectedBooks = books.filter((book) => selectedIds.has(book.id));
   const busy = importing || openingBookId !== null;
 
+  const bookProps = {
+    onOpen: onOpenBook,
+    onDelete: handleDelete,
+    onDetails: setDetailsBook,
+    deleteDisabled: busy,
+    selectMode,
+    onToggleSelect: handleToggleSelect,
+    openDisabled: importing,
+  };
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {/* Toolbar */}
       <header className={titlebarClassName()}>
         <h1
           className="select-none text-sm font-medium"
@@ -206,6 +264,48 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
             onChange={(e) => setSearch(e.target.value)}
             className="h-8 w-56"
           />
+          {books.length > 0 && (
+            <>
+              <Select value={sort} onValueChange={handleSortChange}>
+                <SelectTrigger
+                  size="sm"
+                  className="h-8 w-[8.75rem]"
+                  aria-label={t("library.sort")}
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {SORT_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {t(option.labelKey)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <div className="flex items-center">
+                <Button
+                  type="button"
+                  size="icon-sm"
+                  variant={view === "grid" ? "secondary" : "ghost"}
+                  aria-label={t("library.viewGrid")}
+                  aria-pressed={view === "grid"}
+                  onClick={() => handleViewChange("grid")}
+                >
+                  <LayoutGrid />
+                </Button>
+                <Button
+                  type="button"
+                  size="icon-sm"
+                  variant={view === "list" ? "secondary" : "ghost"}
+                  aria-label={t("library.viewList")}
+                  aria-pressed={view === "list"}
+                  onClick={() => handleViewChange("list")}
+                >
+                  <List />
+                </Button>
+              </div>
+            </>
+          )}
           {selectMode ? (
             <>
               <span className="text-sm text-muted-foreground tabular-nums">
@@ -274,7 +374,6 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
         actionDisabled={importing}
       />
 
-      {/* Grid or empty state */}
       <div className="flex-1 overflow-y-auto p-4">
         {books.length === 0 ? (
           <div className="flex h-full items-center justify-center">
@@ -290,29 +389,73 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
               </Button>
             </div>
           </div>
-        ) : filtered.length === 0 ? (
+        ) : visible.length === 0 ? (
           <div className="flex h-full items-center justify-center">
             <p className="text-muted-foreground">{t("library.noMatches")}</p>
           </div>
         ) : (
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-6">
-            {filtered.map((book) => (
-              <BookCard
-                key={book.id}
-                book={book}
-                onOpen={onOpenBook}
-                onDelete={handleDelete}
-                opening={openingBookId === book.id}
-                deleteDisabled={busy}
-                selectMode={selectMode}
-                selected={selectedIds.has(book.id)}
-                onToggleSelect={handleToggleSelect}
-                openDisabled={importing}
-              />
-            ))}
+          <div className="space-y-6">
+            {recents.length > 0 && (
+              <section>
+                <h2 className="mb-3 text-sm font-medium">
+                  {t("library.continueReading")}
+                </h2>
+                <div className="grid grid-cols-4 gap-4">
+                  {recents.map((book) => (
+                    <BookCard
+                      key={`recent-${book.id}`}
+                      book={book}
+                      opening={openingBookId === book.id}
+                      selected={selectedIds.has(book.id)}
+                      showMenu={false}
+                      showDelete={false}
+                      coverRev={coverRev[book.id]}
+                      {...bookProps}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
+            {view === "list" ? (
+              <div className="flex flex-col gap-2">
+                {visible.map((book) => (
+                  <BookListRow
+                    key={book.id}
+                    book={book}
+                    opening={openingBookId === book.id}
+                    selected={selectedIds.has(book.id)}
+                    coverRev={coverRev[book.id]}
+                    {...bookProps}
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-6">
+                {visible.map((book) => (
+                  <BookCard
+                    key={book.id}
+                    book={book}
+                    opening={openingBookId === book.id}
+                    selected={selectedIds.has(book.id)}
+                    coverRev={coverRev[book.id]}
+                    {...bookProps}
+                  />
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
+
+      <BookDetailsDialog
+        book={detailsBook}
+        coverRev={detailsBook ? coverRev[detailsBook.id] : undefined}
+        open={detailsBook !== null}
+        onOpenChange={(open) => {
+          if (!open) setDetailsBook(null);
+        }}
+        onSaved={handleDetailsSaved}
+      />
 
       <BookImportConfirmDialog
         confirmOpen={confirmOpen}
