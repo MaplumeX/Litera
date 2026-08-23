@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 96
+- **Total Sessions**: 97
 - **Last Active**: 2026-08-24
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~263 | Active |
+| `journal-2.md` | ~284 | Active |
 | `journal-1.md` | ~1996 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 97 | 2026-08-24 | Add README screenshots | `30206ac` | `main` |
 | 96 | 2026-08-24 | Rewrite bilingual README | `b7d45ee` | `main` |
 | 95 | 2026-08-23 | Paseo-style workspace conversation outline rail | `1f4c2c1` | `feat/chatgpt-web-style-conversation-toc` |
 | 95 | 2026-08-23 | Add nested collapse to the reader TOC sidebar | `a6ef219` | `feat/collapse-headings-with-subtitles` |

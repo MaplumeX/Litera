@@ -261,3 +261,24 @@ Replaced the default README with an English version covering library, reader, as
 ### Status
 
 [OK] **Completed**
+
+
+## Session 97: Add README screenshots
+
+**Date**: 2026-08-24
+**Task**: Add README screenshots
+**Branch**: `main`
+
+### Summary
+
+Added library and reader UI screenshots from docs/photos to the English and Chinese READMEs, replacing the favicon placeholder.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `30206ac` | (see git log) |
+
+### Status
+
+[OK] **Completed**
