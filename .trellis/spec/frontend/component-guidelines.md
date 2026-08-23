@@ -64,7 +64,8 @@ import "./index.css";
 - `button.tsx` — all toolbar/action buttons (icon variants via lucide)
 - `dialog.tsx` — modal overlays (used by `AgentConfigDialog` and `SettingsDialog`)
 - `alert-dialog.tsx` — destructive confirms (library delete / overwrite / custom provider delete)
-- `select.tsx` — dropdown selectors (used by `AgentConfigForm` provider picker)
+- `dropdown-menu.tsx` + `context-menu.tsx` — library book actions (⋮ and right-click share Open / Details / Delete)
+- `select.tsx` — dropdown selectors (used by `AgentConfigForm` provider picker, library sort)
 - `slider.tsx` — Appearance chrome font size on `SettingsDialog` (typography continuous fields use `−` / `Input` / `+`, not this slider)
 - `popover.tsx` + `command.tsx` — searchable combobox (reader font picker; custom LLM model picker)
 - `input.tsx` — text/password inputs

@@ -145,6 +145,10 @@ async fn read_import_bytes(store: State<'_, LibraryStore>, book_id: String, impo
 #[tauri::command]
 async fn save_book_metadata(store: State<'_, LibraryStore>, book_id: String, title: String, author: String, cover_bytes: Option<Vec<u8>>, import_id: String) -> AppResult<BookRecord>
 
+// Edit title/author/cover after import. Never reuse save_book_metadata for this.
+#[tauri::command]
+async fn update_book_metadata(store: State<'_, LibraryStore>, book_id: String, title: String, author: String, cover_bytes: Option<Vec<u8>>) -> AppResult<BookRecord>
+
 // List all books
 #[tauri::command]
 async fn list_books(store: State<'_, LibraryStore>) -> AppResult<Vec<BookRecord>>
@@ -301,11 +305,13 @@ Do not filter `book.id != incoming_id` when matching `contentHash`. That made sa
 
 `save_book_metadata` writes `contentHash` from the staged bytes. An overwrite must keep `lastFraction`, `lastCfi`, `settings`, `lastOpenedAt`, `lastReaderMode`, and `lastLayout`. Same-path unchanged is a no-op on `library.json` and the committed EPUB. Overwrite also leaves `books/<id>/annotations.json` in place.
 
-**Cover compression**: `save_book_metadata` compresses incoming `cover_bytes` before writing — decode with the `image` crate, downscale so the long edge ≤ 512px (never upscale), re-encode as JPEG quality 85, and write to `cover.jpg` (not `cover.png`). On any decode/encode failure, fall back to the original bytes so a broken cover never blocks an import. `MAX_COVER_BYTES` validates the raw input before compression. Legacy books with `cover.png` are not migrated; validation and transaction rollback accept both extensions. Frontend `convertFileSrc(coverPath)` works with any extension.
+**Post-import metadata**: `update_book_metadata` is the only command that edits an already-committed book's title, author, or cover. Do not call `save_book_metadata` for this — that path requires a staged `importId` and can replace the EPUB / clear `coverPath` when no new cover is sent. See **Scenario: update book metadata after import**.
+
+**Cover compression**: `save_book_metadata` and `update_book_metadata` compress incoming `cover_bytes` before writing — decode with the `image` crate, downscale so the long edge ≤ 512px (never upscale), re-encode as JPEG quality 85, and write to `cover.jpg` (not `cover.png`). On any decode/encode failure, fall back to the original bytes so a broken cover never blocks an import or edit. `MAX_COVER_BYTES` validates the raw input before compression. Legacy books with `cover.png` are not migrated; validation and transaction rollback accept both extensions. Frontend `convertFileSrc(coverPath)` works with any extension. After a cover replace, cache-bust the asset URL (`?v=`) and reset `<img>` error state; otherwise WebView may keep the old JPEG.
 
 **Annotations**: `get_annotations` / `save_annotations` read and replace `books/<bookId>/annotations.json` under the `LibraryStore` gate. Missing file → `{ schemaVersion: 1, bookmarks: [], highlights: [] }`, not corrupt. Invalid JSON / unknown fields / unsupported `schemaVersion` → `StorageCorrupt`. `save_annotations` is a full snapshot replace (same contract as `settings`). Validate unique ids, non-empty `epubcfi(...)` locators, bookmark `fraction` in `0..=1`, excerpt/label/note byte caps (4KiB), and highlight `color` in `{ yellow, green, blue, pink, orange }`. Persist color as the semantic id, not hex. Omit empty `color` / `note` on write. Do not bump `schemaVersion` for these optional fields. Frontend must not `save_annotations` until `get_annotations` for that book succeeded — a failed load must not be treated as empty and written back. Cap highlight excerpts and notes to the same UTF-8 byte limits on the client before save. Do not add annotation fields to `BookRecord`. Do not add WebView `fs` permission. See **Scenario: highlight color and note**.
 
-**list_books order**: `lastOpenedAt` descending (missing last), then `importedAt` descending. Frontend search filters; it does not re-sort.
+**list_books order**: Rust still returns `lastOpenedAt` descending (missing last), then `importedAt` descending. The library UI re-sorts that array in the WebView (`src/lib/library-shelf.ts`): recent / title / author / imported / progress. Continue-reading is a separate `lastOpenedAt` slice (max 4), not `list_books` output. Do not add a sort parameter to `list_books`. Sort and grid/list view persist in `localStorage` (`litera.librarySort` / `litera.libraryView`), not `preferences.json` or `BookRecord`.
 
 **Open context / last opened**: `get_book_open_context` returns `title` and backfills a missing `contentHash` from the stored EPUB under the store lock. After reading the validated bytes, `open_book_bytes` writes `lastOpenedAt` best-effort (log on failure, do not fail the open).
 
@@ -316,6 +322,102 @@ Do not filter `book.id != incoming_id` when matching `contentHash`. That made sa
 **Drag-drop paths**: `import_paths` accepts only OS drop / picker-equivalent absolute paths. Reject non-`.epub`, symlinks, and non-regular files. Do not add `dialog` / `fs` / `opener` permissions to the WebView capability.
 
 **OS file open**: system "Open With" / double-click is a third path source. It must reuse `import_paths` after `take_pending_open_paths`. See "Scenario: OS EPUB open" below.
+
+## Scenario: update book metadata after import
+
+### 1. Scope / Trigger
+
+Cross-layer edit of an already-committed shelf record. The details dialog saves title, author, and optional cover without touching the EPUB, `bookId`, progress, settings, annotations, or sessions. A new command is required because `save_book_metadata` is the import commit.
+
+### 2. Signatures
+
+```rust
+async fn update_book_metadata(
+    store: State<'_, LibraryStore>,
+    book_id: String,
+    title: String,
+    author: String,
+    cover_bytes: Option<Vec<u8>>,
+) -> AppResult<BookRecord>
+```
+
+```ts
+await invoke<BookRecord>("update_book_metadata", {
+  bookId,
+  title,
+  author,
+  coverBytes?: Uint8Array, // omit to keep the current cover
+});
+```
+
+### 3. Contracts
+
+- `title` is required (trim-empty rejected). `author` may be empty.
+- `cover_bytes: None` / omitted `coverBytes` → do not read, write, or clear `cover.jpg` / `coverPath`.
+- `cover_bytes: Some(bytes)` → non-empty, ≤ `MAX_COVER_BYTES` (20 MiB); compress then atomic-write `cover.jpg` and keep `coverPath` pointing at that file.
+- Must not change `id`, `filePath`, `importedAt`, `contentHash`, `contentVersion`, `lastFraction`, `lastCfi`, `settings`, `lastOpenedAt`, `lastReaderMode`, `lastLayout`.
+- Must not write EPUB bytes or bump `library.json` `schemaVersion`.
+- Cover picker is a WebView `<input type="file" accept="image/*">`. Do not add `dialog` / `fs` permissions.
+- Lock + recoverable atomic write + `spawn_blocking`, same as other library mutations. Cover write failure restores the previous JPEG; `library.json` write failure restores the previous JPEG and leaves the record unchanged.
+
+### 4. Validation & Error Matrix
+
+| Condition | Error / result |
+|-----------|----------------|
+| Unknown / traversal `bookId` | `InvalidInput` or `book_not_found` |
+| Empty / whitespace `title` | `InvalidInput`; no files written |
+| `Some([])` cover | `InvalidInput`; no files written |
+| Cover larger than `MAX_COVER_BYTES` | `InvalidInput`; no files written |
+| Cover or `library.json` persist failure | `StorageIo`; previous cover and record restored |
+| Title-only update | Success; cover bytes on disk unchanged |
+
+### 5. Good/Base/Bad Cases
+
+- **Good**: rename title/author with `coverBytes` omitted; cover file, progress, hash, and EPUB bytes stay identical.
+- **Good**: replace cover; new JPEG on disk; `lastFraction` / `contentHash` unchanged; reader chrome uses the new title.
+- **Base**: empty author is stored; empty title is not.
+- **Bad**: calling `save_book_metadata` from the details dialog (needs `importId`, may replace EPUB / clear cover).
+- **Bad**: sending `coverBytes: []` to mean "keep cover".
+
+### 6. Tests Required
+
+- Title-only update keeps cover bytes, `lastFraction`, `contentHash`, and EPUB bytes.
+- Cover replace writes new bytes and keeps progress / hash / EPUB.
+- Empty title and empty `Some([])` cover rejected with `InvalidInput`.
+- Forced `library.json` write failure after a new cover restores the previous JPEG and old title.
+- Frontend: omit `coverBytes` when no file is chosen; include bytes when a file is chosen.
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```ts
+await invoke("save_book_metadata", { bookId, title, author, coverBytes: null, importId: "" });
+```
+
+#### Correct
+
+```ts
+await invoke<BookRecord>("update_book_metadata", { bookId, title, author });
+```
+
+#### Wrong
+
+```ts
+await invoke("update_book_metadata", { bookId, title, author, coverBytes: new Uint8Array() });
+```
+
+#### Correct
+
+```ts
+const args: { bookId: string; title: string; author: string; coverBytes?: Uint8Array } = {
+  bookId,
+  title,
+  author,
+};
+if (coverBytes) args.coverBytes = coverBytes;
+await invoke<BookRecord>("update_book_metadata", args);
+```
 
 ## Scenario: highlight color and note
 
