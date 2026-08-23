@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend guideline index and pre-development checklist"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "shadcn Input/Button/Slider rules, settings dialog patterns, chrome language"}
+{"file": ".trellis/spec/frontend/i18n.md", "reason": "Catalog key parity, useT, aria-labels must live in zh-CN and en"}
+{"file": ".trellis/spec/frontend/directory-structure.md", "reason": "settings/ module layout; keep stepper local to SettingsDialog"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Reuse clampSnap and existing Button/Input; do not add a second slider stack"}
