@@ -1,70 +1,108 @@
 # Litera
 
-带阅读助手的跨平台 EPUB 阅读器。在书页旁边和助手对话：选中一段提问，或让它自己去读目录、章节和全文检索。
+**English** | [简体中文](README.zh-CN.md)
 
-Linux x64、macOS Apple Silicon、Windows x64。安装包未做付费代码签名。
+A desktop EPUB reader with a built-in reading assistant. Books stay on your machine; the assistant only talks to the LLM provider you configure.
 
-## 下载
+![Litera](public/favicon.png)
 
-- 所有版本：<https://github.com/MaplumeX/Litera/releases>
-- 最新正式版（draft 发布之后）：<https://github.com/MaplumeX/Litera/releases/latest>
+## Features
 
-| 平台 | 安装包 |
+### Library
+
+- Import EPUB files from the file picker, drag-and-drop, or the OS “Open with” menu
+- Search by title or author; sort by recently opened, title, author, date added, or progress
+- Grid and list views, plus a “Continue reading” row of recent books
+- Edit title, author, and cover after import
+- Replace a file while keeping progress, typography, and chats
+- Associate with `.epub` (Windows Explorer can show the book cover when Litera is the default app)
+
+### Reader
+
+- Paginated EPUB layout (wheel, arrow keys, or click the page edges)
+- Nested table of contents; progress restores to the last passage, not just the chapter
+- Bookmarks and multi-color highlights with notes
+- In-place footnote popups instead of jumping to the notes page
+- System-voice read-aloud with follow-along highlight and auto page-turn
+- Typography: font, size, line height, measure, padding, tracking, paragraph spacing, first-line indent, alignment
+- Optional overrides for the book’s embedded fonts and chapter layout (independently)
+- Light / dark / system theme; UI font and size are separate from the page
+
+### Reading assistant
+
+- Two layouts: **Reading** (book first) and **Agent** (conversation first). Each book remembers the last mode
+- Select a passage and ask, or just type a question
+- The assistant can look up metadata, the TOC, chapter windows, in-book search, and your bookmarks/highlights
+- Multiple sessions per book: create, switch, rename, edit-and-resend
+- Per-session system prompt (appended to the default, so reading tools stay intact)
+- Thinking level (off → max); models without thinking degrade safely
+- Long chats are summarized instead of hard-truncated
+- Built-in providers (Anthropic, OpenAI, DeepSeek, Google, OpenRouter, Groq, Mistral, xAI, Together, Fireworks) plus any OpenAI-compatible endpoint (Ollama, etc.)
+
+### App
+
+- English and Simplified Chinese
+- Window size and position restore on launch
+- macOS, Windows, and Linux
+
+## Install
+
+Download the latest build from [Releases](https://github.com/MaplumeX/Litera/releases):
+
+| Platform | Package |
 | --- | --- |
-| Linux x64 | `.AppImage` 或 `.deb` |
-| macOS Apple Silicon | `.dmg` |
-| Windows x64 | NSIS `.exe` |
+| Linux | `.AppImage`, `.deb` |
+| macOS | `.dmg` (Apple Silicon) |
+| Windows | NSIS installer |
 
-各版本的用户可见变化见 [CHANGELOG.md](./CHANGELOG.md)。
+## Quick start
 
-## 安装
+1. Import an EPUB into the library (or open one from the file manager).
+2. Open a book and read. Progress, layout, and annotations are saved automatically.
+3. To use the assistant: **Settings → AI**, pick a provider, enter an API key and model, then **Save and apply**.
+4. In the reader, show the chat panel or switch to Agent mode. Select text and ask, or type freely.
 
-### Linux
+API keys are stored locally. Book files never leave the machine except as context you send to the provider you chose.
 
-- **AppImage**：`chmod +x Litera_*.AppImage`，然后双击或在终端运行。
-- **deb**：`sudo dpkg -i litera_*.deb`（或用软件中心打开）。
+## Development
 
-### macOS（Apple Silicon）
+Requires [Node.js](https://nodejs.org/) 22, a recent [Rust](https://rustup.rs/) stable toolchain, and the [Tauri 2 prerequisites](https://v2.tauri.app/start/prerequisites/) for your OS.
 
-打开 `.dmg`，把 Litera 拖到「应用程序」。第一次从网上下载的未签名应用：
+Linux extra packages used by this project:
 
-1. 不要只双击。在 Finder 里 **右键 → 打开**，再确认打开。
-2. 若系统仍拦截：打开 **系统设置 → 隐私与安全性**，在被拦下的 Litera 旁点 **仍要打开**。
+```bash
+sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xdg-utils \
+  libfontconfig1-dev libfreetype6-dev
+```
 
-构建使用 ad-hoc 签名（`signingIdentity: "-"`），避免 Apple Silicon 把从 GitHub 下载的应用标成「已损坏」。这 **不能** 跳过「未识别的开发者」提示。
+```bash
+git clone --recurse-submodules https://github.com/MaplumeX/Litera.git
+cd Litera
+npm ci
+npm run tauri dev
+```
 
-### Windows
+If you cloned without submodules:
 
-运行 NSIS 安装程序。SmartScreen 可能提示「Windows 已保护你的电脑」：点 **更多信息 → 仍要运行**。
+```bash
+git submodule update --init --recursive
+```
 
-## 维护者发版
+Useful commands:
 
-版本号必须在这三处一致，tag 去掉 `v` 后等于应用版本（`v0.1.0` ↔ `0.1.0`）：
+```bash
+npm test                  # frontend tests (Vitest)
+npx tsc --noEmit          # typecheck
+cargo test --manifest-path src-tauri/Cargo.toml
+npm run tauri build       # production bundle
+```
 
-- `package.json`
-- `src-tauri/tauri.conf.json`
-- `src-tauri/Cargo.toml`
+EPUB rendering comes from [foliate-js](https://github.com/johnfactotum/foliate-js) (`src/foliate-js`). The assistant runtime is [Pi](https://github.com/badlogic/pi-mono) running inside the WebView — there is no sidecar process.
 
-1. 改版本（第一版已是 `0.1.0`，不必再 bump）：
+## Changelog
 
-   ```bash
-   npm run version:bump -- x.y.z
-   ```
+See [CHANGELOG.md](CHANGELOG.md).
 
-2. 在 `CHANGELOG.md` 顶部写 `## [x.y.z] - YYYY-MM-DD` 及用户可见变化。
-3. 提交这些改动。
-4. 打 tag 并推送（会触发 [Release workflow](.github/workflows/release.yml)）：
+## License
 
-   ```bash
-   git tag vX.Y.Z
-   git push origin main
-   git push origin vX.Y.Z
-   ```
-
-5. 在 Actions 里等三个平台 job 跑完（`fail-fast: false`，单个平台失败不会把其余取消，也不会把 Release 标成 published）。
-6. 打开 draft Release，确认有 AppImage、deb、dmg、NSIS exe。
-7. 本地装一下后，再在 GitHub 上 **Publish**。
-
-重跑失败的 tag 构建：在对应 Actions run 上 Re-run，或对同一 commit 使用 `workflow_dispatch`（会挂到当前版本对应的 `v*` Release 上）。不要让 tauri-action 另造 `app-v__VERSION__` tag。
-
-本地开发：克隆时带上 submodule（`git clone --recurse-submodules`，或已有仓库里 `git submodule update --init`），然后 `npm install` 和 `npm run tauri dev`。`src/foliate-js` 不在主仓库树里，漏掉 submodule 时 `vite build` 会找不到 `view.js`。
+This repository does not currently include a top-level license file. [foliate-js](https://github.com/johnfactotum/foliate-js) is MIT-licensed.
