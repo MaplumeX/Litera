@@ -154,3 +154,24 @@ Reopening a book now restores via lastCfi (foliate init lastLocation) instead of
 ### Status
 
 [OK] **Completed**
+
+
+## Session 94: Keep typography preview visible in settings
+
+**Date**: 2026-08-23
+**Task**: Keep typography preview visible in settings
+**Branch**: `fix/settings-layout-preview-text-hidden-on-scroll`
+
+### Summary
+
+Split Settings → Typography into a left compact inspector (steppers and inline toggles) and a right live preview so scrolling no longer hides sample text. Dialog stays 768px; Appearance sliders unchanged.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `afc40e0` | (see git log) |
+
+### Status
+
+[OK] **Completed**
