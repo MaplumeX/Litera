@@ -4,7 +4,9 @@
 
 带阅读助手的桌面 EPUB 阅读器。书文件留在本机；助手只请求你配置的 LLM 供应商。
 
-![Litera](public/favicon.png)
+![书库](docs/photos/1.png)
+
+![阅读页与阅读助手](docs/photos/2.png)
 
 ## 功能
 

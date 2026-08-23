@@ -4,7 +4,9 @@
 
 A desktop EPUB reader with a built-in reading assistant. Books stay on your machine; the assistant only talks to the LLM provider you configure.
 
-![Litera](public/favicon.png)
+![Library](docs/photos/1.png)
+
+![Reader with assistant](docs/photos/2.png)
 
 ## Features
 
