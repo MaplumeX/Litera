@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Verify preview uses border/surface not shadow; rail does not fight session rail or composer chrome."}
+{"file": ".trellis/spec/frontend/i18n.md", "reason": "Both locale catalogs must keep matching keys; unused close copy removed from both."}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "No extra network/CSP surface; outline is DOM-only."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Jump and active-index must stay on ChatPanel; docked must not keep a second TOC path."}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "No new preferences.json keys, Tauri commands, or session schema for this UI."}

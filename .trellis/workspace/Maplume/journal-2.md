@@ -215,6 +215,15 @@ Reader TOC now collapses nested headings via chevrons, defaults to the current c
 - Chevron vs title click; empty href never goTo empty string
 - tocExpanded lives in App so drawer remount keeps expansions; book switch resets
 - currentHref change unions ancestor keys; collapse-all keeps current path
+## Session 95: Paseo-style workspace conversation outline rail
+
+**Date**: 2026-08-23
+**Task**: Paseo-style workspace conversation outline rail
+**Branch**: `feat/chatgpt-web-style-conversation-toc`
+
+### Summary
+
+Replaced the header-button overlay conversation TOC with a Paseo-style left-edge tick rail in Agent workspace. Reader/docked chat no longer has conversation outline UI. Hover-intent, dock magnification, and jump-without-unmounting the rail. Spec and changelog updated.
 
 ### Git Commits
 
@@ -226,6 +235,7 @@ Reader TOC now collapses nested headings via chevrons, defaults to the current c
 
 - [OK] npx vitest run: 53 files, 520 tests passed
 - [OK] npm run build (tsc && vite build) passed
+| `1f4c2c1` | (see git log) |
 
 ### Status
 

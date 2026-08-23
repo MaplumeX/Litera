@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Chrome language: 1px border elevation, no shadow-* on TOC/chat surfaces; shadcn Button only where we keep header controls."}
+{"file": ".trellis/spec/frontend/directory-structure.md", "reason": "Chat outline lives under src/components/chat/ next to ChatPanel; sibling relative imports."}
+{"file": ".trellis/spec/frontend/i18n.md", "reason": "zh-CN/en catalogs and useT(); do not persist outline prefs to preferences.json."}
+{"file": ".trellis/spec/frontend/hook-guidelines.md", "reason": "Keep jump/scroll/session effects on existing ChatPanel refs; no new global store."}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Reuse userMessagePreview, message refs, and jump/bottom-follow; do not duplicate overlay TOC or port Paseo RN source."}

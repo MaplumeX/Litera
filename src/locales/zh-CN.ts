@@ -176,7 +176,6 @@ export const zhCN = {
   "chat.title": "阅读助手",
   "chat.sessions": "会话列表",
   "chat.messageToc": "对话目录",
-  "chat.messageTocClose": "关闭对话目录",
   "chat.messageTocItem": "跳转到第 {number} 条提问：{preview}",
   "chat.settings": "设置",
   "chat.ready": "已就绪",

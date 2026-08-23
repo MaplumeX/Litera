@@ -61,8 +61,23 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
+
+function twoQuestionMessages(): AgentState["messages"] {
+  return [
+    { role: "user", content: "第一问" },
+    { role: "assistant", content: "第一答" },
+    { role: "user", content: "第二问" },
+  ];
+}
+
+function renderWorkspace() {
+  return render(
+    <ChatPanel variant="workspace" currentChapterHref="OEBPS/ch1.xhtml" bookId="book-1" />,
+  );
+}
 
 function openSessionList() {
   const view = render(<ChatPanel currentChapterHref="OEBPS/ch1.xhtml" bookId="book-1" />);
@@ -246,7 +261,7 @@ describe("ChatPanel scroll behavior", () => {
     expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth" });
   });
 
-  it("lists only user questions with normalized previews", () => {
+  it("lists only user questions on the workspace rail", () => {
     bridgeState = readyState({
       messages: [
         { role: "user", content: "第一行\n  第二行" },
@@ -254,34 +269,26 @@ describe("ChatPanel scroll behavior", () => {
         { role: "user", content: `${"很长的提问".repeat(15)}结尾` },
       ],
     });
-    const view = render(<ChatPanel currentChapterHref="OEBPS/ch1.xhtml" bookId="book-1" />);
-    fireEvent.click(view.getByRole("button", { name: "对话目录" }));
-
-    expect(view.queryByText("助手回答不应出现")).toBeTruthy();
-    const toc = view.getByRole("complementary", { name: "对话目录" });
-    expect(within(toc).getByText("第一行 第二行")).toBeTruthy();
-    expect(within(toc).queryByText("助手回答不应出现")).toBeNull();
-    expect(within(toc).getAllByRole("button", { name: /跳转到第/ })).toHaveLength(2);
-    expect(within(toc).getAllByRole("button", { name: /跳转到第/ })[1].textContent).toContain("…");
+    const view = renderWorkspace();
+    const rail = view.getByRole("navigation", { name: "对话目录" });
+    expect(view.getByText("助手回答不应出现")).toBeTruthy();
+    expect(within(rail).queryByText("助手回答不应出现")).toBeNull();
+    expect(within(rail).getAllByRole("button", { name: /跳转到第/ })).toHaveLength(2);
+    expect(
+      view.getByRole("button", { name: /跳转到第 2 条提问：/ }).getAttribute("aria-label"),
+    ).toContain("…");
   });
 
-  it("smoothly jumps to a question, suspends streaming follow, and resumes at the bottom", () => {
+  it("smoothly jumps to a question, keeps the rail, suspends streaming follow, and resumes at the bottom", () => {
     const scrollIntoView = vi.fn();
     HTMLElement.prototype.scrollIntoView = scrollIntoView;
-    bridgeState = readyState({
-      messages: [
-        { role: "user", content: "第一问" },
-        { role: "assistant", content: "第一答" },
-        { role: "user", content: "第二问" },
-      ],
-    });
-    const view = render(<ChatPanel currentChapterHref="OEBPS/ch1.xhtml" bookId="book-1" />);
+    bridgeState = readyState({ messages: twoQuestionMessages() });
+    const view = renderWorkspace();
     scrollIntoView.mockClear();
-    fireEvent.click(view.getByRole("button", { name: "对话目录" }));
     fireEvent.click(view.getByRole("button", { name: "跳转到第 1 条提问：第一问" }));
 
     expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
-    expect(view.queryByRole("complementary", { name: "对话目录" })).toBeNull();
+    expect(view.getByRole("navigation", { name: "对话目录" })).toBeTruthy();
     const container = view.getByTestId("chat-message-scroll");
     Object.defineProperties(container, {
       scrollHeight: { configurable: true, value: 1000 },
@@ -298,22 +305,18 @@ describe("ChatPanel scroll behavior", () => {
         { role: "user", content: "第二问" },
       ],
     });
-    view.rerender(<ChatPanel currentChapterHref="OEBPS/ch1.xhtml" bookId="book-1" />);
+    view.rerender(
+      <ChatPanel variant="workspace" currentChapterHref="OEBPS/ch1.xhtml" bookId="book-1" />,
+    );
     expect(scrollIntoView).not.toHaveBeenCalled();
 
     fireEvent(container, new Event("scrollend"));
     expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth" });
   });
 
-  it("updates the current question while scrolling and resumes bottom follow", () => {
-    bridgeState = readyState({
-      messages: [
-        { role: "user", content: "第一问" },
-        { role: "assistant", content: "第一答" },
-        { role: "user", content: "第二问" },
-      ],
-    });
-    const view = render(<ChatPanel currentChapterHref="OEBPS/ch1.xhtml" bookId="book-1" />);
+  it("updates the current tick while scrolling", () => {
+    bridgeState = readyState({ messages: twoQuestionMessages() });
+    const view = renderWorkspace();
     const container = view.getByTestId("chat-message-scroll");
     const first = view.container.querySelector('[data-user-message-index="0"]') as HTMLElement;
     const second = view.container.querySelector('[data-user-message-index="2"]') as HTMLElement;
@@ -326,38 +329,88 @@ describe("ChatPanel scroll behavior", () => {
       scrollTop: { configurable: true, writable: true, value: 200 },
     });
     fireEvent.scroll(container);
-    fireEvent.click(view.getByRole("button", { name: "对话目录" }));
     expect(view.getByRole("button", { name: "跳转到第 1 条提问：第一问" }).getAttribute("aria-current"))
       .toBe("location");
 
-    fireEvent.click(view.getAllByRole("button", { name: "关闭对话目录" })[1]);
     container.scrollTop = 600;
     vi.spyOn(second, "getBoundingClientRect").mockReturnValue(rect(90, 130));
     fireEvent.scroll(container);
-    fireEvent.click(view.getByRole("button", { name: "对话目录" }));
     expect(view.getByRole("button", { name: "跳转到第 2 条提问：第二问" }).getAttribute("aria-current"))
       .toBe("location");
   });
 
-  it("disables the outline for empty sessions and closes it on session or book switch", () => {
-    bridgeState = readyState({ messages: [] });
-    const view = render(<ChatPanel currentChapterHref="OEBPS/ch1.xhtml" bookId="book-1" />);
-    expect((view.getByRole("button", { name: "对话目录" }) as HTMLButtonElement).disabled).toBe(true);
+  it("shows a focus preview for one workspace tick", () => {
+    bridgeState = readyState({ messages: twoQuestionMessages() });
+    const view = renderWorkspace();
+    const tick = view.getByRole("button", { name: "跳转到第 1 条提问：第一问" });
+    fireEvent.focus(tick);
+    expect(view.getByTestId("chat-outline-preview").textContent).toBe("第一问");
+    fireEvent.blur(tick);
+    expect(view.queryByTestId("chat-outline-preview")).toBeNull();
+  });
 
-    bridgeState = readyState({ messages: [{ role: "user", content: "旧会话问题" }] });
-    view.rerender(<ChatPanel currentChapterHref="OEBPS/ch1.xhtml" bookId="book-1" />);
-    fireEvent.click(view.getByRole("button", { name: "对话目录" }));
-    expect(view.getByRole("complementary", { name: "对话目录" })).toBeTruthy();
+  it("hides the workspace rail for empty sessions and a single user question", () => {
+    bridgeState = readyState({ messages: [] });
+    const view = renderWorkspace();
+    expect(view.queryByTestId("chat-outline-rail")).toBeNull();
+    expect(view.queryByRole("button", { name: "对话目录" })).toBeNull();
+
+    bridgeState = readyState({ messages: [{ role: "user", content: "仅一条" }] });
+    view.rerender(
+      <ChatPanel variant="workspace" currentChapterHref="OEBPS/ch1.xhtml" bookId="book-1" />,
+    );
+    expect(view.queryByTestId("chat-outline-rail")).toBeNull();
+
+    bridgeState = readyState({ messages: twoQuestionMessages() });
+    view.rerender(
+      <ChatPanel variant="workspace" currentChapterHref="OEBPS/ch1.xhtml" bookId="book-1" />,
+    );
+    expect(view.getByTestId("chat-outline-rail")).toBeTruthy();
+  });
+
+  it("does not leak outline preview across session or book changes", () => {
+    vi.useFakeTimers();
+    bridgeState = readyState({
+      messages: [
+        { role: "user", content: "旧会话问题" },
+        { role: "assistant", content: "旧答" },
+        { role: "user", content: "旧会话第二问" },
+      ],
+    });
+    const view = renderWorkspace();
+    fireEvent.pointerEnter(view.getByTestId("chat-outline-rail"), { clientX: 8, clientY: 20 });
+    fireEvent.pointerEnter(view.getByTestId("chat-outline-slot-0"));
+    act(() => {
+      vi.advanceTimersByTime(150);
+    });
+    expect(view.getByTestId("chat-outline-preview").textContent).toBe("旧会话问题");
+
     bridgeState = readyState({
       sessionId: "session-2",
-      messages: [{ role: "user", content: "新会话问题" }],
+      messages: [
+        { role: "user", content: "新会话问题" },
+        { role: "assistant", content: "新答" },
+        { role: "user", content: "新会话第二问" },
+      ],
     });
-    view.rerender(<ChatPanel currentChapterHref="OEBPS/ch1.xhtml" bookId="book-1" />);
-    expect(view.queryByRole("complementary", { name: "对话目录" })).toBeNull();
+    view.rerender(
+      <ChatPanel variant="workspace" currentChapterHref="OEBPS/ch1.xhtml" bookId="book-1" />,
+    );
+    expect(view.queryByTestId("chat-outline-preview")).toBeNull();
+    expect(view.queryByText("旧会话问题")).toBeNull();
 
-    fireEvent.click(view.getByRole("button", { name: "对话目录" }));
-    expect(view.getByRole("complementary", { name: "对话目录" })).toBeTruthy();
-    view.rerender(<ChatPanel currentChapterHref="OEBPS/ch1.xhtml" bookId="book-2" />);
+    view.rerender(
+      <ChatPanel variant="workspace" currentChapterHref="OEBPS/ch1.xhtml" bookId="book-2" />,
+    );
+    expect(view.queryByTestId("chat-outline-preview")).toBeNull();
+  });
+
+  it("does not render outline UI in the docked reader chat", () => {
+    bridgeState = readyState({ messages: twoQuestionMessages() });
+    const view = render(<ChatPanel currentChapterHref="OEBPS/ch1.xhtml" bookId="book-1" />);
+    expect(view.queryByRole("button", { name: "对话目录" })).toBeNull();
+    expect(view.queryByTestId("chat-outline-rail")).toBeNull();
+    expect(view.queryByRole("navigation", { name: "对话目录" })).toBeNull();
     expect(view.queryByRole("complementary", { name: "对话目录" })).toBeNull();
   });
 });
