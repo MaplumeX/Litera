@@ -60,6 +60,7 @@ These guides help you **ask the right questions before coding**.
 - [ ] You see the same pattern repeated 3+ times
 - [ ] You're adding a new field to multiple places
 - [ ] **You're modifying any constant or config**
+- [ ] You want continue-reading covers larger or four-across filling the row — reuse the shelf `grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-6`; do not `grid-cols-4` or a second card size (see frontend `component-guidelines.md` "continue-reading cards match the shelf grid")
 - [ ] **You're creating a new utility/helper function** ← Search first!
 - [ ] Two files read the same untyped payload field with local casts
 - [ ] Multiple branches update the same derived state from `kind` / `action`

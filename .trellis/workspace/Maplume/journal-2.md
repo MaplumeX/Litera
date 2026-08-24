@@ -282,3 +282,24 @@ Added library and reader UI screenshots from docs/photos to the English and Chin
 ### Status
 
 [OK] **Completed**
+
+
+## Session 98: Match continue-reading cards to shelf grid
+
+**Date**: 2026-08-24
+**Task**: Match continue-reading cards to shelf grid
+**Branch**: `fix/continue-reading-book-size`
+
+### Summary
+
+Continue-reading used grid-cols-4 and stretched covers to a quarter of the window. Reused the shelf auto-fill 140px grid, added a class-equality test, and documented the convention in frontend component-guidelines.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `75fb25d` | (see git log) |
+
+### Status
+
+[OK] **Completed**

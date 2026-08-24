@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend quality-check entry and layer checklist"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Library chrome must stay on existing BookCard and shadcn patterns"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Confirm continue-reading and shelf grids share one size source"}

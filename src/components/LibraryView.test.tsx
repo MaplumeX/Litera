@@ -404,6 +404,10 @@ describe("LibraryView", () => {
     const heading = await findByText("继续阅读");
     const recents = heading.closest("section");
     expect(recents).toBeTruthy();
+    const recentsGrid = (recents as HTMLElement).querySelector(".grid");
+    const shelfGrid = (recents as HTMLElement).nextElementSibling;
+    expect(recentsGrid?.className).toBe(shelfGrid?.className);
+    expect(recentsGrid?.className).not.toContain("grid-cols-4");
     expect(within(recents as HTMLElement).queryByTitle("删除")).toBeNull();
     expect(within(recents as HTMLElement).queryByRole("button", { name: "更多操作" })).toBeNull();
     within(recents as HTMLElement).getByTitle("Stored Title").click();
