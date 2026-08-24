@@ -102,6 +102,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         ? [{ messageIndex: index, preview: userMessagePreview(message.content) }]
         : [],
     );
+    const showOutlineRail = isWorkspace && userMessageTocItems.length >= 2;
 
     const clearMessageTocJumpTimer = useCallback(() => {
       if (messageTocJumpTimerRef.current === null) return;
@@ -476,7 +477,11 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
             onScroll={handleScroll}
             onScrollEnd={finishMessageTocJump}
             data-testid="chat-message-scroll"
-            className="h-full space-y-4 overflow-y-auto p-3"
+            className={
+              showOutlineRail
+                ? "h-full space-y-4 overflow-y-auto py-3 pr-3 pl-12"
+                : "h-full space-y-4 overflow-y-auto p-3"
+            }
           >
           {configSnapshot && !configSnapshot.configured && (
             <div className="flex items-start gap-2 rounded border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-400">
@@ -549,7 +554,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
           )}
           <div ref={messagesEndRef} />
           </div>
-          {isWorkspace && userMessageTocItems.length >= 2 && (
+          {showOutlineRail && (
             <ChatOutlineRail
               key={`${bookId}:${state.sessionId ?? ""}`}
               items={userMessageTocItems}

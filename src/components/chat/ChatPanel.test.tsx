@@ -413,6 +413,42 @@ describe("ChatPanel scroll behavior", () => {
     expect(view.queryByRole("navigation", { name: "对话目录" })).toBeNull();
     expect(view.queryByRole("complementary", { name: "对话目录" })).toBeNull();
   });
+
+  it("reserves a left gutter only when the workspace outline rail is mounted", () => {
+    function paddingTokens(view: ReturnType<typeof render>) {
+      return view.getByTestId("chat-message-scroll").className.split(/\s+/);
+    }
+
+    bridgeState = readyState({ messages: twoQuestionMessages() });
+    const view = renderWorkspace();
+    expect(view.getByTestId("chat-outline-rail")).toBeTruthy();
+    expect(paddingTokens(view)).toContain("pl-12");
+    expect(paddingTokens(view)).toContain("py-3");
+    expect(paddingTokens(view)).toContain("pr-3");
+    expect(paddingTokens(view)).not.toContain("p-3");
+
+    bridgeState = readyState({ messages: [] });
+    view.rerender(
+      <ChatPanel variant="workspace" currentChapterHref="OEBPS/ch1.xhtml" bookId="book-1" />,
+    );
+    expect(view.queryByTestId("chat-outline-rail")).toBeNull();
+    expect(paddingTokens(view)).toContain("p-3");
+    expect(paddingTokens(view)).not.toContain("pl-12");
+
+    bridgeState = readyState({ messages: [{ role: "user", content: "仅一条" }] });
+    view.rerender(
+      <ChatPanel variant="workspace" currentChapterHref="OEBPS/ch1.xhtml" bookId="book-1" />,
+    );
+    expect(view.queryByTestId("chat-outline-rail")).toBeNull();
+    expect(paddingTokens(view)).toContain("p-3");
+    expect(paddingTokens(view)).not.toContain("pl-12");
+
+    bridgeState = readyState({ messages: twoQuestionMessages() });
+    view.rerender(<ChatPanel currentChapterHref="OEBPS/ch1.xhtml" bookId="book-1" />);
+    expect(view.queryByTestId("chat-outline-rail")).toBeNull();
+    expect(paddingTokens(view)).toContain("p-3");
+    expect(paddingTokens(view)).not.toContain("pl-12");
+  });
 });
 
 function rect(top: number, bottom: number): DOMRect {

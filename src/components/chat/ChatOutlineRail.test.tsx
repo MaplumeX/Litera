@@ -91,4 +91,45 @@ describe("ChatOutlineRail", () => {
     expect(view.getByRole("button", { name: "Jump to question 1: 第一问" })).toBeTruthy();
     expect(view.queryByRole("button", { name: "Close conversation outline" })).toBeNull();
   });
+
+  it("clusters compact slots in the middle instead of stretching them", () => {
+    const view = render(
+      <ChatOutlineRail items={items} activeMessageIndex={0} onGoTo={() => {}} />,
+    );
+    expect(view.getByTestId("chat-outline-rail").className.split(/\s+/)).toContain(
+      "justify-center",
+    );
+    const slot = view.getByTestId("chat-outline-slot-0");
+    const tokens = slot.className.split(/\s+/);
+    expect(tokens).not.toContain("flex-1");
+    expect(tokens).not.toContain("grow");
+    expect(tokens).toContain("basis-2");
+    expect(tokens).toContain("grow-0");
+    expect(tokens).toContain("shrink");
+  });
+
+  it("previews only the attended tick and leaves distant ticks at rest", () => {
+    const many = Array.from({ length: 8 }, (_, index) => ({
+      messageIndex: index,
+      preview: `问${index}`,
+    }));
+    const view = render(
+      <ChatOutlineRail items={many} activeMessageIndex={0} onGoTo={() => {}} />,
+    );
+    fireEvent.focus(view.getByRole("button", { name: "跳转到第 1 条提问：问0" }));
+
+    const preview = view.getByTestId("chat-outline-preview");
+    expect(preview.textContent).toBe("问0");
+    expect(preview.className.split(/\s+/)).toContain("left-full");
+    expect(preview.parentElement).toBe(view.getByTestId("chat-outline-slot-0"));
+
+    const pill = (messageIndex: number) =>
+      view.getByTestId(`chat-outline-tick-${messageIndex}`).firstElementChild as HTMLElement;
+    expect(pill(0).style.width).toBe("26px");
+    expect(Number.parseFloat(pill(1).style.width)).toBeGreaterThan(10);
+    expect(pill(3).style.width).toBe("10px");
+    expect(pill(3).style.height).toBe("2px");
+    expect(pill(7).style.width).toBe(pill(3).style.width);
+    expect(pill(7).style.height).toBe(pill(3).style.height);
+  });
 });
