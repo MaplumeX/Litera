@@ -283,8 +283,9 @@ scrollToAnchor(range, false); // only if off-screen
 
 **Rules**:
 - Include only `role === "user"`; do not persist outline items or mix in assistant/tool/compaction entries. Preview via `userMessagePreview()` (collapse whitespace, 60 characters).
-- Mount the rail only when `variant === "workspace"` and there are ≥2 user messages. `variant="docked"` must not render a header outline button, rail, or overlay at any width.
-- Overlay the rail on the message column left (`absolute`, ~36px), not under the session rail and not over `ChatInput`. Do not steal layout width.
+- Mount the rail only when `variant === "workspace"` and there are ≥2 user messages (`showOutlineRail`). `variant="docked"` must not render a header outline button, rail, or overlay at any width.
+- Overlay the rail on the message-column gutter (`absolute left-0 w-9`, top/bottom ~10%), not under the session rail and not over `ChatInput`. Litera has no Paseo-style wide centered column, so when the rail is mounted the scroll area uses `py-3 pr-3 pl-12` (36px rail + 12px gap). When the rail is hidden, keep `p-3`. Do not pad the header or composer. Do not turn the rail into a flex column.
+- Slots use `basis-2 grow-0 shrink` and the rail uses `justify-center`. Do **not** `flex-1` the slots: that stretches two or three ticks across the full rail height, so index-distance dock magnification (radius 3) looks like every tick is hovering. Long conversations still shrink below 8px.
 - Hover tracking lives on the slot; press lives on the inner control. Do not put hover on a control that resizes under the pointer. First rail entry waits ~150ms (`createChatOutlineHoverIntent`); after activation, moving between ticks is immediate. Leave clears the preview.
 - Dock-style local magnification around the attended index; `prefers-reduced-motion` disables it. Preview uses a 1px border / surface token — no `shadow-*`.
 - Keep user-message DOM refs keyed by the original message-array index. Active tick = last user message at or above a small probe below the scroll container's top; if none has crossed it, use the first user message. Mark it `aria-current="location"`.
@@ -297,7 +298,23 @@ target.scrollIntoView({ behavior: "smooth", block: "start" });
 // scrollend (or the fallback timer) then recomputes whether bottom-follow resumes.
 ```
 
-**Tests required**: user-only preview derivation; rail hidden for 0/1 user messages and for docked; hover/focus preview; smooth jump without unmounting the rail; streaming follow suppression and recovery at bottom; active-tick tracking; session/book remount; bilingual accessible names.
+**Wrong**:
+```tsx
+<nav className="absolute top-[10%] bottom-[10%] left-0 flex w-9 flex-col">
+  <div className="relative flex min-h-0 flex-1 items-stretch" />
+</nav>
+<div className="h-full overflow-y-auto p-3" />
+```
+
+**Correct**:
+```tsx
+<nav className="absolute top-[10%] bottom-[10%] left-0 z-10 flex w-9 flex-col justify-center">
+  <div className="relative flex min-h-0 w-full basis-2 grow-0 shrink items-center justify-center" />
+</nav>
+<div className="h-full overflow-y-auto py-3 pr-3 pl-12" />
+```
+
+**Tests required**: user-only preview derivation; rail hidden for 0/1 user messages and for docked; hover/focus preview only on the attended tick; slots are not `flex-1` and use `basis-2 grow-0 shrink`; rail `justify-center`; workspace rail visible → scroll `pl-12`; hidden/docked → `p-3`; smooth jump without unmounting the rail; streaming follow suppression and recovery at bottom; active-tick tracking; session/book remount; bilingual accessible names.
 
 **Related**: `src/components/chat/ChatPanel.tsx`; `src/components/chat/ChatOutlineRail.tsx`; `src/components/chat/hover-intent.ts`; the stick-to-bottom convention above.
 

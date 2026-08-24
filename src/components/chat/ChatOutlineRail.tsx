@@ -83,7 +83,7 @@ export function ChatOutlineRail({
     <nav
       data-testid="chat-outline-rail"
       aria-label={t("chat.messageToc")}
-      className="absolute top-[10%] bottom-[10%] left-0 z-10 flex w-9 flex-col"
+      className="absolute top-[10%] bottom-[10%] left-0 z-10 flex w-9 flex-col justify-center"
       onPointerEnter={handlePointerEnterRail}
       onPointerMove={handlePointerMoveRail}
       onPointerLeave={handlePointerLeaveRail}
@@ -106,7 +106,7 @@ export function ChatOutlineRail({
           <div
             key={item.messageIndex}
             data-testid={`chat-outline-slot-${item.messageIndex}`}
-            className="relative flex min-h-0 flex-1 items-stretch"
+            className="relative flex min-h-0 w-full basis-2 grow-0 shrink items-center justify-center"
             onPointerEnter={() => hoverIntent.pointAt(index)}
           >
             <button
