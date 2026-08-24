@@ -303,3 +303,24 @@ Continue-reading used grid-cols-4 and stretched covers to a quarter of the windo
 ### Status
 
 [OK] **Completed**
+
+
+## Session 99: Fix Agent chat outline rail layout
+
+**Date**: 2026-08-24
+**Task**: Fix Agent chat outline rail layout
+**Branch**: `fix/litera-agent-toc-hover-all-items`
+
+### Summary
+
+Clustered Agent workspace outline ticks like Paseo (8px non-stretching slots, rail justify-center) and reserved a 48px left gutter when the rail is mounted so assistant content is not covered.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `72b6d89` | (see git log) |
+
+### Status
+
+[OK] **Completed**
