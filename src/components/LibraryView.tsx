@@ -400,7 +400,7 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
                 <h2 className="mb-3 text-sm font-medium">
                   {t("library.continueReading")}
                 </h2>
-                <div className="grid grid-cols-4 gap-4">
+                <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-6">
                   {recents.map((book) => (
                     <BookCard
                       key={`recent-${book.id}`}

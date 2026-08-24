@@ -376,7 +376,7 @@ Appearance / AI / About keep a single scrolling column (`max-w-md`). Typography 
 
 ### Convention: library confirms and selection mode
 
-**What**: Library delete and same-path overwrite use `AlertDialog`. Import/delete failures use an in-page banner. Toolbar「选择」enters selection mode; cover clicks toggle checkboxes and must not open a book. There is no「继续阅读」banner — recency is `list_books` order.
+**What**: Library delete and same-path overwrite use `AlertDialog`. Import/delete failures use an in-page banner. Toolbar「选择」enters selection mode; cover clicks toggle checkboxes and must not open a book. Continue-reading is a card row at the top of the shelf (see “continue-reading cards match the shelf grid”), not a toolbar banner and not `list_books` order.
 
 **Why**: `confirm()` / `alert()` block the WebView and do not match the dialog system. Opening a book while an overwrite dialog is open unmounts `LibraryView` and leaves staged imports behind.
 
@@ -385,6 +385,29 @@ Appearance / AI / About keep a single scrolling column (`max-w-md`). Typography 
 - Settle pending overwrite confirms as cancel if `LibraryView` unmounts.
 - Gate import (picker + drag-drop) with a synchronous `importingRef`, not only `useState`.
 - Process drag-drop files one path at a time (`import_paths([path])` then confirm/commit) so a later file can see a just-committed `contentHash`.
+
+### Convention: continue-reading cards match the shelf grid
+
+**What**: `LibraryView` continue-reading (`takeRecent`, max 4, `lastOpenedAt`) uses the same `BookCard` and the same grid as the shelf: `grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-6`. List view still renders continue-reading as that card grid; only the main list becomes `BookListRow`.
+
+**Why**: `grid-cols-4` made each cover fill a quarter of the window. Same `BookCard` (`aspect-[2/3] w-full`) then looked oversized next to `minmax(140px)` shelf cards.
+
+**Rules**:
+- Do not use `grid-cols-4` (or any other column count) to force four books across a row.
+- Do not add a larger continue-reading card variant or change `BookCard` aspect.
+- Search still hides the section; `showDelete={false}` / `showMenu={false}` stay; right-click still uses `BookActionContext`.
+- Tests must assert the continue-reading `.grid` className equals the shelf grid className (grid view) and does not contain `grid-cols-4`.
+
+**Example**:
+```tsx
+// Good — both grids
+<div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-6">
+
+// Bad — fills the row
+<div className="grid grid-cols-4 gap-4">
+```
+
+**Related**: `src/lib/library-shelf.ts` `takeRecent` / `RECENT_LIMIT`; backend `tauri-commands.md` `list_books` order (continue-reading is a separate slice).
 
 ### Don't: `callback?.() ?? fallback()` for optional handlers
 
