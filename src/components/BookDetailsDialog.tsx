@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { invokeErrorMessage } from "@/lib/app-error";
 import { useT } from "@/lib/i18n";
 import {
@@ -40,6 +41,10 @@ export function BookDetailsDialog({
   const fileRef = useRef<HTMLInputElement>(null);
   const [title, setTitle] = useState("");
   const [author, setAuthor] = useState("");
+  const [description, setDescription] = useState("");
+  const [publisher, setPublisher] = useState("");
+  const [language, setLanguage] = useState("");
+  const [series, setSeries] = useState("");
   const [coverFile, setCoverFile] = useState<File | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -48,6 +53,10 @@ export function BookDetailsDialog({
     if (!open || !book) return;
     setTitle(book.title);
     setAuthor(book.author);
+    setDescription(book.description ?? "");
+    setPublisher(book.publisher ?? "");
+    setLanguage(book.language ?? "");
+    setSeries(book.series ?? "");
     setCoverFile(null);
     setError(null);
     setSaving(false);
@@ -92,11 +101,19 @@ export function BookDetailsDialog({
         bookId: string;
         title: string;
         author: string;
+        description: string;
+        publisher: string;
+        language: string;
+        series: string;
         coverBytes?: number[];
       } = {
         bookId: book.id,
         title: title.trim(),
         author,
+        description,
+        publisher,
+        language,
+        series,
       };
       if (coverBytes) args.coverBytes = coverBytes;
       const updated = await invoke<BookRecord>("update_book_metadata", args);
@@ -110,7 +127,10 @@ export function BookDetailsDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent
+        className="max-h-[85vh] overflow-y-auto sm:max-w-md"
+        onOpenAutoFocus={(event) => event.preventDefault()}
+      >
         <DialogHeader>
           <DialogTitle>{t("library.detailsTitle")}</DialogTitle>
           <DialogDescription>{t("library.detailsDescription")}</DialogDescription>
@@ -174,6 +194,39 @@ export function BookDetailsDialog({
                 </Button>
               </div>
             </div>
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="book-description">{t("library.fieldDescription")}</Label>
+            <Textarea
+              id="book-description"
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+              rows={4}
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="book-publisher">{t("library.fieldPublisher")}</Label>
+            <Input
+              id="book-publisher"
+              value={publisher}
+              onChange={(event) => setPublisher(event.target.value)}
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="book-language">{t("library.fieldLanguage")}</Label>
+            <Input
+              id="book-language"
+              value={language}
+              onChange={(event) => setLanguage(event.target.value)}
+            />
+          </div>
+          <div className="grid gap-2">
+            <Label htmlFor="book-series">{t("library.fieldSeries")}</Label>
+            <Input
+              id="book-series"
+              value={series}
+              onChange={(event) => setSeries(event.target.value)}
+            />
           </div>
           <dl className="grid gap-2 text-sm">
             <div className="flex justify-between gap-4">

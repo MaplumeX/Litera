@@ -19,6 +19,7 @@ const SCHEMA_VERSION: u32 = 1;
 const ANNOTATIONS_SCHEMA_VERSION: u32 = 1;
 const MAX_TITLE_BYTES: usize = 4 * 1024;
 const MAX_AUTHOR_BYTES: usize = 4 * 1024;
+const MAX_DESCRIPTION_BYTES: usize = 32 * 1024;
 const MAX_CFI_BYTES: usize = 8 * 1024;
 const MAX_EXCERPT_BYTES: usize = 4 * 1024;
 const MAX_LABEL_BYTES: usize = 4 * 1024;
@@ -188,6 +189,14 @@ pub struct BookRecord {
     pub id: String,
     pub title: String,
     pub author: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub publisher: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub series: Option<String>,
     #[serde(rename = "coverPath")]
     pub cover_path: String,
     #[serde(rename = "filePath")]
@@ -545,6 +554,10 @@ impl LibraryStore {
                 id: book_id.clone(),
                 title: display_name.clone(),
                 author: String::new(),
+                description: None,
+                publisher: None,
+                language: None,
+                series: None,
                 cover_path: String::new(),
                 file_path: epub_path.to_string_lossy().into_owned(),
                 imported_at: Utc::now().to_rfc3339(),
@@ -581,11 +594,16 @@ impl LibraryStore {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn save_book_metadata(
         &self,
         book_id: &str,
         title: String,
         author: String,
+        description: String,
+        publisher: String,
+        language: String,
+        series: String,
         cover_bytes: Option<Vec<u8>>,
         import_id: &str,
     ) -> AppResult<BookRecord> {
@@ -593,6 +611,10 @@ impl LibraryStore {
         validate_import_id(import_id)?;
         validate_text("title", &title, MAX_TITLE_BYTES, false)?;
         validate_text("author", &author, MAX_AUTHOR_BYTES, true)?;
+        let description = optional_shelf_text("description", description, MAX_DESCRIPTION_BYTES)?;
+        let publisher = optional_shelf_text("publisher", publisher, MAX_AUTHOR_BYTES)?;
+        let language = optional_shelf_text("language", language, MAX_AUTHOR_BYTES)?;
+        let series = optional_shelf_text("series", series, MAX_AUTHOR_BYTES)?;
         if cover_bytes
             .as_ref()
             .is_some_and(|bytes| bytes.len() > MAX_COVER_BYTES)
@@ -663,6 +685,10 @@ impl LibraryStore {
             let record = &mut library.books[record_index];
             record.title = title;
             record.author = author;
+            record.description = description;
+            record.publisher = publisher;
+            record.language = language;
+            record.series = series;
             record.cover_path = if new_cover.is_some() {
                 cover_path.to_string_lossy().into_owned()
             } else {
@@ -707,16 +733,25 @@ impl LibraryStore {
         Ok(updated)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn update_book_metadata(
         &self,
         book_id: &str,
         title: String,
         author: String,
+        description: String,
+        publisher: String,
+        language: String,
+        series: String,
         cover_bytes: Option<Vec<u8>>,
     ) -> AppResult<BookRecord> {
         validate_book_id(book_id)?;
         validate_text("title", &title, MAX_TITLE_BYTES, false)?;
         validate_text("author", &author, MAX_AUTHOR_BYTES, true)?;
+        let description = optional_shelf_text("description", description, MAX_DESCRIPTION_BYTES)?;
+        let publisher = optional_shelf_text("publisher", publisher, MAX_AUTHOR_BYTES)?;
+        let language = optional_shelf_text("language", language, MAX_AUTHOR_BYTES)?;
+        let series = optional_shelf_text("series", series, MAX_AUTHOR_BYTES)?;
         if let Some(bytes) = &cover_bytes {
             if bytes.is_empty() {
                 return Err(AppError::invalid_input("cover is empty"));
@@ -756,6 +791,10 @@ impl LibraryStore {
             let record = &mut library.books[record_index];
             record.title = title;
             record.author = author;
+            record.description = description;
+            record.publisher = publisher;
+            record.language = language;
+            record.series = series;
             if new_cover.is_some() {
                 record.cover_path = cover_path.to_string_lossy().into_owned();
             }
@@ -1535,6 +1574,15 @@ fn validate_library_records(root: &Path, data: &LibraryData) -> AppResult<()> {
         validate_text("author", &book.author, MAX_AUTHOR_BYTES, true).map_err(|error| {
             AppError::storage_corrupt(format!("Invalid author for book {}: {error}", book.id))
         })?;
+        validate_stored_optional_text(
+            "description",
+            &book.description,
+            MAX_DESCRIPTION_BYTES,
+            &book.id,
+        )?;
+        validate_stored_optional_text("publisher", &book.publisher, MAX_AUTHOR_BYTES, &book.id)?;
+        validate_stored_optional_text("language", &book.language, MAX_AUTHOR_BYTES, &book.id)?;
+        validate_stored_optional_text("series", &book.series, MAX_AUTHOR_BYTES, &book.id)?;
         chrono::DateTime::parse_from_rfc3339(&book.imported_at).map_err(|error| {
             AppError::storage_corrupt(format!("Invalid importedAt for book {}: {error}", book.id))
         })?;
@@ -1687,6 +1735,28 @@ fn validate_text(name: &str, value: &str, max_bytes: usize, allow_empty: bool) -
             "{name} must be {} and at most {max_bytes} bytes",
             if allow_empty { "valid" } else { "non-empty" }
         )));
+    }
+    Ok(())
+}
+
+fn optional_shelf_text(name: &str, value: String, max_bytes: usize) -> AppResult<Option<String>> {
+    if value.trim().is_empty() {
+        return Ok(None);
+    }
+    validate_text(name, &value, max_bytes, true)?;
+    Ok(Some(value))
+}
+
+fn validate_stored_optional_text(
+    name: &str,
+    value: &Option<String>,
+    max_bytes: usize,
+    book_id: &str,
+) -> AppResult<()> {
+    if let Some(text) = value {
+        validate_text(name, text, max_bytes, true).map_err(|error| {
+            AppError::storage_corrupt(format!("Invalid {name} for book {book_id}: {error}"))
+        })?;
     }
     Ok(())
 }
@@ -2319,29 +2389,63 @@ pub async fn read_import_bytes(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn save_book_metadata(
     store: tauri::State<'_, LibraryStore>,
     book_id: String,
     title: String,
     author: String,
+    description: String,
+    publisher: String,
+    language: String,
+    series: String,
     cover_bytes: Option<Vec<u8>>,
     import_id: String,
 ) -> AppResult<BookRecord> {
     let store = store.inner().clone();
-    run_blocking(move || store.save_book_metadata(&book_id, title, author, cover_bytes, &import_id))
-        .await
+    run_blocking(move || {
+        store.save_book_metadata(
+            &book_id,
+            title,
+            author,
+            description,
+            publisher,
+            language,
+            series,
+            cover_bytes,
+            &import_id,
+        )
+    })
+    .await
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn update_book_metadata(
     store: tauri::State<'_, LibraryStore>,
     book_id: String,
     title: String,
     author: String,
+    description: String,
+    publisher: String,
+    language: String,
+    series: String,
     cover_bytes: Option<Vec<u8>>,
 ) -> AppResult<BookRecord> {
     let store = store.inner().clone();
-    run_blocking(move || store.update_book_metadata(&book_id, title, author, cover_bytes)).await
+    run_blocking(move || {
+        store.update_book_metadata(
+            &book_id,
+            title,
+            author,
+            description,
+            publisher,
+            language,
+            series,
+            cover_bytes,
+        )
+    })
+    .await
 }
 
 #[tauri::command]
@@ -2466,6 +2570,10 @@ mod tests {
                 &result.book_id,
                 "Version One".to_string(),
                 "Author One".to_string(),
+                String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
                 Some(vec![1, 2, 3]),
                 staged_import_id(&result),
             )
@@ -2781,7 +2889,16 @@ mod tests {
             fs::read(directory.path().join("books").join(&id).join("book.epub")).expect("epub");
 
         let updated = store
-            .update_book_metadata(&id, "Renamed".to_string(), "Author One".to_string(), None)
+            .update_book_metadata(
+                &id,
+                "Renamed".to_string(),
+                "Author One".to_string(),
+                String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
+                None,
+            )
             .expect("title-only update");
 
         assert_eq!(updated.title, "Renamed");
@@ -2815,6 +2932,10 @@ mod tests {
                 &id,
                 "Version Two".to_string(),
                 "Author Two".to_string(),
+                String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
                 Some(vec![4, 5, 6]),
             )
             .expect_err("library write must fail");
@@ -2832,7 +2953,16 @@ mod tests {
         let id = import_test_book(&store, Path::new("/source/edit-empty-title.epub"));
 
         let error = store
-            .update_book_metadata(&id, "   ".to_string(), "Author".to_string(), None)
+            .update_book_metadata(
+                &id,
+                "   ".to_string(),
+                "Author".to_string(),
+                String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
+                None,
+            )
             .expect_err("empty title");
 
         assert_eq!(error.code, AppErrorCode::InvalidInput);
@@ -2850,6 +2980,10 @@ mod tests {
                 &id,
                 "Version One".to_string(),
                 "Author One".to_string(),
+                String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
                 Some(vec![]),
             )
             .expect_err("empty cover");
@@ -2877,6 +3011,10 @@ mod tests {
                 &id,
                 "Version One".to_string(),
                 "Author One".to_string(),
+                String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
                 Some(vec![4, 5, 6]),
             )
             .expect("cover replace");
@@ -2895,6 +3033,215 @@ mod tests {
     }
 
     #[test]
+    fn extra_shelf_fields_persist_round_trip_and_empty_omits_keys() {
+        let (directory, store) = test_store();
+        let source = Path::new("/source/shelf-fields.epub");
+        let result = store
+            .import_bytes(source, "book.epub".to_string(), b"version-one".to_vec())
+            .expect("import");
+        let saved = store
+            .save_book_metadata(
+                &result.book_id,
+                "Version One".to_string(),
+                "Author One".to_string(),
+                "A blurb".to_string(),
+                "Pub Co".to_string(),
+                "zh-CN".to_string(),
+                "The Series · 2".to_string(),
+                Some(vec![1, 2, 3]),
+                staged_import_id(&result),
+            )
+            .expect("commit extra fields");
+
+        assert_eq!(saved.description.as_deref(), Some("A blurb"));
+        assert_eq!(saved.publisher.as_deref(), Some("Pub Co"));
+        assert_eq!(saved.language.as_deref(), Some("zh-CN"));
+        assert_eq!(saved.series.as_deref(), Some("The Series · 2"));
+
+        let listed = store.list_books().expect("reload").remove(0);
+        assert_eq!(listed.description, saved.description);
+        assert_eq!(listed.publisher, saved.publisher);
+        assert_eq!(listed.language, saved.language);
+        assert_eq!(listed.series, saved.series);
+
+        let library_path = directory.path().join("library.json");
+        let value: serde_json::Value =
+            serde_json::from_slice(&fs::read(&library_path).expect("library bytes"))
+                .expect("library json");
+        assert_eq!(value["books"][0]["description"], "A blurb");
+        assert_eq!(value["books"][0]["publisher"], "Pub Co");
+        assert_eq!(value["books"][0]["language"], "zh-CN");
+        assert_eq!(value["books"][0]["series"], "The Series · 2");
+
+        store
+            .update_book_metadata(
+                &result.book_id,
+                "Version One".to_string(),
+                "Author One".to_string(),
+                "  ".to_string(),
+                String::new(),
+                String::new(),
+                String::new(),
+                None,
+            )
+            .expect("clear extra fields");
+
+        let cleared = store.list_books().expect("cleared").remove(0);
+        assert!(cleared.description.is_none());
+        assert!(cleared.publisher.is_none());
+        assert!(cleared.language.is_none());
+        assert!(cleared.series.is_none());
+        let value: serde_json::Value =
+            serde_json::from_slice(&fs::read(&library_path).expect("library bytes"))
+                .expect("library json");
+        let book = value["books"][0].as_object().expect("book object");
+        assert!(!book.contains_key("description"));
+        assert!(!book.contains_key("publisher"));
+        assert!(!book.contains_key("language"));
+        assert!(!book.contains_key("series"));
+    }
+
+    #[test]
+    fn old_library_json_without_extra_shelf_fields_still_reads() {
+        let (directory, store) = test_store();
+        let id = import_test_book(&store, Path::new("/source/legacy-shelf.epub"));
+        store
+            .update_book_metadata(
+                &id,
+                "Version One".to_string(),
+                "Author One".to_string(),
+                "keep".to_string(),
+                "press".to_string(),
+                "en".to_string(),
+                "saga".to_string(),
+                None,
+            )
+            .expect("seed extra fields");
+        let library_path = directory.path().join("library.json");
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&fs::read(&library_path).expect("library bytes"))
+                .expect("library json");
+        let book = value["books"][0].as_object_mut().expect("book object");
+        book.remove("description");
+        book.remove("publisher");
+        book.remove("language");
+        book.remove("series");
+        fs::write(
+            &library_path,
+            serde_json::to_vec_pretty(&value).expect("legacy json"),
+        )
+        .expect("write legacy record");
+
+        let books = store.list_books().expect("old records still read");
+        assert_eq!(books.len(), 1);
+        assert_eq!(books[0].id, id);
+        assert!(books[0].description.is_none());
+        assert!(books[0].publisher.is_none());
+        assert!(books[0].language.is_none());
+        assert!(books[0].series.is_none());
+        assert_eq!(books[0].title, "Version One");
+    }
+
+    #[test]
+    fn extra_shelf_fields_over_cap_are_rejected() {
+        let (directory, store) = test_store();
+        let id = import_test_book(&store, Path::new("/source/shelf-over-cap.epub"));
+        let too_long_description = "x".repeat(MAX_DESCRIPTION_BYTES + 1);
+        let error = store
+            .update_book_metadata(
+                &id,
+                "Version One".to_string(),
+                "Author One".to_string(),
+                too_long_description,
+                String::new(),
+                String::new(),
+                String::new(),
+                None,
+            )
+            .expect_err("description over cap");
+        assert_eq!(error.code, AppErrorCode::InvalidInput);
+
+        let too_long_publisher = "x".repeat(MAX_AUTHOR_BYTES + 1);
+        let error = store
+            .update_book_metadata(
+                &id,
+                "Version One".to_string(),
+                "Author One".to_string(),
+                String::new(),
+                too_long_publisher,
+                String::new(),
+                String::new(),
+                None,
+            )
+            .expect_err("publisher over cap");
+        assert_eq!(error.code, AppErrorCode::InvalidInput);
+
+        let record = store.list_books().expect("unchanged").remove(0);
+        assert!(record.description.is_none());
+        assert!(record.publisher.is_none());
+
+        let library_path = directory.path().join("library.json");
+        let original = fs::read(&library_path).expect("original library");
+        let mut value: serde_json::Value = serde_json::from_slice(&original).expect("library json");
+        value["books"][0]["description"] =
+            serde_json::Value::String("x".repeat(MAX_DESCRIPTION_BYTES + 1));
+        fs::write(
+            &library_path,
+            serde_json::to_vec_pretty(&value).expect("over-cap json"),
+        )
+        .expect("write over-cap");
+        let error = store.list_books().expect_err("stored over-cap");
+        assert_eq!(error.code, AppErrorCode::StorageCorrupt);
+    }
+
+    #[test]
+    fn overwrite_replaces_extra_shelf_fields() {
+        let (_directory, store) = test_store();
+        let source = Path::new("/source/overwrite-shelf.epub");
+        let id = import_test_book(&store, source);
+        store
+            .update_book_metadata(
+                &id,
+                "Version One".to_string(),
+                "Author One".to_string(),
+                "Old desc".to_string(),
+                "Old pub".to_string(),
+                "en".to_string(),
+                "Old series".to_string(),
+                None,
+            )
+            .expect("seed extra fields");
+        store
+            .update_reading_state(&id, Some(0.42), None, None, None, None)
+            .expect("progress");
+
+        let result = store
+            .import_bytes(source, "book.epub".to_string(), b"version-two".to_vec())
+            .expect("reimport");
+        store
+            .save_book_metadata(
+                &id,
+                "Version Two".to_string(),
+                "Author Two".to_string(),
+                "New desc".to_string(),
+                "New pub".to_string(),
+                "zh".to_string(),
+                "New series".to_string(),
+                Some(vec![9, 9, 9]),
+                staged_import_id(&result),
+            )
+            .expect("commit overwrite");
+
+        let after = store.list_books().expect("after").remove(0);
+        assert_eq!(after.title, "Version Two");
+        assert_eq!(after.description.as_deref(), Some("New desc"));
+        assert_eq!(after.publisher.as_deref(), Some("New pub"));
+        assert_eq!(after.language.as_deref(), Some("zh"));
+        assert_eq!(after.series.as_deref(), Some("New series"));
+        assert_eq!(after.last_fraction, Some(0.42));
+    }
+
+    #[test]
     fn unknown_metadata_id_does_not_create_a_cover_path() {
         let (directory, store) = test_store();
         let unknown = "deadbeef";
@@ -2903,6 +3250,10 @@ mod tests {
             .save_book_metadata(
                 unknown,
                 "Unknown".to_string(),
+                String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
                 String::new(),
                 Some(vec![1, 2, 3]),
                 "pending1",
@@ -2964,6 +3315,10 @@ mod tests {
                 &id,
                 "Version Two".to_string(),
                 "Author Two".to_string(),
+                String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
                 Some(vec![4, 5, 6]),
                 staged_import_id(&result),
             )
@@ -2998,6 +3353,10 @@ mod tests {
                 &id,
                 "Version Two".to_string(),
                 "Author Two".to_string(),
+                String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
                 Some(vec![4, 5, 6]),
                 staged_import_id(&result),
             )
@@ -3429,6 +3788,10 @@ mod tests {
                 &id,
                 "Version Two".to_string(),
                 "Author Two".to_string(),
+                String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
                 None,
                 staged_import_id(&pending),
             )
@@ -3531,6 +3894,10 @@ mod tests {
                 &result.book_id,
                 title.to_string(),
                 "Author One".to_string(),
+                String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
                 Some(vec![1, 2, 3]),
                 staged_import_id(&result),
             )
@@ -3616,6 +3983,10 @@ mod tests {
                 &id,
                 "Version Two".to_string(),
                 "Author Two".to_string(),
+                String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
                 Some(vec![9, 9, 9]),
                 staged_import_id(&result),
             )
@@ -3722,6 +4093,10 @@ mod tests {
                 &id,
                 "Version Two".to_string(),
                 "Author Two".to_string(),
+                String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
                 Some(vec![9, 9, 9]),
                 staged_import_id(&overwrite),
             )
@@ -4380,6 +4755,10 @@ mod tests {
                 &id,
                 "Version Two".to_string(),
                 "Author Two".to_string(),
+                String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
                 Some(vec![9, 9, 9]),
                 staged_import_id(&result),
             )

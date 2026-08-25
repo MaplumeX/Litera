@@ -44,6 +44,10 @@ vi.mock("@/lib/book-utils", () => ({
   extractEpubMetadata: vi.fn(async () => ({
     title: "Extracted Title",
     author: "Extracted Author",
+    description: "A summary",
+    publisher: "Pub",
+    language: "en",
+    series: "Saga · 1",
     coverBytes: null,
   })),
 }));
@@ -184,6 +188,10 @@ describe("LibraryView", () => {
           bookId: "book-1",
           importId: "imp-1",
           title: "Extracted Title",
+          description: "A summary",
+          publisher: "Pub",
+          language: "en",
+          series: "Saga · 1",
         }),
       );
     });
@@ -518,9 +526,74 @@ describe("LibraryView", () => {
         bookId: "book-1",
         title: "New Title",
         author: "New Author",
+        description: "",
+        publisher: "",
+        language: "",
+        series: "",
       });
     });
     expect(await findByText("New Title")).toBeTruthy();
+  });
+
+  it("saves extra details fields", async () => {
+    const withExtra: BookRecord = {
+      ...book,
+      description: "Old blurb",
+      publisher: "Old pub",
+      language: "en",
+      series: "Old series",
+    };
+    const updated = {
+      ...withExtra,
+      description: "New blurb",
+      publisher: "New pub",
+      language: "zh",
+      series: "New series",
+    };
+    setupInvoke({
+      list_books: () => [withExtra],
+      update_book_metadata: () => updated,
+    });
+    const { findByText, getByRole, getByLabelText } = render(
+      <LibraryView onOpenBook={() => {}} onOpenSettings={() => {}} />,
+    );
+    await findByText("Stored Title");
+    fireEvent.pointerDown(getByRole("button", { name: "更多操作" }));
+    (await waitFor(() => getByRole("menuitem", { name: "详情" }))).click();
+    expect(await findByText("书籍详情")).toBeTruthy();
+
+    fireEvent.change(getByLabelText("简介"), { target: { value: "New blurb" } });
+    fireEvent.change(getByLabelText("出版社"), { target: { value: "New pub" } });
+    fireEvent.change(getByLabelText("语言"), { target: { value: "zh" } });
+    fireEvent.change(getByLabelText("系列"), { target: { value: "New series" } });
+    getByRole("button", { name: "保存" }).click();
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith("update_book_metadata", {
+        bookId: "book-1",
+        title: "Stored Title",
+        author: "Author",
+        description: "New blurb",
+        publisher: "New pub",
+        language: "zh",
+        series: "New series",
+      });
+    });
+  });
+
+  it("does not autofocus or select the title when opening details", async () => {
+    const { findByText, getByRole, getByLabelText } = render(
+      <LibraryView onOpenBook={() => {}} onOpenSettings={() => {}} />,
+    );
+    await findByText("Stored Title");
+    fireEvent.pointerDown(getByRole("button", { name: "更多操作" }));
+    (await waitFor(() => getByRole("menuitem", { name: "详情" }))).click();
+    await findByText("书籍详情");
+    const titleInput = getByLabelText("书名") as HTMLInputElement;
+    expect(document.activeElement).not.toBe(titleInput);
+    expect(
+      titleInput.selectionStart === 0 && titleInput.selectionEnd === titleInput.value.length,
+    ).toBe(false);
   });
 
   it("sends coverBytes and cache-busts the cover after a replace", async () => {
