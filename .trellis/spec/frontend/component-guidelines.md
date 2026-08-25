@@ -69,6 +69,7 @@ import "./index.css";
 - `slider.tsx` — Appearance chrome font size on `SettingsDialog` (typography continuous fields use `−` / `Input` / `+`, not this slider)
 - `popover.tsx` + `command.tsx` — searchable combobox (reader font picker; custom LLM model picker)
 - `input.tsx` — text/password inputs
+- `textarea.tsx` — multiline text (book details description)
 - `label.tsx` — form labels
 
 **Rule**: New modals and form fields must use these shadcn components, not native `<select>`/`<input>`/`<label>`/hand-written overlay divs. Add more via `npx shadcn@latest add <name>` when needed. `alert-dialog.tsx` may match the existing `dialog.tsx` Radix style if the CLI add fails; do not use `window.confirm()` / `window.alert()`.
@@ -390,6 +391,22 @@ Appearance / AI / About keep a single scrolling column (`max-w-md`). Typography 
 > **Warning**: Radix Dialog listens for Escape on `document` in the capture phase. A focused stepper's `onKeyDown` cannot stop the dialog from closing. Handle Escape with `DialogContent` `onEscapeKeyDown`: if `event.target.closest("[data-typography-stepper]")`, `preventDefault()` so the row can revert the draft instead.
 
 **Tests**: Typography has no `slider` named 字体大小 / 首行缩进. `+` from 16px font size calls `onTypographyChange("fontSize", 17)`. Invalid blur reverts. Appearance still exposes `slider` 界面字号. Scrolling the inspector must not unmount `.litera-typography-preview`.
+
+### Convention: book details dialog does not auto-select the title
+
+**What**: `BookDetailsDialog` saves title, author, description, publisher, language, series, and optional cover via `update_book_metadata`. Opening the dialog must `onOpenAutoFocus={(event) => event.preventDefault()}` on `DialogContent`. Do not `autoFocus` or `select()` the title input. Description uses shadcn `Textarea`; the other extra fields use `Input`. `DialogContent` is `max-h-[85vh] overflow-y-auto` so Save stays reachable on the default window. Cards, list rows, continue-reading, and search stay title/author/cover only.
+
+**Why**: Radix Dialog focuses the first tabbable control (the title `Input`). WebView then selects all text, so opening Details looks like "overwrite the title now". Bibliographic extras live on the shelf record, not in the EPUB (see backend `tauri-commands.md` "Scenario: update book metadata after import"). The four extra fields plus cover preview overflow a 800×600 window without a scrollable content box.
+
+**Example**:
+```tsx
+<DialogContent
+  className="max-h-[85vh] overflow-y-auto sm:max-w-md"
+  onOpenAutoFocus={(event) => event.preventDefault()}
+>
+```
+
+**Related**: backend `tauri-commands.md` "Scenario: update book metadata after import"; frontend `i18n.md` `library.field*` keys.
 
 ### Convention: library confirms and selection mode
 

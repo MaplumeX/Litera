@@ -37,6 +37,10 @@ export async function commitStagedImport(result: ImportBookResult): Promise<void
     bookId: result.bookId,
     title: metadata.title,
     author: metadata.author,
+    description: metadata.description,
+    publisher: metadata.publisher,
+    language: metadata.language,
+    series: metadata.series,
     coverBytes: metadata.coverBytes ?? null,
     importId: result.importId,
   });

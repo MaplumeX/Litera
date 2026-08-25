@@ -6,7 +6,13 @@ declare module "*/foliate-js/view.js" {
       title?: string | Record<string, string> | { lang?: string; value: string }[];
       author?: unknown;
       identifier?: string;
+      description?: string | Record<string, string> | { lang?: string; value: string }[];
+      publisher?: string | Record<string, string> | { lang?: string; value: string }[];
       language?: string | string[];
+      belongsTo?: {
+        series?: unknown;
+        collection?: unknown;
+      };
     };
     getCover?(): Promise<Blob | null>;
     destroy?(): void;

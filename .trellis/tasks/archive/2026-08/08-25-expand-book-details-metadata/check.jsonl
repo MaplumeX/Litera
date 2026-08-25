@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "Optional fields must not bump schemaVersion; old library.json must load"}
+{"file": ".trellis/spec/backend/tauri-commands.md", "reason": "Post-import edits must not reuse save_book_metadata; EPUB must stay untouched"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Details dialog must use shadcn Input/Textarea/Dialog"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "Frontend BookRecord optional fields aligned with Rust"}
+{"file": ".trellis/spec/frontend/i18n.md", "reason": "New strings in both locale catalogs"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Do not write metadata back to EPUB or mix Agent OPF reads with shelf fields"}
+{"file": ".trellis/tasks/08-25-expand-book-details-metadata/research/epub-prefill-fields.md", "reason": "Import prefill mapping and HTML-strip rule"}
+{"file": ".trellis/tasks/08-25-expand-book-details-metadata/research/reader-metadata-writeback.md", "reason": "Do not treat Calibre embed-on-export as the default reader save path"}

@@ -11,6 +11,10 @@ vi.mock("@/lib/book-utils", () => ({
   extractEpubMetadata: vi.fn(async () => ({
     title: "Extracted Title",
     author: "Extracted Author",
+    description: "A summary",
+    publisher: "Pub",
+    language: "en",
+    series: "Saga · 1",
     coverBytes: null,
   })),
 }));
@@ -98,6 +102,38 @@ describe("processImportResults", () => {
     expect(invokeMock.mock.calls.some(([cmd]) => cmd === "save_book_metadata")).toBe(false);
   });
 
+  it("commits a new import with extracted extra metadata", async () => {
+    const created: ImportBookResult = {
+      status: "new",
+      bookId: "book-1",
+      title: "book.epub",
+      importId: "imp-1",
+      name: "book.epub",
+    };
+    setupInvoke({
+      read_import_bytes: () => new ArrayBuffer(8),
+      save_book_metadata: () => ({ id: "book-1" }),
+    });
+
+    const ids = await processImportResults([created], {
+      askConfirm: vi.fn(),
+      onNotice: vi.fn(),
+    });
+
+    expect(ids).toEqual(["book-1"]);
+    expect(invokeMock).toHaveBeenCalledWith("save_book_metadata", {
+      bookId: "book-1",
+      title: "Extracted Title",
+      author: "Extracted Author",
+      description: "A summary",
+      publisher: "Pub",
+      language: "en",
+      series: "Saga · 1",
+      coverBytes: null,
+      importId: "imp-1",
+    });
+  });
+
   it("commits an overwrite after confirm", async () => {
     const overwrite: ImportBookResult = {
       status: "overwrite",
@@ -123,6 +159,10 @@ describe("processImportResults", () => {
         bookId: "book-1",
         importId: "imp-1",
         title: "Extracted Title",
+        description: "A summary",
+        publisher: "Pub",
+        language: "en",
+        series: "Saga · 1",
       }),
     );
   });

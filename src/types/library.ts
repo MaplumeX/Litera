@@ -27,6 +27,10 @@ export interface BookRecord {
   id: string;
   title: string;
   author: string;
+  description?: string;
+  publisher?: string;
+  language?: string;
+  series?: string;
   coverPath: string;
   filePath: string;
   importedAt: string;
