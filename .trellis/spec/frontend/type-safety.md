@@ -29,6 +29,10 @@ export interface BookRecord {
   id: string;
   title: string;
   author: string;
+  description?: string;   // omit empty; shelf-only
+  publisher?: string;
+  language?: string;
+  series?: string;
   coverPath: string;      // camelCase matches Rust #[serde(rename = "camelCase")]
   filePath: string;
   importedAt: string;      // ISO 8601 (RFC3339)

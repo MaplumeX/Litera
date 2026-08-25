@@ -143,11 +143,11 @@ async fn read_import_bytes(store: State<'_, LibraryStore>, book_id: String, impo
 
 // Commit extracted metadata + cover and the staged EPUB as one recoverable import version
 #[tauri::command]
-async fn save_book_metadata(store: State<'_, LibraryStore>, book_id: String, title: String, author: String, cover_bytes: Option<Vec<u8>>, import_id: String) -> AppResult<BookRecord>
+async fn save_book_metadata(store: State<'_, LibraryStore>, book_id: String, title: String, author: String, description: String, publisher: String, language: String, series: String, cover_bytes: Option<Vec<u8>>, import_id: String) -> AppResult<BookRecord>
 
-// Edit title/author/cover after import. Never reuse save_book_metadata for this.
+// Edit title/author/description/publisher/language/series/cover after import. Never reuse save_book_metadata for this.
 #[tauri::command]
-async fn update_book_metadata(store: State<'_, LibraryStore>, book_id: String, title: String, author: String, cover_bytes: Option<Vec<u8>>) -> AppResult<BookRecord>
+async fn update_book_metadata(store: State<'_, LibraryStore>, book_id: String, title: String, author: String, description: String, publisher: String, language: String, series: String, cover_bytes: Option<Vec<u8>>) -> AppResult<BookRecord>
 
 // List all books
 #[tauri::command]
@@ -199,6 +199,10 @@ interface BookRecord {
   id: string;
   title: string;
   author: string;
+  description?: string; // omit empty; 32 KiB; shelf-only, not written back to EPUB
+  publisher?: string;   // omit empty; 4 KiB
+  language?: string;    // omit empty; 4 KiB
+  series?: string;      // omit empty; 4 KiB; single string, not name+index
   coverPath: string;    // absolute path to app_data/books/<id>/cover.jpg (new) or cover.png (legacy)
   filePath: string;     // absolute path to app_data/books/<id>/book.epub
   importedAt: string;   // ISO 8601 (RFC3339)
@@ -305,7 +309,7 @@ Do not filter `book.id != incoming_id` when matching `contentHash`. That made sa
 
 `save_book_metadata` writes `contentHash` from the staged bytes. An overwrite must keep `lastFraction`, `lastCfi`, `settings`, `lastOpenedAt`, `lastReaderMode`, and `lastLayout`. Same-path unchanged is a no-op on `library.json` and the committed EPUB. Overwrite also leaves `books/<id>/annotations.json` in place.
 
-**Post-import metadata**: `update_book_metadata` is the only command that edits an already-committed book's title, author, or cover. Do not call `save_book_metadata` for this — that path requires a staged `importId` and can replace the EPUB / clear `coverPath` when no new cover is sent. See **Scenario: update book metadata after import**.
+**Post-import metadata**: `update_book_metadata` is the only command that edits an already-committed book's title, author, description, publisher, language, series, or cover. Do not call `save_book_metadata` for this — that path requires a staged `importId` and can replace the EPUB / clear `coverPath` when no new cover is sent. See **Scenario: update book metadata after import**.
 
 **Cover compression**: `save_book_metadata` and `update_book_metadata` compress incoming `cover_bytes` before writing — decode with the `image` crate, downscale so the long edge ≤ 512px (never upscale), re-encode as JPEG quality 85, and write to `cover.jpg` (not `cover.png`). On any decode/encode failure, fall back to the original bytes so a broken cover never blocks an import or edit. `MAX_COVER_BYTES` validates the raw input before compression. Legacy books with `cover.png` are not migrated; validation and transaction rollback accept both extensions. Frontend `convertFileSrc(coverPath)` works with any extension. After a cover replace, cache-bust the asset URL (`?v=`) and reset `<img>` error state; otherwise WebView may keep the old JPEG.
 
@@ -327,7 +331,7 @@ Do not filter `book.id != incoming_id` when matching `contentHash`. That made sa
 
 ### 1. Scope / Trigger
 
-Cross-layer edit of an already-committed shelf record. The details dialog saves title, author, and optional cover without touching the EPUB, `bookId`, progress, settings, annotations, or sessions. A new command is required because `save_book_metadata` is the import commit.
+Cross-layer edit of an already-committed shelf record. The details dialog saves title, author, description, publisher, language, series, and optional cover without touching the EPUB, `bookId`, progress, settings, annotations, or sessions. A new command is required because `save_book_metadata` is the import commit. Readers in this class keep metadata on the shelf (not OPF); do not dual-write the zip on Save.
 
 ### 2. Signatures
 
@@ -337,26 +341,51 @@ async fn update_book_metadata(
     book_id: String,
     title: String,
     author: String,
+    description: String,
+    publisher: String,
+    language: String,
+    series: String,
     cover_bytes: Option<Vec<u8>>,
 ) -> AppResult<BookRecord>
+
+async fn save_book_metadata(
+    store: State<'_, LibraryStore>,
+    book_id: String,
+    title: String,
+    author: String,
+    description: String,
+    publisher: String,
+    language: String,
+    series: String,
+    cover_bytes: Option<Vec<u8>>,
+    import_id: String,
+) -> AppResult<BookRecord>
 ```
+
+Both store methods and commands take eight-plus arguments; keep them flat (same as `update_reading_state`) and `#[allow(clippy::too_many_arguments)]`. Do not nest a patch struct.
 
 ```ts
 await invoke<BookRecord>("update_book_metadata", {
   bookId,
   title,
   author,
-  coverBytes?: Uint8Array, // omit to keep the current cover
+  description,
+  publisher,
+  language,
+  series,
+  coverBytes?: number[], // omit to keep the current cover
 });
 ```
 
 ### 3. Contracts
 
 - `title` is required (trim-empty rejected). `author` may be empty.
+- `description` / `publisher` / `language` / `series` are always sent as strings. Trim-empty persists as omitted keys (`None`), not `""`. Caps: description 32 KiB; the other three 4 KiB (`MAX_AUTHOR_BYTES`).
 - `cover_bytes: None` / omitted `coverBytes` → do not read, write, or clear `cover.jpg` / `coverPath`.
 - `cover_bytes: Some(bytes)` → non-empty, ≤ `MAX_COVER_BYTES` (20 MiB); compress then atomic-write `cover.jpg` and keep `coverPath` pointing at that file.
 - Must not change `id`, `filePath`, `importedAt`, `contentHash`, `contentVersion`, `lastFraction`, `lastCfi`, `settings`, `lastOpenedAt`, `lastReaderMode`, `lastLayout`.
-- Must not write EPUB bytes or bump `library.json` `schemaVersion`.
+- Must not write EPUB bytes or bump `library.json` `schemaVersion`. Agent `get_book_metadata` still parses the stored EPUB; shelf edits do not appear there.
+- Import commit (`save_book_metadata`) pre-fills the four extra fields from `extractEpubMetadata` (foliate: description / publisher / language / `belongsTo.series`). Missing extract → empty strings. Overwrite replaces them like title/author. Already-imported books are not backfilled.
 - Cover picker is a WebView `<input type="file" accept="image/*">`. Do not add `dialog` / `fs` permissions.
 - Lock + recoverable atomic write + `spawn_blocking`, same as other library mutations. Cover write failure restores the previous JPEG; `library.json` write failure restores the previous JPEG and leaves the record unchanged.
 
@@ -366,26 +395,34 @@ await invoke<BookRecord>("update_book_metadata", {
 |-----------|----------------|
 | Unknown / traversal `bookId` | `InvalidInput` or `book_not_found` |
 | Empty / whitespace `title` | `InvalidInput`; no files written |
+| Extra field over its byte cap | `InvalidInput`; no files written |
+| Stored extra field over cap | `StorageCorrupt` |
 | `Some([])` cover | `InvalidInput`; no files written |
 | Cover larger than `MAX_COVER_BYTES` | `InvalidInput`; no files written |
 | Cover or `library.json` persist failure | `StorageIo`; previous cover and record restored |
-| Title-only update | Success; cover bytes on disk unchanged |
+| Title-only update | Success; cover bytes, EPUB, and `contentHash` unchanged |
 
 ### 5. Good/Base/Bad Cases
 
 - **Good**: rename title/author with `coverBytes` omitted; cover file, progress, hash, and EPUB bytes stay identical.
 - **Good**: replace cover; new JPEG on disk; `lastFraction` / `contentHash` unchanged; reader chrome uses the new title.
-- **Base**: empty author is stored; empty title is not.
+- **Good**: save description/publisher/language/series; old `library.json` without those keys still loads; empty strings omit the keys on write.
+- **Good**: new import extracts the four fields; overwrite import replaces them; duplicate does not save.
+- **Base**: empty author and empty extra fields are stored as empty/omitted; empty title is not.
 - **Bad**: calling `save_book_metadata` from the details dialog (needs `importId`, may replace EPUB / clear cover).
 - **Bad**: sending `coverBytes: []` to mean "keep cover".
+- **Bad**: rewriting `book.epub` OPF on details save (changes `contentHash`; not what readers do).
 
 ### 6. Tests Required
 
 - Title-only update keeps cover bytes, `lastFraction`, `contentHash`, and EPUB bytes.
 - Cover replace writes new bytes and keeps progress / hash / EPUB.
+- Extra fields round-trip; empty omits JSON keys; missing keys on old files load.
+- Extra field over cap → `InvalidInput`; stored over-cap → `StorageCorrupt`.
+- Overwrite import replaces the four fields and keeps progress.
 - Empty title and empty `Some([])` cover rejected with `InvalidInput`.
 - Forced `library.json` write failure after a new cover restores the previous JPEG and old title.
-- Frontend: omit `coverBytes` when no file is chosen; include bytes when a file is chosen.
+- Frontend: omit `coverBytes` when no file is chosen; include bytes when a file is chosen; always send the four extra strings.
 
 ### 7. Wrong vs Correct
 
@@ -398,7 +435,9 @@ await invoke("save_book_metadata", { bookId, title, author, coverBytes: null, im
 #### Correct
 
 ```ts
-await invoke<BookRecord>("update_book_metadata", { bookId, title, author });
+await invoke<BookRecord>("update_book_metadata", {
+  bookId, title, author, description, publisher, language, series,
+});
 ```
 
 #### Wrong
@@ -410,11 +449,11 @@ await invoke("update_book_metadata", { bookId, title, author, coverBytes: new Ui
 #### Correct
 
 ```ts
-const args: { bookId: string; title: string; author: string; coverBytes?: Uint8Array } = {
-  bookId,
-  title,
-  author,
-};
+const args: {
+  bookId: string; title: string; author: string;
+  description: string; publisher: string; language: string; series: string;
+  coverBytes?: number[];
+} = { bookId, title, author, description, publisher, language, series };
 if (coverBytes) args.coverBytes = coverBytes;
 await invoke<BookRecord>("update_book_metadata", args);
 ```
