@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "Optional BookRecord fields, schemaVersion 1, deny_unknown_fields"}
+{"file": ".trellis/spec/backend/tauri-commands.md", "reason": "update_book_metadata vs save_book_metadata import commit contract"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Dialog/input/textarea shadcn usage and chrome language"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "TS BookRecord must match Rust serde camelCase"}
+{"file": ".trellis/spec/frontend/i18n.md", "reason": "zh-CN/en catalogs for new details field labels"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Shelf record vs EPUB bytes vs Agent metadata paths"}
+{"file": ".trellis/tasks/08-25-expand-book-details-metadata/research/epub-prefill-fields.md", "reason": "foliate/Readium mapping for description publisher language series"}
+{"file": ".trellis/tasks/08-25-expand-book-details-metadata/research/reader-metadata-writeback.md", "reason": "Industry practice: readers keep metadata in library/sidecar, not EPUB"}
