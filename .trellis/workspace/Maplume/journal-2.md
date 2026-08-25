@@ -324,3 +324,26 @@ Clustered Agent workspace outline ticks like Paseo (8px non-stretching slots, ra
 ### Status
 
 [OK] **Completed**
+
+
+## Session 100: Expand book details metadata editing
+
+**Date**: 2026-08-25
+**Task**: Expand book details metadata editing
+**Branch**: `feat/metadata-editing-selection-and-fields`
+
+### Summary
+
+Details dialog no longer auto-selects the title. Users can edit description, publisher, language, and series on the shelf record. New imports prefill those fields from EPUB; already-imported books are not backfilled. Saves do not rewrite the EPUB. Specs record the extra BookRecord fields and the details-dialog focus rule.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3731f0e` | (see git log) |
+| `ec86da0` | (see git log) |
+| `064318f` | (see git log) |
+
+### Status
+
+[OK] **Completed**
