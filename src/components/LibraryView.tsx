@@ -396,7 +396,7 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
         ) : (
           <div className="space-y-6">
             {recents.length > 0 && (
-              <section>
+              <section className="border-b pb-6">
                 <h2 className="mb-3 text-sm font-medium">
                   {t("library.continueReading")}
                 </h2>
