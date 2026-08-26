@@ -347,3 +347,24 @@ Details dialog no longer auto-selects the title. Users can edit description, pub
 ### Status
 
 [OK] **Completed**
+
+
+## Session 101: Publish Litera 0.2.8
+
+**Date**: 2026-08-26
+**Task**: Publish Litera 0.2.8
+**Branch**: `main`
+
+### Summary
+
+Bumped to 0.2.8, wrote changelog, tagged v0.2.8, and published the GitHub release after all three platform jobs succeeded. Draft notes filled; published with AppImage, deb, dmg, and NSIS exe.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3fb9720` | (see git log) |
+
+### Status
+
+[OK] **Completed**

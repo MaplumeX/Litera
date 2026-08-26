@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 100
-- **Last Active**: 2026-08-25
+- **Total Sessions**: 101
+- **Last Active**: 2026-08-26
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~349 | Active |
+| `journal-2.md` | ~370 | Active |
 | `journal-1.md` | ~1996 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 101 | 2026-08-26 | Publish Litera 0.2.8 | `3fb9720` | `main` |
 | 100 | 2026-08-25 | Expand book details metadata editing | `3731f0e`, `ec86da0`, `064318f` | `feat/metadata-editing-selection-and-fields` |
 | 99 | 2026-08-24 | Fix Agent chat outline rail layout | `72b6d89` | `fix/litera-agent-toc-hover-all-items` |
 | 98 | 2026-08-24 | Match continue-reading cards to shelf grid | `75fb25d` | `fix/continue-reading-book-size` |
