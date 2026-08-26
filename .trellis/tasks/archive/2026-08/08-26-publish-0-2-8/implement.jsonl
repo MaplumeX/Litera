@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend spec index; release work follows Desktop Release layer"}
+{"file": ".trellis/spec/backend/release.md", "reason": "Version lockstep, bump command, CI gates, and maintainer cut list"}

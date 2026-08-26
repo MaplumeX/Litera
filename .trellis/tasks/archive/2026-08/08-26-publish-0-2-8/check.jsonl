@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "Quality Check entry for backend layer"}
+{"file": ".trellis/spec/backend/release.md", "reason": "Verify version lockstep and changelog/tag contract"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Release-adjacent quality gates for cargo test and Windows thumbnail"}
