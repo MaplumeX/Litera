@@ -66,6 +66,7 @@ const readerHandle: ReaderViewHandle = {
   previewLabelAt: () => undefined,
   goToCfi: vi.fn(async () => true),
   setStyles: vi.fn(),
+  setColumnCount: vi.fn(),
   getToc: () => [],
   getLocation: () => ({
     cfi: "epubcfi(/6/8!/4/2,/1:0,/1:80)",

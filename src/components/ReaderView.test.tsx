@@ -37,7 +37,7 @@ beforeAll(() => {
   }
 });
 
-import { ReaderView } from "./ReaderView";
+import { ReaderView, type ReaderViewHandle } from "./ReaderView";
 
 const fileData = {
   bytes: new Uint8Array(new ArrayBuffer(4)),
@@ -115,5 +115,50 @@ describe("ReaderView open restore", () => {
     });
     expect(consoleError).toHaveBeenCalled();
     consoleError.mockRestore();
+  });
+});
+
+describe("ReaderView setColumnCount", () => {
+  function renderWithHandle() {
+    let handle: ReaderViewHandle | null = null;
+    render(
+      <ReaderView
+        ref={(r: ReaderViewHandle | null) => {
+          handle = r;
+        }}
+        fileData={fileData}
+      />,
+    );
+    return { get handle() { return handle; } };
+  }
+
+  function attachRenderer() {
+    const setAttribute = vi.fn();
+    (viewEl() as unknown as { renderer: unknown }).renderer = { setAttribute };
+    return setAttribute;
+  }
+
+  it("sets max-column-count on the renderer", async () => {
+    const { handle } = renderWithHandle();
+    await waitFor(() => expect(handle).not.toBeNull());
+    const setAttribute = attachRenderer();
+    handle!.setColumnCount(3);
+    expect(setAttribute).toHaveBeenCalledWith("max-column-count", "3");
+  });
+
+  it("clamps out-of-range counts into 1–3", async () => {
+    const { handle } = renderWithHandle();
+    await waitFor(() => expect(handle).not.toBeNull());
+    const setAttribute = attachRenderer();
+    handle!.setColumnCount(0);
+    expect(setAttribute).toHaveBeenLastCalledWith("max-column-count", "1");
+    handle!.setColumnCount(4);
+    expect(setAttribute).toHaveBeenLastCalledWith("max-column-count", "3");
+  });
+
+  it("does not throw when the renderer is missing", async () => {
+    const { handle } = renderWithHandle();
+    await waitFor(() => expect(handle).not.toBeNull());
+    expect(() => handle!.setColumnCount(2)).not.toThrow();
   });
 });

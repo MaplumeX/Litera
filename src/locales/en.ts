@@ -119,6 +119,7 @@ export const en: { [K in MessageKey]: string } = {
   "settings.thisBook": "this book",
   "settings.font": "Font",
   "settings.align": "Alignment",
+  "settings.columns": "Columns",
   "settings.theme": "Theme",
   "settings.language": "Language",
   "settings.defaultMode": "Default reading mode",

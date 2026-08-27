@@ -22,6 +22,7 @@ export type TypographyKey =
   | "letterSpacing"
   | "paragraphSpacing"
   | "firstLineIndent"
+  | "columnCount"
   | "overrideFont"
   | "overrideLayout";
 
@@ -35,6 +36,7 @@ export const TYPOGRAPHY_KEYS: TypographyKey[] = [
   "letterSpacing",
   "paragraphSpacing",
   "firstLineIndent",
+  "columnCount",
   "overrideFont",
   "overrideLayout",
 ];
@@ -47,6 +49,7 @@ export const TYPOGRAPHY_RANGES = {
   letterSpacing: { min: -0.05, max: 0.2, step: 0.01, unit: "em" },
   paragraphSpacing: { min: 0, max: 2, step: 0.05, unit: "em" },
   firstLineIndent: { min: 0, max: 3, step: 0.1, unit: "em" },
+  columnCount: { min: 1, max: 3, step: 1, unit: "" },
 } as const;
 
 export type ContinuousKey = keyof typeof TYPOGRAPHY_RANGES;
@@ -61,6 +64,7 @@ export const DEFAULT_TEXT_ALIGN: TextAlignValue = "start";
 export const DEFAULT_LETTER_SPACING = 0;
 export const DEFAULT_PARAGRAPH_SPACING = 1;
 export const DEFAULT_FIRST_LINE_INDENT = 0;
+export const DEFAULT_COLUMN_COUNT = 2;
 export const DEFAULT_OVERRIDE_FONT = false;
 export const DEFAULT_OVERRIDE_LAYOUT = false;
 
@@ -86,6 +90,7 @@ export interface TypographyDefaults {
   letterSpacing: number;
   paragraphSpacing: number;
   firstLineIndent: number;
+  columnCount: number;
   overrideFont: boolean;
   overrideLayout: boolean;
 }
@@ -100,6 +105,7 @@ export const DEFAULT_TYPOGRAPHY: TypographyDefaults = {
   letterSpacing: DEFAULT_LETTER_SPACING,
   paragraphSpacing: DEFAULT_PARAGRAPH_SPACING,
   firstLineIndent: DEFAULT_FIRST_LINE_INDENT,
+  columnCount: DEFAULT_COLUMN_COUNT,
   overrideFont: DEFAULT_OVERRIDE_FONT,
   overrideLayout: DEFAULT_OVERRIDE_LAYOUT,
 };
@@ -223,6 +229,10 @@ export function normalizeSettings(
       "firstLineIndent",
       settings?.firstLineIndent ?? preferences?.firstLineIndent,
     ),
+    columnCount: normalizeContinuous(
+      "columnCount",
+      settings?.columnCount ?? preferences?.columnCount,
+    ),
     overrideFont: settings?.overrideFont ?? preferences?.overrideFont ?? DEFAULT_OVERRIDE_FONT,
     overrideLayout:
       settings?.overrideLayout ?? preferences?.overrideLayout ?? DEFAULT_OVERRIDE_LAYOUT,
@@ -249,6 +259,7 @@ function materializeOverrides(
   if (overrides.letterSpacing != null) result.letterSpacing = overrides.letterSpacing;
   if (overrides.paragraphSpacing != null) result.paragraphSpacing = overrides.paragraphSpacing;
   if (overrides.firstLineIndent != null) result.firstLineIndent = overrides.firstLineIndent;
+  if (overrides.columnCount != null) result.columnCount = overrides.columnCount;
   if (overrides.overrideFont != null) result.overrideFont = overrides.overrideFont;
   if (overrides.overrideLayout != null) result.overrideLayout = overrides.overrideLayout;
   return result;

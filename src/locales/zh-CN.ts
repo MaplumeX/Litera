@@ -117,6 +117,7 @@ export const zhCN = {
   "settings.thisBook": "这本书",
   "settings.font": "字体",
   "settings.align": "对齐",
+  "settings.columns": "分栏数",
   "settings.theme": "主题",
   "settings.language": "语言",
   "settings.defaultMode": "默认阅读模式",

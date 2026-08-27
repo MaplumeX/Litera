@@ -19,6 +19,7 @@ const PAGE_PADDING_RANGE: (f64, f64) = (0.5, 4.0);
 const LETTER_SPACING_RANGE: (f64, f64) = (-0.05, 0.2);
 const PARAGRAPH_SPACING_RANGE: (f64, f64) = (0.0, 2.0);
 const FIRST_LINE_INDENT_RANGE: (f64, f64) = (0.0, 3.0);
+const COLUMN_COUNT_RANGE: (i64, i64) = (1, 3);
 
 fn default_font_size() -> f64 {
     16.0
@@ -56,6 +57,10 @@ fn default_first_line_indent() -> f64 {
     0.0
 }
 
+fn default_column_count() -> i64 {
+    2
+}
+
 fn default_override_font() -> bool {
     false
 }
@@ -69,6 +74,12 @@ fn clamp_or_default(value: Option<f64>, min: f64, max: f64, default: f64) -> f64
         Some(number) if number.is_finite() => number.clamp(min, max),
         _ => default,
     }
+}
+
+fn clamp_column_count(value: Option<i64>) -> i64 {
+    value
+        .unwrap_or_else(default_column_count)
+        .clamp(COLUMN_COUNT_RANGE.0, COLUMN_COUNT_RANGE.1)
 }
 
 #[derive(Debug, Deserialize)]
@@ -95,6 +106,8 @@ struct PreferencesDataRaw {
     #[serde(default)]
     first_line_indent: Option<f64>,
     #[serde(default)]
+    column_count: Option<i64>,
+    #[serde(default)]
     override_font: Option<bool>,
     #[serde(default)]
     override_layout: Option<bool>,
@@ -116,6 +129,7 @@ struct PreferencesData {
     letter_spacing: f64,
     paragraph_spacing: f64,
     first_line_indent: f64,
+    column_count: i64,
     override_font: bool,
     override_layout: bool,
 }
@@ -176,6 +190,7 @@ impl From<PreferencesDataRaw> for PreferencesData {
                 FIRST_LINE_INDENT_RANGE.1,
                 default_first_line_indent(),
             ),
+            column_count: clamp_column_count(raw.column_count),
             override_font: raw.override_font.unwrap_or_else(default_override_font),
             override_layout: raw.override_layout.unwrap_or_else(default_override_layout),
         }
@@ -205,6 +220,7 @@ impl Default for PreferencesData {
             letter_spacing: default_letter_spacing(),
             paragraph_spacing: default_paragraph_spacing(),
             first_line_indent: default_first_line_indent(),
+            column_count: default_column_count(),
             override_font: default_override_font(),
             override_layout: default_override_layout(),
         }
@@ -233,6 +249,7 @@ pub struct PreferencesResponse {
     pub letter_spacing: f64,
     pub paragraph_spacing: f64,
     pub first_line_indent: f64,
+    pub column_count: i64,
     pub override_font: bool,
     pub override_layout: bool,
 }
@@ -250,6 +267,7 @@ impl From<PreferencesData> for PreferencesResponse {
             letter_spacing: data.letter_spacing,
             paragraph_spacing: data.paragraph_spacing,
             first_line_indent: data.first_line_indent,
+            column_count: data.column_count,
             override_font: data.override_font,
             override_layout: data.override_layout,
         }
@@ -268,6 +286,7 @@ struct PreferencesPatch {
     letter_spacing: Option<f64>,
     paragraph_spacing: Option<f64>,
     first_line_indent: Option<f64>,
+    column_count: Option<i64>,
     override_font: Option<bool>,
     override_layout: Option<bool>,
 }
@@ -284,6 +303,7 @@ impl PreferencesPatch {
             && self.letter_spacing.is_none()
             && self.paragraph_spacing.is_none()
             && self.first_line_indent.is_none()
+            && self.column_count.is_none()
             && self.override_font.is_none()
             && self.override_layout.is_none()
     }
@@ -441,6 +461,9 @@ impl PreferencesStore {
         if let Some(first_line_indent) = patch.first_line_indent {
             data.first_line_indent = first_line_indent;
         }
+        if let Some(column_count) = patch.column_count {
+            data.column_count = column_count;
+        }
         if let Some(override_font) = patch.override_font {
             data.override_font = override_font;
         }
@@ -533,6 +556,13 @@ fn validate_patch(patch: &PreferencesPatch) -> AppResult<()> {
             ));
         }
     }
+    if let Some(column_count) = patch.column_count {
+        if !(COLUMN_COUNT_RANGE.0..=COLUMN_COUNT_RANGE.1).contains(&column_count) {
+            return Err(AppError::invalid_input(
+                "columnCount must be an integer between 1 and 3",
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -560,6 +590,7 @@ pub async fn save_preferences(
     letter_spacing: Option<f64>,
     paragraph_spacing: Option<f64>,
     first_line_indent: Option<f64>,
+    column_count: Option<i64>,
     override_font: Option<bool>,
     override_layout: Option<bool>,
 ) -> AppResult<()> {
@@ -576,6 +607,7 @@ pub async fn save_preferences(
             letter_spacing,
             paragraph_spacing,
             first_line_indent,
+            column_count,
             override_font,
             override_layout,
         })
@@ -630,6 +662,7 @@ mod tests {
         assert_eq!(data.letter_spacing, 0.0);
         assert_eq!(data.paragraph_spacing, 1.0);
         assert_eq!(data.first_line_indent, 0.0);
+        assert_eq!(data.column_count, 2);
         assert!(!data.override_font);
         assert!(!data.override_layout);
 
@@ -1051,6 +1084,68 @@ mod tests {
         let prefs = store.get().expect("get");
         assert!(!prefs.override_font);
         assert!(!prefs.override_layout);
+    }
+
+    #[test]
+    fn column_count_defaults_and_clamps_on_load() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join("preferences.json");
+        std::fs::write(&path, br#"{"schemaVersion":1,"theme":"dark"}"#)
+            .expect("write without columnCount");
+
+        let store =
+            PreferencesStore::initialize(directory.path().to_path_buf()).expect("init");
+        assert_eq!(store.get().expect("get").column_count, 2);
+
+        std::fs::write(
+            &path,
+            br#"{"schemaVersion":1,"theme":"dark","columnCount":3}"#,
+        )
+        .expect("write columnCount 3");
+        let store =
+            PreferencesStore::initialize(directory.path().to_path_buf()).expect("reinit");
+        assert_eq!(store.get().expect("get").column_count, 3);
+
+        // Out-of-range stored values clamp into 1–3 on load.
+        for (raw, expected) in [(0, 1), (4, 3)] {
+            std::fs::write(
+                &path,
+                format!(r#"{{"schemaVersion":1,"theme":"dark","columnCount":{raw}}}"#),
+            )
+            .expect("write out of range columnCount");
+            let store = PreferencesStore::initialize(directory.path().to_path_buf())
+                .expect("reinit out of range");
+            assert_eq!(store.get().expect("get").column_count, expected);
+        }
+    }
+
+    #[test]
+    fn save_column_count_persists_and_rejects_out_of_range() {
+        let (directory, store) = test_store();
+        store
+            .save(PreferencesPatch {
+                column_count: Some(3),
+                ..PreferencesPatch::default()
+            })
+            .expect("save column count");
+        assert_eq!(store.get().expect("get").column_count, 3);
+
+        drop(store);
+        let recovered =
+            PreferencesStore::initialize(directory.path().to_path_buf()).expect("reinit");
+        assert_eq!(recovered.get().expect("get recovered").column_count, 3);
+
+        let (_directory, store) = test_store();
+        for count in [0, 4] {
+            let error = store
+                .save(PreferencesPatch {
+                    column_count: Some(count),
+                    ..PreferencesPatch::default()
+                })
+                .expect_err("out of range columnCount");
+            assert_eq!(error.code, crate::error::AppErrorCode::InvalidInput);
+        }
+        assert_eq!(store.get().expect("get").column_count, 2);
     }
 
     #[test]

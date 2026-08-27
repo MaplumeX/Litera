@@ -367,6 +367,7 @@ function App() {
   useEffect(() => {
     const css = generateStylesCss({ ...styleState, theme: resolvedTheme });
     readerRef.current?.setStyles(css);
+    readerRef.current?.setColumnCount(styleState.columnCount);
   }, [styleState, resolvedTheme]);
 
   // Escape closes overlay drawers. Page turning lives in ReaderView
@@ -607,6 +608,7 @@ function App() {
     setSectionTicks(readerRef.current?.getSectionFractions() ?? []);
     // Apply saved styles now that the renderer exists.
     readerRef.current?.setStyles(generateStylesCss(styleStateRef.current));
+    readerRef.current?.setColumnCount(styleStateRef.current.columnCount);
   }, []);
 
   useEffect(() => {

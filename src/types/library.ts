@@ -11,6 +11,7 @@ export interface ReadingSettings {
   letterSpacing?: number;
   paragraphSpacing?: number;
   firstLineIndent?: number;
+  columnCount?: number; // 1–3
   overrideFont?: boolean;
   overrideLayout?: boolean;
 }
