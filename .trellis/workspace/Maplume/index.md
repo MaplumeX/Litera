@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 101
-- **Last Active**: 2026-08-26
+- **Total Sessions**: 102
+- **Last Active**: 2026-08-27
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~370 | Active |
+| `journal-2.md` | ~393 | Active |
 | `journal-1.md` | ~1996 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 102 | 2026-08-27 | Configurable column count setting | `f1aeb51`, `0128032`, `006ceb1` | `feat/configurable-column-count` |
 | 101 | 2026-08-26 | Publish Litera 0.2.8 | `3fb9720` | `main` |
 | 100 | 2026-08-25 | Expand book details metadata editing | `3731f0e`, `ec86da0`, `064318f` | `feat/metadata-editing-selection-and-fields` |
 | 99 | 2026-08-24 | Fix Agent chat outline rail layout | `72b6d89` | `fix/litera-agent-toc-hover-all-items` |
