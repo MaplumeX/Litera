@@ -365,7 +365,7 @@ Appearance / AI / About keep a single scrolling column (`max-w-md`). Typography 
 
 ### Convention: settings exclusive choices are a segmented control
 
-**What**: Theme, language, text-align, and the typography override on/off rows in `SettingsDialog` share a local `SegmentedControl` (`src/components/settings/SettingsDialog.tsx`). Appearance rows stay label above, control full width (`PresetRow`). Typography override and alignment sit inline (`PresetRow inline`, `fullWidth={false}`) so the inspector stays ~260px. The track is `bg-muted`; the selected segment is `bg-background shadow-xs`. The group is `role="radiogroup"`; each option is `role="radio"` with `aria-checked`. Arrow keys move focus; Space / Enter select.
+**What**: Theme, language, text-align, column count, and the typography override on/off rows in `SettingsDialog` share a local `SegmentedControl` (`src/components/settings/SettingsDialog.tsx`). Appearance rows stay label above, control full width (`PresetRow`). Typography override, alignment, and column count sit inline (`PresetRow inline`, `fullWidth={false}`) so the inspector stays ~260px. The track is `bg-muted`; the selected segment is `bg-background shadow-xs`. The group is `role="radiogroup"`; each option is `role="radio"` with `aria-checked`. Arrow keys move focus; Space / Enter select.
 
 **Why**: Separate bordered `ChoiceButton`s read as three action buttons, not one exclusive choice. A filled `bg-primary` selected state looks like a CTA. `src/components/ui/` is shadcn-owned — do not drop this control there, and do not add `Switch` / `toggle-group` for exclusive on/off rows.
 
@@ -639,6 +639,8 @@ readerRef.current?.setStyles(css)
 ```
 
 `generateStylesCss` writes `font-family`, `font-size`, `line-height`, `letter-spacing`, `max-width`, `padding-inline`, and `text-align` on `html, body`, plus `p { margin-block-end; text-indent }` with `!important` so EPUB chapter CSS does not win on those paragraph rules. Each `setStyles` call replaces the full stylesheet (not additive).
+
+Column count is NOT a CSS-injected style: `columnCount` (1–3, default 2) goes through `ReaderViewHandle.setColumnCount` → `renderer.setAttribute("max-column-count", String(n))` on the foliate paginator. The paginator lists `max-column-count` in `observedAttributes`; setting it updates `--_max-column-count`, which flows through `--_max-width` into the container size and triggers the existing `ResizeObserver` re-render — no manual `render()` call needed (unlike `max-inline-size`). Actual column count is always `min(maxColumnCount, ceil(size / maxInlineSize))` and portrait containers fall back to 1, so never compute columns app-side. Persist `columnCount` like other typography keys; do not add it to `generateStylesCss` / `generatePreviewCss`.
 
 Publisher chapter CSS and `@font-face` still win on `font-family` / most typography unless the user turns on `overrideFont` / `overrideLayout` (Settings → Typography, two `SegmentedControl` rows after the preview). Both flags default off; both off must keep this baseline stylesheet bit-for-bit (do not weaken existing `!important`). Do not strip publisher stylesheets.
 
