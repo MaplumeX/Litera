@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Frontend quality gates for reviewing the change"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Rust quality gates for preferences/library changes"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "Verify new field typing consistency"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Check frontend+Rust field pipeline consistency (types, serde, validation)"}
