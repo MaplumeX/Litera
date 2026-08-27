@@ -72,6 +72,7 @@ const styleState: ReaderStyleState = {
   letterSpacing: 0,
   paragraphSpacing: 1,
   firstLineIndent: 0,
+  columnCount: 2,
   overrideFont: false,
   overrideLayout: false,
 };
@@ -288,6 +289,70 @@ describe("SettingsDialog", () => {
       within(fontLabel.parentElement as HTMLElement).getByText("恢复默认").click();
     });
     expect(onRestore).toHaveBeenCalledWith("overrideFont");
+  });
+
+  it("renders the column count row and reports changes and restore", () => {
+    const onChange = vi.fn();
+    const onRestore = vi.fn();
+    const { getByRole, getByText, queryByText, rerender } = render(
+      <SettingsDialog
+        open
+        onClose={noop}
+        bookTitle={null}
+        hasBook={false}
+        styleState={styleState}
+        onTypographyChange={onChange}
+        onRestoreDefault={onRestore}
+        overriddenKeys={["columnCount"]}
+        theme="light"
+        onThemeChange={noop}
+      />,
+    );
+
+    const group = getByRole("radiogroup", { name: "分栏数" });
+    expect(group.className).not.toContain("w-full");
+    expect(within(group).getByRole("radio", { name: "2" }).getAttribute("aria-checked")).toBe(
+      "true",
+    );
+    expect(within(group).getByRole("radio", { name: "1" }).getAttribute("aria-checked")).toBe(
+      "false",
+    );
+    expect(getByText("恢复默认")).toBeTruthy();
+
+    act(() => {
+      within(group).getByRole("radio", { name: "3" }).click();
+    });
+    expect(onChange).toHaveBeenCalledWith("columnCount", 3);
+    expect(onChange).not.toHaveBeenCalledWith("textAlign", expect.anything());
+
+    act(() => {
+      getByText("恢复默认").click();
+    });
+    expect(onRestore).toHaveBeenCalledWith("columnCount");
+
+    onChange.mockClear();
+    onRestore.mockClear();
+    rerender(
+      <SettingsDialog
+        open
+        onClose={noop}
+        bookTitle={null}
+        hasBook={false}
+        styleState={{ ...styleState, columnCount: 2 }}
+        onTypographyChange={onChange}
+        onRestoreDefault={onRestore}
+        overriddenKeys={[]}
+        theme="light"
+        onThemeChange={noop}
+      />,
+    );
+
+    expect(
+      within(getByRole("radiogroup", { name: "分栏数" }))
+        .getByRole("radio", { name: "2" })
+        .getAttribute("aria-checked"),
+    ).toBe("true");
+    expect(queryByText("恢复默认")).toBeNull();
   });
 
   it("updates the preview CSS when fontSize changes", () => {

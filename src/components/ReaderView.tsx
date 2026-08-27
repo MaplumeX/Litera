@@ -17,7 +17,7 @@ import {
 } from "@/lib/reader-paging";
 import { sectionIndexAt } from "@/lib/reader-progress";
 import { TTS_HIGHLIGHT_COLOR, TTS_OVERLAY_KEY } from "@/lib/reader-tts";
-import { footnotePopupCss } from "@/lib/reader-styles";
+import { clampSnap, footnotePopupCss, TYPOGRAPHY_RANGES } from "@/lib/reader-styles";
 import {
   getLastUsedHighlightColor,
   highlightColorHex,
@@ -73,6 +73,7 @@ export interface ReaderViewHandle {
   previewLabelAt: (fraction: number) => string | undefined;
   goToCfi: (cfi: string) => Promise<boolean>;
   setStyles: (css: string) => void;
+  setColumnCount: (count: number) => void;
   getToc: () => TocItem[];
   getLocation: () => ReaderLocation | null;
   getSelectionCfi: () => SelectionCfi | null;
@@ -923,6 +924,14 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       const view = viewRef.current as unknown as { renderer?: { setStyles?: (c: string) => void } };
       view?.renderer?.setStyles?.(css);
     }, []);
+    const setColumnCount = useCallback((count: number) => {
+      const spec = TYPOGRAPHY_RANGES.columnCount;
+      const n = clampSnap(count, spec.min, spec.max, spec.step);
+      const view = viewRef.current as unknown as {
+        renderer?: { setAttribute?: (name: string, value: string) => void };
+      };
+      view?.renderer?.setAttribute?.("max-column-count", String(n));
+    }, []);
     const getToc = useCallback((): TocItem[] => {
       const view = viewRef.current as unknown as { book?: { toc?: TocItem[] } };
       return view?.book?.toc ?? [];
@@ -1015,6 +1024,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         previewLabelAt,
         goToCfi,
         setStyles,
+        setColumnCount,
         getToc,
         getLocation,
         getSelectionCfi,
@@ -1037,6 +1047,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         previewLabelAt,
         goToCfi,
         setStyles,
+        setColumnCount,
         getToc,
         getLocation,
         getSelectionCfi,

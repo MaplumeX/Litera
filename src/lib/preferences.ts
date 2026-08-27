@@ -30,6 +30,7 @@ interface PreferencesResponse {
   letterSpacing?: number;
   paragraphSpacing?: number;
   firstLineIndent?: number;
+  columnCount?: number;
   overrideFont?: boolean;
   overrideLayout?: boolean;
 }
@@ -53,6 +54,7 @@ function normalizePreferences(response: PreferencesResponse | null | undefined):
     letterSpacing: response?.letterSpacing,
     paragraphSpacing: response?.paragraphSpacing,
     firstLineIndent: response?.firstLineIndent,
+    columnCount: response?.columnCount,
     overrideFont: response?.overrideFont,
     overrideLayout: response?.overrideLayout,
   });
@@ -78,6 +80,7 @@ export function usePreferences() {
         letterSpacing: next.letterSpacing,
         paragraphSpacing: next.paragraphSpacing,
         firstLineIndent: next.firstLineIndent,
+        columnCount: next.columnCount,
         overrideFont: next.overrideFont,
         overrideLayout: next.overrideLayout,
       });

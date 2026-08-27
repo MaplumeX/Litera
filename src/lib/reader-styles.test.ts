@@ -21,6 +21,7 @@ describe("normalizeSettings", () => {
       letterSpacing: 0,
       paragraphSpacing: 1,
       firstLineIndent: 0,
+      columnCount: 2,
       overrideFont: false,
       overrideLayout: false,
     });
@@ -43,6 +44,7 @@ describe("normalizeSettings", () => {
       letterSpacing: 0,
       paragraphSpacing: 1,
       firstLineIndent: 0,
+      columnCount: 2,
       overrideFont: false,
       overrideLayout: false,
     });
@@ -102,6 +104,26 @@ describe("normalizeSettings", () => {
     });
     expect(normalizeSettings({ fontFamily: "" })).toMatchObject({
       fontFamily: "serif",
+    });
+  });
+
+  it("normalizes columnCount with defaults, clamping, and override precedence", () => {
+    // missing everywhere → default 2
+    expect(normalizeSettings()).toMatchObject({ columnCount: 2 });
+    // out-of-range clamps via clampSnap
+    expect(normalizeSettings({ columnCount: 0 })).toMatchObject({ columnCount: 1 });
+    expect(normalizeSettings({ columnCount: 4 })).toMatchObject({ columnCount: 3 });
+    // non-integer snaps to the nearest step
+    expect(normalizeSettings({ columnCount: 2.6 })).toMatchObject({ columnCount: 3 });
+    // book override wins over preference
+    expect(normalizeSettings({ columnCount: 1 }, { columnCount: 3 })).toMatchObject({
+      columnCount: 1,
+    });
+    // falls back to preference when the book has none
+    expect(normalizeSettings({}, { columnCount: 3 })).toMatchObject({ columnCount: 3 });
+    // non-numeric garbage falls back to the default
+    expect(normalizeSettings({ columnCount: undefined }, { columnCount: undefined })).toMatchObject({
+      columnCount: 2,
     });
   });
 
@@ -425,6 +447,15 @@ describe("bookSettingsSnapshot", () => {
     ).toEqual({
       textAlign: "justify",
     });
+  });
+
+  it("treats columnCount as a real override and can omit it to restore the default", () => {
+    expect(isTypographyOverridden({ columnCount: 3 }, "columnCount")).toBe(true);
+    expect(isTypographyOverridden({}, "columnCount")).toBe(false);
+    expect(bookSettingsSnapshot({ columnCount: 1 })).toEqual({ columnCount: 1 });
+    expect(
+      bookSettingsSnapshot({ columnCount: 1, textAlign: "justify" }, undefined, "columnCount"),
+    ).toEqual({ textAlign: "justify" });
   });
 });
 

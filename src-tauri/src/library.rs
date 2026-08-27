@@ -35,6 +35,7 @@ const PAGE_PADDING_RANGE: (f64, f64) = (0.5, 4.0);
 const LETTER_SPACING_RANGE: (f64, f64) = (-0.05, 0.2);
 const PARAGRAPH_SPACING_RANGE: (f64, f64) = (0.0, 2.0);
 const FIRST_LINE_INDENT_RANGE: (f64, f64) = (0.0, 3.0);
+const COLUMN_COUNT_RANGE: (i64, i64) = (1, 3);
 const GENERIC_FONT_FAMILIES: [&str; 3] = ["serif", "sans-serif", "monospace"];
 const MAX_FONT_FAMILY_CHARS: usize = 128;
 const VALID_THEMES: [&str; 3] = ["light", "dark", "sepia"];
@@ -72,6 +73,8 @@ pub struct ReadingSettings {
     pub paragraph_spacing: Option<f64>,
     #[serde(rename = "firstLineIndent", skip_serializing_if = "Option::is_none")]
     pub first_line_indent: Option<f64>,
+    #[serde(rename = "columnCount", skip_serializing_if = "Option::is_none")]
+    pub column_count: Option<i64>,
     #[serde(
         rename = "overrideFont",
         default,
@@ -99,6 +102,7 @@ impl ReadingSettings {
             && self.letter_spacing.is_none()
             && self.paragraph_spacing.is_none()
             && self.first_line_indent.is_none()
+            && self.column_count.is_none()
             && self.override_font.is_none()
             && self.override_layout.is_none()
     }
@@ -1938,6 +1942,13 @@ fn validate_settings(settings: &ReadingSettings) -> AppResult<()> {
             ));
         }
     }
+    if let Some(column_count) = settings.column_count {
+        if !(COLUMN_COUNT_RANGE.0..=COLUMN_COUNT_RANGE.1).contains(&column_count) {
+            return Err(AppError::invalid_input(
+                "columnCount must be an integer between 1 and 3",
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -3663,6 +3674,61 @@ mod tests {
             .remove(0)
             .settings
             .is_none());
+    }
+
+    #[test]
+    fn reading_settings_column_count_round_trips_and_validates() {
+        // Old snapshots without columnCount still load.
+        let settings: ReadingSettings =
+            serde_json::from_str(r#"{"fontSize":18.0}"#).expect("old settings json");
+        assert!(settings.column_count.is_none());
+        validate_settings(&settings).expect("old snapshot valid");
+
+        // columnCount round-trips with the camelCase wire name and is
+        // omitted from JSON when None.
+        let with_count: ReadingSettings =
+            serde_json::from_str(r#"{"fontSize":18.0,"columnCount":3}"#)
+                .expect("columnCount settings");
+        assert_eq!(with_count.column_count, Some(3));
+        validate_settings(&with_count).expect("columnCount valid");
+        let json = serde_json::to_string(&with_count).expect("serialize");
+        assert!(json.contains("\"columnCount\":3"));
+
+        let without_count: ReadingSettings = serde_json::from_str(r#"{"fontSize":18.0}"#)
+            .expect("settings without columnCount");
+        let json = serde_json::to_string(&without_count).expect("serialize");
+        assert!(!json.contains("columnCount"));
+
+        let (_directory, store) = test_store();
+        let id = import_test_book(&store, Path::new("/source/column-count.epub"));
+        store
+            .update_reading_state(&id, None, Some(with_count.clone()), None, None, None)
+            .expect("persist columnCount");
+        let stored = store
+            .list_books()
+            .expect("list")
+            .remove(0)
+            .settings
+            .expect("settings");
+        assert_eq!(stored, with_count);
+
+        // validate_settings rejects 0 and 4 on update_reading_state.
+        for count in [0, 4] {
+            let error = store
+                .update_reading_state(
+                    &id,
+                    None,
+                    Some(ReadingSettings {
+                        column_count: Some(count),
+                        ..ReadingSettings::default()
+                    }),
+                    None,
+                    None,
+                    None,
+                )
+                .expect_err("out of range columnCount");
+            assert_eq!(error.code, AppErrorCode::InvalidInput);
+        }
     }
 
     #[test]

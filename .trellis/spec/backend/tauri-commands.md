@@ -233,6 +233,7 @@ interface ReadingSettings {
   letterSpacing?: number;      // em, -0.05–0.2
   paragraphSpacing?: number;   // em, 0–2
   firstLineIndent?: number;    // em, 0–3
+  columnCount?: number;        // max columns, 1–3; paginator max-column-count, default 2
 }
 
 type ImportStatus = "new" | "overwrite" | "duplicate";

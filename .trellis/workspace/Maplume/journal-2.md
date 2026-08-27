@@ -368,3 +368,26 @@ Bumped to 0.2.8, wrote changelog, tagged v0.2.8, and published the GitHub releas
 ### Status
 
 [OK] **Completed**
+
+
+## Session 102: Configurable column count setting
+
+**Date**: 2026-08-27
+**Task**: Configurable column count setting
+**Branch**: `feat/configurable-column-count`
+
+### Summary
+
+Added columnCount (1-3, default 2) as a full TypographyKey: settings segmented control, ReaderView setColumnCount -> paginator max-column-count attribute with hot relayout, per-book + global persistence end-to-end including Rust validation (preferences.rs + library.rs). tsc/vitest(547)/cargo(174) all green; spec updated with paginator attribute notes and ReadingSettings contract.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f1aeb51` | (see git log) |
+| `0128032` | (see git log) |
+| `006ceb1` | (see git log) |
+
+### Status
+
+[OK] **Completed**

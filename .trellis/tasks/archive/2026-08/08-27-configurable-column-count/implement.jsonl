@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend layer conventions entry point"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "Typography settings pipeline (preferences vs per-book overrides) rules"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "Typing conventions for new columnCount field across types"}
+{"file": ".trellis/spec/frontend/i18n.md", "reason": "Locale key conventions for new settings.columns entries"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "SettingsDialog typography pane and ReaderView renderer integration constraints"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend layer conventions entry point"}
+{"file": ".trellis/spec/backend/tauri-commands.md", "reason": "save_preferences / update_reading_state command signature conventions for new columnCount param"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Validation error style for validate_patch / validate_settings additions"}

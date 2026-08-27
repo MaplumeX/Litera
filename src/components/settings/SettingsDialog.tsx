@@ -722,6 +722,28 @@ export function SettingsDialog({
                       ariaLabel={t("settings.align")}
                     />
                   </PresetRow>
+
+                  <PresetRow
+                    inline
+                    label={t("settings.columns")}
+                    restore={{
+                      show: canRestore("columnCount"),
+                      onClick: () => onRestoreDefault("columnCount"),
+                      label: restoreLabel,
+                    }}
+                  >
+                    <SegmentedControl
+                      fullWidth={false}
+                      value={String(styleState.columnCount)}
+                      options={[
+                        { value: "1", label: "1" },
+                        { value: "2", label: "2" },
+                        { value: "3", label: "3" },
+                      ]}
+                      onChange={(next) => onTypographyChange("columnCount", Number(next))}
+                      ariaLabel={t("settings.columns")}
+                    />
+                  </PresetRow>
                 </div>
               </div>
               <div className="min-h-0 min-w-0 flex-1 overflow-y-auto p-6 @max-[519px]:max-h-[40%] @max-[519px]:flex-none">
