@@ -53,8 +53,11 @@ export async function resolveRuntimeModel(config: RuntimeModelConfig): Promise<M
     throw new Error("不支持的模型提供商");
   }
   const baseUrl = config.baseUrl.replace(/\/+$/, "");
+  // Catalog hit is only valid when its wire API matches the configured one
+  // (a custom OpenAI-compatible relay must not inherit an anthropic-messages
+  // stream function just because the model id exists in the pi-ai catalog).
   const catalogModel = (await fullCatalogIndex()).get(config.model);
-  if (catalogModel) {
+  if (catalogModel && catalogModel.api === config.api) {
     return { ...catalogModel, provider: config.provider, baseUrl };
   }
   const probed = config.contextWindow;

@@ -400,6 +400,30 @@ describe("LiteraAgentRuntime",()=>{
     expect(events.some((event)=>event.type==="prompt_end")).toBe(true);
   });
 
+  it("normalizes a backoff-sleep abort into a persisted terminal aborted assistant",async()=>{
+    const current=session();const events:string[]=[];const batches:PiSessionEntry[][]=[];
+    const sessions:SessionPort={create:async()=>current,list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,entries)=>{batches.push(entries);return entries.at(-1)?.id??null;}};
+    const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:1}),toc:async()=>[],readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:1,text:"chapter"}),search:async()=>[],close:()=>{}};
+    const faux=createFauxCore({tokensPerSecond:10_000});faux.setResponses([fauxAssistantMessage("x",{stopReason:"error",errorMessage:"429: too many requests, please retry later"}),fauxAssistantMessage("never reached")]);
+    const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret",thinkingLevel:"off"};
+    const runtime=new LiteraAgentRuntime({sessions,book,loadConfig:async()=>config,loadStream:async()=>faux.streamSimple});
+    runtime.subscribe((event)=>{events.push(event.type);});
+    await runtime.openBook("book",new ArrayBuffer(1));
+    vi.useFakeTimers();
+    const prompt=runtime.prompt("question",{},"prompt-abort");
+    await vi.advanceTimersByTimeAsync(0);// first attempt settles with 429, backoff sleep starts
+    runtime.abort();
+    await vi.runAllTimersAsync();
+    await prompt;
+    vi.useRealTimers();
+    expect(events).toContain("retry_scheduled");
+    expect(events).toContain("prompt_aborted");
+    expect(events).not.toContain("prompt_end");
+    // The aborted assistant never entered agent state, yet is persisted.
+    const persisted=batches.flat().filter((entry)=>entry.type==="message");
+    expect(persisted.some((entry)=>((entry.message as {stopReason?:string}).stopReason)==="aborted")).toBe(true);
+  });
+
   it("does not retry a deterministic 401 auth failure",async()=>{
     const current=session();const events:string[]=[];
     const sessions:SessionPort={create:async()=>current,list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,entries)=>entries.at(-1)?.id??null};

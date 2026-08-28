@@ -48,6 +48,17 @@ describe("resolveRuntimeModel", () => {
     });
   });
 
+  it("skips a catalog entry whose wire api differs from the configured one", async () => {
+    // claude-* exists in the pi-ai catalog as anthropic-messages; a custom
+    // OpenAI-compatible relay must fall through to probe/default instead.
+    await expect(resolveRuntimeModel({
+      provider: "custom-abc12345",
+      model: "claude-fable-5",
+      api: "openai-completions",
+      baseUrl: "https://relay.example/v1",
+    })).resolves.toMatchObject({ api: "openai-completions", contextWindow: 128_000, maxTokens: 8_192 });
+  });
+
   it("uses the Rust-probed context window for custom models missing from the catalog", async () => {
     await expect(resolveRuntimeModel({
       provider: "custom-abc12345",
