@@ -13,7 +13,7 @@ import { invokeErrorMessage } from "@/lib/app-error";
 import type { AgentEvent, AgentMessage as UiMessage } from "@/types/agent";
 import type { AnnotationsFile } from "@/types/library";
 
-export interface RuntimeConfig { provider:string; model:string; api:string; baseUrl:string; apiKey:string; thinkingLevel:string }
+export interface RuntimeConfig { provider:string; model:string; api:string; baseUrl:string; apiKey:string; thinkingLevel:string; contextWindow?:number }
 type Listener = (event: AgentEvent) => void;
 type RuntimeEventPayload = AgentEvent extends infer Event
   ? Event extends { version: number }

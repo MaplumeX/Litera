@@ -32,4 +32,46 @@ describe("resolveRuntimeModel", () => {
       baseUrl: "https://api.openai.com/v1",
     })).rejects.toThrow("不支持所选模型");
   });
+
+  it("resolves a custom model from the pi-ai catalog, keeping the custom baseUrl", async () => {
+    await expect(resolveRuntimeModel({
+      provider: "custom-abc12345",
+      model: "deepseek-v4-pro",
+      api: "openai-completions",
+      baseUrl: "https://relay.example/v1",
+    })).resolves.toMatchObject({
+      provider: "custom-abc12345",
+      baseUrl: "https://relay.example/v1",
+      contextWindow: 1_000_000,
+      maxTokens: 384_000,
+      api: "openai-completions",
+    });
+  });
+
+  it("uses the Rust-probed context window for custom models missing from the catalog", async () => {
+    await expect(resolveRuntimeModel({
+      provider: "custom-abc12345",
+      model: "private-model",
+      api: "openai-completions",
+      baseUrl: "https://relay.example/v1",
+      contextWindow: 200_000,
+    })).resolves.toMatchObject({
+      provider: "custom-abc12345",
+      baseUrl: "https://relay.example/v1",
+      contextWindow: 200_000,
+      maxTokens: 25_000,
+    });
+  });
+
+  it("falls back to 128k/8192 when no catalog entry or probe value exists", async () => {
+    await expect(resolveRuntimeModel({
+      provider: "custom-abc12345",
+      model: "private-model",
+      api: "openai-completions",
+      baseUrl: "https://relay.example/v1",
+    })).resolves.toMatchObject({
+      contextWindow: 128_000,
+      maxTokens: 8_192,
+    });
+  });
 });
