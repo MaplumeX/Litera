@@ -35,6 +35,7 @@ export interface AgentToolCall {
 export interface AgentMessage {
   role: "user" | "assistant";
   content: string;
+  thinking?: string;
   selection?: string;
   chapterHref?: string;
   toolCalls?: AgentToolCall[];
@@ -54,6 +55,9 @@ export type AgentEvent = EventEnvelope & (
   | ({ type: "book_closed"; bookId?: string } & RequestCorrelation)
   | ({ type: "prompt_started" } & PromptCorrelation & RequestCorrelation)
   | ({ type: "text_delta"; delta: string } & PromptCorrelation)
+  | ({ type: "thinking_start"; contentIndex: number } & PromptCorrelation)
+  | ({ type: "thinking_delta"; delta: string; contentIndex: number } & PromptCorrelation)
+  | ({ type: "thinking_end"; contentIndex: number } & PromptCorrelation)
   | ({ type: "tool_start"; toolCallId: string; tool: string; params: unknown } & PromptCorrelation)
   | ({ type: "tool_end"; toolCallId: string; result: unknown; isError: boolean } & PromptCorrelation)
   | ({ type: "compaction_started" } & PromptCorrelation)

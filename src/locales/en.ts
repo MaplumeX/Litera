@@ -217,6 +217,7 @@ export const en: { [K in MessageKey]: string } = {
   "chat.systemPrompt": "System prompt",
   "chat.systemPromptHint": "Leave empty to use the default prompt; otherwise appended to the default prompt",
   "chat.thinkingLevel": "Thinking level",
+  "chat.thinking": "Thinking",
   "chat.clearPrompt": "Clear",
   "chat.compacting": "Compacting context…",
   "chat.compacted": "Context compacted",

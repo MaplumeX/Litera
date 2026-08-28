@@ -1,11 +1,12 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Bot, Check, Copy } from "lucide-react";
+import { Bot, Brain, Check, ChevronRight, Copy } from "lucide-react";
 import type { AgentMessage } from "@/types/agent";
 import { ToolCallCard } from "./ToolCallCard";
 import { TypingIndicator } from "./TypingIndicator";
 import { useT } from "@/lib/i18n";
+import { cn } from "@/lib/utils";
 
 const markdownComponents: Components = {
   a: ({ href, children }) => (
@@ -46,6 +47,38 @@ export function BotAvatar() {
   );
 }
 
+function ThinkingBlock({ thinking, active }: { thinking: string; active: boolean }) {
+  const { t } = useT();
+  const [expanded, setExpanded] = useState(active);
+  useEffect(() => {
+    if (!active) setExpanded(false);
+  }, [active]);
+  return (
+    <div className="rounded border bg-muted/50 text-xs">
+      <button
+        type="button"
+        onClick={() => setExpanded((value) => !value)}
+        className="flex w-full items-center gap-1 px-2 py-1 text-left hover:bg-muted/70"
+        aria-expanded={expanded}
+      >
+        <ChevronRight
+          className={cn(
+            "h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform",
+            expanded && "rotate-90",
+          )}
+        />
+        <Brain className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        <span className="font-medium">{t("chat.thinking")}</span>
+      </button>
+      {expanded && (
+        <div className="whitespace-pre-wrap border-t px-2 py-1 text-xs text-muted-foreground">
+          {thinking}
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface AssistantMessageProps {
   message: AgentMessage;
   streaming?: boolean;
@@ -57,6 +90,9 @@ export function AssistantMessage({ message, streaming = false }: AssistantMessag
       <BotAvatar />
       <div className="min-w-0 max-w-[90%] space-y-1">
         {streaming && <TypingIndicator />}
+        {message.thinking && (
+          <ThinkingBlock thinking={message.thinking} active={streaming} />
+        )}
         {message.toolCalls?.map((call) => (
           <ToolCallCard key={call.toolCallId} call={call} />
         ))}
