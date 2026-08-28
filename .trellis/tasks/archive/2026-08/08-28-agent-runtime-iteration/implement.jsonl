@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "R1/R2/R7 前端 runtime 改动需符合质量与测试规范"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "R7 thinking 事件扩展 agent-reducer 状态流"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "AgentEvent/AgentMessage 类型扩展需符合类型安全规范"}
+{"file": ".trellis/spec/frontend/i18n.md", "reason": "R1 错误文案与 R3 表单标签均为用户可见中文文案"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "R1 错误分类与 R3 Rust 校验错误返回需符合后端错误处理规范"}
+{"file": ".trellis/spec/backend/tauri-commands.md", "reason": "R3 需扩展 save_custom_provider/add_custom_provider Tauri 命令参数"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "agent_config.rs 改动需符合后端质量规范"}
+{"file": ".trellis/tasks/08-28-agent-runtime-iteration/design.md", "reason": "六项改动的技术设计、事件契约与兼容性约束"}

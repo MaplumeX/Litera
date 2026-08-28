@@ -229,26 +229,6 @@ export function visibleMessages(session: DecodedPiSession): UiAgentMessage[] {
   return output;
 }
 
-export function windowCompleteTurns(messages: PiAgentMessage[], maxTurns = 12): PiAgentMessage[] {
-  let userTurns = 0;
-  let start = messages.length;
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    if (messages[index].role === "user") userTurns += 1;
-    start = index;
-    if (userTurns >= maxTurns) break;
-  }
-  const window = messages.slice(start);
-  let snapshot: PiAgentMessage | undefined;
-  for (let index = start - 1; index >= 0; index -= 1) {
-    const candidate = messages[index] as unknown as Record<string, unknown>;
-    if (candidate.role === "custom" && candidate.customType === "bookSnapshot") {
-      snapshot = messages[index];
-      break;
-    }
-  }
-  return snapshot ? [snapshot, ...window] : window;
-}
-
 export interface SessionConfig {
   systemPrompt: string;
 }

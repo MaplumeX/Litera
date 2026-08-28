@@ -1,18 +1,19 @@
 import { invoke } from "@tauri-apps/api/core";
 import { Agent, type AgentEvent as PiEvent, type AgentMessage as PiMessage, type AgentTool, type StreamFn } from "@earendil-works/pi-agent-core";
-import { clampThinkingLevel, isContextOverflow, type AssistantMessage, type ModelThinkingLevel } from "@earendil-works/pi-ai";
+import { clampThinkingLevel, isContextOverflow, retryAssistantCall, type AssistantMessage, type Context, type ModelThinkingLevel } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { BookWorkerClient, chapterAside, formatBookSnapshot, type BookContentPort } from "@/agent/book/book-content";
 import { DEFAULT_COMPACTION_SETTINGS, estimateContextTokens, findLastValidUsage, generateSummary, prepareCompaction, shouldCompact } from "@/agent/compaction/compaction";
 import { createGuardedNativeFetch } from "@/agent/transport/native-fetch";
 import { resolveRuntimeModel } from "@/agent/runtime/model-resolution";
+import { classifyPromptError } from "@/agent/runtime/prompt-error";
 import { activeBranch, convertPiContextToLlm, newEntry, piContextMessages, sessionConfig, visibleMessages, type DecodedPiSession, type PiSessionEntry } from "@/agent/sessions/pi-session";
 import { tauriSessionPort, type SessionPort } from "@/agent/sessions/session-port";
 import { invokeErrorMessage } from "@/lib/app-error";
 import type { AgentEvent, AgentMessage as UiMessage } from "@/types/agent";
 import type { AnnotationsFile } from "@/types/library";
 
-export interface RuntimeConfig { provider:string; model:string; api:string; baseUrl:string; apiKey:string; thinkingLevel:string }
+export interface RuntimeConfig { provider:string; model:string; api:string; baseUrl:string; apiKey:string; thinkingLevel:string; contextWindow?:number }
 type Listener = (event: AgentEvent) => void;
 type RuntimeEventPayload = AgentEvent extends infer Event
   ? Event extends { version: number }
@@ -30,26 +31,30 @@ async function streamFor(api: string): Promise<StreamFn> {
   return (await import("@earendil-works/pi-ai/api/openai-completions")).streamSimple as StreamFn;
 }
 const result = (text:string,details:unknown={})=>({content:[{type:"text" as const,text}],details});
+const RETRY_POLICY={enabled:true,maxRetries:3,baseDelayMs:500};
+const TITLE_PROMPT="Generate a short session title for the conversation below, in the user's language, at most 20 characters. Output only the title text itself: no quotes, no prefix, no explanation.";
+const emptyUsage=()=>({input:0,output:0,cacheRead:0,cacheWrite:0,totalTokens:0,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}});
+function errorAssistant(model:{api:AssistantMessage["api"];provider:string;id:string},error:unknown):AssistantMessage{return{role:"assistant",content:[],api:model.api,provider:model.provider,model:model.id,usage:emptyUsage(),stopReason:"error",errorMessage:error instanceof Error?error.message:String(error),timestamp:Date.now()};}
 
 export class LiteraAgentRuntime {
   private readonly listeners=new Set<Listener>(); private readonly sessions:SessionPort; private book:BookContentPort;
   private readonly loadConfig:()=>Promise<RuntimeConfig>; private readonly loadStream:(api:string)=>Promise<StreamFn>;
   private readonly loadAnnotations:(bookId:string)=>Promise<AnnotationsFile>;
-  private bookId:string|null=null; private session:DecodedPiSession|null=null; private agent:Agent|null=null; private promptId:string|null=null; private revision=0; private bookGeneration=0; private configRevision=0;
+  private bookId:string|null=null; private session:DecodedPiSession|null=null; private agent:Agent|null=null; private promptId:string|null=null; private revision=0; private bookGeneration=0; private configRevision=0; private promptAbort:AbortController|null=null;
   constructor(options?:{sessions?:SessionPort;book?:BookContentPort;loadConfig?:()=>Promise<RuntimeConfig>;loadStream?:(api:string)=>Promise<StreamFn>;loadAnnotations?:(bookId:string)=>Promise<AnnotationsFile>}){this.sessions=options?.sessions??tauriSessionPort;this.book=options?.book??new BookWorkerClient();this.loadConfig=options?.loadConfig??(()=>invoke<RuntimeConfig>("get_agent_runtime_config"));this.loadStream=options?.loadStream??streamFor;this.loadAnnotations=options?.loadAnnotations??((bookId)=>invoke<AnnotationsFile>("get_annotations",{bookId}));}
   subscribe(listener:Listener){this.listeners.add(listener);return()=>{this.listeners.delete(listener);};}
   syncBook(bookId:string){if(this.bookId===bookId)this.emit({type:"book_ready",bookId});}
   private emit(payload:RuntimeEventPayload){const event={version:++this.revision,...payload} as AgentEvent; for(const listener of this.listeners)listener(event);}
-  invalidateConfig(){this.configRevision+=1; this.agent?.abort(); this.agent=null;}
-  async openBook(bookId:string,bytes:ArrayBuffer){this.agent?.abort();this.book.close();const generation=++this.bookGeneration;this.bookId=bookId;this.session=null;this.agent=null;this.emit({type:"book_loading",bookId});try{await this.book.open(bookId,bytes);if(this.bookGeneration===generation&&this.bookId===bookId)this.emit({type:"book_ready",bookId});}catch(error){if(this.bookGeneration===generation&&this.bookId===bookId)this.emit({type:"error",scope:"book",message:error instanceof Error?error.message:String(error),recoverable:true,bookId});}}
-  closeBook(){const id=this.bookId;this.agent?.abort();this.book.close();this.bookGeneration+=1;this.bookId=null;this.session=null;this.agent=null;if(id)this.emit({type:"book_closed",bookId:id});}
+  invalidateConfig(){this.configRevision+=1;this.promptAbort?.abort();this.agent?.abort();this.agent=null;}
+  async openBook(bookId:string,bytes:ArrayBuffer){this.promptAbort?.abort();this.agent?.abort();this.book.close();const generation=++this.bookGeneration;this.bookId=bookId;this.session=null;this.agent=null;this.emit({type:"book_loading",bookId});try{await this.book.open(bookId,bytes);if(this.bookGeneration===generation&&this.bookId===bookId)this.emit({type:"book_ready",bookId});}catch(error){if(this.bookGeneration===generation&&this.bookId===bookId)this.emit({type:"error",scope:"book",message:error instanceof Error?error.message:String(error),recoverable:true,bookId});}}
+  closeBook(){const id=this.bookId;this.promptAbort?.abort();this.agent?.abort();this.book.close();this.bookGeneration+=1;this.bookId=null;this.session=null;this.agent=null;if(id)this.emit({type:"book_closed",bookId:id});}
   async listSessions(requestId?:string){if(!this.bookId)return;const bookId=this.bookId;const sessions=await this.sessions.list(bookId);if(this.bookId===bookId)this.emit({type:"sessions_list",bookId,requestId,sessions});}
   async newSession(requestId?:string){if(!this.bookId)return;const bookId=this.bookId;const session=await this.sessions.create(bookId);if(this.bookId!==bookId)return;this.session=session;this.agent=null;this.emit({type:"session_created",bookId,sessionId:session.header.id,requestId});}
   async switchSession(sessionId:string,requestId?:string){if(!this.bookId)return;const bookId=this.bookId;const session=await this.sessions.load(bookId,sessionId);if(this.bookId!==bookId)return;this.session=session;this.agent=null;this.emit({type:"session_switched",bookId,sessionId,requestId,messages:visibleMessages(session)});}
   async deleteSession(sessionId:string,requestId?:string){if(!this.bookId)return;const bookId=this.bookId;await this.sessions.delete(bookId,sessionId);if(this.bookId!==bookId)return;if(this.session?.header.id===sessionId){this.session=null;this.agent=null;}this.emit({type:"session_deleted",bookId,sessionId,requestId});}
   async renameSession(sessionId:string,title:string,requestId?:string){if(!this.bookId)return;const bookId=this.bookId;const clean=title.trim();if(!clean||clean.length>128)throw new Error("Invalid session title");const session=this.session?.header.id===sessionId?this.session:await this.sessions.load(bookId,sessionId);if(this.bookId!==bookId)return;const entry=newEntry("session_info",session.leafId,{name:clean});const leaf=await this.sessions.append(bookId,sessionId,session.leafId,[entry]);if(this.bookId!==bookId)return;session.entries.push(entry);session.leafId=leaf;this.emit({type:"session_renamed",bookId,sessionId,title:clean,requestId});}
   async updateSessionConfig(sessionId:string,systemPrompt:string,requestId?:string){if(!this.bookId)throw new Error("No book is open");const bookId=this.bookId;if(systemPrompt.length>16*1024)throw new Error("Invalid system prompt");const session=this.session?.header.id===sessionId?this.session:await this.sessions.load(bookId,sessionId);if(this.bookId!==bookId)return;const entry=newEntry("session_config",session.leafId,{systemPrompt});const leaf=await this.sessions.append(bookId,sessionId,session.leafId,[entry]);if(this.bookId!==bookId)return;session.entries.push(entry);session.leafId=leaf;this.agent=null;this.emit({type:"session_config_updated",bookId,sessionId,systemPrompt,requestId});}
-  abort(_requestId?:string){this.agent?.abort();}
+  abort(_requestId?:string){this.promptAbort?.abort();this.agent?.abort();}
 
   async prompt(text:string,context:{selection?:string;chapterHref?:string},promptId:string=crypto.randomUUID(),requestId?:string,editIndex?:number){
     if(!this.bookId)throw new Error("No book is open"); if(this.promptId)throw new Error("A prompt is already active");
@@ -62,6 +67,7 @@ export class LiteraAgentRuntime {
       if(!this.session){const created=await this.sessions.create(promptBookId);if(this.bookId!==promptBookId)throw new Error("Book context changed");this.session=created;this.agent=null;this.emit({type:"session_created",bookId:promptBookId,sessionId:created.header.id,requestId});} session=this.session!;
       const persistedLeaf=session.leafId;
       if(editIndex!==undefined){const branch=activeBranch(session);const visible=branch.filter((entry)=>entry.type==="message"&&(["user","assistant"] as unknown[]).includes((entry.message as {role?:unknown})?.role));const target=visible[editIndex];if(!target||((target.message as {role?:unknown}).role!=="user"))throw new Error("Edited message is not a visible user message");session.leafId=target.parentId;this.agent=null;this.emit({type:"session_rewound",bookId:promptBookId,sessionId:session.header.id,promptId,requestId,messages:visibleMessages({...session,leafId:session.leafId})});}
+      const isFirstTurn=!activeBranch(session).some((entry)=>entry.type==="message"&&((entry.message as {role?:unknown})?.role==="user"));
       const configAtStart=this.configRevision; const config=await this.loadConfig();if(this.bookId!==promptBookId)throw new Error("Book context changed");
       const metadata=await this.book.metadata(); const toc=await this.book.toc();
       const snapshot=formatBookSnapshot(metadata,toc);
@@ -85,15 +91,60 @@ export class LiteraAgentRuntime {
       if(configAtStart!==this.configRevision||this.bookId!==promptBookId)throw new Error("Agent context changed");
       this.emit({type:"prompt_started",bookId:promptBookId,sessionId:session.header.id,promptId,requestId});
       unsubscribe=agent.subscribe((event)=>this.onPiEvent(event,promptBookId,promptId,session!.header.id));
-      await agent.prompt([...promptMessages,user]);
+      const promptAbort=new AbortController();this.promptAbort=promptAbort;
+      let finalAssistant:AssistantMessage;
+      try{
+        finalAssistant=await retryAssistantCall(async()=>{
+          agent.state.messages.length=before;
+          try{await agent.prompt([...promptMessages,user]);}
+          catch(error){return errorAssistant(agent.state.model,error);}
+          const last=agent.state.messages[agent.state.messages.length-1] as AssistantMessage|undefined;
+          return last?.role==="assistant"?last:errorAssistant(agent.state.model,new Error("模型请求失败"));
+        },RETRY_POLICY,promptAbort.signal,{onRetryScheduled:(attempt,maxAttempts,delayMs)=>this.emit({type:"retry_scheduled",bookId:promptBookId,sessionId:session!.header.id,promptId,attempt,maxAttempts,delayMs})});
+      }finally{if(this.promptAbort===promptAbort)this.promptAbort=null;}
+      // A backoff-sleep abort normalizes to an aborted message that never entered
+      // agent state; push it so the terminal aborted assistant is still persisted.
+      if(finalAssistant.stopReason==="aborted"&&agent.state.messages[agent.state.messages.length-1]!==finalAssistant)agent.state.messages.push(finalAssistant);
       const completed=agent.state.messages.slice(before+promptMessages.length+1);const entries:PiSessionEntry[]=[];let parent=session.leafId;for(const message of completed){const persisted=message.role==="assistant"&&message.stopReason==="error"?{...message,errorMessage:"模型请求失败"}:message;const entry=newEntry("message",parent,{message:persisted});entries.push(entry);parent=entry.id;}
       if(entries.length){session.leafId=await this.sessions.append(promptBookId,session.header.id,session.leafId,entries);session.entries.push(...entries);}
       await this.maybeCompact(agent,session,promptBookId);
       const aborted=completed.some((message)=>message.role==="assistant"&&message.stopReason==="aborted");this.emit(aborted?{type:"prompt_aborted",bookId:promptBookId,sessionId:session.header.id,promptId,requestId}:{type:"prompt_end",bookId:promptBookId,sessionId:session.header.id,promptId});
-    }catch{const safeError=new Error("模型请求失败，请检查配置后重试");this.emit({type:"error",scope:"prompt",message:safeError.message,recoverable:true,bookId:promptBookId,sessionId:session?.header.id,promptId});throw safeError;}finally{unsubscribe?.();if(this.promptId===promptId)this.promptId=null;}
+      if(!aborted&&isFirstTurn){const leafAtEnd=session.leafId;const assistantText=finalAssistant.content.flatMap((block)=>block.type==="text"&&typeof block.text==="string"?[block.text]:[]).join("");void this.maybeGenerateTitle(promptBookId,session.header.id,leafAtEnd,text.slice(0,2000),assistantText.slice(0,2000),agent);}
+    }catch(error){const safeError=new Error(classifyPromptError(error).message);this.emit({type:"error",scope:"prompt",message:safeError.message,recoverable:true,bookId:promptBookId,sessionId:session?.header.id,promptId});throw safeError;}finally{unsubscribe?.();if(this.promptId===promptId)this.promptId=null;}
   }
 
-  private async ensureAgent(config:RuntimeConfig,session:DecodedPiSession,bookId:string){if(this.agent)return this.agent;const resolvedModel=await resolveRuntimeModel(config);const nativeFetch=createGuardedNativeFetch({baseUrl:resolvedModel.baseUrl});const providerStream=await this.loadStream(resolvedModel.api);const stream:StreamFn=(requestModel,requestContext,options)=>providerStream(requestModel,requestContext,{...options,fetch:nativeFetch,maxRetries:0});const tools=await this.tools(bookId);const configured=sessionConfig(session);const userPrompt=configured?.systemPrompt.trim();return new Agent({initialState:{systemPrompt:userPrompt?`${SYSTEM_PROMPT}\n\n${userPrompt}`:SYSTEM_PROMPT,model:resolvedModel,thinkingLevel:clampThinkingLevel(resolvedModel,config.thinkingLevel as ModelThinkingLevel),messages:piContextMessages(session),tools},streamFn:stream,convertToLlm:convertPiContextToLlm,getApiKey:()=>config.apiKey,transport:"sse"});}
+  private async ensureAgent(config:RuntimeConfig,session:DecodedPiSession,bookId:string){if(this.agent)return this.agent;const resolvedModel=await resolveRuntimeModel(config);const nativeFetch=createGuardedNativeFetch({baseUrl:resolvedModel.baseUrl});const providerStream=await this.loadStream(resolvedModel.api);const stream:StreamFn=(requestModel,requestContext,options)=>providerStream(requestModel,requestContext,{...options,fetch:nativeFetch,maxRetries:3});const tools=await this.tools(bookId);const configured=sessionConfig(session);const userPrompt=configured?.systemPrompt.trim();return new Agent({initialState:{systemPrompt:userPrompt?`${SYSTEM_PROMPT}\n\n${userPrompt}`:SYSTEM_PROMPT,model:resolvedModel,thinkingLevel:clampThinkingLevel(resolvedModel,config.thinkingLevel as ModelThinkingLevel),messages:piContextMessages(session),tools},streamFn:stream,convertToLlm:convertPiContextToLlm,getApiKey:()=>config.apiKey,transport:"sse"});}
+
+  /**
+   * Fire-and-forget session title generation after the first completed turn.
+   *
+   * Never blocks or fails the prompt flow: every guard failure, model error,
+   * stale-leaf append, or book switch is silently swallowed and the Rust-side
+   * `first_user_text` fallback title stays in effect.
+   */
+  private async maybeGenerateTitle(bookId:string,sessionId:string,leafAtEnd:string|null,userText:string,assistantText:string,agent:Agent){
+    try{
+      const startedAt=new Date().toISOString();
+      const model=agent.state.model;
+      const apiKey=await agent.getApiKey?.(model.provider);
+      const context:Context={systemPrompt:"You generate concise chat session titles. Output only the title.",messages:[{role:"user",content:[{type:"text",text:`${TITLE_PROMPT}\n\n<conversation>\n[User]: ${userText}\n[Assistant]: ${assistantText.slice(0,2000)}\n</conversation>`}],timestamp:Date.now()}]};
+      const stream=await agent.streamFunction(model,context,{apiKey:apiKey??"",maxTokens:64,cacheRetention:"none",sessionId:crypto.randomUUID()});
+      const response=await stream.result();
+      if(response.stopReason==="error")throw new Error(response.errorMessage||"Title request failed");
+      if(this.bookId!==bookId||this.session?.header.id!==sessionId||this.promptId)return;
+      const title=response.content.flatMap((block)=>block.type==="text"&&typeof block.text==="string"?[block.text]:[]).join("").trim();
+      if(!title||title.length>128)return;
+      const session=await this.sessions.load(bookId,sessionId);
+      if(this.bookId!==bookId)return;
+      if(session.entries.some((entry)=>entry.type==="session_info"&&entry.timestamp>startedAt))return;// user renamed while the title was generating
+      if(session.leafId!==leafAtEnd)return;// a newer prompt/entry advanced the durable leaf
+      const entry=newEntry("session_info",session.leafId,{name:title});
+      const leaf=await this.sessions.append(bookId,sessionId,session.leafId,[entry]);
+      if(this.bookId!==bookId||this.session?.header.id!==sessionId)return;
+      if(this.session?.leafId===session.leafId){this.session.entries.push(entry);this.session.leafId=leaf;}
+      this.emit({type:"session_renamed",bookId,sessionId,title});
+    }catch(error){console.warn("Session title generation failed",error);}
+  }
 
   /**
    * Compact the session context when it approaches the model context window.
@@ -141,7 +192,7 @@ export class LiteraAgentRuntime {
     {name:"search_in_book",label:"Search Book",description:"Search multiple query variants",parameters:search,execute:async(_id,args)=>{const input=args as {queries:string[]};return result(JSON.stringify(await this.bookCall(bookId,()=>this.book.search(input.queries))));}},
     {name:"list_annotations",label:"List Annotations",description:"List the current book's bookmarks and highlights. Use when the user asks about what they marked; not for ordinary chapter questions.",parameters:empty,execute:async()=>{try{const data=await this.bookCall(bookId,()=>this.loadAnnotations(bookId));return result(JSON.stringify({bookmarks:data.bookmarks.map(({id,cfi,fraction,createdAt,label})=>({id,cfi,fraction,createdAt,...(label!==undefined?{label}:{})})),highlights:data.highlights.map(({id,cfi,excerpt,createdAt,color,note})=>({id,cfi,excerpt,createdAt,color:color??"yellow",...(note?.trim()?{note}:{})}))}));}catch(error){throw error instanceof Error?error:new Error(invokeErrorMessage(error));}}},
   ];}
-  private onPiEvent(event:PiEvent,bookId:string,promptId:string,sessionId:string){const base={bookId,sessionId,promptId};if(event.type==="message_update"&&event.assistantMessageEvent.type==="text_delta")this.emit({type:"text_delta",...base,delta:event.assistantMessageEvent.delta});else if(event.type==="tool_execution_start")this.emit({type:"tool_start",...base,toolCallId:event.toolCallId,tool:event.toolName,params:event.args});else if(event.type==="tool_execution_end")this.emit({type:"tool_end",...base,toolCallId:event.toolCallId,result:event.result,isError:event.isError});}
+  private onPiEvent(event:PiEvent,bookId:string,promptId:string,sessionId:string){const base={bookId,sessionId,promptId};const e=event.type==="message_update"?event.assistantMessageEvent:undefined;if(e?.type==="text_delta")this.emit({type:"text_delta",...base,delta:e.delta});else if(e?.type==="thinking_start")this.emit({type:"thinking_start",...base,contentIndex:e.contentIndex});else if(e?.type==="thinking_delta")this.emit({type:"thinking_delta",...base,contentIndex:e.contentIndex,delta:e.delta});else if(e?.type==="thinking_end")this.emit({type:"thinking_end",...base,contentIndex:e.contentIndex});else if(event.type==="tool_execution_start")this.emit({type:"tool_start",...base,toolCallId:event.toolCallId,tool:event.toolName,params:event.args});else if(event.type==="tool_execution_end")this.emit({type:"tool_end",...base,toolCallId:event.toolCallId,result:event.result,isError:event.isError});}
 }
 
 export const embeddedAgentRuntime=new LiteraAgentRuntime();

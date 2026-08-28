@@ -107,6 +107,18 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
           content: message.content + event.delta,
         })),
       };
+    case "thinking_start":
+    case "thinking_end":
+      return base;
+    case "thinking_delta":
+      if (!matchesPrompt(base, event)) return base;
+      return {
+        ...base,
+        messages: updateLastAssistant(base.messages, (message) => ({
+          ...message,
+          thinking: (message.thinking ?? "") + event.delta,
+        })),
+      };
     case "tool_start":
       if (!matchesPrompt(base, event)) return base;
       return {
@@ -141,6 +153,8 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
       return matchesPrompt(base, event) ? { ...base, compaction: { status: "compacted" } } : base;
     case "compaction_failed":
       return matchesPrompt(base, event) ? { ...base, compaction: null } : base;
+    case "retry_scheduled":
+      return base;
     case "prompt_end":
     case "prompt_aborted":
       return matchesPrompt(base, event)

@@ -215,6 +215,7 @@ export const zhCN = {
   "chat.systemPrompt": "系统提示词",
   "chat.systemPromptHint": "留空使用默认提示词；填写则追加到默认提示词之后",
   "chat.thinkingLevel": "思考强度",
+  "chat.thinking": "思考过程",
   "chat.clearPrompt": "清空",
   "chat.compacting": "正在压缩上下文…",
   "chat.compacted": "上下文已压缩",

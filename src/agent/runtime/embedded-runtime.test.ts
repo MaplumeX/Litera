@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createFauxCore, fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { LiteraAgentRuntime, SYSTEM_PROMPT, type RuntimeConfig } from "./embedded-runtime";
 import type { BookContentPort } from "@/agent/book/book-content";
@@ -29,15 +29,17 @@ describe("LiteraAgentRuntime",()=>{
     const current=session();const batches:PiSessionEntry[][]=[];const requestedModels:string[]=[];
     const sessions:SessionPort={create:async()=>current,list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,entries)=>{batches.push(entries);return entries[entries.length-1]?.id??null;}};
     const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:1}),toc:async()=>[],readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:1,text:"chapter"}),search:async()=>[],close:()=>{}};
-    const faux=createFauxCore({tokensPerSecond:10_000});faux.setResponses([fauxAssistantMessage("one"),fauxAssistantMessage("two")]);
+    const faux=createFauxCore({tokensPerSecond:10_000});faux.setResponses([fauxAssistantMessage("one"),fauxAssistantMessage("title"),fauxAssistantMessage("two"),fauxAssistantMessage("title")]);
     let config:RuntimeConfig={provider:"custom-a",model:"model-a",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret",thinkingLevel:"off"};
     const runtime=new LiteraAgentRuntime({sessions,book,loadConfig:async()=>config,loadStream:async()=>((requestModel,context,options)=>{requestedModels.push(requestModel.id);return faux.streamSimple(requestModel,context,options);})});
     await runtime.openBook("book",new ArrayBuffer(1));
     await runtime.prompt("first",{});
+    await new Promise((resolve)=>setTimeout(resolve,0));// flush the fire-and-forget title task before invalidating
     config={...config,provider:"custom-b",model:"model-b"};
     runtime.invalidateConfig();
     await runtime.prompt("second",{});
-    expect(requestedModels).toEqual(["model-a","model-b"]);
+    // The first turn's title request also streams with model-a.
+    expect(requestedModels).toEqual(["model-a","model-a","model-b"]);
     const changes=batches.flat().filter((entry)=>entry.type==="model_change");
     expect(changes).toMatchObject([{provider:"custom-a",modelId:"model-a"},{provider:"custom-b",modelId:"model-b"}]);
   });
@@ -243,7 +245,7 @@ describe("LiteraAgentRuntime",()=>{
     const current=session();const batches:PiSessionEntry[][]=[];const events:string[]=[];const captured:Array<{systemPrompt?:string;reasoning?:unknown}>=[];
     const sessions:SessionPort={create:async()=>current,list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,entries)=>{batches.push(entries);return entries.at(-1)?.id??null;}};
     const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:1}),toc:async()=>[],readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:1,text:"chapter"}),search:async()=>[],close:()=>{}};
-    const faux=createFauxCore({tokensPerSecond:10_000});faux.setResponses([fauxAssistantMessage("one"),fauxAssistantMessage("two")]);
+    const faux=createFauxCore({tokensPerSecond:10_000});faux.setResponses([fauxAssistantMessage("answer"),fauxAssistantMessage("title")]);
     const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret",thinkingLevel:"off"};
     const runtime=new LiteraAgentRuntime({sessions,book,loadConfig:async()=>config,loadStream:async()=>((requestModel,context,options)=>{captured.push({systemPrompt:context.systemPrompt,reasoning:options?.reasoning});return faux.streamSimple(requestModel,context,options);})});
     runtime.subscribe((event)=>{events.push(event.type);});
@@ -255,8 +257,8 @@ describe("LiteraAgentRuntime",()=>{
     expect(configEntries).toMatchObject([{systemPrompt:"新提示词"}]);
     expect(events).toContain("session_config_updated");
     await runtime.prompt("second",{});
-    expect(captured[1].systemPrompt).toBe(`${SYSTEM_PROMPT}\n\n新提示词`);
-    expect(captured[1].reasoning).toBeUndefined();
+    expect(captured[2].systemPrompt).toBe(`${SYSTEM_PROMPT}\n\n新提示词`);
+    expect(captured[2].reasoning).toBeUndefined();
   });
 
   it("rejects an invalid session config update",async()=>{
@@ -310,6 +312,134 @@ describe("LiteraAgentRuntime",()=>{
     expect(result?.isError).toBe(true);
     expect(result?.text).toContain("Failed to parse annotations.json");
     expect(result?.text).not.toContain("[object Object]");
+  });
+
+  it("generates and persists a session title after the first turn",async()=>{
+    const current=session();const batches:PiSessionEntry[][]=[];const events:{type:string;title?:string}[]=[];
+    const sessions:SessionPort={create:async()=>current,list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,entries)=>{batches.push(entries);return entries.at(-1)?.id??null;}};
+    const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:1}),toc:async()=>[],readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:1,text:"chapter"}),search:async()=>[],close:()=>{}};
+    const faux=createFauxCore({tokensPerSecond:10_000});
+    faux.setResponses([fauxAssistantMessage("the answer"),fauxAssistantMessage("Reading Questions")]);
+    const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret",thinkingLevel:"off"};
+    const runtime=new LiteraAgentRuntime({sessions,book,loadConfig:async()=>config,loadStream:async()=>faux.streamSimple});
+    runtime.subscribe((event)=>{events.push({type:event.type,title:event.type==="session_renamed"?event.title:undefined});});
+    await runtime.openBook("book",new ArrayBuffer(1));
+    await runtime.prompt("question",{});
+    await vi.waitFor(()=>{expect(events.some((event)=>event.type==="session_renamed")).toBe(true);});
+    expect(events.find((event)=>event.type==="session_renamed")).toMatchObject({title:"Reading Questions"});
+    const infos=batches.flat().filter((entry)=>entry.type==="session_info");
+    expect(infos).toHaveLength(1);
+    expect(infos[0]).toMatchObject({name:"Reading Questions"});
+  });
+
+  it("keeps the fallback title when the title request fails",async()=>{
+    const current=session();const batches:PiSessionEntry[][]=[];const events:string[]=[];
+    const sessions:SessionPort={create:async()=>current,list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,entries)=>{batches.push(entries);return entries.at(-1)?.id??null;}};
+    const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:1}),toc:async()=>[],readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:1,text:"chapter"}),search:async()=>[],close:()=>{}};
+    const faux=createFauxCore({tokensPerSecond:10_000});faux.setResponses([fauxAssistantMessage("answer"),fauxAssistantMessage("x",{stopReason:"error",errorMessage:"429: too many requests"})]);
+    const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret",thinkingLevel:"off"};
+    const runtime=new LiteraAgentRuntime({sessions,book,loadConfig:async()=>config,loadStream:async()=>faux.streamSimple});
+    const warn=vi.spyOn(console,"warn").mockImplementation(()=>{});
+    runtime.subscribe((event)=>{events.push(event.type);});
+    await runtime.openBook("book",new ArrayBuffer(1));
+    await runtime.prompt("question",{});
+    await vi.waitFor(()=>{expect(warn).toHaveBeenCalled();});
+    expect(events).toContain("prompt_end");
+    expect(events).not.toContain("session_renamed");
+    expect(batches.flat().filter((entry)=>entry.type==="session_info")).toHaveLength(0);
+    warn.mockRestore();
+  });
+
+  it("skips the generated title when the user renamed during generation",async()=>{
+    const current=session();const batches:PiSessionEntry[][]=[];const events:{type:string;title?:string}[]=[];
+    const sessions:SessionPort={create:async()=>current,list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,entries)=>{batches.push(entries);for(const entry of entries)current.entries.push(entry);return entries.at(-1)?.id??null;}};
+    const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:1}),toc:async()=>[],readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:1,text:"chapter"}),search:async()=>[],close:()=>{}};
+    const faux=createFauxCore({tokensPerSecond:10_000});
+    faux.setResponses([
+      fauxAssistantMessage("answer"),
+      (context,_options,state,model)=>{
+        // The user renames while the title request is in flight; only then resolve it.
+        const renamed={type:"session_info",id:crypto.randomUUID(),parentId:current.leafId,timestamp:new Date(Date.now()+1000).toISOString(),name:"手动标题"};
+        current.entries.push(renamed);current.leafId=renamed.id;
+        return fauxAssistantMessage("Generated Title",{timestamp:1});
+      },
+    ]);
+    const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret",thinkingLevel:"off"};
+    const runtime=new LiteraAgentRuntime({sessions,book,loadConfig:async()=>config,loadStream:async()=>faux.streamSimple});
+    runtime.subscribe((event)=>{events.push({type:event.type,title:event.type==="session_renamed"?event.title:undefined});});
+    await runtime.openBook("book",new ArrayBuffer(1));
+    await runtime.prompt("question",{});
+    // Flush the fire-and-forget title task.
+    await vi.waitFor(()=>{expect(batches.some((batch)=>batch.some((entry)=>entry.type==="session_info"))||current.entries.some((entry)=>entry.type==="session_info")).toBe(true);});
+    await new Promise((resolve)=>setTimeout(resolve,0));
+    // The manual rename (newer session_info) blocks the generated title.
+    expect(events.filter((event)=>event.type==="session_renamed")).toEqual([]);
+    const infos=current.entries.filter((entry)=>entry.type==="session_info");
+    expect(infos).toHaveLength(1);
+    expect(infos[0]).toMatchObject({name:"手动标题"});
+  });
+
+  it("retries a transient 429 failure with backoff and emits retry_scheduled",async()=>{
+    const current=session();const events:{type:string;attempt?:number;maxAttempts?:number;delayMs?:number;bookId?:string;sessionId?:string;promptId?:string}[]=[];
+    const sessions:SessionPort={create:async()=>current,list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,entries)=>entries.at(-1)?.id??null};
+    const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:1}),toc:async()=>[],readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:1,text:"chapter"}),search:async()=>[],close:()=>{}};
+    const faux=createFauxCore({tokensPerSecond:10_000});faux.setResponses([fauxAssistantMessage("x",{stopReason:"error",errorMessage:"429: too many requests, please retry later"}),fauxAssistantMessage("x",{stopReason:"error",errorMessage:"503: service unavailable"}),fauxAssistantMessage("recovered")]);
+    const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret",thinkingLevel:"off"};
+    const runtime=new LiteraAgentRuntime({sessions,book,loadConfig:async()=>config,loadStream:async()=>faux.streamSimple});
+    runtime.subscribe((event)=>{events.push(event);});
+    await runtime.openBook("book",new ArrayBuffer(1));
+    vi.useFakeTimers();
+    const prompt=runtime.prompt("question",{},"prompt-retry");
+    await vi.runAllTimersAsync();
+    await prompt;
+    vi.useRealTimers();
+    const retries=events.filter((event)=>event.type==="retry_scheduled");
+    expect(retries).toHaveLength(2);
+    expect(retries[0]).toMatchObject({attempt:1,maxAttempts:3,delayMs:500,bookId:"book",sessionId:"session-1",promptId:"prompt-retry"});
+    expect(retries[1]).toMatchObject({attempt:2,delayMs:1000});
+    expect(events.some((event)=>event.type==="prompt_end")).toBe(true);
+  });
+
+  it("normalizes a backoff-sleep abort into a persisted terminal aborted assistant",async()=>{
+    const current=session();const events:string[]=[];const batches:PiSessionEntry[][]=[];
+    const sessions:SessionPort={create:async()=>current,list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,entries)=>{batches.push(entries);return entries.at(-1)?.id??null;}};
+    const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:1}),toc:async()=>[],readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:1,text:"chapter"}),search:async()=>[],close:()=>{}};
+    const faux=createFauxCore({tokensPerSecond:10_000});faux.setResponses([fauxAssistantMessage("x",{stopReason:"error",errorMessage:"429: too many requests, please retry later"}),fauxAssistantMessage("never reached")]);
+    const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret",thinkingLevel:"off"};
+    const runtime=new LiteraAgentRuntime({sessions,book,loadConfig:async()=>config,loadStream:async()=>faux.streamSimple});
+    runtime.subscribe((event)=>{events.push(event.type);});
+    await runtime.openBook("book",new ArrayBuffer(1));
+    vi.useFakeTimers();
+    const prompt=runtime.prompt("question",{},"prompt-abort");
+    await vi.advanceTimersByTimeAsync(0);// first attempt settles with 429, backoff sleep starts
+    runtime.abort();
+    await vi.runAllTimersAsync();
+    await prompt;
+    vi.useRealTimers();
+    expect(events).toContain("retry_scheduled");
+    expect(events).toContain("prompt_aborted");
+    expect(events).not.toContain("prompt_end");
+    // The aborted assistant never entered agent state, yet is persisted.
+    const persisted=batches.flat().filter((entry)=>entry.type==="message");
+    expect(persisted.some((entry)=>((entry.message as {stopReason?:string}).stopReason)==="aborted")).toBe(true);
+  });
+
+  it("does not retry a deterministic 401 auth failure",async()=>{
+    const current=session();const events:string[]=[];
+    const sessions:SessionPort={create:async()=>current,list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,entries)=>entries.at(-1)?.id??null};
+    const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:1}),toc:async()=>[],readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:1,text:"chapter"}),search:async()=>[],close:()=>{}};
+    const faux=createFauxCore({tokensPerSecond:10_000});faux.setResponses([fauxAssistantMessage("x",{stopReason:"error",errorMessage:"401: unauthorized, invalid api key"}),fauxAssistantMessage("never reached")]);
+    const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret",thinkingLevel:"off"};
+    const runtime=new LiteraAgentRuntime({sessions,book,loadConfig:async()=>config,loadStream:async()=>faux.streamSimple});
+    runtime.subscribe((event)=>{events.push(event.type);});
+    await runtime.openBook("book",new ArrayBuffer(1));
+    vi.useFakeTimers();
+    const prompt=runtime.prompt("question",{},"prompt-auth");
+    await vi.runAllTimersAsync();
+    await prompt;
+    vi.useRealTimers();
+    expect(events).not.toContain("retry_scheduled");
+    expect(events).toContain("prompt_end");
   });
 
   it("rejects a stale list_annotations execute after the bookId switches",async()=>{

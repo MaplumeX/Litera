@@ -58,6 +58,9 @@ pub struct AgentRuntimeConfig {
     pub base_url: String,
     pub api_key: String,
     pub thinking_level: String,
+    /// Probed context window for custom models; absent for built-in providers.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_window: Option<u64>,
 }
 
 #[tauri::command]
@@ -331,7 +334,7 @@ fn read_runtime_config(agent_dir: &Path) -> AppResult<AgentRuntimeConfig> {
         .filter(|value| !value.is_empty())
         .ok_or_else(|| AppError::invalid_input("Agent API key is not configured"))?
         .to_string();
-    let (api, base_url) = if provider.starts_with("custom-") {
+    let (api, base_url, context_window) = if provider.starts_with("custom-") {
         let models = read_json_or_empty(&agent_dir.join("models.json"), "models.json")?;
         let definition = models
             .get("providers")
@@ -355,6 +358,14 @@ fn read_runtime_config(agent_dir: &Path) -> AppResult<AgentRuntimeConfig> {
                 "Configured model is not declared by the custom provider",
             ));
         }
+        let context_window = definition
+            .get("models")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .find(|entry| entry.get("id").and_then(Value::as_str) == Some(model.as_str()))
+            .and_then(|entry| entry.get("contextWindow"))
+            .and_then(Value::as_u64);
         (
             definition
                 .get("api")
@@ -362,6 +373,7 @@ fn read_runtime_config(agent_dir: &Path) -> AppResult<AgentRuntimeConfig> {
                 .unwrap_or("openai-completions")
                 .to_string(),
             base.to_string(),
+            context_window,
         )
     } else {
         let pair = match provider.as_str() {
@@ -385,7 +397,7 @@ fn read_runtime_config(agent_dir: &Path) -> AppResult<AgentRuntimeConfig> {
             "fireworks" => ("anthropic-messages", "https://api.fireworks.ai/inference"),
             _ => return Err(AppError::invalid_input("Unsupported built-in provider")),
         };
-        (pair.0.to_string(), pair.1.to_string())
+        (pair.0.to_string(), pair.1.to_string(), None)
     };
     let parsed = reqwest::Url::parse(&base_url)
         .map_err(|_| AppError::invalid_input("Provider base URL is invalid"))?;
@@ -402,6 +414,7 @@ fn read_runtime_config(agent_dir: &Path) -> AppResult<AgentRuntimeConfig> {
         base_url,
         api_key,
         thinking_level,
+        context_window,
     })
 }
 
@@ -500,11 +513,19 @@ fn normalize_model_ids(models: Vec<String>) -> AppResult<Vec<String>> {
     Ok(out)
 }
 
-fn models_json(models: &[String]) -> serde_json::Value {
+/// Build the models.json model array; stamps a probed `contextWindow` onto
+/// matching ids and omits the field otherwise.
+fn models_json_with_windows(
+    models: &[String],
+    windows: &std::collections::HashMap<String, u64>,
+) -> serde_json::Value {
     serde_json::Value::Array(
         models
             .iter()
-            .map(|id| serde_json::json!({ "id": id }))
+            .map(|id| match windows.get(id) {
+                Some(window) => serde_json::json!({ "id": id, "contextWindow": window }),
+                None => serde_json::json!({ "id": id }),
+            })
             .collect(),
     )
 }
@@ -579,7 +600,7 @@ fn parse_openai_model_ids(body: &[u8]) -> AppResult<Vec<String>> {
 
 const MAX_MODELS_BODY: usize = 1024 * 1024;
 
-async fn fetch_remote_models(url: &str, api_key: &str) -> AppResult<Vec<String>> {
+async fn fetch_models_body(url: &str, api_key: &str) -> AppResult<Vec<u8>> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .build()
@@ -615,8 +636,54 @@ async fn fetch_remote_models(url: &str, api_key: &str) -> AppResult<Vec<String>>
         }
         body.extend_from_slice(&chunk);
     }
+    Ok(body)
+}
 
+async fn fetch_remote_models(url: &str, api_key: &str) -> AppResult<Vec<String>> {
+    let body = fetch_models_body(url, api_key).await?;
     parse_openai_model_ids(&body)
+}
+
+/// Extract the context window (tokens) for `model_id` from a `/models` response
+/// body. Reads OpenRouter's `context_length` or vLLM's `max_model_len`; returns
+/// `None` when the entry or field is absent or non-numeric.
+fn parse_probed_context_window(body: &[u8], model_id: &str) -> Option<u64> {
+    let value: serde_json::Value = serde_json::from_slice(body).ok()?;
+    let entries = value
+        .get("data")
+        .and_then(Value::as_array)
+        .or_else(|| value.as_array())?;
+    let entry = entries
+        .iter()
+        .find(|entry| entry.get("id").and_then(Value::as_str) == Some(model_id))?;
+    let field = entry
+        .get("context_length")
+        .or_else(|| entry.get("max_model_len"))?;
+    let window = field.as_u64().or_else(|| field.as_f64().map(|v| v as u64))?;
+    (window > 0).then_some(window)
+}
+
+/// Probe `{baseUrl}/models` once for the context windows of `model_ids`.
+///
+/// Best-effort by design: any failure (network, auth, parse, missing field)
+/// yields an empty map so the save path proceeds without probed windows.
+async fn probe_context_windows(
+    base_url: &str,
+    api_key: &str,
+    model_ids: &[String],
+) -> std::collections::HashMap<String, u64> {
+    let mut windows = std::collections::HashMap::new();
+    let Ok(url) = models_endpoint_url(base_url) else {
+        return windows;
+    };
+    if let Ok(body) = fetch_models_body(&url, api_key).await {
+        for model_id in model_ids {
+            if let Some(window) = parse_probed_context_window(&body, model_id) {
+                windows.insert(model_id.clone(), window);
+            }
+        }
+    }
+    windows
 }
 
 fn save_config(agent_dir: &Path, provider: &str, api_key: &str, model: &str) -> AppResult<()> {
@@ -692,6 +759,8 @@ fn add_custom_provider_impl(
 ) -> AppResult<CustomProviderEntry> {
     let models = normalize_model_ids(models.to_vec())?;
     let custom_id = generate_custom_id();
+    // Best-effort context window probe; an empty map keeps the save untouched.
+    let windows = tauri::async_runtime::block_on(probe_context_windows(base_url, api_key, &models));
 
     // Write models.json provider entry.
     let models_path = agent_dir.join("models.json");
@@ -714,7 +783,7 @@ fn add_custom_provider_impl(
             "name": name,
             "baseUrl": base_url,
             "api": "openai-completions",
-            "models": models_json(&models)
+            "models": models_json_with_windows(&models, &windows)
         }),
     );
     let models_bytes = serde_json::to_vec_pretty(&models_file).map_err(|error| {
@@ -835,11 +904,13 @@ fn update_custom_provider_impl(
         .and_then(|value| value.as_str())
         .unwrap_or("openai-completions")
         .to_string();
+    // Best-effort context window probe; an empty map keeps the save untouched.
+    let windows = tauri::async_runtime::block_on(probe_context_windows(base_url, api_key, &models));
     *existing = serde_json::json!({
         "name": name,
         "baseUrl": base_url,
         "api": api,
-        "models": models_json(&models)
+        "models": models_json_with_windows(&models, &windows)
     });
     let models_bytes = serde_json::to_vec_pretty(&models_file).map_err(|error| {
         AppError::storage_io(format!("Failed to serialize models.json: {error}"))
@@ -1720,6 +1791,28 @@ mod tests {
     }
 
     #[test]
+    fn parse_probed_context_window_reads_openrouter_and_vllm_fields() {
+        let openrouter = br#"{"data":[{"id":"other"},{"id":"m1","context_length":1000000}]}"#;
+        assert_eq!(parse_probed_context_window(openrouter, "m1"), Some(1_000_000));
+
+        let vllm = br#"{"object":"list","data":[{"id":"m2","max_model_len":32768}]}"#;
+        assert_eq!(parse_probed_context_window(vllm, "m2"), Some(32_768));
+
+        let neither = br#"{"data":[{"id":"m3"}]}"#;
+        assert_eq!(parse_probed_context_window(neither, "m3"), None);
+        assert_eq!(parse_probed_context_window(neither, "missing"), None);
+
+        let bare_array = br#"[{"id":"m4","context_length":8192}]"#;
+        assert_eq!(parse_probed_context_window(bare_array, "m4"), Some(8_192));
+
+        let invalid = br#"not json"#;
+        assert_eq!(parse_probed_context_window(invalid, "m"), None);
+
+        let zero = br#"{"data":[{"id":"m","context_length":0}]}"#;
+        assert_eq!(parse_probed_context_window(zero, "m"), None);
+    }
+
+    #[test]
     fn models_endpoint_url_strips_trailing_slash() {
         assert_eq!(
             models_endpoint_url("http://localhost:11434/v1/").expect("url"),
@@ -1731,6 +1824,79 @@ mod tests {
         );
         let error = models_endpoint_url("   ").expect_err("empty");
         assert_eq!(error.code, AppErrorCode::InvalidInput);
+    }
+
+
+    #[test]
+    fn models_json_with_windows_stamps_probed_values_only() {
+        let mut windows = std::collections::HashMap::new();
+        windows.insert("a".to_string(), 1_000_000u64);
+        let models = models_json_with_windows(&ids(&["a", "b"]), &windows);
+        assert_eq!(models[0]["contextWindow"], 1_000_000u64);
+        assert!(models[1].get("contextWindow").is_none());
+
+        let no_windows = models_json_with_windows(&ids(&["a"]), &std::collections::HashMap::new());
+        assert_eq!(no_windows[0], serde_json::json!({ "id": "a" }));
+    }
+
+    #[test]
+    fn custom_provider_save_succeeds_without_probe_and_leaves_models_unchanged() {
+        // Probe failure (unreachable endpoint) must not break the save.
+        let dir = temp_agent_dir();
+        let entry = add_custom_provider_impl(
+            dir.path(),
+            "Ollama",
+            "http://127.0.0.1:9/v1",
+            "key",
+            &ids(&["llama-3.1"]),
+        )
+        .expect("add custom provider with unreachable probe");
+        let models: serde_json::Value = serde_json::from_slice(
+            &fs::read(dir.path().join("models.json")).expect("read models"),
+        )
+        .expect("parse models");
+        assert_eq!(
+            models["providers"][&entry.id]["models"][0],
+            serde_json::json!({ "id": "llama-3.1" })
+        );
+    }
+
+    #[test]
+    fn read_runtime_config_without_context_window_is_none() {
+        let dir = temp_agent_dir();
+        let provider = add_custom_provider_impl(
+            dir.path(),
+            "Ollama",
+            "http://localhost:11434/v1",
+            "key",
+            &ids(&["llama-3.1"]),
+        )
+        .expect("add custom provider");
+        switch_provider_impl(dir.path(), &provider.id, "llama-3.1").expect("switch");
+        let runtime = read_runtime_config(dir.path()).expect("runtime config");
+        assert_eq!(runtime.context_window, None);
+    }
+
+    #[test]
+    fn read_runtime_config_reads_probed_context_window() {
+        let dir = temp_agent_dir();
+        let entry = add_custom_provider_impl(
+            dir.path(),
+            "Ollama",
+            "http://localhost:11434/v1",
+            "key",
+            &ids(&["llama-3.1"]),
+        )
+        .expect("add custom provider");
+        let models_path = dir.path().join("models.json");
+        let mut models: serde_json::Value =
+            serde_json::from_slice(&fs::read(&models_path).expect("read models")).expect("parse");
+        models["providers"][&entry.id]["models"][0]["contextWindow"] = serde_json::json!(200_000u64);
+        fs::write(&models_path, serde_json::to_vec(&models).expect("serialize")).expect("write");
+
+        switch_provider_impl(dir.path(), &entry.id, "llama-3.1").expect("switch");
+        let runtime = read_runtime_config(dir.path()).expect("runtime config");
+        assert_eq!(runtime.context_window, Some(200_000));
     }
 
     #[test]

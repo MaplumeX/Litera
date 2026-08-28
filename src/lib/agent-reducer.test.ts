@@ -132,4 +132,21 @@ describe("agentReducer", () => {
     state = reduce(state, { version: 3, type: "session_rewound", bookId: "book-a", sessionId: "s", promptId: "p", messages: [] });
     expect(state.compaction).toBeNull();
   });
+
+  it("accumulates thinking deltas on the last assistant message", () => {
+    let state = createAgentState("book-a");
+    state = reduce(state, { version: 1, type: "prompt_started", bookId: "book-a", sessionId: "s", promptId: "p" });
+    state = reduce(state, { version: 2, type: "thinking_start", bookId: "book-a", sessionId: "s", promptId: "p", contentIndex: 0 });
+    state = reduce(state, { version: 3, type: "thinking_delta", bookId: "book-a", sessionId: "s", promptId: "p", contentIndex: 0, delta: "让我想想" });
+    state = reduce(state, { version: 4, type: "thinking_delta", bookId: "book-a", sessionId: "s", promptId: "p", contentIndex: 0, delta: "…" });
+    state = reduce(state, { version: 5, type: "thinking_end", bookId: "book-a", sessionId: "s", promptId: "p", contentIndex: 0 });
+    expect(state.messages).toEqual([expect.objectContaining({ role: "assistant", thinking: "让我想想…" })]);
+  });
+
+  it("ignores stale-prompt thinking deltas", () => {
+    let state = createAgentState("book-a");
+    state = reduce(state, { version: 1, type: "prompt_started", bookId: "book-a", sessionId: "s", promptId: "p" });
+    state = reduce(state, { version: 2, type: "thinking_delta", bookId: "book-a", sessionId: "s2", promptId: "p", contentIndex: 0, delta: "stale" });
+    expect(state.messages).toEqual([]);
+  });
 });
