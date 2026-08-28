@@ -303,6 +303,18 @@ export function generatePreviewCss(state: ReaderStyleState): string {
 ${PREVIEW_SELECTOR} p { margin-block-end: ${state.paragraphSpacing}em; text-indent: ${state.firstLineIndent}em; }`;
 }
 
+const NOTEREF_ACCENT_LIGHT = "#2563eb";
+const NOTEREF_ACCENT_DARK = "#6db4ff";
+
+/** Academic superscript style for footnote reference marks.
+ *  EPUB XHTML chapters are parsed as XML, where `epub:type` is a namespaced
+ *  attribute: `[epub|type]` (with the `@namespace` prefix below) matches there,
+ *  while `[epub\\:type]` covers the literal attribute in HTML-parsed docs. */
+const EPUB_NAMESPACE = '@namespace epub url("http://www.idpf.org/2007/ops");';
+function noterefCss(accent: string): string {
+  return `a[epub\\:type~="noteref"], a[epub|type~="noteref"], sup > a[href^="#"] { font-size: 0.72em !important; vertical-align: super !important; line-height: 1 !important; text-decoration: none !important; color: ${accent} !important; }`;
+}
+
 const THEME_CSS: Record<string, string> = {
   light: "",
   dark: `html, body { background: #1a1a1a !important; color: #c8c8c8 !important; }
@@ -321,8 +333,12 @@ code, kbd, pre, samp { font-family: monospace !important; }`;
   if (state.overrideLayout) {
     fontCss += `\nhtml, body, p, div, li, blockquote { font-size: ${state.fontSize}px !important; line-height: ${state.lineHeight} !important; letter-spacing: ${state.letterSpacing}em !important; text-align: ${state.textAlign} !important; }`;
   }
+  // `@namespace` must come first in the sheet for `[epub|type]` to work.
+  const noteref = noterefCss(state.theme === "dark" ? NOTEREF_ACCENT_DARK : NOTEREF_ACCENT_LIGHT);
   const themeCss = THEME_CSS[state.theme] ?? "";
-  return themeCss ? `${fontCss}\n${themeCss}` : fontCss;
+  return themeCss
+    ? `${EPUB_NAMESPACE}${fontCss}\n${noteref}\n${themeCss}`
+    : `${EPUB_NAMESPACE}${fontCss}\n${noteref}`;
 }
 
 /**

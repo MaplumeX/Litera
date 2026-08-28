@@ -402,6 +402,15 @@ Added columnCount (1-3, default 2) as a full TypographyKey: settings segmented c
 ### Summary
 
 Reviewed the 6 agent-runtime-iteration commits against AC1-AC6. All gates pass: tsc --noEmit, vitest 564 tests, cargo 179 tests, npm run build. Fixed one real defect: custom-provider catalog hits now require the catalog wire api to match the configured api (a custom OpenAI-compatible relay no longer inherits anthropic-messages from a claude-* id); added a regression test. Added the missing backoff-sleep abort normalization test (terminal aborted assistant persisted, prompt_aborted emitted). Security review clean: classifyPromptError returns preset strings only, title generation uses the guarded native fetch, probe writes numeric contextWindow only.
+## Session 104: Beautify footnote noteref marks with theme-aware superscript style
+
+**Date**: 2026-08-28
+**Task**: Beautify footnote noteref marks with theme-aware superscript style
+**Branch**: `feat/footnote-styles`
+
+### Summary
+
+Styled EPUB footnote reference marks as a consistent academic superscript via noterefCss() in generateStylesCss (0.72em, vertical-align super, no underline, accent #2563eb light / #6db4ff dark). Check phase caught that foliate parses chapter XHTML as XML, so [epub\\:type] matches nothing; fixed with @namespace epub + [epub|type] as the first stylesheet statement, plus sup > a[href^="#"] fallback. Rejected a[href*="#fn"] as too broad. 549 tests + tsc pass. Archived 08-28-footnote-noteref-style.
 
 ### Git Commits
 
@@ -414,6 +423,8 @@ Reviewed the 6 agent-runtime-iteration commits against AC1-AC6. All gates pass: 
 | `3b4020f` | (see git log) |
 | `37962a2` | (see git log) |
 | `229e6c1` | (see git log) |
+| `5ac33ad` | (see git log) |
+| `fd4c1b2` | (see git log) |
 
 ### Status
 

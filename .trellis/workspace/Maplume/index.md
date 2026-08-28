@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 103
+- **Total Sessions**: 104
 - **Last Active**: 2026-08-28
 <!-- @@@/auto:current-status -->
 
@@ -30,7 +30,8 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
-| 103 | 2026-08-28 | Agent runtime iteration check: verify 6 commits, fix catalog api guard, add abort test | `92e3810`, `dd0ed2a`, `de13a75`, `29716c5`, `3b4020f`, `37962a2`, `229e6c1` | `feat/litera-agent-runtime-iteration` |
+| 104 | 2026-08-28 | Agent runtime iteration check: verify 6 commits, fix catalog api guard, add abort test | `92e3810`, `dd0ed2a`, `de13a75`, `29716c5`, `3b4020f`, `37962a2`, `229e6c1` | `feat/litera-agent-runtime-iteration` |
+| 104 | 2026-08-28 | Beautify footnote noteref marks with theme-aware superscript style | `5ac33ad`, `fd4c1b2` | `feat/footnote-styles` |
 | 102 | 2026-08-27 | Configurable column count setting | `f1aeb51`, `0128032`, `006ceb1` | `feat/configurable-column-count` |
 | 101 | 2026-08-26 | Publish Litera 0.2.8 | `3fb9720` | `main` |
 | 100 | 2026-08-25 | Expand book details metadata editing | `3731f0e`, `ec86da0`, `064318f` | `feat/metadata-editing-selection-and-fields` |
