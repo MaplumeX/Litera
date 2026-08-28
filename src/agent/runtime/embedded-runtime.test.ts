@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createFauxCore, fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { LiteraAgentRuntime, SYSTEM_PROMPT, type RuntimeConfig } from "./embedded-runtime";
 import type { BookContentPort } from "@/agent/book/book-content";
@@ -310,6 +310,45 @@ describe("LiteraAgentRuntime",()=>{
     expect(result?.isError).toBe(true);
     expect(result?.text).toContain("Failed to parse annotations.json");
     expect(result?.text).not.toContain("[object Object]");
+  });
+
+  it("retries a transient 429 failure with backoff and emits retry_scheduled",async()=>{
+    const current=session();const events:{type:string;attempt?:number;maxAttempts?:number;delayMs?:number;bookId?:string;sessionId?:string;promptId?:string}[]=[];
+    const sessions:SessionPort={create:async()=>current,list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,entries)=>entries.at(-1)?.id??null};
+    const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:1}),toc:async()=>[],readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:1,text:"chapter"}),search:async()=>[],close:()=>{}};
+    const faux=createFauxCore({tokensPerSecond:10_000});faux.setResponses([fauxAssistantMessage("x",{stopReason:"error",errorMessage:"429: too many requests, please retry later"}),fauxAssistantMessage("x",{stopReason:"error",errorMessage:"503: service unavailable"}),fauxAssistantMessage("recovered")]);
+    const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret",thinkingLevel:"off"};
+    const runtime=new LiteraAgentRuntime({sessions,book,loadConfig:async()=>config,loadStream:async()=>faux.streamSimple});
+    runtime.subscribe((event)=>{events.push(event);});
+    await runtime.openBook("book",new ArrayBuffer(1));
+    vi.useFakeTimers();
+    const prompt=runtime.prompt("question",{},"prompt-retry");
+    await vi.runAllTimersAsync();
+    await prompt;
+    vi.useRealTimers();
+    const retries=events.filter((event)=>event.type==="retry_scheduled");
+    expect(retries).toHaveLength(2);
+    expect(retries[0]).toMatchObject({attempt:1,maxAttempts:3,delayMs:500,bookId:"book",sessionId:"session-1",promptId:"prompt-retry"});
+    expect(retries[1]).toMatchObject({attempt:2,delayMs:1000});
+    expect(events.some((event)=>event.type==="prompt_end")).toBe(true);
+  });
+
+  it("does not retry a deterministic 401 auth failure",async()=>{
+    const current=session();const events:string[]=[];
+    const sessions:SessionPort={create:async()=>current,list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,entries)=>entries.at(-1)?.id??null};
+    const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:1}),toc:async()=>[],readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:1,text:"chapter"}),search:async()=>[],close:()=>{}};
+    const faux=createFauxCore({tokensPerSecond:10_000});faux.setResponses([fauxAssistantMessage("x",{stopReason:"error",errorMessage:"401: unauthorized, invalid api key"}),fauxAssistantMessage("never reached")]);
+    const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret",thinkingLevel:"off"};
+    const runtime=new LiteraAgentRuntime({sessions,book,loadConfig:async()=>config,loadStream:async()=>faux.streamSimple});
+    runtime.subscribe((event)=>{events.push(event.type);});
+    await runtime.openBook("book",new ArrayBuffer(1));
+    vi.useFakeTimers();
+    const prompt=runtime.prompt("question",{},"prompt-auth");
+    await vi.runAllTimersAsync();
+    await prompt;
+    vi.useRealTimers();
+    expect(events).not.toContain("retry_scheduled");
+    expect(events).toContain("prompt_end");
   });
 
   it("rejects a stale list_annotations execute after the bookId switches",async()=>{

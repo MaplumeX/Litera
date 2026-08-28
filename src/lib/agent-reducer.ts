@@ -141,6 +141,8 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
       return matchesPrompt(base, event) ? { ...base, compaction: { status: "compacted" } } : base;
     case "compaction_failed":
       return matchesPrompt(base, event) ? { ...base, compaction: null } : base;
+    case "retry_scheduled":
+      return base;
     case "prompt_end":
     case "prompt_aborted":
       return matchesPrompt(base, event)

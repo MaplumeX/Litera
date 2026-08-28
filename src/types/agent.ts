@@ -59,6 +59,7 @@ export type AgentEvent = EventEnvelope & (
   | ({ type: "compaction_started" } & PromptCorrelation)
   | ({ type: "compaction_completed" } & PromptCorrelation)
   | ({ type: "compaction_failed" } & PromptCorrelation)
+  | ({ type: "retry_scheduled"; attempt: number; maxAttempts: number; delayMs: number } & PromptCorrelation)
   | ({ type: "prompt_end" } & PromptCorrelation)
   | ({ type: "prompt_aborted" } & PromptCorrelation & RequestCorrelation)
   | ({ type: "session_created" } & BookCorrelation & { sessionId: string } & RequestCorrelation)
