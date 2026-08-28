@@ -391,3 +391,25 @@ Added columnCount (1-3, default 2) as a full TypographyKey: settings segmented c
 ### Status
 
 [OK] **Completed**
+
+
+## Session 103: Beautify footnote noteref marks with theme-aware superscript style
+
+**Date**: 2026-08-28
+**Task**: Beautify footnote noteref marks with theme-aware superscript style
+**Branch**: `feat/footnote-styles`
+
+### Summary
+
+Styled EPUB footnote reference marks as a consistent academic superscript via noterefCss() in generateStylesCss (0.72em, vertical-align super, no underline, accent #2563eb light / #6db4ff dark). Check phase caught that foliate parses chapter XHTML as XML, so [epub\\:type] matches nothing; fixed with @namespace epub + [epub|type] as the first stylesheet statement, plus sup > a[href^="#"] fallback. Rejected a[href*="#fn"] as too broad. 549 tests + tsc pass. Archived 08-28-footnote-noteref-style.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5ac33ad` | (see git log) |
+| `fd4c1b2` | (see git log) |
+
+### Status
+
+[OK] **Completed**

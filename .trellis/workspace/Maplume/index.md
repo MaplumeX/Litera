@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 102
-- **Last Active**: 2026-08-27
+- **Total Sessions**: 103
+- **Last Active**: 2026-08-28
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~393 | Active |
+| `journal-2.md` | ~415 | Active |
 | `journal-1.md` | ~1996 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 103 | 2026-08-28 | Beautify footnote noteref marks with theme-aware superscript style | `5ac33ad`, `fd4c1b2` | `feat/footnote-styles` |
 | 102 | 2026-08-27 | Configurable column count setting | `f1aeb51`, `0128032`, `006ceb1` | `feat/configurable-column-count` |
 | 101 | 2026-08-26 | Publish Litera 0.2.8 | `3fb9720` | `main` |
 | 100 | 2026-08-25 | Expand book details metadata editing | `3731f0e`, `ec86da0`, `064318f` | `feat/metadata-editing-selection-and-fields` |
