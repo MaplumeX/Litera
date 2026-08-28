@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { Agent, type AgentEvent as PiEvent, type AgentMessage as PiMessage, type AgentTool, type StreamFn } from "@earendil-works/pi-agent-core";
-import { clampThinkingLevel, isContextOverflow, retryAssistantCall, type AssistantMessage, type ModelThinkingLevel } from "@earendil-works/pi-ai";
+import { clampThinkingLevel, isContextOverflow, retryAssistantCall, type AssistantMessage, type Context, type ModelThinkingLevel } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { BookWorkerClient, chapterAside, formatBookSnapshot, type BookContentPort } from "@/agent/book/book-content";
 import { DEFAULT_COMPACTION_SETTINGS, estimateContextTokens, findLastValidUsage, generateSummary, prepareCompaction, shouldCompact } from "@/agent/compaction/compaction";
@@ -32,6 +32,7 @@ async function streamFor(api: string): Promise<StreamFn> {
 }
 const result = (text:string,details:unknown={})=>({content:[{type:"text" as const,text}],details});
 const RETRY_POLICY={enabled:true,maxRetries:3,baseDelayMs:500};
+const TITLE_PROMPT="Generate a short session title for the conversation below, in the user's language, at most 20 characters. Output only the title text itself: no quotes, no prefix, no explanation.";
 const emptyUsage=()=>({input:0,output:0,cacheRead:0,cacheWrite:0,totalTokens:0,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}});
 function errorAssistant(model:{api:AssistantMessage["api"];provider:string;id:string},error:unknown):AssistantMessage{return{role:"assistant",content:[],api:model.api,provider:model.provider,model:model.id,usage:emptyUsage(),stopReason:"error",errorMessage:error instanceof Error?error.message:String(error),timestamp:Date.now()};}
 
@@ -66,6 +67,7 @@ export class LiteraAgentRuntime {
       if(!this.session){const created=await this.sessions.create(promptBookId);if(this.bookId!==promptBookId)throw new Error("Book context changed");this.session=created;this.agent=null;this.emit({type:"session_created",bookId:promptBookId,sessionId:created.header.id,requestId});} session=this.session!;
       const persistedLeaf=session.leafId;
       if(editIndex!==undefined){const branch=activeBranch(session);const visible=branch.filter((entry)=>entry.type==="message"&&(["user","assistant"] as unknown[]).includes((entry.message as {role?:unknown})?.role));const target=visible[editIndex];if(!target||((target.message as {role?:unknown}).role!=="user"))throw new Error("Edited message is not a visible user message");session.leafId=target.parentId;this.agent=null;this.emit({type:"session_rewound",bookId:promptBookId,sessionId:session.header.id,promptId,requestId,messages:visibleMessages({...session,leafId:session.leafId})});}
+      const isFirstTurn=!activeBranch(session).some((entry)=>entry.type==="message"&&((entry.message as {role?:unknown})?.role==="user"));
       const configAtStart=this.configRevision; const config=await this.loadConfig();if(this.bookId!==promptBookId)throw new Error("Book context changed");
       const metadata=await this.book.metadata(); const toc=await this.book.toc();
       const snapshot=formatBookSnapshot(metadata,toc);
@@ -107,10 +109,42 @@ export class LiteraAgentRuntime {
       if(entries.length){session.leafId=await this.sessions.append(promptBookId,session.header.id,session.leafId,entries);session.entries.push(...entries);}
       await this.maybeCompact(agent,session,promptBookId);
       const aborted=completed.some((message)=>message.role==="assistant"&&message.stopReason==="aborted");this.emit(aborted?{type:"prompt_aborted",bookId:promptBookId,sessionId:session.header.id,promptId,requestId}:{type:"prompt_end",bookId:promptBookId,sessionId:session.header.id,promptId});
+      if(!aborted&&isFirstTurn){const leafAtEnd=session.leafId;const assistantText=finalAssistant.content.flatMap((block)=>block.type==="text"&&typeof block.text==="string"?[block.text]:[]).join("");void this.maybeGenerateTitle(promptBookId,session.header.id,leafAtEnd,text.slice(0,2000),assistantText.slice(0,2000),agent);}
     }catch(error){const safeError=new Error(classifyPromptError(error).message);this.emit({type:"error",scope:"prompt",message:safeError.message,recoverable:true,bookId:promptBookId,sessionId:session?.header.id,promptId});throw safeError;}finally{unsubscribe?.();if(this.promptId===promptId)this.promptId=null;}
   }
 
   private async ensureAgent(config:RuntimeConfig,session:DecodedPiSession,bookId:string){if(this.agent)return this.agent;const resolvedModel=await resolveRuntimeModel(config);const nativeFetch=createGuardedNativeFetch({baseUrl:resolvedModel.baseUrl});const providerStream=await this.loadStream(resolvedModel.api);const stream:StreamFn=(requestModel,requestContext,options)=>providerStream(requestModel,requestContext,{...options,fetch:nativeFetch,maxRetries:3});const tools=await this.tools(bookId);const configured=sessionConfig(session);const userPrompt=configured?.systemPrompt.trim();return new Agent({initialState:{systemPrompt:userPrompt?`${SYSTEM_PROMPT}\n\n${userPrompt}`:SYSTEM_PROMPT,model:resolvedModel,thinkingLevel:clampThinkingLevel(resolvedModel,config.thinkingLevel as ModelThinkingLevel),messages:piContextMessages(session),tools},streamFn:stream,convertToLlm:convertPiContextToLlm,getApiKey:()=>config.apiKey,transport:"sse"});}
+
+  /**
+   * Fire-and-forget session title generation after the first completed turn.
+   *
+   * Never blocks or fails the prompt flow: every guard failure, model error,
+   * stale-leaf append, or book switch is silently swallowed and the Rust-side
+   * `first_user_text` fallback title stays in effect.
+   */
+  private async maybeGenerateTitle(bookId:string,sessionId:string,leafAtEnd:string|null,userText:string,assistantText:string,agent:Agent){
+    try{
+      const startedAt=new Date().toISOString();
+      const model=agent.state.model;
+      const apiKey=await agent.getApiKey?.(model.provider);
+      const context:Context={systemPrompt:"You generate concise chat session titles. Output only the title.",messages:[{role:"user",content:[{type:"text",text:`${TITLE_PROMPT}\n\n<conversation>\n[User]: ${userText}\n[Assistant]: ${assistantText.slice(0,2000)}\n</conversation>`}],timestamp:Date.now()}]};
+      const stream=await agent.streamFunction(model,context,{apiKey:apiKey??"",maxTokens:64,cacheRetention:"none",sessionId:crypto.randomUUID()});
+      const response=await stream.result();
+      if(response.stopReason==="error")throw new Error(response.errorMessage||"Title request failed");
+      if(this.bookId!==bookId||this.session?.header.id!==sessionId||this.promptId)return;
+      const title=response.content.flatMap((block)=>block.type==="text"&&typeof block.text==="string"?[block.text]:[]).join("").trim();
+      if(!title||title.length>128)return;
+      const session=await this.sessions.load(bookId,sessionId);
+      if(this.bookId!==bookId)return;
+      if(session.entries.some((entry)=>entry.type==="session_info"&&entry.timestamp>startedAt))return;// user renamed while the title was generating
+      if(session.leafId!==leafAtEnd)return;// a newer prompt/entry advanced the durable leaf
+      const entry=newEntry("session_info",session.leafId,{name:title});
+      const leaf=await this.sessions.append(bookId,sessionId,session.leafId,[entry]);
+      if(this.bookId!==bookId||this.session?.header.id!==sessionId)return;
+      if(this.session?.leafId===session.leafId){this.session.entries.push(entry);this.session.leafId=leaf;}
+      this.emit({type:"session_renamed",bookId,sessionId,title});
+    }catch(error){console.warn("Session title generation failed",error);}
+  }
 
   /**
    * Compact the session context when it approaches the model context window.
