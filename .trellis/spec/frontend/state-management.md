@@ -74,6 +74,19 @@ clickable book locators. Reader jumps are owned by the chrome: TOC, prev/next
 chapter, and the annotation drawers. Do not parse assistant Markdown as book
 locators, and do not keep a second reader-location store in chat state.
 
+Thinking deltas stream as `thinking_start` / `thinking_delta` / `thinking_end`
+`PromptCorrelation` events; the reducer accumulates them onto the last
+assistant message's optional `thinking` field (`thinking_start`/`end` are
+no-ops). AssistantMessage renders them in a collapsible block that
+auto-expands only while that message is the streaming last message. Token
+usage/cost are not surfaced anywhere (deliberate product decision).
+
+`retry_scheduled` events (bounded retry via pi-ai `retryAssistantCall`, SDK
+`maxRetries: 3`) are emitted per backoff attempt but carry no reducer state;
+the UI hint is future work. Prompt failures are classified by
+`classifyPromptError` into preset credential-free Chinese messages — raw
+provider error text never reaches reducer state or logs.
+
 ## Durable writes
 
 Library/preferences/annotation mutations go through Tauri commands. Reading

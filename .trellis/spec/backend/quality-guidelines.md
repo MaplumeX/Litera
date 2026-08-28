@@ -47,6 +47,20 @@
   origin, and reject redirects.
 - API keys exist only in Rust-owned config files and request memory. Never put
   them in local storage, sessions, logs, errors, or snapshots.
+- Custom OpenAI-compatible models resolve `contextWindow` in three layers:
+  pi-ai builtin catalog hit (requires the catalog wire `api` to match the
+  configured `api` — an id reused across APIs must not inherit the wrong
+  streamFn), then the optional Rust-probed `contextWindow` persisted from a
+  save-time `/models` probe (OpenRouter `context_length` / vLLM
+  `max_model_len`), then the 128k/8192 default. Probe failure is silent and
+  never blocks saving. `maxTokens` is computed as `contextWindow / 8` and not
+  persisted.
+- Prompt failures are classified by `classifyPromptError` into preset Chinese
+  messages (auth / rate_limited / server / network / context_overflow /
+  unknown); never concatenate provider error bodies into user-visible strings.
+- Auto-generated session titles use the same guarded stream path, a standalone
+  session id, `maxTokens: 64`, and `cacheRetention: "none"`; a newer
+  `session_info` from a manual rename wins and stale leaves skip silently.
 
 ## Required gates
 
