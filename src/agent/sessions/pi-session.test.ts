@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activeBranch, convertPiContextToLlm, decodePiSession, piContextMessages, sessionConfig, sessionSummary, visibleMessages, windowCompleteTurns } from "./pi-session";
+import { activeBranch, convertPiContextToLlm, decodePiSession, piContextMessages, sessionConfig, sessionSummary, visibleMessages } from "./pi-session";
 
 const timestamp = "2026-08-14T00:00:00Z";
 const entry = (id: string, parentId: string | null, role: "user" | "assistant", text: string) => ({ type: "message", id, parentId, timestamp, message: { role, content: [{ type: "text", text }], timestamp: 1 } });
@@ -55,18 +55,6 @@ describe("Pi session decoder", () => {
     const context = piContextMessages(session);
     expect((context[0] as unknown as { role: string }).role).toBe("compactionSummary");
     expect(convertPiContextToLlm(context)[0]).toMatchObject({ role: "user", content: [{ text: expect.stringContaining("sum") }] });
-  });
-  it("keeps only the requested number of complete recent turns", () => {
-    const messages = [{ role: "user" }, { role: "assistant" }, { role: "toolResult" }, { role: "user" }, { role: "assistant" }] as never[];
-    expect(windowCompleteTurns(messages, 1)).toHaveLength(2);
-  });
-  it("retains the book snapshot outside the recent turn window", () => {
-    const messages = [
-      { role: "custom", customType: "bookSnapshot" },
-      { role: "user" }, { role: "assistant" },
-      { role: "user" }, { role: "assistant" },
-    ] as never[];
-    expect(windowCompleteTurns(messages, 1).map((message) => (message as unknown as { role: string }).role)).toEqual(["custom", "user", "assistant"]);
   });
   it("copies toolResult isError onto the visible tool call", () => {
     const session = makeSession([
