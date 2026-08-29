@@ -26,6 +26,8 @@ export interface Segment {
   /** Anchor id that starts this slice; undefined for the leading slice. */
   anchorId?: string;
   text: string;
+  /** Structured Markdown projection of the same slice; flat `text` when the markdown walk failed. */
+  markdown?: string;
 }
 
 interface Chapter {
@@ -34,6 +36,7 @@ interface Chapter {
   depth: number;
   hrefs: string[];
   text: string;
+  markdown: string;
 }
 
 export interface ParsedBook {
@@ -84,6 +87,464 @@ function firstText(root: ReturnType<typeof parseXml>, names: string[], fallback:
     if (value) return value;
   }
   return fallback;
+}
+
+const INLINE_EMPTY_TAGS = new Set(["img", "svg", "audio", "video", "image"]);
+const BLOCK_TAGS = new Set(["p", "div", "section", "header", "footer", "aside"]);
+
+/**
+ * Normalize inline text: collapse whitespace runs to a single space and
+ * trim — but keep `<br/>`-produced line breaks (`\n`) as paragraph-internal
+ * hard breaks, collapsing whitespace only within each line.
+ */
+function collapseInline(text: string): string {
+  return text
+    .split("\n")
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .join("\n");
+}
+
+/** Verbatim pre-content: raw text nodes preserved, `<br/>` → `\n`, no collapsing. */
+function preText(node: XmlNode): string {
+  const type = node.nodeType;
+  if (type === 3 || type === 4) return node.nodeValue ?? "";
+  if (type !== 1) return "";
+  const element = node as XmlElement;
+  const tag = elementTag(element);
+  if (tag === "br") return "\n";
+  if (INLINE_EMPTY_TAGS.has(tag)) return "";
+  let out = "";
+  const children = element.childNodes;
+  for (let index = 0; index < children.length; index += 1) out += preText(children[index]);
+  return out;
+}
+
+interface MarkdownWalk {
+  /** Block-level output: paragraphs, headings, quotes, lists, pre blocks. */
+  blocks: string[];
+}
+
+interface MarkdownItem {
+  /** Item text (single block or `\n\n`-joined blocks for loose items). */
+  text: string;
+  /** Nested list elements to render indented after this item. */
+  nested: XmlElement[];
+}
+
+/** Markdown projection walk for one element subtree. */
+function walkElement(element: XmlElement, state: MarkdownWalk): void {
+  const tag = elementTag(element);
+  if (tag === "pre") {
+    let raw = "";
+    const children = element.childNodes;
+    for (let index = 0; index < children.length; index += 1) raw += preText(children[index]);
+    state.blocks.push(raw);
+    return;
+  }
+  if (tag === "table") {
+    const text = collapseInline(inlineOf(element));
+    if (text) state.blocks.push(text);
+    return;
+  }
+  if (tag === "ul" || tag === "ol") {
+    const lines = listBlocks(element, tag === "ol");
+    if (lines.length) state.blocks.push(lines.join("\n"));
+    return;
+  }
+  if (tag === "blockquote") {
+    const inner: MarkdownWalk = { blocks: [] };
+    const children = element.childNodes;
+    for (let index = 0; index < children.length; index += 1) {
+      const child = children[index];
+      if (child.nodeType === 3 || child.nodeType === 4) {
+        // Bare text inside a quote renders as its own quoted paragraph.
+        const text = collapseInline(child.nodeValue ?? "");
+        if (text) inner.blocks.push(text);
+        continue;
+      }
+      if (child.nodeType === 1) walkElement(child as XmlElement, inner);
+    }
+    const quote = inner.blocks.join("\n\n");
+    if (quote) state.blocks.push(quote.split("\n").map((line) => (line ? `> ${line}` : ">")).join("\n"));
+    return;
+  }
+  const heading = /^h[1-6]$/.exec(tag);
+  if (heading) {
+    const text = collapseInline(inlineOf(element));
+    if (text) state.blocks.push(`${"#".repeat(Number(tag.slice(1)))} ${text}`);
+    return;
+  }
+  if (BLOCK_TAGS.has(tag) && !hasBlockDescendant(element)) {
+    // Purely inline block content (the common `<p>` case): one collapsed
+    // paragraph. A block wrapper with block children (e.g. a `<div>` of
+    // `<p>`/headings — the dominant real-book shape) falls through to the
+    // transparent flush-and-recurse branch so the nested blocks emit their
+    // own structure instead of being flattened.
+    const text = collapseInline(inlineOf(element));
+    if (text) state.blocks.push(text);
+    return;
+  }
+  // Transparent: recurse into children without emitting this element's own
+  // block. Pure-inline children accumulate into one paragraph; block roots
+  // (or subtrees containing them) flush the accumulated text and emit their
+  // own blocks.
+  let text = "";
+  const children = element.childNodes;
+  const flushText = () => {
+    const block = collapseInline(text);
+    text = "";
+    if (block) state.blocks.push(block);
+  };
+  for (let index = 0; index < children.length; index += 1) {
+    const child = children[index];
+    if (child.nodeType === 3 || child.nodeType === 4) {
+      text += child.nodeValue ?? "";
+      continue;
+    }
+    if (child.nodeType !== 1) continue;
+    const childElement = child as XmlElement;
+    if (isMarkdownBlockRoot(childElement) || hasBlockDescendant(childElement)) {
+      flushText();
+      walkElement(childElement, state);
+    } else {
+      text += inlineOf(childElement);
+    }
+  }
+  flushText();
+}
+
+/** Inline Markdown projection of an element subtree; returns text with block structure dropped. */
+function inlineOf(element: XmlElement): string {
+  // Delegate to `inlineNode` so the element's OWN emphasis delimiters apply
+  // too — recursing children directly drops the `*…*` of a pure-inline `<em>`.
+  return inlineNode(element);
+}
+
+function inlineNode(node: XmlNode): string {
+  const type = node.nodeType;
+  if (type === 3 || type === 4) return node.nodeValue ?? "";
+  if (type !== 1) return "";
+  const element = node as XmlElement;
+  const tag = elementTag(element);
+  if (INLINE_EMPTY_TAGS.has(tag)) return "";
+  if (tag === "br") return "\n";
+  const children = element.childNodes;
+  let text = "";
+  for (let index = 0; index < children.length; index += 1) text += inlineNode(children[index]);
+  if (tag === "em" || tag === "i") return text ? `*${text}*` : text;
+  if (tag === "strong" || tag === "b") return text ? `**${text}**` : text;
+  if (tag === "del" || tag === "s" || tag === "strike") return text ? `~~${text}~~` : text;
+  return text;
+}
+
+/** Render `<ul>`/`<ol>` as Markdown list lines; nested lists indent two spaces. */
+function listBlocks(list: XmlElement, ordered: boolean): string[] {
+  const items: MarkdownItem[] = [];
+  const children = list.childNodes;
+  for (let index = 0; index < children.length; index += 1) {
+    const child = children[index];
+    if (child.nodeType !== 1) continue;
+    const element = child as XmlElement;
+    const tag = elementTag(element);
+    if (tag === "li") items.push(listItem(element));
+    else if (tag === "ul" || tag === "ol") items.push(...listBlocks(element, tag === "ol").map((text) => ({ text, nested: [] })));
+  }
+  const lines: string[] = [];
+  items.forEach((item, index) => {
+    lines.push(`${ordered ? `${index + 1}. ` : "- "}${item.text}`);
+    item.nested.forEach((nested) => {
+      listBlocks(nested, elementTag(nested) === "ol").forEach((line) => lines.push(`  ${line}`));
+    });
+  });
+  return lines;
+}
+
+function listItem(li: XmlElement): MarkdownItem {
+  const inlineParts: string[] = [];
+  const blockParts: string[] = [];
+  const nested: XmlElement[] = [];
+  const children = li.childNodes;
+  for (let index = 0; index < children.length; index += 1) {
+    const child = children[index];
+    if (child.nodeType === 3 || child.nodeType === 4) {
+      const value = child.nodeValue;
+      if (value) inlineParts.push(value);
+      continue;
+    }
+    if (child.nodeType !== 1) continue;
+    const element = child as XmlElement;
+    const tag = elementTag(element);
+    if (tag === "ul" || tag === "ol") {
+      nested.push(element);
+      continue;
+    }
+    if (BLOCK_TAGS.has(tag) || tag === "pre" || tag === "blockquote" || /^h[1-6]$/.test(tag) || tag === "table") {
+      const state: MarkdownWalk = { blocks: [] };
+      walkElement(element, state);
+      if (state.blocks.length) blockParts.push(state.blocks.join("\n\n"));
+      continue;
+    }
+    // Inline markup: use inline projection, but a stray block boundary inside it still forces a break.
+    const text = inlineOf(element);
+    if (text) inlineParts.push(text);
+  }
+  const inlineText = collapseInline(inlineParts.join(""));
+  return { text: [inlineText, ...blockParts].filter(Boolean).join("\n\n"), nested };
+}
+
+/**
+ * Structured Markdown projection of one DOM root. `\n\n` separates block
+ * paragraphs; inline whitespace collapses to single spaces except inside
+ * `<pre>`, whose content stays verbatim. Shares the block-event walk with
+ * `parseSpineSegments` so both projections follow identical rules.
+ */
+export function markdownText(source: string): string {
+  const parsed = parseXml(source, "text/html");
+  const root = parsed.documentElement;
+  if (!root) return "";
+  const state: MarkdownWalk = { blocks: [] };
+  walkElement(root, state);
+  return state.blocks.map((block) => block.replace(/\s+$/g, "")).filter(Boolean).join("\n\n");
+}
+
+// Block roots are consumed by `walkElement` as a whole subtree; everything
+// else is transparent in the event walk (inline content flows into `buffer`).
+function isMarkdownBlockRoot(element: XmlElement): boolean {
+  const tag = elementTag(element);
+  return (
+    tag === "pre" ||
+    tag === "table" ||
+    tag === "blockquote" ||
+    tag === "ul" ||
+    tag === "ol" ||
+    BLOCK_TAGS.has(tag) ||
+    /^h[1-6]$/.test(tag)
+  );
+}
+
+/** True when any descendant of `element` (not the element itself) is a block root. */
+function hasBlockDescendant(element: XmlElement): boolean {
+  const children = element.childNodes;
+  for (let index = 0; index < children.length; index += 1) {
+    const child = children[index];
+    if (child.nodeType !== 1) continue;
+    const childElement = child as XmlElement;
+    if (isMarkdownBlockRoot(childElement) || hasBlockDescendant(childElement)) return true;
+  }
+  return false;
+}
+
+type MarkdownEvent = { kind: "anchor"; id: string } | { kind: "block"; text: string };
+
+function isAnchored(element: XmlElement): boolean {
+  return anchorIdOf(element) !== undefined;
+}
+
+/** True when any descendant of `element` (not the element itself) carries an anchor id. */
+function hasAnchoredDescendant(element: XmlElement): boolean {
+  const children = element.childNodes;
+  for (let index = 0; index < children.length; index += 1) {
+    const child = children[index];
+    if (child.nodeType !== 1) continue;
+    const childElement = child as XmlElement;
+    if (isAnchored(childElement) || hasAnchoredDescendant(childElement)) return true;
+  }
+  return false;
+}
+
+/**
+ * Event-stream markdown walk: block emissions and anchor boundaries in
+ * document order. Anchored elements still wrap their own subtree — an
+ * anchored `<p>` emits its anchor then the whole paragraph. Bare inline
+ * text between blocks is flushed as a collapsed block at the next boundary.
+ * Atomic block roots that anchors cannot cleanly split (`pre`, lists,
+ * quotes, tables, headings) are consumed wholesale; a consumer block root
+ * (`p`/`div`/`section`/…) runs the anchor-aware transparent walk instead,
+ * so nested anchors land as their own slice events — swallowing them would
+ * desynchronize the event stream from the flat walk and flatten the whole
+ * file via the dense-guard fallback.
+ */
+function markdownEvents(root: XmlElement): MarkdownEvent[] {
+  const events: MarkdownEvent[] = [];
+  let buffer = "";
+  const flushInline = () => {
+    const text = collapseInline(buffer);
+    buffer = "";
+    if (text) events.push({ kind: "block", text });
+  };
+  const inlineChild = (element: XmlElement): boolean =>
+    !isMarkdownBlockRoot(element) &&
+    !hasBlockDescendant(element) &&
+    !isAnchored(element) &&
+    !hasAnchoredDescendant(element);
+  const visit = (node: XmlNode) => {
+    const type = node.nodeType;
+    if (type === 3 || type === 4) {
+      const value = node.nodeValue;
+      if (value) buffer += value;
+      return;
+    }
+    if (type !== 1) return;
+    const element = node as XmlElement;
+    const anchor = anchorIdOf(element);
+    if (anchor !== undefined) {
+      flushInline();
+      events.push({ kind: "anchor", id: anchor });
+    }
+    const tag = elementTag(element);
+    if (isMarkdownBlockRoot(element) && !BLOCK_TAGS.has(tag)) {
+      flushInline();
+      const state: MarkdownWalk = { blocks: [] };
+      walkElement(element, state);
+      for (const block of state.blocks) {
+        const text = block.replace(/\s+$/g, "");
+        if (text) events.push({ kind: "block", text });
+      }
+      return;
+    }
+    if (BLOCK_TAGS.has(tag)) {
+      // Container block: mirror walkElement's transparent branch, but flush
+      // and recurse at anchored children too, so each nested anchor lands in
+      // its own slice; the element itself is a block boundary (end flush).
+      const children = element.childNodes;
+      for (let index = 0; index < children.length; index += 1) {
+        const child = children[index];
+        if (child.nodeType === 3 || child.nodeType === 4) {
+          const value = child.nodeValue;
+          if (value) buffer += value;
+          continue;
+        }
+        if (child.nodeType !== 1) continue;
+        const childElement = child as XmlElement;
+        if (inlineChild(childElement)) buffer += inlineOf(childElement);
+        else {
+          flushInline();
+          visit(childElement);
+        }
+      }
+      flushInline();
+      return;
+    }
+    if (INLINE_EMPTY_TAGS.has(tag)) return;
+    if (tag === "br") {
+      buffer += "\n";
+      return;
+    }
+    const children = element.childNodes;
+    for (let index = 0; index < children.length; index += 1) visit(children[index]);
+  };
+  visit(root);
+  flushInline();
+  return events;
+}
+
+/** Dense form: all whitespace removed — used for content-equivalence checks. */
+function dense(text: string): string {
+  return text.replace(/\s+/g, "");
+}
+
+/**
+ * Dense content of a Markdown projection: strip structural markers (heading,
+ * quote, list line prefixes; emphasis delimiters) first, then remove
+ * whitespace. Comparable with `dense` of the flat projection; a mismatch
+ * (e.g. literal `*` in the source text) makes the caller fall back to flat
+ * text, which is always safe.
+ */
+function denseMarkdown(markdown: string): string {
+  const lines = markdown.split("\n").map((line) => {
+    let text = line.replace(/^(\s*)([-+]|\d{1,9}\.)\s+/, "$1");
+    text = text.replace(/^(\s*)#{1,6}\s+/, "$1");
+    while (/^(\s*)>\s?/.test(text)) text = text.replace(/^(\s*)>\s?/, "$1");
+    return text;
+  });
+  return dense(lines.join("\n"))
+    .split("**")
+    .join("")
+    .split("~~")
+    .join("")
+    .split("*")
+    .join("");
+}
+
+/**
+ * Reduce markdown events into slices aligned with the flat walk's anchor
+ * sequence (slice 0 = leading content, then one slice per anchor). Returns
+ * `[]` when the markdown anchor stream disagrees with the flat one, so the
+ * caller falls back to flat text for every slice.
+ */
+function markdownSlices(events: readonly MarkdownEvent[], anchorIds: readonly string[]): string[] {
+  const slices: string[] = new Array(anchorIds.length + 1).fill("");
+  let slice = 0;
+  let cursor = 0;
+  for (const event of events) {
+    if (event.kind === "anchor") {
+      if (cursor >= anchorIds.length || event.id !== anchorIds[cursor]) return [];
+      cursor += 1;
+      slice = cursor;
+    } else if (event.text) {
+      slices[slice] = slices[slice] ? `${slices[slice]}\n\n${event.text}` : event.text;
+    }
+  }
+  return slices;
+}
+
+/**
+ * Split one spine document into anchor-bounded segments, each carrying BOTH
+ * projections: the flat `text` (legacy semantics — anchor slicing, whitespace
+ * collapse, trim — completely unchanged) and `markdown` (structured projection
+ * of the same slice). Anchor ids come from the same document order, so both
+ * projections stay slice-aligned; a slice whose markdown would not densely
+ * equal its flat text falls back to flat text, keeping the union invariant
+ * true for both projections. Malformed markup falls back to the legacy
+ * single-segment `htmlText` flat projection.
+ */
+export function parseSpineSegments(source: string): Segment[] {
+  try {
+    const parsed = parseXml(source, "text/html");
+    const root = parsed.documentElement;
+    if (!root) return [{ text: htmlText(source) }];
+    const flats: Array<{ anchorId?: string; text: string }> = [];
+    const anchorIds: string[] = [];
+    let parts: string[] = [];
+    let anchorId: string | undefined = undefined;
+    const finish = () => {
+      flats.push({ anchorId, text: parts.join("").replace(/\s+/g, " ").trim() });
+      parts = [];
+    };
+    const visit = (node: XmlNode) => {
+      const type = node.nodeType;
+      if (type === 3 || type === 4) {
+        const value = node.nodeValue;
+        if (value) parts.push(value);
+        return;
+      }
+      if (type !== 1) return;
+      const element = node as XmlElement;
+      const nextAnchor = anchorIdOf(element);
+      if (nextAnchor !== undefined) {
+        finish();
+        anchorId = nextAnchor;
+        anchorIds.push(nextAnchor);
+      }
+      const children = element.childNodes;
+      for (let index = 0; index < children.length; index += 1) visit(children[index]);
+    };
+    visit(root);
+    finish();
+    if (!flats.length) return [{ text: "" }];
+    const markdowns = markdownSlices(markdownEvents(root), anchorIds);
+    const segments: Segment[] = flats.map((flat, index) => {
+      const markdown = markdowns.length ? markdowns[index] : undefined;
+      return {
+        anchorId: flat.anchorId,
+        text: flat.text,
+        markdown: markdown !== undefined && denseMarkdown(markdown) === dense(flat.text) ? markdown : flat.text,
+      };
+    });
+    return segments;
+  } catch {
+    return [{ text: htmlText(source) }];
+  }
 }
 
 function htmlText(source: string): string {
@@ -151,49 +612,6 @@ function anchorIdOf(element: XmlElement): string | undefined {
   return undefined;
 }
 
-/**
- * Split one spine document into anchor-bounded segments: each element carrying
- * a non-empty `id` (or an EPUB2 `<a name>`) starts a new segment that runs to
- * the next anchor element (or end of file). Without anchors the whole file is a
- * single leading segment — identical to the legacy `htmlText` projection.
- */
-export function parseSpineSegments(source: string): Segment[] {
-  try {
-    const parsed = parseXml(source, "text/html");
-    const root = parsed.documentElement;
-    if (!root) return [{ text: htmlText(source) }];
-    const segments: Segment[] = [];
-    let parts: string[] = [];
-    let anchorId: string | undefined = undefined;
-    const finish = () => {
-      segments.push({ anchorId, text: parts.join("").replace(/\s+/g, " ").trim() });
-      parts = [];
-    };
-    const visit = (node: XmlNode) => {
-      const type = node.nodeType;
-      if (type === 3 || type === 4) {
-        const value = node.nodeValue;
-        if (value) parts.push(value);
-        return;
-      }
-      if (type !== 1) return;
-      const element = node as XmlElement;
-      const nextAnchor = anchorIdOf(element);
-      if (nextAnchor !== undefined) {
-        finish();
-        anchorId = nextAnchor;
-      }
-      const children = element.childNodes;
-      for (let index = 0; index < children.length; index += 1) visit(children[index]);
-    };
-    visit(root);
-    finish();
-    return segments.length ? segments : [{ text: "" }];
-  } catch {
-    return [{ text: htmlText(source) }];
-  }
-}
-
 function sameTarget(left: string, right: string): boolean {
   return hrefMatches(left, right) && hrefFragment(left) === hrefFragment(right);
 }
@@ -202,9 +620,18 @@ function segmentText(segments: readonly Segment[]): string {
   return segments.map((segment) => segment.text).filter(Boolean).join("");
 }
 
-function addFileToBucket(bucket: { hrefs: string[]; texts: string[] }, href: string, text: string): void {
+function segmentMarkdown(segments: readonly Segment[]): string {
+  // Each segment markdown is internally complete; joining distinct segments
+  // with `\n\n` keeps headings/quotes on their own lines (a flat `""` join
+  // would land a `##` marker mid-line). The flat `texts` join stays ""
+  // (union invariant).
+  return segments.map((segment) => segment.markdown ?? segment.text).filter(Boolean).join("\n\n");
+}
+
+function addFileToBucket(bucket: { hrefs: string[]; texts: string[]; markdowns: string[] }, href: string, text: string, markdown: string): void {
   if (!bucket.hrefs.includes(href)) bucket.hrefs.push(href);
   if (text) bucket.texts.push(text);
+  if (markdown) bucket.markdowns.push(markdown);
 }
 
 /**
@@ -233,18 +660,18 @@ export function buildOwnedChapters(
     return { node, ancestors, container };
   });
 
-  interface Bucket { label: string; ancestors: string[]; depth: number; hrefs: string[]; texts: string[] }
+  interface Bucket { label: string; ancestors: string[]; depth: number; hrefs: string[]; texts: string[]; markdowns: string[] }
   const buckets = new Map<number, Bucket>();
   const bucketFor = (global: number, info: Info): Bucket => {
     let bucket = buckets.get(global);
     if (!bucket) {
-      bucket = { label: info.node.label, ancestors: info.ancestors, depth: info.node.depth, hrefs: [], texts: [] };
+      bucket = { label: info.node.label, ancestors: info.ancestors, depth: info.node.depth, hrefs: [], texts: [], markdowns: [] };
       buckets.set(global, bucket);
     }
     return bucket;
   };
   let previous: Bucket | undefined;
-  const leadingFiles: Array<{ href: string; text: string }> = [];
+  const leadingFiles: Array<{ href: string; text: string; markdown: string }> = [];
 
   spineHrefs.forEach((fileHref, fileIndex) => {
     const targeting: Array<{ global: number; info: Info }> = [];
@@ -254,8 +681,9 @@ export function buildOwnedChapters(
     const segments = spineSegments[fileIndex] ?? [];
     if (!targeting.length) {
       const text = segmentText(segments);
-      if (previous) addFileToBucket(previous, fileHref, text);
-      else leadingFiles.push({ href: fileHref, text });
+      const markdown = segmentMarkdown(segments);
+      if (previous) addFileToBucket(previous, fileHref, text, markdown);
+      else leadingFiles.push({ href: fileHref, text, markdown });
       return;
     }
     // Resolvable fragment claims; the first node claiming a segment wins.
@@ -290,6 +718,8 @@ export function buildOwnedChapters(
         const href = segment.anchorId === undefined ? fileHref : `${fileHref}#${segment.anchorId}`;
         if (!bucket.hrefs.includes(href)) bucket.hrefs.push(href);
         if (segment.text) bucket.texts.push(segment.text);
+        const markdown = segment.markdown ?? segment.text;
+        if (markdown) bucket.markdowns.push(markdown);
       });
       lastBucket = bucket;
     });
@@ -297,7 +727,7 @@ export function buildOwnedChapters(
   });
 
   const first = buckets.values().next().value;
-  if (first) leadingFiles.forEach(({ href, text }) => addFileToBucket(first, href, text));
+  if (first) leadingFiles.forEach(({ href, text, markdown }) => addFileToBucket(first, href, text, markdown));
 
   const chapters: Chapter[] = [];
   infos.forEach((info, global) => {
@@ -305,13 +735,14 @@ export function buildOwnedChapters(
     if (info.container || !bucket) return;
     const text = bucket.texts.join("");
     if (!text) return;
-    chapters.push({ label: bucket.label, ancestors: bucket.ancestors, depth: bucket.depth, hrefs: bucket.hrefs, text });
+    chapters.push({ label: bucket.label, ancestors: bucket.ancestors, depth: bucket.depth, hrefs: bucket.hrefs, text, markdown: bucket.markdowns.join("\n\n") || text });
   });
   if (chapters.length) return chapters;
   // Empty or entirely unresolvable TOC: one chapter per spine file, as before.
   return spineHrefs.flatMap((href, index) => {
-    const text = segmentText(spineSegments[index] ?? []);
-    return text ? [{ label: "", ancestors: [] as string[], depth: 0, hrefs: [href], text }] : [];
+    const segments = spineSegments[index] ?? [];
+    const text = segmentText(segments);
+    return text ? [{ label: "", ancestors: [] as string[], depth: 0, hrefs: [href], text, markdown: segmentMarkdown(segments) || text }] : [];
   });
 }
 
@@ -376,21 +807,78 @@ export function bookToc(book: ParsedBook): BookTocEntry[] {
     ancestors: chapter.ancestors,
     depth: chapter.depth,
     hrefs: chapter.hrefs,
-    chars: chapter.text.length,
+    chars: chapter.markdown.length,
   }));
+}
+
+/**
+ * Paragraph-aligned window packing (design §7): split the markdown on
+ * `\n\n` into blocks, greedily pack blocks into windows of at most
+ * `CHAPTER_PART_CHARS` (+2 accounting for the `\n\n` join separator), and
+ * hard-split only a single block that alone exceeds the limit. Windows joined
+ * back with `\n\n` reproduce the original markdown at every block boundary
+ * that was NOT introduced by a hard split: the pieces of an oversized block
+ * are exact consecutive slices of it (the residual final piece keeps packing
+ * with following blocks). Every window is complete Markdown.
+ */
+export function chapterWindows(markdown: string): string[] {
+  const blocks = markdown.split("\n\n");
+  const windows: string[] = [];
+  let current = "";
+  const seal = () => {
+    if (current) windows.push(current);
+    current = "";
+  };
+  for (const block of blocks) {
+    if (!block) continue;
+    if (block.length > CHAPTER_PART_CHARS) {
+      // Oversized single block (e.g. a huge <pre>): hard-split into full-size
+      // windows; the residual final piece becomes `current` so following
+      // blocks can pack with it instead of wasting a near-empty window.
+      seal();
+      const fullPieces = Math.floor(block.length / CHAPTER_PART_CHARS);
+      for (let piece = 0; piece < fullPieces; piece += 1) {
+        windows.push(block.slice(piece * CHAPTER_PART_CHARS, (piece + 1) * CHAPTER_PART_CHARS));
+      }
+      current = block.slice(fullPieces * CHAPTER_PART_CHARS);
+      continue;
+    }
+    if (!current) {
+      current = block;
+      continue;
+    }
+    if (current.length + 2 + block.length <= CHAPTER_PART_CHARS) {
+      current = `${current}\n\n${block}`;
+    } else {
+      windows.push(current);
+      current = block;
+    }
+  }
+  seal();
+  return windows.length ? windows : [""];
 }
 
 export function readChapter(book: ParsedBook, chapterIndex: number, rawPart = 0) {
   const chapter = book.chapters[chapterIndex];
   if (!chapter) throw new Error("Chapter index is out of range");
-  const totalParts = Math.max(1, Math.ceil(chapter.text.length / CHAPTER_PART_CHARS));
+  let windows: string[];
+  try {
+    windows = chapterWindows(chapter.markdown);
+  } catch {
+    // Defensive: if packing ever fails, degrade to flat-text hard slicing.
+    windows = Array.from(
+      { length: Math.max(1, Math.ceil(chapter.text.length / CHAPTER_PART_CHARS)) },
+      (_, part) => chapter.text.slice(part * CHAPTER_PART_CHARS, (part + 1) * CHAPTER_PART_CHARS),
+    );
+  }
+  const totalParts = windows.length;
   const part = Math.min(Math.max(0, Math.trunc(rawPart) || 0), totalParts - 1);
   return {
     chapterIndex,
     chapterNumber: chapterIndex + 1,
     part,
     totalParts,
-    text: chapter.text.slice(part * CHAPTER_PART_CHARS, (part + 1) * CHAPTER_PART_CHARS),
+    text: windows[part],
   };
 }
 

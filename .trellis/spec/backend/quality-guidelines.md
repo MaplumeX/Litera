@@ -28,8 +28,17 @@
   indented by depth under the same 200-entry / 4k-char caps. `hrefs` never
   appear in model-visible output. `chapterAside` prefers an exact
   file+fragment match before the fragment-insensitive fallback.
-- `read_chapter` is bounded by 12,000-character parts. Search accepts multiple
-  query variants, prefers exact hits, and returns deterministic bounded snippets.
+- `read_chapter` returns the chapter's structured Markdown projection
+  (paragraphs, headings, emphasis, quotes, lists, verbatim pre) instead of
+  flattened text. Windows are paragraph-aligned: `\n\n`-separated blocks are
+  greedily packed into ≤12,000-character parts; only a single block exceeding
+  12k is hard-split. `get_toc`/snapshot `chars` is the markdown length.
+- Search accepts multiple query variants, prefers exact hits, and returns
+  deterministic bounded snippets. Search stays on the flat text projection
+  (trigram index and snippets); a per-segment guard falls back to flat text
+  when the markdown walk would not dense-equal the flat text. A hit's `part`
+  stays a flat-offset approximation of the markdown windows (may be off by
+  one).
 - EPUB parsing, ownership, indexing, and search run in the module worker. A book
   switch terminates the old worker and rejects pending calls.
 - `list_annotations` is a no-arg read of the current book's `annotations.json`

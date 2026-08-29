@@ -1,7 +1,7 @@
 import { DOMParser } from "@xmldom/xmldom";
 import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 import { describe, expect, it } from "vitest";
-import { bookToc, buildOwnedChapters, hrefFragment, parseEpub, parseSpineSegments, readChapter, searchBook, stripFragment, type NavNode } from "./epub-content";
+import { bookToc, buildOwnedChapters, chapterWindows, hrefFragment, markdownText, parseEpub, parseSpineSegments, readChapter, searchBook, stripFragment, type NavNode } from "./epub-content";
 
 type FileMap = Record<string, string>;
 
@@ -84,6 +84,39 @@ const ac1Files = (): FileMap =>
     { "text/vol1.xhtml": volumeOneSource },
   );
 
+// Rich structural fixture for the read_chapter Markdown projection (AC1/AC5).
+const richChapterSource = `<html><body><h1 id="ch1">Chapter One</h1><p>The <em>quick</em> brown fox runs into the <strong>strong</strong> city.</p><h2>Later</h2><blockquote><p>A quoted line.</p></blockquote><ul><li>first item</li><li>second item</li></ul><ol><li>ordered</li></ol><pre>code line
+keep  spacing</pre></body></html>`;
+
+const richMarkdown = [
+  "# Chapter One",
+  "The *quick* brown fox runs into the **strong** city.",
+  "## Later",
+  "> A quoted line.",
+  "- first item\n- second item",
+  "1. ordered",
+  "code line\nkeep  spacing",
+].join("\n\n");
+
+const richFiles = (): FileMap =>
+  hierarchyFiles(flatNav(["Rich chapter"], ["text/vol1.xhtml#ch1"]), {
+    "text/vol1.xhtml": richChapterSource,
+  });
+
+// Long fixture exercising paragraph-aligned window packing (AC5): one small
+// anchor paragraph plus ten 5k paragraphs, so windows hold two blocks each.
+const longChapterSource = (): string => {
+  const paragraphs = ["start", ...Array.from({ length: 10 }, () => "a".repeat(5000))];
+  return `<html><body>${paragraphs
+    .map((text, index) => `<p${index === 0 ? ' id="ch1"' : ""}>${text}</p>`)
+    .join("")}</body></html>`;
+};
+
+const longFiles = (): FileMap =>
+  hierarchyFiles(flatNav(["Long chapter"], ["text/vol1.xhtml#ch1"]), {
+    "text/vol1.xhtml": longChapterSource(),
+  });
+
 const flatNav = (labels: string[], hrefs: string[]): string =>
   labels.map((label, index) => `<a href="${hrefs[index]}">${label}</a>`).join("");
 
@@ -103,7 +136,7 @@ describe("url helpers", () => {
 describe("parseSpineSegments", () => {
   it("returns a single leading segment without anchors", () => {
     expect(parseSpineSegments("<html><body>plain text</body></html>")).toEqual([
-      { text: "plain text" },
+      { text: "plain text", markdown: "plain text" },
     ]);
   });
 
@@ -111,25 +144,34 @@ describe("parseSpineSegments", () => {
     const source =
       '<html><body>intro <h1 id="a">One</h1>first <h2 id="b">Two</h2>second tail</body></html>';
     expect(parseSpineSegments(source)).toEqual([
-      { text: "intro" },
-      { anchorId: "a", text: "Onefirst" },
-      { anchorId: "b", text: "Twosecond tail" },
+      { text: "intro", markdown: "intro" },
+      { anchorId: "a", text: "Onefirst", markdown: "# One\n\nfirst" },
+      { anchorId: "b", text: "Twosecond tail", markdown: "## Two\n\nsecond tail" },
     ]);
   });
 
   it("supports EPUB2 <a name> anchors", () => {
     const source = '<html><body><a name="start"></a>opened body</body></html>';
     expect(parseSpineSegments(source)).toEqual([
-      { text: "" },
-      { anchorId: "start", text: "opened body" },
+      { text: "", markdown: "" },
+      { anchorId: "start", text: "opened body", markdown: "opened body" },
     ]);
   });
 
   it("treats inline-span anchors as segment boundaries", () => {
     const source = '<html><body><p>alpha <span id="mid">beta</span> gamma</p></body></html>';
     expect(parseSpineSegments(source)).toEqual([
-      { text: "alpha" },
-      { anchorId: "mid", text: "beta gamma" },
+      { text: "alpha", markdown: "alpha" },
+      { anchorId: "mid", text: "beta gamma", markdown: "beta gamma" },
+    ]);
+  });
+
+  it("keeps anchor slices aligned when anchors sit inside div containers (production shape)", () => {
+    const source = '<html><body><div><h2 id="s1">One</h2>a <p id="s2">Two</p>b</div></body></html>';
+    expect(parseSpineSegments(source)).toEqual([
+      { text: "", markdown: "" },
+      { anchorId: "s1", text: "Onea", markdown: "## One\n\na" },
+      { anchorId: "s2", text: "Twob", markdown: "Two\n\nb" },
     ]);
   });
 
@@ -139,6 +181,27 @@ describe("parseSpineSegments", () => {
     expect(segments).toHaveLength(1);
     expect(segments[0].anchorId).toBeUndefined();
     expect(segments[0].text).toContain("unclosed");
+  });
+
+  it("keeps structure for div/section-wrapped chapter bodies (production shape)", () => {
+    const body = (wrapper: "div" | "section"): string =>
+      `<${wrapper} class="ch"><h2 id="ch1">T</h2><p>one</p><p>two <em>x</em></p><blockquote><p>q1</p><p>q2</p></blockquote><pre>code\n  indented</pre></${wrapper}>`;
+    const expectedMarkdown = [
+      "## T",
+      "one",
+      "two *x*",
+      "> q1\n>\n> q2",
+      "code\n  indented",
+    ].join("\n\n");
+    for (const wrapper of ["div", "section"] as const) {
+      const segments = parseSpineSegments(`<html><body>${body(wrapper)}</body></html>`);
+      expect(segments[segments.length - 1]).toEqual({
+        anchorId: "ch1",
+        text: "Tonetwo xq1q2code indented",
+        markdown: expectedMarkdown,
+      });
+      expect(segments.slice(0, -1)).toEqual([{ text: "", markdown: "" }]);
+    }
   });
 });
 
@@ -267,7 +330,10 @@ describe("anchor-level ownership (AC1–AC3)", () => {
     );
     const book = parseEpub(pack(files));
     expect(bookToc(book)).toHaveLength(1);
-    expect(readChapter(book, 0).text).toBe("introorphanownedtrailing");
+    // Multi-segment chapter markdown joins slices with `\n\n` so structure
+    // markers stay on their own lines (segment-level dense guard plus the
+    // `\n\n` joints only add strippable whitespace).
+    expect(readChapter(book, 0).text).toBe("intro\n\norphan\n\nowned\n\ntrailing");
     expect(bookToc(book)[0].hrefs).toEqual([
       "OPS/text/vol1.xhtml",
       "OPS/text/vol1.xhtml#a",
@@ -305,6 +371,8 @@ describe("AC4 fallbacks and invariants", () => {
   it("keeps the union-of-texts invariant on every fixture", () => {
     const fixtures: Array<{ buffer: ArrayBuffer; spine: string[] }> = [
       { buffer: pack(ac1Files()), spine: ["OPS/text/vol1.xhtml"] },
+      { buffer: pack(richFiles()), spine: ["OPS/text/vol1.xhtml"] },
+      { buffer: pack(longFiles()), spine: ["OPS/text/vol1.xhtml"] },
       { buffer: epub({ nav: true }), spine: ["OPS/text/one.xhtml", "OPS/text/two.xhtml", "OPS/text/three.xhtml"] },
       { buffer: epub({ ncx: true }), spine: ["OPS/text/one.xhtml", "OPS/text/two.xhtml", "OPS/text/three.xhtml"] },
       { buffer: epub({}), spine: ["OPS/text/one.xhtml", "OPS/text/two.xhtml", "OPS/text/three.xhtml"] },
@@ -335,12 +403,37 @@ describe("AC4 fallbacks and invariants", () => {
     // Whitespace may differ at segment boundaries (each slice trims its own
     // edges); the invariant is that no characters of content are lost.
     const dense = (text: string): number => text.replace(/\s+/g, "").length;
+    // Mirror of the source's internal denseMarkdown: strip Markdown structural
+    // markers (heading/quote/list line prefixes, emphasis delimiters), then
+    // drop all whitespace — comparable against dense flat text. A chapter whose
+    // markdown would not dense-equal its flat text fell back to flat text, so
+    // this assertion holds on every chapter.
+    const denseMarkdown = (markdown: string): string => {
+      const lines = markdown.split("\n").map((line) => {
+        let text = line.replace(/^(\s*)([-+]|\d{1,9}\.)\s+/, "$1");
+        text = text.replace(/^(\s*)#{1,6}\s+/, "$1");
+        while (/^(\s*)>\s?/.test(text)) text = text.replace(/^(\s*)>\s?/, "$1");
+        return text;
+      });
+      return lines
+        .join("\n")
+        .split("**")
+        .join("")
+        .split("~~")
+        .join("")
+        .split("*")
+        .join("")
+        .replace(/\s+/g, "");
+    };
     for (const { buffer, spine } of fixtures) {
       const book = parseEpub(buffer);
       const chapterText = book.chapters.map((chapter) => chapter.text).join("");
       const spineText = spine.map((href) => fileText(buffer, href)).join("");
       expect(sorted(chapterText)).toBe(sorted(spineText));
       expect(dense(chapterText)).toBe(dense(spineText));
+      book.chapters.forEach((chapter) => {
+        expect(denseMarkdown(chapter.markdown)).toBe(chapter.text.replace(/\s+/g, ""));
+      });
     }
   });
 
@@ -402,6 +495,186 @@ describe("browser EPUB projection", () => {
       [0, "exact"],
       [1, "partial"],
     ]);
+  });
+});
+
+describe("markdownText", () => {
+  it("maps headings to Markdown levels", () => {
+    expect(markdownText("<html><body><h1>A</h1><h2>B</h2><h3>C</h3><h6>F</h6></body></html>")).toBe("# A\n\n## B\n\n### C\n\n###### F");
+  });
+
+  it("renders paragraphs with collapsed inline whitespace and inline emphasis", () => {
+    const source = '<html><body><p>Hello   <em>world</em> <strong>soon</strong> <b>now</b> <del>gone</del></p></body></html>';
+    expect(markdownText(source)).toBe("Hello *world* **soon** **now** ~~gone~~");
+  });
+
+  it("prefixes blockquote lines with > and joins quoted paragraphs", () => {
+    expect(markdownText("<blockquote><p>q1</p><p>q2</p></blockquote>")).toBe(
+      "> q1\n>\n> q2",
+    );
+  });
+
+  it("renders lists with nesting and ordered numbering", () => {
+    const source = '<html><body><ul><li>a</li><li>b<ul><li>b1</li></ul></li></ul><ol><li>one</li></ol></body></html>';
+    expect(markdownText(source)).toBe("- a\n- b\n  - b1\n\n1. one");
+  });
+
+  it("keeps pre content verbatim with line breaks and no collapsing", () => {
+    const source = '<html><body><pre>line1\nline2  spaced</pre></body></html>';
+    expect(markdownText(source)).toBe("line1\nline2  spaced");
+  });
+
+  it("renders img/svg/audio/video as empty and keeps br as an in-paragraph break", () => {
+    expect(markdownText('<html><body><p>a<img src="x"/><svg></svg><br/>b</p></body></html>')).toBe("a\nb");
+  });
+
+  it("keeps nested block structure inside div/section wrappers (production shape)", () => {
+    const inner = '<h2>T</h2><p>one</p><p>two <em>x</em></p><blockquote><p>q1</p><p>q2</p></blockquote><pre>code\n  indented</pre>';
+    const expected = [
+      "## T",
+      "one",
+      "two *x*",
+      "> q1\n>\n> q2",
+      "code\n  indented",
+    ].join("\n\n");
+    expect(markdownText(`<html><body><div class="ch">${inner}</div></body></html>`)).toBe(expected);
+    expect(markdownText(`<html><body><section class="ch">${inner}</section></body></html>`)).toBe(expected);
+  });
+
+  it("keeps blockquotes and mixed inline/block content intact through wrappers", () => {
+    expect(markdownText("<html><body><div><blockquote><p>q1</p><p>q2</p></blockquote></div></body></html>")).toBe("> q1\n>\n> q2");
+    expect(markdownText("<html><body><blockquote><div><p>q1</p><p>q2</p></div></blockquote></body></html>")).toBe("> q1\n>\n> q2");
+    expect(markdownText('<html><body><div>lead <p>para</p> tail</div></body></html>')).toBe("lead\n\npara\n\ntail");
+  });
+
+  it("keeps unknown elements transparent and tables as plain block text", () => {
+    expect(markdownText('<html><body><article><p>kept</p></article><table><tr><td>cell</td></tr></table></body></html>')).toBe("kept\n\ncell");
+  });
+
+  it("returns empty for unparsable roots", () => {
+    expect(markdownText("<html><body></body></html>")).toBe("");
+  });
+});
+
+describe("chapterWindows", () => {
+  it("greedily packs paragraph blocks into <=12k windows and rejoins exactly", () => {
+    const paragraphs = ["a".repeat(6000), "b".repeat(5000), "c".repeat(2000)];
+    const markdown = paragraphs.join("\n\n");
+    const windows = chapterWindows(markdown);
+    expect(windows).toEqual([`${paragraphs[0]}\n\n${paragraphs[1]}`, paragraphs[2]]);
+    windows.forEach((window) => expect(window.length).toBeLessThanOrEqual(12_000));
+    expect(windows.join("\n\n")).toBe(markdown);
+  });
+
+  it("packs a single block that exactly fits the limit into one window", () => {
+    const markdown = "x".repeat(12_000);
+    expect(chapterWindows(markdown)).toEqual([markdown]);
+  });
+
+  it("hard-splits an oversized single block into 12k windows", () => {
+    const markdown = "x".repeat(12_001);
+    const windows = chapterWindows(markdown);
+    expect(windows.map((window) => window.length)).toEqual([12_000, 1]);
+    // Hard-split pieces are exact consecutive slices of the oversized block.
+    expect(windows.join("")).toBe(markdown);
+  });
+
+  it("packs the hard-split residual with following blocks instead of wasting a near-empty window", () => {
+    const oversized = "a".repeat(13_000);
+    const tiny = "b".repeat(100);
+    const windows = chapterWindows(`${oversized}\n\n${tiny}`);
+    expect(windows).toEqual(["a".repeat(12_000), `${"a".repeat(1_000)}\n\n${tiny}`]);
+    expect(windows[0] + windows[1]).toBe(`${oversized}\n\n${tiny}`);
+  });
+
+  it("seals a trailing hard-split residual as its own window", () => {
+    const windows = chapterWindows(`lead\n\n${"x".repeat(15_000)}`);
+    expect(windows).toEqual(["lead", "x".repeat(12_000), "x".repeat(3_000)]);
+  });
+
+  it("returns one empty window for empty markdown", () => {
+    expect(chapterWindows("")).toEqual([""]);
+  });
+});
+
+describe("read_chapter structured Markdown (AC1/AC5)", () => {
+  it("AC1: read_chapter returns headings, emphasis, quotes, lists, and verbatim pre", () => {
+    const book = parseEpub(pack(richFiles()));
+    const result = readChapter(book, 0);
+    expect(result.text).toBe(richMarkdown);
+    expect(result.text).toContain("\n\n");
+    expect(result.text).toContain("# Chapter One");
+    expect(result.text).toContain("## Later");
+    expect(result.text).toContain("*quick*");
+    expect(result.text).toContain("**strong**");
+    expect(result.text).toContain("> A quoted line.");
+    expect(result.text).toContain("- first item\n- second item");
+    expect(result.text).toContain("1. ordered");
+    expect(result.text).toContain("code line\nkeep  spacing");
+  });
+
+  it("AC5: a small chapter fits one window, chars matches markdown length, and part clamps", () => {
+    const book = parseEpub(pack(richFiles()));
+    const chapter = book.chapters[0];
+    const windows = chapterWindows(chapter.markdown);
+    expect(windows).toHaveLength(1);
+    expect(windows[0]).toBe(chapter.markdown);
+    expect(bookToc(book)[0].chars).toBe(chapter.markdown.length);
+    expect(readChapter(book, 0)).toMatchObject({ part: 0, totalParts: 1 });
+    expect(readChapter(book, 0, 99)).toMatchObject({ part: 0, totalParts: 1 });
+    expect(readChapter(book, 0, -5).part).toBe(0);
+  });
+
+  it("AC5: totalParts follows paragraph packing and windows rejoin the chapter markdown", () => {
+    const book = parseEpub(pack(longFiles()));
+    const chapter = book.chapters[0];
+    const windows = chapterWindows(chapter.markdown);
+    expect(windows.length).toBeGreaterThan(1);
+    const result = readChapter(book, 0, 0);
+    expect(result.totalParts).toBe(windows.length);
+    const parts = Array.from({ length: result.totalParts }, (_, part) => readChapter(book, 0, part).text);
+    expect(parts).toEqual(windows);
+    parts.forEach((part) => expect(part.length).toBeLessThanOrEqual(12_000));
+    expect(parts.join("\n\n")).toBe(chapter.markdown);
+    expect(readChapter(book, 0, 99).part).toBe(result.totalParts - 1);
+    expect(bookToc(book)[0].chars).toBe(chapter.markdown.length);
+  });
+
+  it("AC1: keeps structure in div/section-wrapped chapter bodies through the full pipeline", () => {
+    const body = (wrapper: "div" | "section"): string =>
+      `<${wrapper} class="ch"><h2 id="ch1">T</h2><p>one</p><p>two <em>x</em></p><blockquote><p>q1</p><p>q2</p></blockquote><pre>code\n  indented</pre></${wrapper}>`;
+    const expected = "## T\n\none\n\ntwo *x*\n\n> q1\n>\n> q2\n\ncode\n  indented";
+    for (const wrapper of ["div", "section"] as const) {
+      const files = hierarchyFiles(flatNav(["Wrapped"], ["text/vol1.xhtml#ch1"]), {
+        "text/vol1.xhtml": `<html><body>${body(wrapper)}</body></html>`,
+      });
+      const book = parseEpub(pack(files));
+      const chapter = book.chapters[0];
+      expect(readChapter(book, 0)).toMatchObject({ part: 0, totalParts: 1, text: expected });
+      expect(bookToc(book)[0].chars).toBe(expected.length);
+      expect(chapter.markdown).toBe(expected);
+    }
+  });
+
+  it("AC5/R5: multi-slice chapters join markdown with \n\n so headings start their own line", () => {
+    const files = hierarchyFiles(
+      flatNav(["B"], ["text/vol1.xhtml#b"]),
+      { "text/vol1.xhtml": '<html><body>intro <h2 id="a">Two</h2>a-text <p id="b">owned</p></body></html>' },
+    );
+    const book = parseEpub(pack(files));
+    const chapter = book.chapters[0];
+    // Chapter B owns the leading slice plus the unclaimed anchor `a` slice.
+    const result = readChapter(book, 0);
+    expect(result.text).toBe("intro\n\n## Two\n\na-text\n\nowned");
+    expect(result.text.split("\n\n")).toContain("## Two");
+    // Chapter-level dense guard: stripped markdown dense-equals flat text (R5).
+    const stripped = result.text
+      .split("\n")
+      .map((line) => line.replace(/^#{1,6}\s+/, "").replace(/^>\s?/, ""))
+      .join("")
+      .split("*")
+      .join("");
+    expect(stripped.replace(/\s+/g, "")).toBe(chapter.text.replace(/\s+/g, ""));
   });
 });
 
