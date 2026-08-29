@@ -309,10 +309,18 @@ const NOTEREF_ACCENT_DARK = "#6db4ff";
 /** Academic superscript style for footnote reference marks.
  *  EPUB XHTML chapters are parsed as XML, where `epub:type` is a namespaced
  *  attribute: `[epub|type]` (with the `@namespace` prefix below) matches there,
- *  while `[epub\\:type]` covers the literal attribute in HTML-parsed docs. */
+ *  while `[epub\\:type]` covers the literal attribute in HTML-parsed docs.
+ *  Real-world books also write references as `<a href><sup>1</sup></a>` (the
+ *  `sup` inside the link, often with a cross-file href): `a[href] > sup`
+ *  styles the visible mark regardless of href target, and `a[href]:has(> sup)`
+ *  de-underlines and colors the wrapper link (a sup-side `text-decoration: none`
+ *  cannot remove decoration propagated from the ancestor `a`). The child
+ *  combinators keep sibling note-body markers (`<a id></a><sup>①</sup>`) unstyled. */
 const EPUB_NAMESPACE = '@namespace epub url("http://www.idpf.org/2007/ops");';
 function noterefCss(accent: string): string {
-  return `a[epub\\:type~="noteref"], a[epub|type~="noteref"], sup > a[href^="#"] { font-size: 0.72em !important; vertical-align: super !important; line-height: 1 !important; text-decoration: none !important; color: ${accent} !important; }`;
+  return `a[epub\\:type~="noteref"], a[epub|type~="noteref"], sup > a[href^="#"] { font-size: 0.72em !important; vertical-align: super !important; line-height: 1 !important; text-decoration: none !important; color: ${accent} !important; }
+a[href] > sup { font-size: 0.72em !important; vertical-align: super !important; line-height: 1 !important; color: ${accent} !important; }
+a[href]:has(> sup) { text-decoration: none !important; color: ${accent} !important; }`;
 }
 
 const THEME_CSS: Record<string, string> = {
