@@ -472,3 +472,24 @@ Diagnosed why footnote noteref style did not apply: real-world EPUBs (置身事�
 ### Status
 
 [OK] **Completed**
+
+
+## Session 107: Restore noteref mark size to 0.83em
+
+**Date**: 2026-08-29
+**Task**: Restore noteref mark size to 0.83em
+**Branch**: `feat/optimize-footnote-styles`
+
+### Summary
+
+User reported footnote reference marks (#32's 0.72em) felt too small vs the pre-styling browser <sup> default (~0.83em). Bumped noterefCss() font-size to 0.83em in both rule blocks, updated the three test assertions, and synced the spec's 0.72em mention. Implement + check sub-agents (glm-5.3-flash) verified: 567 tests pass, tsc clean. Archived task 08-29-noteref-size-restore.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `6f652f7` | (see git log) |
+
+### Status
+
+[OK] **Completed**
