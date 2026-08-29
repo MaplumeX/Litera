@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.10] - 2026-08-29
+
+### Changed
+
+- **章节结构化 Markdown**：阅读助手读章节时返回带段落、标题、强调、引用、列表的 Markdown，而不是一整段纯文本。
+- **目录层级与锚点切分**：助手看到的目录与书内层级一致；同一文件里多个目录条目会按锚点切开，不再整文件只给第一条。
+
+### Fixed
+
+- **脚注引用标记**：更多真实 EPUB 里的脚注上标会套上阅读器样式，字号回到浏览器默认大小。
+
 ## [0.2.9] - 2026-08-28
 
 ### Added
