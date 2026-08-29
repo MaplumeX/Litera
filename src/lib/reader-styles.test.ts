@@ -236,8 +236,8 @@ describe("generateStylesCss", () => {
       '@namespace epub url("http://www.idpf.org/2007/ops");' +
         "html, body { font-family: serif; font-size: 16px !important; line-height: 2; letter-spacing: 0.02em; max-width: 36em; margin-inline: auto; padding-inline: 1.25rem; text-align: justify; }\n" +
         "p { margin-block-end: 1.1em !important; text-indent: 2em !important; }\n" +
-        'a[epub\\:type~="noteref"], a[epub|type~="noteref"], sup > a[href^="#"] { font-size: 0.72em !important; vertical-align: super !important; line-height: 1 !important; text-decoration: none !important; color: #2563eb !important; }\n' +
-        'a[href] > sup { font-size: 0.72em !important; vertical-align: super !important; line-height: 1 !important; color: #2563eb !important; }\n' +
+        'a[epub\\:type~="noteref"], a[epub|type~="noteref"], sup > a[href^="#"] { font-size: 0.83em !important; vertical-align: super !important; line-height: 1 !important; text-decoration: none !important; color: #2563eb !important; }\n' +
+        'a[href] > sup { font-size: 0.83em !important; vertical-align: super !important; line-height: 1 !important; color: #2563eb !important; }\n' +
         'a[href]:has(> sup) { text-decoration: none !important; color: #2563eb !important; }',
     );
     expect(css).not.toContain("font-family: serif !important");
@@ -268,7 +268,7 @@ describe("generateStylesCss", () => {
     expect(css).toContain('sup > a[href^="#"]');
     expect(css).toContain("a[href] > sup");
     expect(css).toContain("a[href]:has(> sup)");
-    expect(css).toContain("font-size: 0.72em !important");
+    expect(css).toContain("font-size: 0.83em !important");
     expect(css).toContain("vertical-align: super !important");
     expect(css).toContain("text-decoration: none !important");
     expect(css).toContain("color: #2563eb !important");

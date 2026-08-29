@@ -318,8 +318,8 @@ const NOTEREF_ACCENT_DARK = "#6db4ff";
  *  combinators keep sibling note-body markers (`<a id></a><sup>①</sup>`) unstyled. */
 const EPUB_NAMESPACE = '@namespace epub url("http://www.idpf.org/2007/ops");';
 function noterefCss(accent: string): string {
-  return `a[epub\\:type~="noteref"], a[epub|type~="noteref"], sup > a[href^="#"] { font-size: 0.72em !important; vertical-align: super !important; line-height: 1 !important; text-decoration: none !important; color: ${accent} !important; }
-a[href] > sup { font-size: 0.72em !important; vertical-align: super !important; line-height: 1 !important; color: ${accent} !important; }
+  return `a[epub\\:type~="noteref"], a[epub|type~="noteref"], sup > a[href^="#"] { font-size: 0.83em !important; vertical-align: super !important; line-height: 1 !important; text-decoration: none !important; color: ${accent} !important; }
+a[href] > sup { font-size: 0.83em !important; vertical-align: super !important; line-height: 1 !important; color: ${accent} !important; }
 a[href]:has(> sup) { text-decoration: none !important; color: ${accent} !important; }`;
 }
 
