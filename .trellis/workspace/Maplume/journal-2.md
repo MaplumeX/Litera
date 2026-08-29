@@ -429,3 +429,24 @@ Styled EPUB footnote reference marks as a consistent academic superscript via no
 ### Status
 
 [OK] **Completed**
+
+
+## Session 105: Fix footnote noteref style for a>sup structure
+
+**Date**: 2026-08-29
+**Task**: Fix footnote noteref style for a>sup structure
+**Branch**: `clean-elk`
+
+### Summary
+
+Real-world EPUBs (置身事内, 黑格尔小逻辑绎注) write footnote references as <a href><sup>1</sup></a> with sup inside the link and often cross-file hrefs, so none of the existing noteref selectors (epub:type variants, sup > a[href^="#"]) matched and the accent style never applied. Added a[href] > sup to style the visible mark and a[href]:has(> sup) to de-underline/color the wrapper link; child combinators keep sibling note-body sups unstyled. :has() is safe in Tauri v2 WebViews (Safari 15.4+/Chromium 105+) with graceful degradation otherwise. Updated reader-styles tests (30 pass) and tsc clean. Diagnosed by extracting both books' EPUB markup.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `98611b3` | (see git log) |
+
+### Status
+
+[OK] **Completed**
