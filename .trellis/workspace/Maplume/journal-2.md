@@ -450,3 +450,25 @@ Real-world EPUBs (置身事内, 黑格尔小逻辑绎注) write footnote referen
 ### Status
 
 [OK] **Completed**
+
+
+## Session 106: Fix footnote noteref style for a>sup structure
+
+**Date**: 2026-08-29
+**Task**: Fix footnote noteref style for a>sup structure
+**Branch**: `clean-elk`
+
+### Summary
+
+Diagnosed why footnote noteref style did not apply: real-world EPUBs (置身事内, 黑格尔小逻辑绎注) write references as <a href><sup>1</sup></a> with cross-file hrefs, missing all three existing selectors (epub:type attrs, sup>a). Added a[href] > sup for the visible mark and a[href]:has(> sup) to de-underline the wrapper link; child combinators keep sibling note-body sups unstyled. 30 reader-styles tests + full suite (567) pass; spec updated.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `98611b3` | (see git log) |
+| `3c2ba58` | (see git log) |
+
+### Status
+
+[OK] **Completed**
