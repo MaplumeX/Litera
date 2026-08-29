@@ -1,6 +1,6 @@
 export const CHAPTER_PART_CHARS = 12_000;
 export interface BookMetadata { title: string; author: string; language: string; totalChapters: number }
-export interface BookTocEntry { index: number; label: string; hrefs: string[]; chars: number }
+export interface BookTocEntry { index: number; label: string; ancestors: string[]; depth: number; hrefs: string[]; chars: number }
 export interface SearchHit { chapterIndex: number; chapterTitle?: string; part: number; match: "exact" | "partial"; snippet: string }
 export const BOOK_SNAPSHOT_MAX_TOC_ENTRIES = 200;
 export const BOOK_SNAPSHOT_MAX_TOC_CHARS = 4_000;
@@ -26,12 +26,22 @@ export function hrefMatches(leftHref: string, rightHref: string): boolean {
   return left === right || left.endsWith(`/${right}`) || right.endsWith(`/${left}`);
 }
 
+function chapterTitle(entry: BookTocEntry): string {
+  return [...entry.ancestors, entry.label].filter(Boolean).join(" › ");
+}
+
+function sameFragmentHref(left: string, right: string): boolean {
+  return hrefMatches(left, right) && (left.split("#")[1] ?? "") === (right.split("#")[1] ?? "");
+}
+
 export function chapterAside(toc: readonly BookTocEntry[], href: string | undefined): string | undefined {
   if (!href) return undefined;
-  const chapter = toc.find((entry) => entry.hrefs.some((candidate) => hrefMatches(candidate, href)));
+  const exact = toc.find((entry) => entry.hrefs.some((candidate) => sameFragmentHref(candidate, href)));
+  const chapter = exact ?? toc.find((entry) => entry.hrefs.some((candidate) => hrefMatches(candidate, href)));
   if (!chapter) return undefined;
-  return chapter.label.trim()
-    ? `Current chapter: ${chapter.label} (chapterIndex ${chapter.index})`
+  const title = chapterTitle(chapter).trim();
+  return title
+    ? `Current chapter: ${title} (chapterIndex ${chapter.index})`
     : `Current chapterIndex: ${chapter.index}`;
 }
 
@@ -40,7 +50,7 @@ export function formatBookSnapshot(metadata: BookMetadata, toc: readonly BookToc
   let chars = 0;
   for (const entry of toc) {
     if (lines.length >= BOOK_SNAPSHOT_MAX_TOC_ENTRIES) break;
-    const line = `${entry.index + 1} [index ${entry.index}]: ${entry.label}`;
+    const line = `${"  ".repeat(entry.depth)}${entry.index + 1} [index ${entry.index}]: ${entry.label}`;
     const next = chars === 0 ? line.length : chars + 1 + line.length;
     if (next > BOOK_SNAPSHOT_MAX_TOC_CHARS) break;
     lines.push(line);

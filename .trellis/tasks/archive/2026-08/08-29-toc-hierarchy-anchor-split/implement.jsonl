@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Book tools and coordinates contract: chapterIndex = TOC-owned projection, 12k read windows, worker isolation, no href leaks to the model, tool surface"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Reader chapterHref, chapterAside, worker TOC, and tool chapterIndex are one coordinate system across layers"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "BookTocEntry gains ancestors/depth fields; keep typed fakes in embedded-runtime tests consistent"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Anchor/fragment resolution failures must fall back, never throw out of worker tool paths"}
+{"file": ".trellis/tasks/08-29-toc-hierarchy-anchor-split/prd.md", "reason": "R1-R7 requirements and AC1-AC8 acceptance criteria"}
+{"file": ".trellis/tasks/08-29-toc-hierarchy-anchor-split/design.md", "reason": "NavNode depth, parseSpineSegments, ownership v2, container collapse, projection surface changes"}

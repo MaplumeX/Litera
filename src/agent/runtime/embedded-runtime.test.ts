@@ -13,7 +13,7 @@ describe("LiteraAgentRuntime",()=>{
   it("persists the user before network and completed assistant after settlement",async()=>{
     const current=session();const order:string[]=[];const batches:PiSessionEntry[][]=[];
     const sessions:SessionPort={create:async()=>current,list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,entries)=>{order.push(`append:${entries.map((entry)=>entry.type).join(",")}`);batches.push(entries);return entries[entries.length-1]?.id??null;}};
-    const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:1}),toc:async()=>[{index:0,label:"One",hrefs:["one.xhtml"],chars:10}],readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:1,text:"chapter"}),search:async()=>[],close:()=>{}};
+    const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:1}),toc:async()=>[{index:0,label:"One",ancestors:[],depth:0,hrefs:["one.xhtml"],chars:10}],readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:1,text:"chapter"}),search:async()=>[],close:()=>{}};
     const faux=createFauxCore({tokensPerSecond:10_000});faux.setResponses([fauxAssistantMessage("answer")]);
     const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret",thinkingLevel:"off"};
     const runtime=new LiteraAgentRuntime({sessions,book,loadConfig:async()=>config,loadStream:async()=>((requestModel,context,options)=>{order.push("network");return faux.streamSimple(requestModel,context,options);})});
@@ -314,6 +314,26 @@ describe("LiteraAgentRuntime",()=>{
     expect(result?.text).not.toContain("[object Object]");
   });
 
+  it("maps get_toc entries onto the hierarchical path/depth shape and never leaks hrefs",async()=>{
+    const current=session();const batches:PiSessionEntry[][]=[];
+    const sessions:SessionPort={create:async()=>current,list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,entries)=>{batches.push(entries);return entries[entries.length-1]?.id??null;}};
+    const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"zh",totalChapters:2}),toc:async()=>[{index:0,label:"第一卷 出走",ancestors:[],depth:0,hrefs:["OPS/vol1.xhtml#ch1"],chars:100},{index:1,label:"第二章 母亲的信",ancestors:["第一卷 出走"],depth:1,hrefs:["OPS/vol1.xhtml#ch2"],chars:7200}],readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:1,text:"chapter"}),search:async()=>[],close:()=>{}};
+    const faux=createFauxCore({tokensPerSecond:10_000});faux.setResponses([fauxAssistantMessage(fauxToolCall("get_toc",{}),{stopReason:"toolUse"}),fauxAssistantMessage("ok")]);
+    const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret",thinkingLevel:"off"};
+    const runtime=new LiteraAgentRuntime({sessions,book,loadConfig:async()=>config,loadStream:async()=>faux.streamSimple});
+    await runtime.openBook("book",new ArrayBuffer(1));
+    await runtime.prompt("list chapters",{});
+    const text=getToolResultText(batches,"get_toc");
+    expect(text).toBeTruthy();
+    const payload=JSON.parse(text!);
+    expect(payload).toEqual([
+      {chapterIndex:0,chapterNumber:1,title:"第一卷 出走",path:["第一卷 出走"],depth:0,chars:100},
+      {chapterIndex:1,chapterNumber:2,title:"第二章 母亲的信",path:["第一卷 出走","第二章 母亲的信"],depth:1,chars:7200},
+    ]);
+    expect(text).not.toContain("xhtml");
+    expect(text).not.toContain("hrefs");
+  });
+
   it("generates and persists a session title after the first turn",async()=>{
     const current=session();const batches:PiSessionEntry[][]=[];const events:{type:string;title?:string}[]=[];
     const sessions:SessionPort={create:async()=>current,list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,entries)=>{batches.push(entries);return entries.at(-1)?.id??null;}};
@@ -467,10 +487,18 @@ describe("LiteraAgentRuntime",()=>{
 });
 
 function listAnnotationsResult(batches:PiSessionEntry[][]):{isError:boolean;text:string}|undefined{
+  return toolResult(batches,"list_annotations");
+}
+
+function getToolResultText(batches:PiSessionEntry[][],tool:string):string|undefined{
+  return toolResult(batches,tool)?.text;
+}
+
+function toolResult(batches:PiSessionEntry[][],tool:string):{isError:boolean;text:string}|undefined{
   for(const entry of batches.flat()){
     if(entry.type!=="message")continue;
     const message=entry.message as {role?:string;toolName?:string;isError?:boolean;content?:Array<{type?:string;text?:string}>};
-    if(message.role==="toolResult"&&message.toolName==="list_annotations"){
+    if(message.role==="toolResult"&&message.toolName===tool){
       return{isError:message.isError===true,text:message.content?.find((block)=>block.type==="text")?.text??""};
     }
   }
