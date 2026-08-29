@@ -236,7 +236,9 @@ describe("generateStylesCss", () => {
       '@namespace epub url("http://www.idpf.org/2007/ops");' +
         "html, body { font-family: serif; font-size: 16px !important; line-height: 2; letter-spacing: 0.02em; max-width: 36em; margin-inline: auto; padding-inline: 1.25rem; text-align: justify; }\n" +
         "p { margin-block-end: 1.1em !important; text-indent: 2em !important; }\n" +
-        'a[epub\\:type~="noteref"], a[epub|type~="noteref"], sup > a[href^="#"] { font-size: 0.72em !important; vertical-align: super !important; line-height: 1 !important; text-decoration: none !important; color: #2563eb !important; }',
+        'a[epub\\:type~="noteref"], a[epub|type~="noteref"], sup > a[href^="#"] { font-size: 0.72em !important; vertical-align: super !important; line-height: 1 !important; text-decoration: none !important; color: #2563eb !important; }\n' +
+        'a[href] > sup { font-size: 0.72em !important; vertical-align: super !important; line-height: 1 !important; color: #2563eb !important; }\n' +
+        'a[href]:has(> sup) { text-decoration: none !important; color: #2563eb !important; }',
     );
     expect(css).not.toContain("font-family: serif !important");
     expect(css).not.toContain("code, kbd, pre, samp");
@@ -264,6 +266,8 @@ describe("generateStylesCss", () => {
     expect(css).toContain('a[epub|type~="noteref"]');
     expect(css).toContain('@namespace epub url("http://www.idpf.org/2007/ops")');
     expect(css).toContain('sup > a[href^="#"]');
+    expect(css).toContain("a[href] > sup");
+    expect(css).toContain("a[href]:has(> sup)");
     expect(css).toContain("font-size: 0.72em !important");
     expect(css).toContain("vertical-align: super !important");
     expect(css).toContain("text-decoration: none !important");
@@ -278,6 +282,21 @@ describe("generateStylesCss", () => {
     expect(css).toContain("noteref");
     expect(css).toContain("color: #6db4ff !important");
     expect(css).not.toContain("color: #2563eb !important");
+    expect(css).toContain("a[href] > sup");
+    expect(css).toContain("a[href]:has(> sup)");
+  });
+
+  it("matches a>sup reference marks regardless of href target but not sibling note-body sups", () => {
+    const css = generateStylesCss({ ...DARK_STYLES });
+    // 《黑格尔小逻辑绎注》 and 《置身事内》: the sup sits INSIDE the link and the
+    // href may point to another file, so the selector must not require "#" ...
+    expect(css).toContain("a[href] > sup");
+    // ... but the child combinator must not match the note-body side
+    // (`<a id="s7-note-1"></a><sup>①</sup>`), where the sup is a sibling of the a.
+    const selector = css.match(/(^|\n)(a\[href\] > sup \{[^}]*\})/);
+    expect(selector).not.toBeNull();
+    expect(selector![2]).not.toContain(" + ");
+    expect(selector![2]).not.toContain(" ~ ");
   });
 
   it("forces the user font on body text and headings, keeping code monospace", () => {
