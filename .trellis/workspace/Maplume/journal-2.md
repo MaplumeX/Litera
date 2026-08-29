@@ -514,3 +514,24 @@ Agent chapter projection now mirrors the human-visible TOC: parseNav/parseNcx ke
 ### Status
 
 [OK] **Completed**
+
+
+## Session 109: read_chapter structured Markdown projection
+
+**Date**: 2026-08-29
+**Task**: read_chapter structured Markdown projection
+**Branch**: `feat/read-chapter-structured-content`
+
+### Summary
+
+read_chapter now returns structured Markdown (paragraphs, headings, emphasis, quotes, lists, verbatim pre) instead of flattened text. Dual projection: flat text walk unchanged (search trigram index/snippets stay on it, per-segment dense-equal guard falls back to flat on mismatch); structured markdown walk emits block roots as own blocks with transparent container recursion, anchors inside div/section aligned with the flat anchor stream. Multi-slice chapter markdown joins with \n\n. chapterWindows does paragraph-aligned greedy packing into <=12k windows with hard-split residual repacking. get_toc chars = markdown length; tool description updated; spec updated incl. search part approximation note. Check round caught and fixed 2 blockers (div-wrapped nested blocks flattened; multi-segment markdown joined with '') plus nested-anchor swallowing and inlineOf self-delimiter gaps. 613/613 tests green, tsc clean.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2cdfb65` | (see git log) |
+
+### Status
+
+[OK] **Completed**
