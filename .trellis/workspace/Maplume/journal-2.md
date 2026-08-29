@@ -493,3 +493,24 @@ User reported footnote reference marks (#32's 0.72em) felt too small vs the pre-
 ### Status
 
 [OK] **Completed**
+
+
+## Session 108: Hierarchical TOC with anchor-level chapter splitting
+
+**Date**: 2026-08-29
+**Task**: Hierarchical TOC with anchor-level chapter splitting
+**Branch**: `feat/read-chapter-heading-levels`
+
+### Summary
+
+Agent chapter projection now mirrors the human-visible TOC: parseNav/parseNcx keep nesting depth + ancestor paths, parseSpineSegments slices spine files at id/<a name> anchors, buildOwnedChapters v2 grants per-segment ownership so multiple TOC entries can share one spine file (previously dropped). get_toc/snapshot/chapterAside/search expose path+depth; container entries collapse into ancestors; unresolvable fragments fall back without text loss (union invariant tested). Verified against two real EPUBs (置身事内: 3-level hierarchy, 黑格尔小逻辑绎注: 4 sections per file, exact per-section slices). 590 tests green, tsc clean, tool surface/RPC/hrefs-hidden unchanged. Spec quality-guidelines.md updated.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `04f7f3d` | (see git log) |
+
+### Status
+
+[OK] **Completed**
