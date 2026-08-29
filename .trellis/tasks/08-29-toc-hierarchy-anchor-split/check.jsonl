@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Verify tool surface unchanged, no href leaks in snapshot/get_toc/read_chapter/search output, worker isolation intact"}
+{"file": ".trellis/tasks/08-29-toc-hierarchy-anchor-split/prd.md", "reason": "Check AC1-AC8: hierarchy, anchor slicing, fallbacks, compat"}
+{"file": ".trellis/tasks/08-29-toc-hierarchy-anchor-split/design.md", "reason": "Check implementation matches ownership v2 semantics and container-entry collapse"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Missing anchor / malformed HTML paths must not throw out of tool execute"}

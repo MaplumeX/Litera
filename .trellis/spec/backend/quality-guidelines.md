@@ -14,6 +14,20 @@
 
 - `chapterIndex` always indexes the TOC-owned chapter projection, never raw spine
   files. The reader sends `chapterHref`; the runtime resolves ownership.
+- The chapter projection mirrors the human-visible TOC. TOC entries keep their
+  nav/ncx nesting depth and an ancestor label path; a TOC entry whose href
+  carries a `#fragment` owns the text slice of its spine file from the anchor
+  element (matching `id` / EPUB2 `<a name>`) to the next anchor. Several entries
+  may share one spine file, each owning its own slice. Unclaimed segments
+  (leading text, non-TOC anchors, unresolvable fragments) join the preceding
+  claimer, so the union of all chapter texts always equals the union of all
+  spine texts. A container entry whose target equals its first child's target
+  collapses into the children's `ancestors`, never its own chapter.
+- `get_toc` entries expose `chapterIndex`, `chapterNumber`, `title`, `path`
+  (ancestors + self), `depth`, `chars`; the snapshot renders the hierarchy
+  indented by depth under the same 200-entry / 4k-char caps. `hrefs` never
+  appear in model-visible output. `chapterAside` prefers an exact
+  file+fragment match before the fragment-insensitive fallback.
 - `read_chapter` is bounded by 12,000-character parts. Search accepts multiple
   query variants, prefers exact hits, and returns deterministic bounded snippets.
 - EPUB parsing, ownership, indexing, and search run in the module worker. A book
