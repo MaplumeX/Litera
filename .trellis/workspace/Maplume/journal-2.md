@@ -535,3 +535,24 @@ read_chapter now returns structured Markdown (paragraphs, headings, emphasis, qu
 ### Status
 
 [OK] **Completed**
+
+
+## Session 110: Agent chat ordered content blocks
+
+**Date**: 2026-08-30
+**Task**: Agent chat ordered content blocks
+**Branch**: `fix/litera-agent-event-stream-ordering`
+
+### Summary
+
+Fixed chat UI event-stream flattening: replaced flat thinking/toolCalls assistant fields with ordered AssistantBlock list (thinking|text|toolCall). Reducer folds deltas in event order; visibleMessages() rebuilds blocks from persisted entries including thinking (previously dropped on reload) and merges consecutive assistant entries; AssistantMessage renders blocks in array order. Full suite + tsc green; spec state-management.md updated.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0bb9108` | (see git log) |
+
+### Status
+
+[OK] **Completed**
