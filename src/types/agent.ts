@@ -32,13 +32,17 @@ export interface AgentToolCall {
   isError?: boolean;
 }
 
+export type AssistantBlock =
+  | { type: "thinking"; text: string }
+  | { type: "text"; text: string }
+  | { type: "toolCall"; toolCall: AgentToolCall };
+
 export interface AgentMessage {
   role: "user" | "assistant";
   content: string;
-  thinking?: string;
   selection?: string;
   chapterHref?: string;
-  toolCalls?: AgentToolCall[];
+  blocks?: AssistantBlock[];
 }
 
 type EventEnvelope = {

@@ -74,12 +74,21 @@ clickable book locators. Reader jumps are owned by the chrome: TOC, prev/next
 chapter, and the annotation drawers. Do not parse assistant Markdown as book
 locators, and do not keep a second reader-location store in chat state.
 
-Thinking deltas stream as `thinking_start` / `thinking_delta` / `thinking_end`
-`PromptCorrelation` events; the reducer accumulates them onto the last
-assistant message's optional `thinking` field (`thinking_start`/`end` are
-no-ops). AssistantMessage renders them in a collapsible block that
-auto-expands only while that message is the streaming last message. Token
-usage/cost are not surfaced anywhere (deliberate product decision).
+Assistant messages carry an ordered `blocks` array (`AssistantBlock`: `thinking` |
+`text` | `toolCall` — see `src/types/agent.ts`); block order is the rendering
+contract and must match event arrival order. Thinking deltas stream as
+`thinking_start` / `thinking_delta` / `thinking_end` `PromptCorrelation` events;
+the reducer folds `thinking_delta` / `text_delta` onto the last block when it
+has the same type, otherwise opens a new block (`thinking_start`/`end` are
+no-ops). `tool_start` pushes a toolCall block; `tool_end` fills
+`result`/`done`/`isError` by `toolCallId` (out-of-order completion supported).
+Every block mutation also syncs the message's `content` (join of text blocks)
+for consumers outside AssistantMessage. AssistantMessage renders blocks in
+array order; each thinking block is collapsible and auto-expands only while
+its message is the streaming last message. `visibleMessages()` in
+`pi-session.ts` rebuilds the same ordered blocks from persisted entries
+(including thinking) and merges consecutive assistant entries into one bubble.
+Token usage/cost are not surfaced anywhere (deliberate product decision).
 
 `retry_scheduled` events (bounded retry via pi-ai `retryAssistantCall`, SDK
 `maxRetries: 3`) are emitted per backoff attempt but carry no reducer state;

@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "Agent state ownership: reducer projection used by chat UI belongs to React; runtime owns events. Defines what may live in UI state."}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "Type conventions: minimal discriminated types in src/types/, no runtime validation, strict TS. Governs the new AssistantBlock union."}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "shadcn/ui component patterns for the chat block rendering changes in AssistantMessage.tsx."}

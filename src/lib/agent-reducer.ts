@@ -4,6 +4,7 @@ import type {
   AgentMessage,
   AgentSessionSummary,
   AgentStatus,
+  AssistantBlock,
 } from "@/types/agent";
 import { t } from "@/lib/i18n";
 
@@ -68,6 +69,35 @@ function matchesPrompt(
     && state.promptId === event.promptId;
 }
 
+function textContent(blocks: AssistantBlock[]): string {
+  return blocks
+    .filter((block): block is Extract<AssistantBlock, { type: "text" }> => block.type === "text")
+    .map((block) => block.text)
+    .join("");
+}
+
+function appendDelta(
+  blocks: AssistantBlock[] | undefined,
+  type: "thinking" | "text",
+  delta: string,
+): AssistantBlock[] {
+  const next = blocks ? blocks.slice() : [];
+  const last = next[next.length - 1];
+  if (last?.type === type) {
+    next[next.length - 1] = { type, text: last.text + delta };
+  } else {
+    next.push({ type, text: delta });
+  }
+  return next;
+}
+
+function withBlocks(
+  message: AgentMessage,
+  blocks: AssistantBlock[],
+): AgentMessage {
+  return { ...message, blocks, content: textContent(blocks) };
+}
+
 function updateLastAssistant(
   messages: AgentMessage[],
   update: (message: AgentMessage) => AgentMessage,
@@ -76,7 +106,7 @@ function updateLastAssistant(
   if (last?.role === "assistant") {
     return [...messages.slice(0, -1), update(last)];
   }
-  return [...messages, update({ role: "assistant", content: "" })];
+  return [...messages, update({ role: "assistant", content: "", blocks: [] })];
 }
 
 function applyEvent(state: AgentState, event: AgentEvent): AgentState {
@@ -102,10 +132,8 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
       if (!matchesPrompt(base, event)) return base;
       return {
         ...base,
-        messages: updateLastAssistant(base.messages, (message) => ({
-          ...message,
-          content: message.content + event.delta,
-        })),
+        messages: updateLastAssistant(base.messages, (message) =>
+          withBlocks(message, appendDelta(message.blocks, "text", event.delta))),
       };
     case "thinking_start":
     case "thinking_end":
@@ -114,38 +142,47 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
       if (!matchesPrompt(base, event)) return base;
       return {
         ...base,
-        messages: updateLastAssistant(base.messages, (message) => ({
-          ...message,
-          thinking: (message.thinking ?? "") + event.delta,
-        })),
+        messages: updateLastAssistant(base.messages, (message) =>
+          withBlocks(message, appendDelta(message.blocks, "thinking", event.delta))),
       };
     case "tool_start":
       if (!matchesPrompt(base, event)) return base;
       return {
         ...base,
-        messages: updateLastAssistant(base.messages, (message) => ({
-          ...message,
-          toolCalls: [
-            ...(message.toolCalls ?? []),
-            {
+        messages: updateLastAssistant(base.messages, (message) => {
+          const blocks = message.blocks ? message.blocks.slice() : [];
+          blocks.push({
+            type: "toolCall",
+            toolCall: {
               toolCallId: event.toolCallId,
               tool: event.tool,
               params: event.params,
               done: false,
             },
-          ],
-        })),
+          });
+          return withBlocks(message, blocks);
+        }),
       };
     case "tool_end":
       if (!matchesPrompt(base, event)) return base;
       return {
         ...base,
-        messages: updateLastAssistant(base.messages, (message) => ({
-          ...message,
-          toolCalls: message.toolCalls?.map((call) => call.toolCallId === event.toolCallId
-            ? { ...call, result: event.result, done: true, isError: event.isError }
-            : call),
-        })),
+        messages: updateLastAssistant(base.messages, (message) => {
+          const blocks = message.blocks?.map((block) =>
+            block.type === "toolCall" && block.toolCall.toolCallId === event.toolCallId
+              ? {
+                  type: "toolCall" as const,
+                  toolCall: {
+                    ...block.toolCall,
+                    result: event.result,
+                    done: true,
+                    isError: event.isError,
+                  },
+                }
+              : block,
+          );
+          return blocks ? withBlocks(message, blocks) : message;
+        }),
       };
     case "compaction_started":
       return matchesPrompt(base, event) ? { ...base, compaction: { status: "compacting" } } : base;
