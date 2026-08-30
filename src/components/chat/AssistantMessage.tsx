@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { Bot, Brain, Check, ChevronRight, Copy } from "lucide-react";
+import { Bot, Brain, ChevronRight } from "lucide-react";
 import type { AgentMessage, AssistantBlock } from "@/types/agent";
 import { ToolCallCard } from "./ToolCallCard";
+import { CopyButton } from "./CopyButton";
 import { TypingIndicator } from "./TypingIndicator";
 import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -15,26 +16,6 @@ const markdownComponents: Components = {
     </a>
   ),
 };
-
-function CopyButton({ text }: { text: string }) {
-  const { t } = useT();
-  const [copied, setCopied] = useState(false);
-  return (
-    <button
-      type="button"
-      onClick={() => {
-        void navigator.clipboard.writeText(text).then(() => {
-          setCopied(true);
-          setTimeout(() => setCopied(false), 1500);
-        });
-      }}
-      className="text-muted-foreground/50 transition-colors hover:text-muted-foreground"
-      aria-label={t("chat.copy")}
-    >
-      {copied ? <Check className="h-3.5 w-3.5 text-green-600" /> : <Copy className="h-3.5 w-3.5" />}
-    </button>
-  );
-}
 
 export function BotAvatar() {
   return (
@@ -54,11 +35,11 @@ function ThinkingBlock({ thinking, active }: { thinking: string; active: boolean
     if (!active) setExpanded(false);
   }, [active]);
   return (
-    <div className="rounded border bg-muted/50 text-xs">
+    <div className="-ml-1 rounded px-1 transition-colors hover:bg-muted/40">
       <button
         type="button"
         onClick={() => setExpanded((value) => !value)}
-        className="flex w-full items-center gap-1 px-2 py-1 text-left hover:bg-muted/70"
+        className="flex w-full items-center gap-1.5 py-0.5 text-left"
         aria-expanded={expanded}
       >
         <ChevronRight
@@ -67,11 +48,17 @@ function ThinkingBlock({ thinking, active }: { thinking: string; active: boolean
             expanded && "rotate-90",
           )}
         />
-        <Brain className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-        <span className="font-medium">{t("chat.thinking")}</span>
+        <Brain
+          className={cn(
+            "h-3.5 w-3.5 shrink-0 text-muted-foreground",
+            active && "animate-pulse motion-reduce:animate-none",
+          )}
+          aria-hidden="true"
+        />
+        <span className="text-xs italic text-muted-foreground/70">{t("chat.thinking")}</span>
       </button>
       {expanded && (
-        <div className="whitespace-pre-wrap border-t px-2 py-1 text-xs text-muted-foreground">
+        <div className="max-h-60 overflow-y-auto whitespace-pre-wrap pb-1 text-xs text-muted-foreground/70">
           {thinking}
         </div>
       )}

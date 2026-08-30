@@ -556,3 +556,45 @@ Fixed chat UI event-stream flattening: replaced flat thinking/toolCalls assistan
 ### Status
 
 [OK] **Completed**
+
+
+## Session 111: Redesign agent thinking & tool call UI
+
+**Date**: 2026-08-30
+**Task**: Redesign agent thinking & tool call UI
+**Branch**: `feat/litera-agent-runtime-toolcall-styles`
+
+### Summary
+
+Researched agent UI patterns (Claude collapsed trace, ChatGPT Deep Research, Cursor, DeerFlow), then redesigned Litera chat thinking/tool-call blocks: replaced gray boxes with left-hairline de-emphasized style, added running/success/error lifecycle states to ToolCallCard, scrollable truncated results with copy button, shared CopyButton component, 5 new i18n keys, 9 new tests. 627 tests + build pass.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `912bbae` | (see git log) |
+
+### Status
+
+[OK] **Completed**
+
+
+## Session 112: Drop left hairline on thinking/tool rows
+
+**Date**: 2026-08-31
+**Task**: Drop left hairline on thinking/tool rows
+**Branch**: `feat/litera-agent-runtime-toolcall-styles`
+
+### Summary
+
+User feedback: stacked left border lines looked noisy. Switched thinking and tool-call blocks to borderless rows with subtle hover background (option A); removed border assertions from error-state test.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `74c4100` | (see git log) |
+
+### Status
+
+[OK] **Completed**

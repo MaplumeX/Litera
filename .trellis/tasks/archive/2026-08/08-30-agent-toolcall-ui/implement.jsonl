@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend conventions overview: React 19 + Tailwind v4 + shadcn/ui, local state patterns"}
+{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "shadcn/ui component patterns and chrome visual language needed for the redesigned blocks"}
+{"file": ".trellis/spec/frontend/i18n.md", "reason": "Adding new locale keys for truncation notice, copy result, error label"}
+{"file": ".trellis/tasks/08-30-agent-toolcall-ui/prd.md", "reason": "Requirements and acceptance criteria for this task"}
+{"file": ".trellis/tasks/08-30-agent-toolcall-ui/design.md", "reason": "Chosen visual design: collapsed-trace style, lifecycle states, left border line language"}

@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 110
-- **Last Active**: 2026-08-30
+- **Total Sessions**: 112
+- **Last Active**: 2026-08-31
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~558 | Active |
+| `journal-2.md` | ~600 | Active |
 | `journal-1.md` | ~1996 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,8 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 112 | 2026-08-31 | Drop left hairline on thinking/tool rows | `74c4100` | `feat/litera-agent-runtime-toolcall-styles` |
+| 111 | 2026-08-30 | Redesign agent thinking & tool call UI | `912bbae` | `feat/litera-agent-runtime-toolcall-styles` |
 | 110 | 2026-08-30 | Agent chat ordered content blocks | `0bb9108` | `fix/litera-agent-event-stream-ordering` |
 | 109 | 2026-08-29 | read_chapter structured Markdown projection | `2cdfb65` | `feat/read-chapter-structured-content` |
 | 108 | 2026-08-29 | Hierarchical TOC with anchor-level chapter splitting | `04f7f3d` | `feat/read-chapter-heading-levels` |
