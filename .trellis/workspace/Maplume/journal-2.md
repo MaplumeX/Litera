@@ -577,3 +577,24 @@ Researched agent UI patterns (Claude collapsed trace, ChatGPT Deep Research, Cur
 ### Status
 
 [OK] **Completed**
+
+
+## Session 112: Drop left hairline on thinking/tool rows
+
+**Date**: 2026-08-31
+**Task**: Drop left hairline on thinking/tool rows
+**Branch**: `feat/litera-agent-runtime-toolcall-styles`
+
+### Summary
+
+User feedback: stacked left border lines looked noisy. Switched thinking and tool-call blocks to borderless rows with subtle hover background (option A); removed border assertions from error-state test.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `74c4100` | (see git log) |
+
+### Status
+
+[OK] **Completed**
