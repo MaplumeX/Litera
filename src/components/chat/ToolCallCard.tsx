@@ -56,12 +56,7 @@ export function ToolCallCard({ call }: { call: AgentToolCall }) {
   const shownResult = truncated ? fullResult.slice(0, RESULT_TRUNCATE_LIMIT) : fullResult;
 
   return (
-    <div
-      className={cn(
-        "border-l-2 pl-3",
-        error ? "border-destructive/50" : "border-muted-foreground/20",
-      )}
-    >
+    <div className="-ml-1 rounded px-1 transition-colors hover:bg-muted/40">
       <button
         type="button"
         onClick={() => setExpanded((value) => !value)}

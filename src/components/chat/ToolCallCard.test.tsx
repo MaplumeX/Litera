@@ -43,7 +43,6 @@ describe("ToolCallCard", () => {
     );
     expect(getByText("调用失败")).toBeTruthy();
     expect(container.querySelector(".text-destructive")).toBeTruthy();
-    expect(container.querySelector(".border-destructive\\/50")).toBeTruthy();
   });
 
   it("expands to key-value params and a result with a copy button", () => {

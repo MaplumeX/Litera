@@ -35,7 +35,7 @@ function ThinkingBlock({ thinking, active }: { thinking: string; active: boolean
     if (!active) setExpanded(false);
   }, [active]);
   return (
-    <div className="border-l-2 border-muted-foreground/20 pl-3">
+    <div className="-ml-1 rounded px-1 transition-colors hover:bg-muted/40">
       <button
         type="button"
         onClick={() => setExpanded((value) => !value)}
