@@ -1,6 +1,11 @@
 import type { AgentMessage as PiAgentMessage } from "@earendil-works/pi-agent-core";
 import type { Message } from "@earendil-works/pi-ai";
-import type { AgentMessage as UiAgentMessage, AgentSessionSummary } from "@/types/agent";
+import type {
+  AgentMessage as UiAgentMessage,
+  AgentSessionSummary,
+  AgentToolCall,
+  AssistantBlock,
+} from "@/types/agent";
 
 export interface PiSessionHeader {
   type: "session";
@@ -198,7 +203,7 @@ function contentText(content: unknown): string {
 
 export function visibleMessages(session: DecodedPiSession): UiAgentMessage[] {
   const output: UiAgentMessage[] = [];
-  const toolOwners = new Map<string, { messageIndex: number; callIndex: number }>();
+  const toolOwners = new Map<string, { messageIndex: number; blockIndex: number }>();
   for (const entry of activeBranch(session)) {
     if (entry.type !== "message") continue;
     const message = object(entry.message);
@@ -206,27 +211,72 @@ export function visibleMessages(session: DecodedPiSession): UiAgentMessage[] {
     if (message.role === "toolResult" && typeof message.toolCallId === "string") {
       const owner = toolOwners.get(message.toolCallId);
       if (owner) {
-        const call = output[owner.messageIndex].toolCalls?.[owner.callIndex];
-        if (call) {
-          call.result = contentText(message.content);
-          if (message.isError === true) call.isError = true;
+        const block = output[owner.messageIndex]?.blocks?.[owner.blockIndex];
+        if (block?.type === "toolCall") {
+          block.toolCall = {
+            ...block.toolCall,
+            result: contentText(message.content),
+            ...(message.isError === true ? { isError: true } : {}),
+          };
         }
       }
       continue;
     }
     if (message.role !== "user" && message.role !== "assistant") continue;
-    const toolCalls = message.role === "assistant" && Array.isArray(message.content)
-      ? message.content.flatMap((part) => {
+    if (message.role === "user") {
+      output.push({ role: "user", content: contentText(message.content) });
+      continue;
+    }
+    const blocks: AssistantBlock[] = Array.isArray(message.content)
+      ? message.content.flatMap((part): AssistantBlock[] => {
           const block = object(part);
-          return block?.type === "toolCall" && typeof block.id === "string" && typeof block.name === "string"
-            ? [{ toolCallId: block.id, tool: block.name, params: block.arguments, done: true }]
-            : [];
+          if (!block) return [];
+          if (block.type === "thinking" && typeof block.thinking === "string") {
+            return [{ type: "thinking", text: block.thinking }];
+          }
+          if (block.type === "text" && typeof block.text === "string") {
+            return [{ type: "text", text: block.text }];
+          }
+          if (block.type === "toolCall" && typeof block.id === "string" && typeof block.name === "string") {
+            const toolCall: AgentToolCall = {
+              toolCallId: block.id,
+              tool: block.name,
+              params: block.arguments,
+              done: true,
+            };
+            return [{ type: "toolCall", toolCall }];
+          }
+          return [];
         })
-      : undefined;
-    output.push({ role: message.role, content: contentText(message.content), toolCalls });
-    toolCalls?.forEach((call, callIndex) => toolOwners.set(call.toolCallId, { messageIndex: output.length - 1, callIndex }));
+      : [];
+    const last = output[output.length - 1];
+    if (last?.role === "assistant" && last.blocks) {
+      // Consecutive assistant entries (agent loop iterations) merge into one bubble.
+      for (let blockIndex = 0; blockIndex < blocks.length; blockIndex += 1) {
+        const block = blocks[blockIndex];
+        if (block.type === "toolCall") {
+          toolOwners.set(block.toolCall.toolCallId, { messageIndex: output.length - 1, blockIndex: last.blocks.length });
+        }
+        last.blocks.push(block);
+      }
+      last.content = textBlocksContent(last.blocks);
+    } else {
+      output.push({ role: "assistant", content: textBlocksContent(blocks), blocks });
+      blocks.forEach((block, blockIndex) => {
+        if (block.type === "toolCall") {
+          toolOwners.set(block.toolCall.toolCallId, { messageIndex: output.length - 1, blockIndex });
+        }
+      });
+    }
   }
   return output;
+}
+
+function textBlocksContent(blocks: AssistantBlock[]): string {
+  return blocks
+    .filter((block): block is Extract<AssistantBlock, { type: "text" }> => block.type === "text")
+    .map((block) => block.text)
+    .join("");
 }
 
 export interface SessionConfig {

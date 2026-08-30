@@ -29,9 +29,9 @@ describe("agentReducer", () => {
     state = reduce(state, { version: 2, type: "tool_start", bookId: "book-a", sessionId: "s", promptId: "p", toolCallId: "one", tool: "read_chapter", params: {} });
     state = reduce(state, { version: 3, type: "tool_start", bookId: "book-a", sessionId: "s", promptId: "p", toolCallId: "two", tool: "read_chapter", params: {} });
     state = reduce(state, { version: 4, type: "tool_end", bookId: "book-a", sessionId: "s", promptId: "p", toolCallId: "two", result: "done", isError: false });
-    expect(state.messages[0].toolCalls).toEqual([
-      expect.objectContaining({ toolCallId: "one", done: false }),
-      expect.objectContaining({ toolCallId: "two", done: true, result: "done", isError: false }),
+    expect(state.messages[0].blocks).toEqual([
+      { type: "toolCall", toolCall: expect.objectContaining({ toolCallId: "one", done: false }) },
+      { type: "toolCall", toolCall: expect.objectContaining({ toolCallId: "two", done: true, result: "done", isError: false }) },
     ]);
   });
 
@@ -40,9 +40,47 @@ describe("agentReducer", () => {
     state = reduce(state, { version: 1, type: "prompt_started", bookId: "book-a", sessionId: "s", promptId: "p" });
     state = reduce(state, { version: 2, type: "tool_start", bookId: "book-a", sessionId: "s", promptId: "p", toolCallId: "one", tool: "search_in_book", params: {} });
     state = reduce(state, { version: 3, type: "tool_end", bookId: "book-a", sessionId: "s", promptId: "p", toolCallId: "one", result: "boom", isError: true });
-    expect(state.messages[0].toolCalls).toEqual([
-      expect.objectContaining({ toolCallId: "one", done: true, result: "boom", isError: true }),
+    expect(state.messages[0].blocks).toEqual([
+      { type: "toolCall", toolCall: expect.objectContaining({ toolCallId: "one", done: true, result: "boom", isError: true }) },
     ]);
+  });
+
+  it("maintains blocks in event order for interleaved deltas", () => {
+    let state = createAgentState("book-a");
+    state = reduce(state, { version: 1, type: "prompt_started", bookId: "book-a", sessionId: "s", promptId: "p" });
+    state = reduce(state, { version: 2, type: "thinking_start", bookId: "book-a", sessionId: "s", promptId: "p", contentIndex: 0 });
+    state = reduce(state, { version: 3, type: "thinking_delta", bookId: "book-a", sessionId: "s", promptId: "p", contentIndex: 0, delta: "先想一下" });
+    state = reduce(state, { version: 4, type: "thinking_end", bookId: "book-a", sessionId: "s", promptId: "p", contentIndex: 0 });
+    state = reduce(state, { version: 5, type: "text_delta", bookId: "book-a", sessionId: "s", promptId: "p", delta: "我先查一下，" });
+    state = reduce(state, { version: 6, type: "tool_start", bookId: "book-a", sessionId: "s", promptId: "p", toolCallId: "t1", tool: "read_chapter", params: {} });
+    state = reduce(state, { version: 7, type: "tool_end", bookId: "book-a", sessionId: "s", promptId: "p", toolCallId: "t1", result: "chapter text", isError: false });
+    state = reduce(state, { version: 8, type: "thinking_start", bookId: "book-a", sessionId: "s", promptId: "p", contentIndex: 1 });
+    state = reduce(state, { version: 9, type: "thinking_delta", bookId: "book-a", sessionId: "s", promptId: "p", contentIndex: 1, delta: "再看一次" });
+    state = reduce(state, { version: 10, type: "thinking_end", bookId: "book-a", sessionId: "s", promptId: "p", contentIndex: 1 });
+    state = reduce(state, { version: 11, type: "tool_start", bookId: "book-a", sessionId: "s", promptId: "p", toolCallId: "t2", tool: "search_in_book", params: {} });
+    state = reduce(state, { version: 12, type: "tool_end", bookId: "book-a", sessionId: "s", promptId: "p", toolCallId: "t2", result: "hits", isError: false });
+    state = reduce(state, { version: 13, type: "text_delta", bookId: "book-a", sessionId: "s", promptId: "p", delta: "结论如下" });
+    expect(state.messages[0].blocks?.map((block) => block.type)).toEqual([
+      "thinking",
+      "text",
+      "toolCall",
+      "thinking",
+      "toolCall",
+      "text",
+    ]);
+    expect(state.messages[0].blocks?.[0]).toEqual({ type: "thinking", text: "先想一下" });
+    expect(state.messages[0].blocks?.[5]).toEqual({ type: "text", text: "结论如下" });
+    expect(state.messages[0].content).toBe("我先查一下，结论如下");
+  });
+
+  it("keeps content in sync with the joined text blocks", () => {
+    let state = createAgentState("book-a");
+    state = reduce(state, { version: 1, type: "prompt_started", bookId: "book-a", sessionId: "s", promptId: "p" });
+    state = reduce(state, { version: 2, type: "thinking_delta", bookId: "book-a", sessionId: "s", promptId: "p", contentIndex: 0, delta: "推理" });
+    state = reduce(state, { version: 3, type: "text_delta", bookId: "book-a", sessionId: "s", promptId: "p", delta: "答案一" });
+    state = reduce(state, { version: 4, type: "tool_start", bookId: "book-a", sessionId: "s", promptId: "p", toolCallId: "t1", tool: "read_chapter", params: {} });
+    state = reduce(state, { version: 5, type: "text_delta", bookId: "book-a", sessionId: "s", promptId: "p", delta: "答案二" });
+    expect(state.messages[0].content).toBe("答案一答案二");
   });
 
   it("does not clear a live prompt for an unrelated error", () => {
@@ -140,7 +178,7 @@ describe("agentReducer", () => {
     state = reduce(state, { version: 3, type: "thinking_delta", bookId: "book-a", sessionId: "s", promptId: "p", contentIndex: 0, delta: "让我想想" });
     state = reduce(state, { version: 4, type: "thinking_delta", bookId: "book-a", sessionId: "s", promptId: "p", contentIndex: 0, delta: "…" });
     state = reduce(state, { version: 5, type: "thinking_end", bookId: "book-a", sessionId: "s", promptId: "p", contentIndex: 0 });
-    expect(state.messages).toEqual([expect.objectContaining({ role: "assistant", thinking: "让我想想…" })]);
+    expect(state.messages).toEqual([expect.objectContaining({ role: "assistant", blocks: [{ type: "thinking", text: "让我想想…" }] })]);
   });
 
   it("ignores stale-prompt thinking deltas", () => {

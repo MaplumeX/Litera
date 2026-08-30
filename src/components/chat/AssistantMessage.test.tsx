@@ -58,7 +58,9 @@ describe("AssistantMessage", () => {
     expect(queryByText("思考过程")).toBeNull();
 
     const second = render(
-      <AssistantMessage message={{ role: "assistant", content: "answer", thinking: "内部推理" }} />,
+      <AssistantMessage
+        message={{ role: "assistant", content: "answer", blocks: [{ type: "thinking", text: "内部推理" }, { type: "text", text: "answer" }] }}
+      />,
     );
     expect(second.getByText("思考过程")).toBeTruthy();
     expect(second.queryByText("内部推理")).toBeNull();
@@ -71,7 +73,7 @@ describe("AssistantMessage", () => {
   it("auto-expands thinking while streaming and collapses after streaming ends", () => {
     const first = render(
       <AssistantMessage
-        message={{ role: "assistant", content: "", thinking: "推理中" }}
+        message={{ role: "assistant", content: "", blocks: [{ type: "thinking", text: "推理中" }] }}
         streaming
       />,
     );
@@ -79,10 +81,39 @@ describe("AssistantMessage", () => {
 
     first.rerender(
       <AssistantMessage
-        message={{ role: "assistant", content: "done", thinking: "推理中" }}
+        message={{ role: "assistant", content: "done", blocks: [{ type: "thinking", text: "推理中" }, { type: "text", text: "done" }] }}
         streaming={false}
       />,
     );
     expect(first.queryByText("推理中")).toBeNull();
+  });
+
+  it("renders blocks in array order with thinking before an earlier tool card", () => {
+    const { container } = render(
+      <AssistantMessage
+        message={{
+          role: "assistant",
+          content: "结论",
+          blocks: [
+            { type: "thinking", text: "先想" },
+            { type: "toolCall", toolCall: { toolCallId: "t1", tool: "read_chapter", params: {}, done: true, result: "章节" } },
+            { type: "text", text: "结论" },
+          ],
+        }}
+      />,
+    );
+    const children = Array.from(container.querySelectorAll(".space-y-1 > *"));
+    expect(children).toHaveLength(3);
+    expect(children[0].textContent).toContain("思考过程");
+    expect(children[1].textContent).toContain("read_chapter");
+    expect(children[2].textContent).toContain("结论");
+  });
+
+  it("falls back to rendering content as a single text block when blocks is missing", () => {
+    const { container, getByText } = render(
+      <AssistantMessage message={{ role: "assistant", content: SAMPLE }} />,
+    );
+    expect(container.querySelector("h1")?.textContent).toBe("Heading 1");
+    expect(getByText("list item")).toBeTruthy();
   });
 });

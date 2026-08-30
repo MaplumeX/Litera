@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Bot, Brain, Check, ChevronRight, Copy } from "lucide-react";
-import type { AgentMessage } from "@/types/agent";
+import type { AgentMessage, AssistantBlock } from "@/types/agent";
 import { ToolCallCard } from "./ToolCallCard";
 import { TypingIndicator } from "./TypingIndicator";
 import { useT } from "@/lib/i18n";
@@ -79,38 +79,56 @@ function ThinkingBlock({ thinking, active }: { thinking: string; active: boolean
   );
 }
 
+function TextBlock({ text, streaming }: { text: string; streaming: boolean }) {
+  return (
+    <div>
+      <div className="prose prose-sm max-w-none overflow-x-auto dark:prose-invert">
+        <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+          {text}
+        </ReactMarkdown>
+        {streaming && (
+          <span className="ml-0.5 inline-block h-4 w-2 animate-pulse bg-primary/70 motion-reduce:animate-none" />
+        )}
+      </div>
+      <div className="flex h-6 items-center">
+        <CopyButton text={text} />
+      </div>
+    </div>
+  );
+}
+
+function messageBlocks(message: AgentMessage): AssistantBlock[] {
+  if (message.blocks) return message.blocks;
+  return message.content ? [{ type: "text", text: message.content }] : [];
+}
+
 interface AssistantMessageProps {
   message: AgentMessage;
   streaming?: boolean;
 }
 
 export function AssistantMessage({ message, streaming = false }: AssistantMessageProps) {
+  const blocks = messageBlocks(message);
+  const textBlocks = blocks.filter((block): block is Extract<AssistantBlock, { type: "text" }> => block.type === "text");
+  const lastTextIndex = textBlocks.length > 0
+    ? blocks.lastIndexOf(textBlocks[textBlocks.length - 1])
+    : -1;
   return (
     <div className="flex gap-2">
       <BotAvatar />
       <div className="min-w-0 max-w-[90%] space-y-1">
         {streaming && <TypingIndicator />}
-        {message.thinking && (
-          <ThinkingBlock thinking={message.thinking} active={streaming} />
-        )}
-        {message.toolCalls?.map((call) => (
-          <ToolCallCard key={call.toolCallId} call={call} />
-        ))}
-        {message.content && (
-          <div>
-            <div className="prose prose-sm max-w-none overflow-x-auto dark:prose-invert">
-              <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-                {message.content}
-              </ReactMarkdown>
-              {streaming && (
-                <span className="ml-0.5 inline-block h-4 w-2 animate-pulse bg-primary/70 motion-reduce:animate-none" />
-              )}
-            </div>
-            <div className="flex h-6 items-center">
-              <CopyButton text={message.content} />
-            </div>
-          </div>
-        )}
+        {blocks.map((block, index) => {
+          if (block.type === "thinking") {
+            return block.text ? (
+              <ThinkingBlock key={index} thinking={block.text} active={streaming} />
+            ) : null;
+          }
+          if (block.type === "toolCall") {
+            return <ToolCallCard key={block.toolCall.toolCallId} call={block.toolCall} />;
+          }
+          return <TextBlock key={index} text={block.text} streaming={streaming && index === lastTextIndex} />;
+        })}
       </div>
     </div>
   );

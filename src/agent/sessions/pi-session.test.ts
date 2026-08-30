@@ -47,7 +47,7 @@ describe("Pi session decoder", () => {
   it("follows the active branch and excludes alternate history", () => {
     const session = decodePiSession({ header: { type: "session", version: 3, id: "s", timestamp, cwd: "" }, entries: [entry("a", null, "user", "old"), entry("b", "a", "assistant", "old answer"), entry("c", null, "user", "edited")], leafId: "c" });
     expect(activeBranch(session).map((item) => item.id)).toEqual(["c"]);
-    expect(visibleMessages(session)).toEqual([{ role: "user", content: "edited", toolCalls: undefined }]);
+    expect(visibleMessages(session)).toEqual([{ role: "user", content: "edited" }]);
   });
   it("uses the latest compaction boundary", () => {
     const session = makeSession([entry("a", null, "user", "one"), entry("b", "a", "assistant", "two"), { type: "compaction", id: "c", parentId: "b", timestamp, summary: "sum", firstKeptEntryId: "b" }, entry("d", "c", "user", "three")], "d");
@@ -84,11 +84,93 @@ describe("Pi session decoder", () => {
         },
       },
     ], "b");
-    expect(visibleMessages(session)[0].toolCalls?.[0]).toMatchObject({
-      toolCallId: "c1",
-      result: "[]",
-      isError: true,
+    expect(visibleMessages(session)[0].blocks?.[0]).toMatchObject({
+      type: "toolCall",
+      toolCall: {
+        toolCallId: "c1",
+        result: "[]",
+        isError: true,
+      },
     });
+  });
+  it("rebuilds ordered blocks including thinking and merges consecutive assistant entries", () => {
+    const session = makeSession([
+      entry("u", null, "user", "question"),
+      {
+        type: "message",
+        id: "a1",
+        parentId: "u",
+        timestamp,
+        message: {
+          role: "assistant",
+          content: [
+            { type: "thinking", thinking: "先想" },
+            { type: "text", text: "我查一下" },
+            { type: "toolCall", id: "c1", name: "search_in_book", arguments: { queries: ["x"] } },
+          ],
+          timestamp: 1,
+        },
+      },
+      {
+        type: "message",
+        id: "r1",
+        parentId: "a1",
+        timestamp,
+        message: {
+          role: "toolResult",
+          toolCallId: "c1",
+          toolName: "search_in_book",
+          content: [{ type: "text", text: "[]" }],
+          isError: false,
+          timestamp: 2,
+        },
+      },
+      {
+        type: "message",
+        id: "a2",
+        parentId: "r1",
+        timestamp,
+        message: {
+          role: "assistant",
+          content: [
+            { type: "thinking", thinking: "再看" },
+            { type: "text", text: "结论" },
+          ],
+          timestamp: 3,
+        },
+      },
+    ], "a2");
+    expect(visibleMessages(session)).toEqual([
+      { role: "user", content: "question" },
+      {
+        role: "assistant",
+        content: "我查一下结论",
+        blocks: [
+          { type: "thinking", text: "先想" },
+          { type: "text", text: "我查一下" },
+          {
+            type: "toolCall",
+            toolCall: {
+              toolCallId: "c1",
+              tool: "search_in_book",
+              params: { queries: ["x"] },
+              result: "[]",
+              done: true,
+            },
+          },
+          { type: "thinking", text: "再看" },
+          { type: "text", text: "结论" },
+        ],
+      },
+    ]);
+  });
+  it("does not merge assistant entries across a user message", () => {
+    const session = makeSession([
+      entry("a1", null, "assistant", "first"),
+      entry("u", "a1", "user", "again"),
+      entry("a2", "u", "assistant", "second"),
+    ], "a2");
+    expect(visibleMessages(session).map((message) => message.content)).toEqual(["first", "again", "second"]);
   });
   it("normalizes legacy null content and rejects malformed known messages", () => {
     const normalized = makeSession([{ type: "message", id: "a", parentId: null, timestamp, message: { role: "assistant", content: null } }], "a");

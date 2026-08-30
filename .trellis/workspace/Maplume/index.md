@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 109
-- **Last Active**: 2026-08-29
+- **Total Sessions**: 110
+- **Last Active**: 2026-08-30
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~537 | Active |
+| `journal-2.md` | ~558 | Active |
 | `journal-1.md` | ~1996 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 110 | 2026-08-30 | Agent chat ordered content blocks | `0bb9108` | `fix/litera-agent-event-stream-ordering` |
 | 109 | 2026-08-29 | read_chapter structured Markdown projection | `2cdfb65` | `feat/read-chapter-structured-content` |
 | 108 | 2026-08-29 | Hierarchical TOC with anchor-level chapter splitting | `04f7f3d` | `feat/read-chapter-heading-levels` |
 | 107 | 2026-08-29 | Restore noteref mark size to 0.83em | `6f652f7` | `feat/optimize-footnote-styles` |
