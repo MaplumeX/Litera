@@ -1993,7 +1993,14 @@ fn compress_cover(raw: &[u8]) -> Vec<u8> {
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
-    format!("{:x}", Sha256::digest(bytes))
+    // sha2 0.11 removed the LowerHex impl on digest output, so encode manually.
+    use std::fmt::Write as _;
+    let digest = Sha256::digest(bytes);
+    let mut out = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        let _ = write!(out, "{byte:02x}");
+    }
+    out
 }
 
 fn validate_content_hash(hash: &str) -> AppResult<()> {
