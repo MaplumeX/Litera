@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.11] - 2026-09-01
+
+### Changed
+
+- **阅读助手系统提示词**：强化阅读助手系统提示词，进一步提升阅读问答质量。
+- **思考与工具调用 UI**：重新设计聊天中模型思考与工具调用的展示，改为低调的折叠轨迹样式；工具卡片具备运行/成功/错误状态、参数展示、可滚动结果与复制按钮，并遵循系统的减少动效偏好。
+
+### Fixed
+
+- **事件渲染顺序**：聊天中的思考、工具调用与文本按真实到达顺序渲染，不再按类型分组；重新加载会话后思考块不再丢失。
+
+### Chores
+
+- 新增 Dependabot 配置，自动维护 npm、Cargo 与 GitHub Actions 依赖。
+- 升级 vite、TypeScript、Vitest、@vitejs/plugin-react 等开发依赖与若干运行时依赖。
+
 ## [0.2.10] - 2026-08-29
 
 ### Changed
