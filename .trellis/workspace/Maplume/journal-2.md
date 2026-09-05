@@ -598,3 +598,24 @@ User feedback: stacked left border lines looked noisy. Switched thinking and too
 ### Status
 
 [OK] **Completed**
+
+
+## Session 113: Fix agent message edit confirm button index mismatch
+
+**Date**: 2026-09-05
+**Task**: Fix agent message edit confirm button index mismatch
+**Branch**: `fix/litera-agent-runtime-message-confirm-button`
+
+### Summary
+
+Diagnosed the dead edit-confirm button in the embedded agent runtime: UI bubble indexes (visibleMessages) diverged from the runtime's raw entry filtering after tool-call turns, so edits either failed with a masked 'model request failed' error or silently rewound to the wrong branch point. Fixed by adding visibleMessageEntries() as the single source of truth for UI-index-to-entry mapping (shared traversal with visibleMessages), resolving editIndex through it in the runtime, surfacing the local validation error verbatim, and treating a null leafId as an empty branch in activeBranch(). Added invariant tests, runtime edit regression tests (tool-turn edit, first-message edit, invalid targets), and kept the ChatPanel confirm-button tests. All 636 tests and build pass. Updated frontend state-management spec.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e3195c3` | (see git log) |
+
+### Status
+
+[OK] **Completed**

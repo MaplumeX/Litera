@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activeBranch, convertPiContextToLlm, decodePiSession, piContextMessages, sessionConfig, sessionSummary, visibleMessages } from "./pi-session";
+import { activeBranch, convertPiContextToLlm, decodePiSession, piContextMessages, sessionConfig, sessionSummary, visibleMessageEntries, visibleMessages } from "./pi-session";
 
 const timestamp = "2026-08-14T00:00:00Z";
 const entry = (id: string, parentId: string | null, role: "user" | "assistant", text: string) => ({ type: "message", id, parentId, timestamp, message: { role, content: [{ type: "text", text }], timestamp: 1 } });
@@ -40,6 +40,55 @@ describe("sessionSummary", () => {
   it("omits null or non-string config fields", () => {
     expect(sessionSummary({ id: "s", title: "t", createdAt: timestamp, updatedAt: timestamp, systemPrompt: null, thinkingLevel: 3 }))
       .toEqual({ id: "s", title: "t", createdAt: timestamp, updatedAt: timestamp });
+  });
+});
+
+describe("visibleMessageEntries", () => {
+  it("stays in lockstep with visibleMessages for tool rounds and consecutive assistant entries", () => {
+    const session = makeSession([
+      entry("u1", null, "user", "first question"),
+      {
+        type: "message",
+        id: "a1",
+        parentId: "u1",
+        timestamp,
+        message: {
+          role: "assistant",
+          content: [{ type: "toolCall", id: "c1", name: "search_in_book", arguments: { queries: ["x"] } }],
+          timestamp: 1,
+        },
+      },
+      {
+        type: "message",
+        id: "r1",
+        parentId: "a1",
+        timestamp,
+        message: {
+          role: "toolResult",
+          toolCallId: "c1",
+          toolName: "search_in_book",
+          content: [{ type: "text", text: "[]" }],
+          isError: false,
+          timestamp: 2,
+        },
+      },
+      entry("a2", "r1", "assistant", "looked up"),
+      entry("u2", "a2", "user", "second question"),
+      entry("a3", "u2", "assistant", "second answer"),
+    ], "a3");
+    const anchors = visibleMessageEntries(session);
+    const visible = visibleMessages(session);
+    // One anchor per UI bubble: the tool round merges into a single assistant
+    // bubble anchored at the run's first assistant entry (a1).
+    expect(anchors.map((anchor) => anchor.id)).toEqual(["u1", "a1", "u2", "a3"]);
+    expect(anchors).toHaveLength(visible.length);
+    expect(anchors.map((anchor) => (anchor.message as { role: string }).role)).toEqual(visible.map((message) => message.role));
+  });
+  it("returns an empty anchor list for a rewound-to-root session", () => {
+    const session = makeSession([entry("u1", null, "user", "q"), entry("a1", "u1", "assistant", "a")], "a1");
+    expect(activeBranch({ ...session, leafId: null })).toEqual([]);
+    expect(visibleMessageEntries({ ...session, leafId: null })).toEqual([]);
+    expect(visibleMessages({ ...session, leafId: null })).toEqual([]);
   });
 });
 

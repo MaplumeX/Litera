@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend spec index: conventions for the agent bridge/state layer this fix touches"}
+{"file": ".trellis/spec/frontend/state-management.md", "reason": "Agent state/reducer and message-index semantics involved in edit flow"}
+{"file": ".trellis/spec/frontend/type-safety.md", "reason": "TypeScript conventions for pi-session types"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "Error classification rules; local validation errors must not be masked as network errors"}

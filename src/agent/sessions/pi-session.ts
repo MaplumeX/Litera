@@ -116,7 +116,10 @@ export function decodePiSession(value: unknown): DecodedPiSession {
 
 export function activeBranch(session: DecodedPiSession): PiSessionEntry[] {
   const byId = new Map(session.entries.map((entry) => [entry.id, entry]));
-  let current = session.leafId ? byId.get(session.leafId) : session.entries[session.entries.length - 1];
+  // A null leafId means "before the first entry" (fresh session, or a rewind to
+  // the branch root): the active branch is empty. Sessions with entries always
+  // carry a non-null leafId (Rust load/create and runtime appends guarantee it).
+  let current = session.leafId ? byId.get(session.leafId) : undefined;
   const path: PiSessionEntry[] = [];
   const visited = new Set<string>();
   while (current && !visited.has(current.id)) {
@@ -201,9 +204,44 @@ function contentText(content: unknown): string {
   }).join("");
 }
 
+function messageRole(entry: PiSessionEntry | undefined): string | null {
+  if (!entry || entry.type !== "message") return null;
+  return string(object(entry.message)?.role);
+}
+
+/**
+ * Shared traversal backing both `visibleMessageEntries` and `visibleMessages`:
+ * exactly one anchor entry per visible UI bubble. User entries anchor their
+ * own bubble; only the first entry of a consecutive assistant run (agent
+ * loop iterations, with toolResult entries in between) anchors the merged
+ * bubble; toolResult and non-message entries never anchor. Both exported
+ * functions must stay in lockstep — the UI edit index is resolved against
+ * these anchors.
+ */
+function visibleMessageAnchors(session: DecodedPiSession): PiSessionEntry[] {
+  const anchors: PiSessionEntry[] = [];
+  for (const entry of activeBranch(session)) {
+    const role = messageRole(entry);
+    if (role !== "user" && role !== "assistant") continue;
+    if (role === "assistant" && messageRole(anchors[anchors.length - 1]) === "assistant") continue;
+    anchors.push(entry);
+  }
+  return anchors;
+}
+
+/**
+ * Entries corresponding one-to-one (same length, same order) with
+ * `visibleMessages(session)`: the entry that anchors each visible bubble.
+ * The runtime edit flow resolves UI bubble indices against these anchors.
+ */
+export function visibleMessageEntries(session: DecodedPiSession): PiSessionEntry[] {
+  return visibleMessageAnchors(session);
+}
+
 export function visibleMessages(session: DecodedPiSession): UiAgentMessage[] {
   const output: UiAgentMessage[] = [];
   const toolOwners = new Map<string, { messageIndex: number; blockIndex: number }>();
+  const anchorIds = new Set(visibleMessageAnchors(session).map((anchor) => anchor.id));
   for (const entry of activeBranch(session)) {
     if (entry.type !== "message") continue;
     const message = object(entry.message);
@@ -250,8 +288,9 @@ export function visibleMessages(session: DecodedPiSession): UiAgentMessage[] {
         })
       : [];
     const last = output[output.length - 1];
-    if (last?.role === "assistant" && last.blocks) {
-      // Consecutive assistant entries (agent loop iterations) merge into one bubble.
+    if (!anchorIds.has(entry.id) && last?.role === "assistant" && last.blocks) {
+      // Non-anchor assistant entry: continuation of the merged bubble opened
+      // by the run's first assistant entry (agent loop iterations).
       for (let blockIndex = 0; blockIndex < blocks.length; blockIndex += 1) {
         const block = blocks[blockIndex];
         if (block.type === "toolCall") {
