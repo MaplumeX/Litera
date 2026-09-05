@@ -88,13 +88,23 @@ array order; each thinking block is collapsible and auto-expands only while
 its message is the streaming last message. `visibleMessages()` in
 `pi-session.ts` rebuilds the same ordered blocks from persisted entries
 (including thinking) and merges consecutive assistant entries into one bubble.
+`visibleMessageEntries()` exposes the same traversal as entry anchors (one
+anchor per UI bubble: user entries anchor themselves; only the first entry of
+a consecutive assistant run anchors; `toolResult` never does). Any code that
+resolves a UI message index against session entries (e.g. the runtime's
+message-edit `editIndex`) must go through `visibleMessageEntries()` — never
+re-derive the mapping by filtering entries, or tool-call turns shift the
+indexes. `activeBranch()` treats `leafId === null` as an empty branch (the
+Rust session port guarantees a non-null leaf whenever entries exist).
 Token usage/cost are not surfaced anywhere (deliberate product decision).
 
 `retry_scheduled` events (bounded retry via pi-ai `retryAssistantCall`, SDK
 `maxRetries: 3`) are emitted per backoff attempt but carry no reducer state;
 the UI hint is future work. Prompt failures are classified by
 `classifyPromptError` into preset credential-free Chinese messages — raw
-provider error text never reaches reducer state or logs.
+provider error text never reaches reducer state or logs. Local validation
+errors (e.g. an invalid edit target) are the exception: they are surfaced
+verbatim and must not be routed through the network-error classifier.
 
 ## Durable writes
 
