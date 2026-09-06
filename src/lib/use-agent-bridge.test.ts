@@ -17,6 +17,7 @@ const runtime = vi.hoisted(() => {
     deleteSession: vi.fn(async () => {}),
     renameSession: vi.fn(async () => {}),
     updateSessionConfig: vi.fn(async () => {}),
+    switchBranchAtAnchor: vi.fn(async () => {}),
   };
 });
 
@@ -94,15 +95,19 @@ describe("useAgentBridge", () => {
     expect(runtime.listSessions).not.toHaveBeenCalled();
   });
 
-  it("forwards session config updates to the embedded runtime", async () => {
+  it("forwards branch switches to the embedded runtime with the active session", async () => {
     const { result } = renderHook(() => useAgentBridge("book-a"));
+    act(() => runtime.emit(event({ type: "session_switched", bookId: "book-a", sessionId: "session-1", messages: [], version: 2 })));
+    await waitFor(() => expect(result.current.state.sessionId).toBe("session-1"));
+
     await act(async () => {
-      await result.current.updateSessionConfig("session-1", "你是翻译助手");
+      await result.current.switchBranchAtAnchor("u1b", -1);
     });
-    expect(runtime.updateSessionConfig).toHaveBeenCalledWith(
+    expect(runtime.switchBranchAtAnchor).toHaveBeenCalledWith(
       "session-1",
-      "你是翻译助手",
-      expect.stringMatching(/^update-session-config-/),
+      "u1b",
+      -1,
+      expect.stringMatching(/^switch-branch-/),
     );
   });
 });

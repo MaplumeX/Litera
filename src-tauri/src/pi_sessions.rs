@@ -156,11 +156,38 @@ impl PiSessionStore {
             .map_err(|_| AppError::storage_io("Session lock is poisoned"))?;
         let path = self.find_file(book_id, session_id)?;
         let (header, entries) = load_and_migrate(&path)?;
-        let leaf_id = entries.last().and_then(entry_id).map(str::to_string);
+        let leaf_id = stored_leaf_id(&path, &entries)
+            .or_else(|| entries.last().and_then(entry_id).map(str::to_string));
         Ok(LoadedPiSession {
             header,
             entries,
             leaf_id,
+        })
+    }
+
+    pub fn set_leaf(
+        &self,
+        book_id: &str,
+        session_id: &str,
+        leaf_id: &str,
+    ) -> AppResult<LoadedPiSession> {
+        let _guard = self
+            .gate
+            .lock()
+            .map_err(|_| AppError::storage_io("Session lock is poisoned"))?;
+        let path = self.find_file(book_id, session_id)?;
+        let (header, entries) = load_and_migrate(&path)?;
+        let ids: HashSet<&str> = entries.iter().filter_map(entry_id).collect();
+        if !ids.contains(leaf_id) {
+            return Err(AppError::invalid_input(
+                "Session leaf is unknown; reload before switching",
+            ));
+        }
+        write_leaf_sidecar(&path, leaf_id)?;
+        Ok(LoadedPiSession {
+            header,
+            entries,
+            leaf_id: Some(leaf_id.to_string()),
         })
     }
 
@@ -257,17 +284,29 @@ impl PiSessionStore {
         let path = self.find_file(book_id, session_id)?;
         recover_truncated_tail(&path)?;
         let (_header, existing) = load_and_migrate(&path)?;
-        let current_leaf = existing.last().and_then(entry_id);
-        if current_leaf != expected_leaf_id {
-            return Err(AppError::invalid_input(
-                "Session leaf changed; reload before appending",
-            ));
-        }
-        let mut ids: HashSet<String> = existing
+        let ids: HashSet<String> = existing
             .iter()
             .filter_map(entry_id)
             .map(str::to_string)
             .collect();
+        // Optimistic leaf check, relaxed for branch switching: `None` requires
+        // an empty session (fresh-session semantics); `Some(id)` only requires
+        // the id to exist in the file, so a stale writer cannot fork history it
+        // never saw, while continuing on a non-final (old) branch is allowed.
+        match expected_leaf_id {
+            Some(expected) if !ids.contains(expected) => {
+                return Err(AppError::invalid_input(
+                    "Session leaf changed; reload before appending",
+                ));
+            }
+            None if !existing.is_empty() => {
+                return Err(AppError::invalid_input(
+                    "Session leaf changed; reload before appending",
+                ));
+            }
+            _ => {}
+        }
+        let mut ids = ids;
         let mut encoded = Vec::new();
         for entry in &entries {
             validate_entry(entry, &ids)?;
@@ -301,7 +340,16 @@ impl PiSessionStore {
             .and_then(|_| file.flush())
             .and_then(|_| file.sync_all())
             .map_err(|error| AppError::storage_io(format!("Failed to append session: {error}")))?;
-        Ok(entries.last().and_then(entry_id).map(str::to_string))
+        let new_leaf = entries.last().and_then(entry_id).map(str::to_string);
+        // Appending always advances the active-branch sidecar to the newest
+        // leaf ("latest branch" semantics: continuing a conversation moves
+        // the pointer even when the append extended an older branch).
+        if let Some(leaf) = new_leaf.as_deref() {
+            if write_leaf_sidecar(&path, leaf).is_err() {
+                eprintln!("[sessions] Failed to persist active leaf sidecar for {session_id}");
+            }
+        }
+        Ok(new_leaf)
     }
 
     pub fn delete(&self, book_id: &str, session_id: &str) -> AppResult<()> {
@@ -310,8 +358,18 @@ impl PiSessionStore {
             .lock()
             .map_err(|_| AppError::storage_io("Session lock is poisoned"))?;
         let path = self.find_file(book_id, session_id)?;
-        fs::remove_file(path)
-            .map_err(|error| AppError::storage_io(format!("Failed to delete session: {error}")))
+        fs::remove_file(&path)
+            .map_err(|error| AppError::storage_io(format!("Failed to delete session: {error}")))?;
+        // The sidecar may already be gone; deleting a session must not fail on
+        // its absence.
+        if let Err(error) = fs::remove_file(leaf_sidecar_path(&path)) {
+            if error.kind() != std::io::ErrorKind::NotFound {
+                return Err(AppError::storage_io(format!(
+                    "Failed to delete session leaf sidecar: {error}"
+                )));
+            }
+        }
+        Ok(())
     }
 }
 
@@ -447,6 +505,36 @@ fn validate_header(header: &Value) -> AppResult<()> {
 
 fn entry_id(entry: &Value) -> Option<&str> {
     entry.get("id").and_then(Value::as_str)
+}
+
+/// The active-branch pointer lives next to the JSONL file (append-only stays
+/// intact): `<session>.jsonl.leaf` holds the target leaf id as one line.
+fn leaf_sidecar_path(session_path: &Path) -> PathBuf {
+    let mut name = session_path
+        .file_name()
+        .map(|value| value.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    name.push_str(".leaf");
+    session_path.with_file_name(name)
+}
+
+/// Read the sidecar leaf id; `None` when absent, unreadable, or pointing at
+/// an id the session no longer carries (fall back to `entries.last()`).
+fn stored_leaf_id(session_path: &Path, entries: &[Value]) -> Option<String> {
+    let bytes = fs::read(leaf_sidecar_path(session_path)).ok()?;
+    let id = String::from_utf8(bytes).ok()?.trim().to_string();
+    if id.is_empty() {
+        return None;
+    }
+    entries
+        .iter()
+        .any(|entry| entry_id(entry) == Some(id.as_str()))
+        .then_some(id)
+}
+
+fn write_leaf_sidecar(session_path: &Path, leaf_id: &str) -> AppResult<()> {
+    let bytes = format!("{leaf_id}\n");
+    library::atomic_write(&leaf_sidecar_path(session_path), bytes.as_bytes(), "Pi session leaf")
 }
 
 fn validate_entries(entries: &[Value]) -> AppResult<()> {
@@ -713,6 +801,19 @@ pub async fn append_agent_session_entries(
     .map_err(|error| AppError::storage_io(format!("Session worker failed: {error}")))?
 }
 #[tauri::command]
+pub async fn set_agent_session_leaf(
+    app: tauri::AppHandle,
+    book_id: String,
+    session_id: String,
+    leaf_id: String,
+) -> AppResult<LoadedPiSession> {
+    tauri::async_runtime::spawn_blocking(move || {
+        resolve_store(&app)?.set_leaf(&book_id, &session_id, &leaf_id)
+    })
+    .await
+    .map_err(|error| AppError::storage_io(format!("Session worker failed: {error}")))?
+}
+#[tauri::command]
 pub async fn delete_agent_session(
     app: tauri::AppHandle,
     book_id: String,
@@ -742,11 +843,116 @@ mod tests {
             store.append("book-1", id, None, vec![entry]).unwrap(),
             Some("entry1".into())
         );
+        // Contract change (branch switching): `None` still requires an empty
+        // session, but a *missing* expected id is the only `Some` rejection —
+        // an id anywhere in the file now passes (old-branch continuation).
         assert!(store.append("book-1", id, None, vec![json!({})]).is_err());
+        assert!(store
+            .append("book-1", id, Some("ghost-id"), vec![json!({})])
+            .is_err());
         assert_eq!(
             store.load("book-1", id).unwrap().leaf_id.as_deref(),
             Some("entry1")
         );
+    }
+
+    #[test]
+    fn appends_on_an_old_branch_after_the_leaf_contract_relaxation() {
+        let (_temp, store) = store();
+        let created = store.create("book").unwrap();
+        let id = created.header["id"].as_str().unwrap();
+        let now = Utc::now().to_rfc3339();
+        let first = json!({"type":"message","id":"entry001","parentId":null,"timestamp":now,"message":{"role":"user","content":"one","timestamp":1}});
+        let second = json!({"type":"message","id":"entry002","parentId":"entry001","timestamp":now,"message":{"role":"assistant","content":[],"timestamp":2}});
+        let third = json!({"type":"message","id":"entry003","parentId":"entry002","timestamp":now,"message":{"role":"user","content":"two","timestamp":3}});
+        assert_eq!(store.append("book", id, None, vec![first]).unwrap(), Some("entry001".into()));
+        assert_eq!(store.append("book", id, Some("entry001"), vec![second]).unwrap(), Some("entry002".into()));
+        assert_eq!(store.append("book", id, Some("entry002"), vec![third]).unwrap(), Some("entry003".into()));
+        // Continuing on the old branch: the expected leaf is a mid-file entry,
+        // which used to be rejected and must now be accepted (branch switching).
+        let fork = json!({"type":"message","id":"fork0001","parentId":"entry001","timestamp":now,"message":{"role":"user","content":"edited","timestamp":4}});
+        assert_eq!(
+            store.append("book", id, Some("entry001"), vec![fork]).unwrap(),
+            Some("fork0001".into())
+        );
+        // A ghost leaf id is still a stale-writer rejection.
+        let ghost = json!({"type":"message","id":"ghost0001","parentId":"entry001","timestamp":now,"message":{"role":"user","content":"x","timestamp":5}});
+        assert!(store.append("book", id, Some("ghost-id"), vec![ghost]).is_err());
+        // The append advanced the sidecar to the newest leaf.
+        assert_eq!(
+            store.load("book", id).unwrap().leaf_id.as_deref(),
+            Some("fork0001")
+        );
+    }
+
+    #[test]
+    fn set_leaf_persists_and_load_returns_it() {
+        let (_temp, store) = store();
+        let created = store.create("book").unwrap();
+        let id = created.header["id"].as_str().unwrap();
+        let now = Utc::now().to_rfc3339();
+        let one = json!({"type":"message","id":"entry001","parentId":null,"timestamp":now,"message":{"role":"user","content":"one","timestamp":1}});
+        let two = json!({"type":"message","id":"entry002","parentId":"entry001","timestamp":now,"message":{"role":"assistant","content":[],"timestamp":2}});
+        let three = json!({"type":"message","id":"entry003","parentId":"entry002","timestamp":now,"message":{"role":"user","content":"two","timestamp":3}});
+        store.append("book", id, None, vec![one]).unwrap();
+        store.append("book", id, Some("entry001"), vec![two]).unwrap();
+        store.append("book", id, Some("entry002"), vec![three]).unwrap();
+        // Switch back to the middle entry and reload.
+        let loaded = store.set_leaf("book", id, "entry001").unwrap();
+        assert_eq!(loaded.leaf_id.as_deref(), Some("entry001"));
+        assert_eq!(
+            store.load("book", id).unwrap().leaf_id.as_deref(),
+            Some("entry001")
+        );
+        // An id the file does not carry is rejected.
+        assert!(store.set_leaf("book", id, "ghost-id").is_err());
+    }
+
+    #[test]
+    fn load_falls_back_to_last_entry_when_the_sidecar_is_missing_or_stale() {
+        let (_temp, store) = store();
+        let created = store.create("book").unwrap();
+        let id = created.header["id"].as_str().unwrap();
+        let now = Utc::now().to_rfc3339();
+        let one = json!({"type":"message","id":"entry001","parentId":null,"timestamp":now,"message":{"role":"user","content":"one","timestamp":1}});
+        let two = json!({"type":"message","id":"entry002","parentId":"entry001","timestamp":now,"message":{"role":"assistant","content":[],"timestamp":2}});
+        store.append("book", id, None, vec![one]).unwrap();
+        store.append("book", id, Some("entry001"), vec![two]).unwrap();
+        let path = store.find_file("book", id).unwrap();
+        let sidecar = leaf_sidecar_path(&path);
+        // Sidecar written by the appends: load returns it, removing it falls
+        // back to `entries.last()` (legacy-session compatibility).
+        assert!(sidecar.exists());
+        fs::remove_file(&sidecar).unwrap();
+        assert_eq!(
+            store.load("book", id).unwrap().leaf_id.as_deref(),
+            Some("entry002")
+        );
+        // A sidecar pointing at an id the file no longer carries is ignored.
+        fs::write(&sidecar, "ghost-id\n").unwrap();
+        assert_eq!(
+            store.load("book", id).unwrap().leaf_id.as_deref(),
+            Some("entry002")
+        );
+    }
+
+    #[test]
+    fn delete_removes_the_leaf_sidecar() {
+        let (_temp, store) = store();
+        let created = store.create("book").unwrap();
+        let id = created.header["id"].as_str().unwrap();
+        let now = Utc::now().to_rfc3339();
+        let one = json!({"type":"message","id":"entry001","parentId":null,"timestamp":now,"message":{"role":"user","content":"one","timestamp":1}});
+        store.append("book", id, None, vec![one]).unwrap();
+        let path = store.find_file("book", id).unwrap();
+        let sidecar = leaf_sidecar_path(&path);
+        assert!(sidecar.exists());
+        store.delete("book", id).unwrap();
+        assert!(!path.exists());
+        assert!(!sidecar.exists());
+        // Deleting again still fails on the missing session file (unknown
+        // session), never on the already-absent sidecar.
+        assert!(store.delete("book", id).is_err());
     }
     #[test]
     fn migrates_v2_hook_message_with_backup() {

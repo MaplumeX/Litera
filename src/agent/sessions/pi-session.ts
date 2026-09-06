@@ -2,9 +2,11 @@ import type { AgentMessage as PiAgentMessage } from "@earendil-works/pi-agent-co
 import type { Message } from "@earendil-works/pi-ai";
 import type {
   AgentMessage as UiAgentMessage,
+  AnchorBranchInfo,
   AgentSessionSummary,
   AgentToolCall,
   AssistantBlock,
+  BranchOption,
 } from "@/types/agent";
 
 export interface PiSessionHeader {
@@ -320,6 +322,123 @@ function textBlocksContent(blocks: AssistantBlock[]): string {
 
 export interface SessionConfig {
   systemPrompt: string;
+}
+
+// BranchOption / AnchorBranchInfo live in @/types/agent (the AgentEvent
+// contract carries them); re-exported here for existing importers.
+export type { AnchorBranchInfo, BranchOption };
+
+/** Serializable navigation snapshot carried by runtime events. */
+export interface SessionNavigation {
+  anchors: string[];
+  navigation: Record<string, AnchorBranchInfo>;
+}
+
+/**
+ * Event payload helper: visible-message anchor ids plus the branch navigation
+ * map serialized to a plain record. `anchors[i]` corresponds one-to-one with
+ * `visibleMessages(session)[i]`.
+ */
+export function sessionNavigation(session: DecodedPiSession): SessionNavigation {
+  const navigation: Record<string, AnchorBranchInfo> = {};
+  for (const [anchorId, info] of branchNavigation(session)) navigation[anchorId] = info;
+  return {
+    anchors: visibleMessageEntries(session).map((entry) => entry.id),
+    navigation,
+  };
+}
+
+function isUserMessageEntry(entry: PiSessionEntry | undefined): boolean {
+  return !!entry && entry.type === "message" && string(object(entry.message)?.role) === "user";
+}
+
+const BRANCH_PREVIEW_CHARS = 40;
+
+function branchPreview(content: unknown): string {
+  const text = contentText(content).replace(/\s+/g, " ").trim();
+  return text.length > BRANCH_PREVIEW_CHARS ? `${text.slice(0, BRANCH_PREVIEW_CHARS)}…` : text;
+}
+
+/**
+ * Sibling branches under a fork point share the same *previous user message*
+ * on their root path ("" when the fork is at the session root): the edit flow
+ * repoints `leafId` to the edited message's parent, so every new branch's
+ * first user message hangs below that same ancestor. Grouping user-message
+ * entries by previous user message therefore enumerates the branches at each
+ * fork; only groups with more than one member are forks. Keys of the returned
+ * Map are each branch's own first user-message entry id (anchorId); every
+ * member of a fork maps to the same AnchorBranchInfo (activeIndex points at
+ * the branch the current leaf is on, resolved via the true leaf→root path so
+ * compaction projection cannot hide the active member).
+ */
+export function branchNavigation(session: DecodedPiSession): Map<string, AnchorBranchInfo> {
+  const byId = new Map(session.entries.map((entry) => [entry.id, entry]));
+  const groups = new Map<string, PiSessionEntry[]>();
+  for (const entry of session.entries) {
+    if (!isUserMessageEntry(entry)) continue;
+    let previousUserId = "";
+    let current = entry.parentId ? byId.get(entry.parentId) : undefined;
+    while (current) {
+      if (isUserMessageEntry(current)) {
+        previousUserId = current.id;
+        break;
+      }
+      current = current.parentId ? byId.get(current.parentId) : undefined;
+    }
+    const group = groups.get(previousUserId) ?? [];
+    group.push(entry);
+    groups.set(previousUserId, group);
+  }
+  const activeIds = new Set<string>();
+  let node = session.leafId ? byId.get(session.leafId) : undefined;
+  while (node) {
+    activeIds.add(node.id);
+    node = node.parentId ? byId.get(node.parentId) : undefined;
+  }
+  const navigation = new Map<string, AnchorBranchInfo>();
+  for (const group of groups.values()) {
+    if (group.length < 2) continue;
+    const options = [...group]
+      .sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp))
+      .map((entry) => ({
+        anchorId: entry.id,
+        preview: branchPreview(object(entry.message)?.content),
+      }));
+    const info: AnchorBranchInfo = {
+      options,
+      activeIndex: options.findIndex((option) => activeIds.has(option.anchorId)),
+    };
+    for (const option of options) navigation.set(option.anchorId, info);
+  }
+  return navigation;
+}
+
+/**
+ * Deepest leaf of the branch that starts at `anchorId`: walk child links from
+ * the anchor, following the latest-timestamp child at each fork, until a
+ * node without children. Returns null when the anchor entry does not exist.
+ */
+export function branchLeafId(session: DecodedPiSession, anchorId: string): string | null {
+  const byId = new Map(session.entries.map((entry) => [entry.id, entry]));
+  const anchor = byId.get(anchorId);
+  if (!anchor) return null;
+  const children = new Map<string, PiSessionEntry[]>();
+  for (const entry of session.entries) {
+    if (!entry.parentId) continue;
+    const list = children.get(entry.parentId) ?? [];
+    list.push(entry);
+    children.set(entry.parentId, list);
+  }
+  let current = anchor;
+  for (;;) {
+    const kids = children.get(current.id);
+    if (!kids || kids.length === 0) return current.id;
+    let next = kids[0];
+    for (const kid of kids.slice(1)) {
+      if (Date.parse(kid.timestamp) > Date.parse(next.timestamp)) next = kid;
+    }
+    current = next;
+  }
 }
 
 /**

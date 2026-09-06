@@ -229,6 +229,8 @@ export const en: { [K in MessageKey]: string } = {
   "chat.modelLabel": "Model",
   "chat.modelNotConfigured": "Set up model",
   "chat.switchModelFailed": "Failed to switch model: {message}",
+  "chat.branchPrev": "Previous branch",
+  "chat.branchNext": "Next branch",
 
   "agent.title": "LLM settings",
   "agent.description": "Configure the LLM provider, API key, and model.",

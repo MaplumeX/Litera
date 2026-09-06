@@ -7,7 +7,7 @@ import { DEFAULT_COMPACTION_SETTINGS, estimateContextTokens, findLastValidUsage,
 import { createGuardedNativeFetch } from "@/agent/transport/native-fetch";
 import { resolveRuntimeModel } from "@/agent/runtime/model-resolution";
 import { classifyPromptError } from "@/agent/runtime/prompt-error";
-import { activeBranch, convertPiContextToLlm, newEntry, piContextMessages, sessionConfig, visibleMessageEntries, visibleMessages, type DecodedPiSession, type PiSessionEntry } from "@/agent/sessions/pi-session";
+import { activeBranch, branchLeafId, branchNavigation, convertPiContextToLlm, newEntry, piContextMessages, sessionConfig, sessionNavigation, visibleMessageEntries, visibleMessages, type DecodedPiSession, type PiSessionEntry } from "@/agent/sessions/pi-session";
 import { tauriSessionPort, type SessionPort } from "@/agent/sessions/session-port";
 import { invokeErrorMessage } from "@/lib/app-error";
 import type { AgentEvent, AgentMessage as UiMessage } from "@/types/agent";
@@ -90,7 +90,36 @@ export class LiteraAgentRuntime {
   closeBook(){const id=this.bookId;this.promptAbort?.abort();this.agent?.abort();this.book.close();this.bookGeneration+=1;this.bookId=null;this.session=null;this.agent=null;if(id)this.emit({type:"book_closed",bookId:id});}
   async listSessions(requestId?:string){if(!this.bookId)return;const bookId=this.bookId;const sessions=await this.sessions.list(bookId);if(this.bookId===bookId)this.emit({type:"sessions_list",bookId,requestId,sessions});}
   async newSession(requestId?:string){if(!this.bookId)return;const bookId=this.bookId;const session=await this.sessions.create(bookId);if(this.bookId!==bookId)return;this.session=session;this.agent=null;this.emit({type:"session_created",bookId,sessionId:session.header.id,requestId});}
-  async switchSession(sessionId:string,requestId?:string){if(!this.bookId)return;const bookId=this.bookId;const session=await this.sessions.load(bookId,sessionId);if(this.bookId!==bookId)return;this.session=session;this.agent=null;this.emit({type:"session_switched",bookId,sessionId,requestId,messages:visibleMessages(session)});}
+  async switchSession(sessionId:string,requestId?:string){if(!this.bookId)return;const bookId=this.bookId;const session=await this.sessions.load(bookId,sessionId);if(this.bookId!==bookId)return;this.session=session;this.agent=null;this.emit({type:"session_switched",bookId,sessionId,requestId,messages:visibleMessages(session),...sessionNavigation(session)});}
+  async switchBranch(sessionId:string,targetLeafId:string,requestId?:string){
+    if(!this.bookId)throw new Error("No book is open");
+    const bookId=this.bookId;
+    const current=this.session;
+    if(!current||current.header.id!==sessionId)throw new Error("Session is not active");
+    if(this.promptId)throw new Error("A prompt is already active");
+    if(!current.entries.some((entry)=>entry.id===targetLeafId))throw new Error("Branch leaf is not in the session");
+    try{
+      const session=await this.sessions.setLeaf(bookId,sessionId,targetLeafId);
+      if(this.bookId!==bookId||this.session!==current)return;
+      this.session=session;this.agent=null;
+      this.emit({type:"branch_switched",bookId,sessionId,requestId,messages:visibleMessages(session),...sessionNavigation(session)});
+    }catch(error){
+      this.emit({type:"error",scope:"session",message:error instanceof Error?error.message:String(error),recoverable:true,bookId,sessionId});
+      throw error;
+    }
+  }
+  /** Switch to the sibling branch at `direction` from the fork anchored at `anchorId`. */
+  async switchBranchAtAnchor(sessionId:string,anchorId:string,direction:-1|1,requestId?:string){
+    const current=this.session;
+    if(!current||current.header.id!==sessionId)throw new Error("Session is not active");
+    const info=branchNavigation(current).get(anchorId);
+    if(!info)throw new Error("Branch anchor is not in the session");
+    const target=info.options[info.activeIndex+direction];
+    if(!target)throw new Error("No sibling branch in that direction");
+    const leaf=branchLeafId(current,target.anchorId);
+    if(!leaf)throw new Error("Branch leaf is not in the session");
+    await this.switchBranch(sessionId,leaf,requestId);
+  }
   async deleteSession(sessionId:string,requestId?:string){if(!this.bookId)return;const bookId=this.bookId;await this.sessions.delete(bookId,sessionId);if(this.bookId!==bookId)return;if(this.session?.header.id===sessionId){this.session=null;this.agent=null;}this.emit({type:"session_deleted",bookId,sessionId,requestId});}
   async renameSession(sessionId:string,title:string,requestId?:string){if(!this.bookId)return;const bookId=this.bookId;const clean=title.trim();if(!clean||clean.length>128)throw new Error("Invalid session title");const session=this.session?.header.id===sessionId?this.session:await this.sessions.load(bookId,sessionId);if(this.bookId!==bookId)return;const entry=newEntry("session_info",session.leafId,{name:clean});const leaf=await this.sessions.append(bookId,sessionId,session.leafId,[entry]);if(this.bookId!==bookId)return;session.entries.push(entry);session.leafId=leaf;this.emit({type:"session_renamed",bookId,sessionId,title:clean,requestId});}
   async updateSessionConfig(sessionId:string,systemPrompt:string,requestId?:string){if(!this.bookId)throw new Error("No book is open");const bookId=this.bookId;if(systemPrompt.length>16*1024)throw new Error("Invalid system prompt");const session=this.session?.header.id===sessionId?this.session:await this.sessions.load(bookId,sessionId);if(this.bookId!==bookId)return;const entry=newEntry("session_config",session.leafId,{systemPrompt});const leaf=await this.sessions.append(bookId,sessionId,session.leafId,[entry]);if(this.bookId!==bookId)return;session.entries.push(entry);session.leafId=leaf;this.agent=null;this.emit({type:"session_config_updated",bookId,sessionId,systemPrompt,requestId});}
@@ -148,7 +177,9 @@ export class LiteraAgentRuntime {
       const completed=agent.state.messages.slice(before+promptMessages.length+1);const entries:PiSessionEntry[]=[];let parent=session.leafId;for(const message of completed){const persisted=message.role==="assistant"&&message.stopReason==="error"?{...message,errorMessage:"模型请求失败"}:message;const entry=newEntry("message",parent,{message:persisted});entries.push(entry);parent=entry.id;}
       if(entries.length){session.leafId=await this.sessions.append(promptBookId,session.header.id,session.leafId,entries);session.entries.push(...entries);}
       await this.maybeCompact(agent,session,promptBookId);
-      const aborted=completed.some((message)=>message.role==="assistant"&&message.stopReason==="aborted");this.emit(aborted?{type:"prompt_aborted",bookId:promptBookId,sessionId:session.header.id,promptId,requestId}:{type:"prompt_end",bookId:promptBookId,sessionId:session.header.id,promptId});
+      const aborted=completed.some((message)=>message.role==="assistant"&&message.stopReason==="aborted");
+      const finalMessages=visibleMessages(session);const finalNavigation=sessionNavigation(session);
+      this.emit(aborted?{type:"prompt_aborted",bookId:promptBookId,sessionId:session.header.id,promptId,requestId,messages:finalMessages,...finalNavigation}:{type:"prompt_end",bookId:promptBookId,sessionId:session.header.id,promptId,messages:finalMessages,...finalNavigation});
       if(!aborted&&isFirstTurn){const leafAtEnd=session.leafId;const assistantText=finalAssistant.content.flatMap((block)=>block.type==="text"&&typeof block.text==="string"?[block.text]:[]).join("");void this.maybeGenerateTitle(promptBookId,session.header.id,leafAtEnd,text.slice(0,2000),assistantText.slice(0,2000),agent);}
     }catch(error){const rawMessage=error instanceof Error?error.message:String(error);const safeError=new Error(rawMessage===EDIT_TARGET_ERROR?rawMessage:classifyPromptError(error).message);this.emit({type:"error",scope:"prompt",message:safeError.message,recoverable:true,bookId:promptBookId,sessionId:session?.header.id,promptId});throw safeError;}finally{unsubscribe?.();if(this.promptId===promptId)this.promptId=null;}
   }

@@ -11,6 +11,7 @@ export interface SessionPort {
   create(bookId: string): Promise<DecodedPiSession>;
   list(bookId: string): Promise<AgentSessionSummary[]>;
   load(bookId: string, sessionId: string): Promise<DecodedPiSession>;
+  setLeaf(bookId: string, sessionId: string, leafId: string): Promise<DecodedPiSession>;
   append(bookId: string, sessionId: string, expectedLeafId: string | null, entries: PiSessionEntry[]): Promise<string | null>;
   delete(bookId: string, sessionId: string): Promise<void>;
 }
@@ -23,6 +24,7 @@ export const tauriSessionPort: SessionPort = {
     return result.map(sessionSummary);
   },
   async load(bookId, sessionId) { return decodePiSession(await invoke("load_agent_session", { bookId, sessionId })); },
+  async setLeaf(bookId, sessionId, leafId) { return decodePiSession(await invoke("set_agent_session_leaf", { bookId, sessionId, leafId })); },
   append(bookId, sessionId, expectedLeafId, entries) {
     return invoke<string | null>("append_agent_session_entries", { bookId, sessionId, expectedLeafId, entries });
   },
