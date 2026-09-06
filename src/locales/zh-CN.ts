@@ -224,6 +224,9 @@ export const zhCN = {
   "chat.clearPrompt": "清空",
   "chat.compacting": "正在压缩上下文…",
   "chat.compacted": "上下文已压缩",
+  "chat.modelLabel": "模型",
+  "chat.modelNotConfigured": "配置模型",
+  "chat.switchModelFailed": "切换模型失败：{message}",
 
   "agent.title": "LLM 设置",
   "agent.description": "配置 LLM 供应商、API Key 与模型。",

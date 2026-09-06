@@ -619,3 +619,24 @@ Diagnosed the dead edit-confirm button in the embedded agent runtime: UI bubble 
 ### Status
 
 [OK] **Completed**
+
+
+## Session 114: Chat quick model switcher
+
+**Date**: 2026-09-06
+**Task**: Chat quick model switcher
+**Branch**: `feat/litera-chat-model-switcher`
+
+### Summary
+
+Added a ModelSwitcher chip to the chat composer toolbar: lightweight popover lists the current provider's models (pi-ai static catalog for built-in providers via new listBuiltinModelIds(); persisted models for custom providers), item click calls switch_provider through useAgentConfig().switchProvider and invalidates the runtime cache. ChatInput gained an additive leadingControls slot; unconfigured state opens AgentConfigDialog; streaming disables the switcher. i18n en+zh-CN; 648 tests green, tsc clean. Specs updated with the ModelSwitcher exception to the draft-only provider dropdown convention.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `41d6be0` | (see git log) |
+
+### Status
+
+[OK] **Completed**

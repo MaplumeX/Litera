@@ -11,11 +11,14 @@ import { Button } from "@/components/ui/button";
 import { MessagesSquare, Settings, AlertCircle } from "lucide-react";
 import { useAgentBridge } from "@/lib/use-agent-bridge";
 import { useAgentConfig } from "@/lib/use-agent-config";
+import { invokeErrorMessage } from "@/lib/app-error";
 import { embeddedAgentRuntime } from "@/agent/runtime/embedded-runtime";
+import { isCustomProviderId } from "@/types/agent-config";
 import { AgentConfigDialog } from "@/components/AgentConfigDialog";
 import { MessageBubble } from "./MessageBubble";
 import { AssistantMessage, BotAvatar } from "./AssistantMessage";
 import { ChatInput } from "./ChatInput";
+import { ModelSwitcher } from "./ModelSwitcher";
 import { EmptyState } from "./EmptyState";
 import { SessionConfigDialog, type SessionConfigTarget } from "./SessionConfigDialog";
 import { SessionList } from "./SessionList";
@@ -81,7 +84,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     const [editDraft, setEditDraft] = useState("");
     const [stickToBottom, setStickToBottom] = useState(true);
     const [activeUserMessageIndex, setActiveUserMessageIndex] = useState<number | null>(null);
-    const { snapshot: configSnapshot, load: loadConfig } = useAgentConfig();
+    const { snapshot: configSnapshot, load: loadConfig, switchProvider } = useAgentConfig();
     const thinkingLevel = configSnapshot?.thinkingLevel ?? "medium";
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -359,6 +362,17 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       }
     }, [configSession, updateSessionConfig]);
 
+    const handleModelSelect = useCallback(async (model: string) => {
+      const provider = configSnapshot?.provider;
+      if (!provider || !configSnapshot?.configured) return;
+      setInvokeError(null);
+      try {
+        await switchProvider(provider, model);
+      } catch (error) {
+        setInvokeError(t("chat.switchModelFailed", { message: invokeErrorMessage(error) }));
+      }
+    }, [configSnapshot, switchProvider, t]);
+
     const handleThinkingLevelChange = useCallback(async (level: string) => {
       setInvokeError(null);
       try {
@@ -577,6 +591,23 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
           textareaRef={inputRef}
           thinkingLevel={thinkingLevel}
           onThinkingLevelChange={(level) => void handleThinkingLevelChange(level)}
+          leadingControls={
+            <ModelSwitcher
+              provider={configSnapshot?.provider ?? null}
+              model={configSnapshot?.model ?? null}
+              configured={configSnapshot?.configured ?? false}
+              customModels={
+                configSnapshot && configSnapshot.provider && isCustomProviderId(configSnapshot.provider)
+                  ? (configSnapshot.customProviders.find(
+                      (entry) => entry.id === configSnapshot.provider,
+                    )?.models ?? [])
+                  : []
+              }
+              isStreaming={isStreaming}
+              onModelSelect={(model) => void handleModelSelect(model)}
+              onOpenConfig={() => setShowConfig(true)}
+            />
+          }
         />
         <AgentConfigDialog open={showConfig} onClose={() => setShowConfig(false)} />
         <SessionConfigDialog
