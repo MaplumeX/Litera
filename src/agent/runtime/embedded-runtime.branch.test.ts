@@ -197,6 +197,9 @@ describe("LiteraAgentRuntime branch switching", () => {
   it("prompt_aborted after an edit carries the persisted-entry projection (deltas ≡ payload)", async () => {
     const current = forkedSession();
     // Abort mid-stream: a slow response lets deltas land before the abort.
+    // The faux chunk delays are real timers, so this test takes multiple
+    // seconds by design — slow CI runners (e.g. windows-latest) can exceed
+    // the default 5s timeout. Allow ample headroom.
     const faux = createFauxCore({ tokensPerSecond: 1 });
     faux.setResponses([fauxAssistantMessage("aborted partial answer")]);
     const events: AgentEvent[] = [];
@@ -249,7 +252,7 @@ describe("LiteraAgentRuntime branch switching", () => {
     // One anchor per visible message.
     expect(aborted.anchors).toHaveLength(aborted.messages!.length);
     unsubscribe();
-  });
+  }, 20_000);
 });
 
 describe("LiteraAgentRuntime.switchBranchAtAnchor", () => {
