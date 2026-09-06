@@ -25,6 +25,8 @@ interface ChatInputProps {
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
   thinkingLevel: string;
   onThinkingLevelChange: (level: string) => void;
+  /** Optional left-most controls on the toolbar row (e.g. the model switcher). */
+  leadingControls?: React.ReactNode;
 }
 
 export function ChatInput({
@@ -40,6 +42,7 @@ export function ChatInput({
   textareaRef,
   thinkingLevel,
   onThinkingLevelChange,
+  leadingControls,
 }: ChatInputProps) {
   const { t } = useT();
   const handleKeyDown = (event: React.KeyboardEvent) => {
@@ -99,7 +102,8 @@ export function ChatInput({
           disabled={isStreaming || !bookReady}
         />
         <div className="flex items-center justify-between px-2 pb-1.5 pt-0.5">
-          <div className="flex items-center gap-2">
+          <div className="flex min-w-0 items-center gap-2">
+            {leadingControls}
             <Select value={thinkingLevel} onValueChange={onThinkingLevelChange} disabled={isStreaming}>
               <SelectTrigger className="h-6 w-auto gap-1 border-none bg-transparent px-1.5 text-[10px] text-muted-foreground shadow-none focus:ring-0" aria-label={t("chat.thinkingLevel")}>
                 <SelectValue />

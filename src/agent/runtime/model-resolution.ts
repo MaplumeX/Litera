@@ -26,6 +26,12 @@ async function builtinCatalog(provider: string): Promise<ModelCatalog | null> {
   }
 }
 
+/** Lists the built-in catalog model ids for `provider`, in catalog order. Unknown providers yield []. */
+export async function listBuiltinModelIds(provider: string): Promise<string[]> {
+  const catalog = await builtinCatalog(provider);
+  return catalog ? Object.keys(catalog) : [];
+}
+
 const FULL_CATALOG_PROVIDERS = ["anthropic", "openai", "deepseek", "google", "openrouter", "groq", "mistral", "xai", "together", "fireworks"] as const;
 let fullCatalogPromise: Promise<Map<string, Model<Api>>> | null = null;
 

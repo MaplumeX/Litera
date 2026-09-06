@@ -1,5 +1,24 @@
 import { describe, expect, it } from "vitest";
-import { resolveRuntimeModel } from "./model-resolution";
+import { listBuiltinModelIds, resolveRuntimeModel } from "./model-resolution";
+
+describe("listBuiltinModelIds", () => {
+  it("lists the built-in catalog model ids in catalog order", async () => {
+    const openai = await listBuiltinModelIds("openai");
+    expect(openai.length).toBeGreaterThan(0);
+    expect(openai).toContain("gpt-5");
+    // catalog order is preserved and entries are unique
+    expect(new Set(openai).size).toBe(openai.length);
+
+    const anthropic = await listBuiltinModelIds("anthropic");
+    expect(anthropic.length).toBeGreaterThan(0);
+  });
+
+  it("returns [] for unknown and custom providers", async () => {
+    await expect(listBuiltinModelIds("not-a-provider")).resolves.toEqual([]);
+    await expect(listBuiltinModelIds("custom-abc12345")).resolves.toEqual([]);
+    await expect(listBuiltinModelIds("")).resolves.toEqual([]);
+  });
+});
 
 describe("resolveRuntimeModel", () => {
   it("uses pinned Pi catalog metadata for built-in models", async () => {

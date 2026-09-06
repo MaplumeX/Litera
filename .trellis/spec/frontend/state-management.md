@@ -121,7 +121,10 @@ id; stale writers fail rather than overwrite a new branch.
 
 Forms keep draft provider/model values locally. Applying a draft performs one
 Rust mutation sequence, updates the masked snapshot, and invalidates the embedded
-runtime cache. Provider selection alone never changes the live model.
+runtime cache. Provider selection alone never changes the live model. The one
+runtime-switch surface is the composer `ModelSwitcher`: an explicit model-list
+item click calls `switch_provider` + invalidates the runtime cache (see
+component-guidelines "Exception — ModelSwitcher").
 
 ## Testing
 

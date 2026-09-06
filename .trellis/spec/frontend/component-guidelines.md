@@ -86,6 +86,8 @@ Custom (and the add form) model field is a local searchable combobox (`Popover` 
 
 **Don't**: Put add-custom back in the Select. Don't call `switch_provider` from `onValueChange`. Don't fetch `/models` from the WebView. Don't add a model-list editor or per-id delete. Don't share the model combobox module with the font picker (create-new vs fixed list). Don't show refresh on built-in providers.
 
+**Exception — `ModelSwitcher` is an explicit runtime-switch surface**: the draft-only convention governs `AgentConfigForm`'s form semantics. `src/components/chat/ModelSwitcher.tsx` (composed into `ChatInput` via the `leadingControls` slot by `ChatPanel`) is a deliberate quick-switch control in the composer toolbar: trigger shows the current model id; a `Popover` (`modal={false}`, `side="top"`) lists the current provider's models — built-in via `listBuiltinModelIds(provider)` from `src/agent/runtime/model-resolution.ts` (pi-ai static catalog, no network), custom via the snapshot entry's `models`; current model gets a `Check`; a free-text historical model not in the list is prepended as selectable. Item click calls `switch_provider` through `useAgentConfig().switchProvider` (explicit intent, never on open/render) then invalidates the runtime cache. Unconfigured → button opens `AgentConfigDialog`; `isStreaming` disables it. Provider switching and API keys stay in `AgentConfigDialog`; ModelSwitcher never switches providers or edits provider config.
+
 ### Icon Buttons (lucide-react)
 
 **Decision**: All toolbar and action buttons use lucide-react icons via the `Button` `icon` / `icon-sm` / `icon-xs` size variants, not text labels.

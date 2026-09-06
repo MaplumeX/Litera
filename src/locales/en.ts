@@ -226,6 +226,9 @@ export const en: { [K in MessageKey]: string } = {
   "chat.clearPrompt": "Clear",
   "chat.compacting": "Compacting context…",
   "chat.compacted": "Context compacted",
+  "chat.modelLabel": "Model",
+  "chat.modelNotConfigured": "Set up model",
+  "chat.switchModelFailed": "Failed to switch model: {message}",
 
   "agent.title": "LLM settings",
   "agent.description": "Configure the LLM provider, API key, and model.",
