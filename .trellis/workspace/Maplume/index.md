@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 114
+- **Total Sessions**: 115
 - **Last Active**: 2026-09-06
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~642 | Active |
+| `journal-2.md` | ~663 | Active |
 | `journal-1.md` | ~1996 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 115 | 2026-09-06 | ChatGPT-style message branch switching | `f24dfb9` | `feat/session-branch-message-switching` |
 | 114 | 2026-09-06 | Chat quick model switcher | `41d6be0` | `feat/litera-chat-model-switcher` |
 | 113 | 2026-09-05 | Fix agent message edit confirm button index mismatch | `e3195c3` | `fix/litera-agent-runtime-message-confirm-button` |
 | 112 | 2026-08-31 | Drop left hairline on thinking/tool rows | `74c4100` | `feat/litera-agent-runtime-toolcall-styles` |

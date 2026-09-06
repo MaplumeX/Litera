@@ -640,3 +640,24 @@ Added a ModelSwitcher chip to the chat composer toolbar: lightweight popover lis
 ### Status
 
 [OK] **Completed**
+
+
+## Session 115: ChatGPT-style message branch switching
+
+**Date**: 2026-09-06
+**Task**: ChatGPT-style message branch switching
+**Branch**: `feat/session-branch-message-switching`
+
+### Summary
+
+Implemented full branch-switching across all layers: branchNavigation/branchLeafId pure functions in pi-session.ts (grouped by preceding user message, active index via true leaf-to-root path for compaction safety); Rust .jsonl.leaf sidecar pointer with set_agent_session_leaf IPC and relaxed append optimistic lock (expected leaf must exist, not be last); runtime switchBranch/switchBranchAtAnchor with prompt-streaming guard; branch_switched event plus navigation payloads on session_switched/prompt_end/prompt_aborted; reducer branchNavigation/branchAnchors state with full lifecycle reset coverage; BranchSwitcher UI ([<] 2/3 [>]) in the reserved h-6 action row with streaming-disable and edit-cancel handling. All gates green: 689 vitest, 183 cargo tests, clippy, tsc. Remaining: manual smoke test in Tauri dev (edit -> switch -> continue on old branch -> restart persists).
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f24dfb9` | (see git log) |
+
+### Status
+
+[OK] **Completed**
