@@ -59,6 +59,23 @@ and controlled from the ChatInput toolbar.
 Book changes reset messages, prompt state, sessions, errors, and compaction.
 Late events for an old book or prompt advance no user-visible state.
 
+Branch navigation: `AgentState` carries `branchNavigation` (`Record<anchorId,
+AnchorBranchInfo>` from `branchNavigation()` in `pi-session.ts`) and
+`branchAnchors` (`visibleMessageEntries` ids). `anchors.length ===
+messages.length` and `messages[i]` corresponds to `branchAnchors[i]` — any code
+resolving a UI message index against anchors must keep that pairing.
+`branch_switched`, `session_switched`, `prompt_end`, and `prompt_aborted`
+carry `messages + anchors + navigation` computed by `sessionNavigation(session)`
+on the runtime side; the reducer replaces all three atomically (streaming
+deltas have already maintained `messages` to the same state — equivalence is
+test-covered, including abort-after-edit). Legacy events without the payload
+reset navigation. Streaming events (`text_delta`, `tool_start`, ...) append to
+`messages` without touching anchors, so `branchAnchors[index]` can be
+`undefined` for the streaming tail — UI must tolerate that and hide branch
+controls. UI never touches `DecodedPiSession`; branch switching goes through
+`runtime.switchBranchAtAnchor(sessionId, anchorId, direction)` which resolves
+the target fork and leaf internally.
+
 Context compaction emits three `PromptCorrelation` events from `maybeCompact`:
 `compaction_started` (before summarization), `compaction_completed` (after the
 compaction entry is persisted), and `compaction_failed` (catch path, swallowed

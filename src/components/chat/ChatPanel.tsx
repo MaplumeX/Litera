@@ -16,6 +16,7 @@ import { embeddedAgentRuntime } from "@/agent/runtime/embedded-runtime";
 import { isCustomProviderId } from "@/types/agent-config";
 import { AgentConfigDialog } from "@/components/AgentConfigDialog";
 import { MessageBubble } from "./MessageBubble";
+import { BranchSwitcher } from "./BranchSwitcher";
 import { AssistantMessage, BotAvatar } from "./AssistantMessage";
 import { ChatInput } from "./ChatInput";
 import { ModelSwitcher } from "./ModelSwitcher";
@@ -62,6 +63,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       renameSession,
       switchSession,
       updateSessionConfig,
+      switchBranchAtAnchor,
     } = bridge;
     const [input, setInput] = useState("");
     const [pendingSelection, setPendingSelection] = useState<{
@@ -335,6 +337,21 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       }
     }, [bookId, currentChapterHref, editDraft, editPrompt, editingIndex, isStreaming, scrollToBottom, state.messages]);
 
+    const handleSwitchBranch = useCallback(async (anchorId: string, direction: -1 | 1) => {
+      if (isStreaming) return;
+      if (editingIndex !== null) {
+        setEditingIndex(null);
+        setEditDraft("");
+      }
+      setInvokeError(null);
+      try {
+        await switchBranchAtAnchor(anchorId, direction);
+        scrollToBottom(false);
+      } catch (error) {
+        setInvokeError(String(error));
+      }
+    }, [editingIndex, isStreaming, scrollToBottom, switchBranchAtAnchor]);
+
     const handleRenameSave = useCallback(async (sessionId: string) => {
       const title = editingTitle.trim();
       if (!title) {
@@ -541,6 +558,20 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                   onSave={() => void handleSaveEdit()}
                   onCancel={handleCancelEdit}
                   editDisabled={isStreaming}
+                  branchSwitcher={(() => {
+                    const anchorId = state.branchAnchors[index];
+                    const info = anchorId !== undefined ? state.branchNavigation[anchorId] : undefined;
+                    if (!info || info.options.length <= 1 || info.activeIndex < 0) return undefined;
+                    return (
+                      <BranchSwitcher
+                        current={info.activeIndex + 1}
+                        total={info.options.length}
+                        disabled={isStreaming}
+                        onPrev={() => void handleSwitchBranch(info.options[info.activeIndex - 1].anchorId, -1)}
+                        onNext={() => void handleSwitchBranch(info.options[info.activeIndex + 1].anchorId, 1)}
+                      />
+                    );
+                  })()}
                 />
               )}
               {message.role === "assistant" && (

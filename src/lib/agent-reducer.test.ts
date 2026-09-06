@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { agentReducer, createAgentState, type AgentState } from "./agent-reducer";
-import type { AgentEvent } from "@/types/agent";
+import type { AgentEvent, AnchorBranchInfo } from "@/types/agent";
 
 function reduce(state: AgentState, event: AgentEvent): AgentState {
   return agentReducer(state, { type: "event", event });
@@ -186,5 +186,130 @@ describe("agentReducer", () => {
     state = reduce(state, { version: 1, type: "prompt_started", bookId: "book-a", sessionId: "s", promptId: "p" });
     state = reduce(state, { version: 2, type: "thinking_delta", bookId: "book-a", sessionId: "s2", promptId: "p", contentIndex: 0, delta: "stale" });
     expect(state.messages).toEqual([]);
+  });
+});
+
+const forkNavigation: Record<string, AnchorBranchInfo> = {
+  u1: { options: [{ anchorId: "u1", preview: "first question" }, { anchorId: "u1b", preview: "edited first question" }], activeIndex: 0 },
+  u1b: { options: [{ anchorId: "u1", preview: "first question" }, { anchorId: "u1b", preview: "edited first question" }], activeIndex: 0 },
+};
+
+describe("agentReducer branch navigation", () => {
+  it("initializes branch state empty", () => {
+    expect(createAgentState("book-a").branchNavigation).toEqual({});
+    expect(createAgentState("book-a").branchAnchors).toEqual([]);
+  });
+
+  it("branch_switched replaces messages and navigation for the matching session", () => {
+    let state = createAgentState("book-a");
+    state = reduce(state, { version: 1, type: "session_switched", bookId: "book-a", sessionId: "s", messages: [{ role: "user", content: "new branch" }] });
+    state = reduce(state, {
+      version: 2,
+      type: "branch_switched",
+      bookId: "book-a",
+      sessionId: "s",
+      messages: [{ role: "user", content: "first question" }],
+      anchors: ["u1"],
+      navigation: forkNavigation,
+    });
+    expect(state.messages).toEqual([{ role: "user", content: "first question" }]);
+    expect(state.branchAnchors).toEqual(["u1"]);
+    expect(state.branchNavigation).toEqual(forkNavigation);
+    // status/promptId untouched — switching only happens outside streaming.
+    expect(state.status).toBe("bookReady");
+    expect(state.promptId).toBeNull();
+  });
+
+  it("ignores branch_switched for a different session", () => {
+    let state = createAgentState("book-a");
+    state = reduce(state, { version: 1, type: "session_switched", bookId: "book-a", sessionId: "s", messages: [] });
+    state = reduce(state, { version: 2, type: "branch_switched", bookId: "book-a", sessionId: "other", messages: [{ role: "user", content: "x" }], anchors: ["x"], navigation: forkNavigation });
+    expect(state.messages).toEqual([]);
+    expect(state.branchNavigation).toEqual({});
+  });
+
+  it("session_switched applies navigation when carried and resets when absent", () => {
+    let state = createAgentState("book-a");
+    state = reduce(state, { version: 1, type: "session_switched", bookId: "book-a", sessionId: "s", messages: [], anchors: ["u1"], navigation: forkNavigation });
+    expect(state.branchAnchors).toEqual(["u1"]);
+    expect(state.branchNavigation).toEqual(forkNavigation);
+    // A legacy event without the fields resets the projection (other session).
+    state = reduce(state, { version: 2, type: "session_switched", bookId: "book-a", sessionId: "s2", messages: [] });
+    expect(state.branchAnchors).toEqual([]);
+    expect(state.branchNavigation).toEqual({});
+  });
+
+  it("book_changed resets branch navigation", () => {
+    let state = createAgentState("book-a");
+    state = reduce(state, { version: 1, type: "session_switched", bookId: "book-a", sessionId: "s", messages: [], anchors: ["u1"], navigation: forkNavigation });
+    state = agentReducer(state, { type: "book_changed", bookId: "book-b" });
+    expect(state.branchNavigation).toEqual({});
+    expect(state.branchAnchors).toEqual([]);
+  });
+
+  it("creating a fresh session outside a prompt resets branch navigation", () => {
+    let state = createAgentState("book-a");
+    state = reduce(state, { version: 1, type: "session_switched", bookId: "book-a", sessionId: "s", messages: [], anchors: ["u1"], navigation: forkNavigation });
+    state = reduce(state, { version: 2, type: "session_created", bookId: "book-a", sessionId: "fresh" });
+    expect(state.messages).toEqual([]);
+    expect(state.branchNavigation).toEqual({});
+    expect(state.branchAnchors).toEqual([]);
+  });
+
+  it("session_created mid-prompt keeps the streaming messages and navigation", () => {
+    let state = createAgentState("book-a");
+    state = agentReducer(state, { type: "prompt_queued", bookId: "book-a", promptId: "p" });
+    state = agentReducer(state, { type: "user_message", message: { role: "user", content: "q" } });
+    state = reduce(state, { version: 1, type: "session_switched", bookId: "book-a", sessionId: "s", messages: [{ role: "user", content: "q" }], anchors: ["u1"], navigation: forkNavigation });
+    state = reduce(state, { version: 2, type: "prompt_started", bookId: "book-a", sessionId: "s", promptId: "p" });
+    state = reduce(state, { version: 3, type: "session_created", bookId: "book-a", sessionId: "s" });
+    expect(state.messages).toEqual([{ role: "user", content: "q" }]);
+    expect(state.branchAnchors).toEqual(["u1"]);
+  });
+
+  it("deleting the active session resets branch navigation", () => {
+    let state = createAgentState("book-a");
+    state = reduce(state, { version: 1, type: "session_switched", bookId: "book-a", sessionId: "s", messages: [], anchors: ["u1"], navigation: forkNavigation });
+    state = reduce(state, { version: 2, type: "session_deleted", bookId: "book-a", sessionId: "s" });
+    expect(state.branchNavigation).toEqual({});
+    expect(state.branchAnchors).toEqual([]);
+  });
+
+  it("prompt_end carrying messages and navigation replaces the streamed projection equivalently", () => {
+    let state = createAgentState("book-a");
+    state = agentReducer(state, { type: "prompt_queued", bookId: "book-a", promptId: "p" });
+    state = agentReducer(state, { type: "user_message", message: { role: "user", content: "question" } });
+    state = reduce(state, { version: 1, type: "prompt_started", bookId: "book-a", sessionId: "s", promptId: "p" });
+    state = reduce(state, { version: 2, type: "text_delta", bookId: "book-a", sessionId: "s", promptId: "p", delta: "partial" });
+    const finalMessages = [
+      { role: "user" as const, content: "question" },
+      { role: "assistant" as const, content: "full answer", blocks: [{ type: "text" as const, text: "full answer" }] },
+    ];
+    state = reduce(state, {
+      version: 3,
+      type: "prompt_end",
+      bookId: "book-a",
+      sessionId: "s",
+      promptId: "p",
+      messages: finalMessages,
+      anchors: ["u1", "a1"],
+      navigation: forkNavigation,
+    });
+    expect(state.messages).toEqual(finalMessages);
+    expect(state.branchAnchors).toEqual(["u1", "a1"]);
+    expect(state.branchNavigation).toEqual(forkNavigation);
+    expect(state.promptId).toBeNull();
+    expect(state.status).toBe("bookReady");
+  });
+
+  it("prompt_end without payload resets branch state (runtime always carries it)", () => {
+    let state = createAgentState("book-a");
+    state = reduce(state, { version: 1, type: "session_switched", bookId: "book-a", sessionId: "s", messages: [], anchors: ["u1"], navigation: forkNavigation });
+    state = reduce(state, { version: 2, type: "prompt_started", bookId: "book-a", sessionId: "s", promptId: "p" });
+    state = reduce(state, { version: 3, type: "prompt_end", bookId: "book-a", sessionId: "s", promptId: "p" });
+    // Pre-prompt anchors are stale after new messages; a payload-less event
+    // (never emitted by the current runtime) resets rather than keeps them.
+    expect(state.branchAnchors).toEqual([]);
+    expect(state.branchNavigation).toEqual({});
   });
 });

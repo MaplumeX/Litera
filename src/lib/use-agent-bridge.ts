@@ -104,6 +104,13 @@ export function useAgentBridge(bookId: string) {
   }, []);
 
   const abort = useCallback(async () => embeddedAgentRuntime.abort(id("abort")), []);
+  const switchBranchAtAnchor = useCallback(async (anchorId: string, direction: -1 | 1) => {
+    const currentBookId = bookIdRef.current;
+    if (!currentBookId) throw new Error("No book is open");
+    const sessionId = state.sessionId;
+    if (!sessionId) throw new Error("No active session");
+    await embeddedAgentRuntime.switchBranchAtAnchor(sessionId, anchorId, direction, id("switch-branch"));
+  }, [state.sessionId]);
   const newSession = useCallback(async () => {
     if (bookIdRef.current) await embeddedAgentRuntime.newSession(id("new-session"));
   }, []);
@@ -119,5 +126,5 @@ export function useAgentBridge(bookId: string) {
     }
   }, []);
 
-  return { state, prompt, editPrompt, abort, listSessions, newSession, switchSession, deleteSession, renameSession, updateSessionConfig };
+  return { state, prompt, editPrompt, abort, listSessions, newSession, switchSession, deleteSession, renameSession, updateSessionConfig, switchBranchAtAnchor };
 }

@@ -28,6 +28,12 @@ async fn append_agent_session_entries(
     expected_leaf_id: Option<String>,
     entries: Vec<Value>,
 ) -> AppResult<Option<String>>
+async fn set_agent_session_leaf(
+    app: AppHandle,
+    book_id: String,
+    session_id: String,
+    leaf_id: String,
+) -> AppResult<LoadedPiSession>
 async fn delete_agent_session(app: AppHandle, book_id: String, session_id: String) -> AppResult<()>
 ```
 
@@ -47,10 +53,20 @@ active `apiKey`, and `thinkingLevel` (global, from `settings.json`
 - Creation writes a Pi v3 header immediately. Load migrates v1/v2 only after a
   `.pre-v3.bak` backup and atomically replaces the source. Normal v3 interaction
   is append-only.
-- Append is optimistic. `expectedLeafId` must match the durable leaf (including
-  `null` for a header-only session); the returned value is the new durable leaf.
-  Rewinding chooses a branch parent in the frontend but does not change the
-  expected durable leaf used for the append race check.
+- Append is optimistic. `expectedLeafId` must exist in the durable file
+  (`null` requires an empty session); the returned value is the new durable
+  leaf. Rewinding chooses a branch parent in the frontend but does not change
+  the expected durable leaf used for the append race check. An id that exists
+  anywhere in the file passes, so a prompt can continue on a non-final (old)
+  branch after `set_agent_session_leaf` switched to it; a ghost id still fails
+  as a stale writer.
+- The active-branch pointer is persisted next to the JSONL as a sidecar
+  `<session>.jsonl.leaf` (one line, the target leaf id). `load` uses it when the
+  id exists in the entries and otherwise falls back to `entries.last()`; every
+  successful append rewrites it to the appended batch's last entry; `delete`
+  removes it together with the session file. `set_agent_session_leaf`
+  validates the target id exists, atomically writes the sidecar, and returns
+  the reloaded `LoadedPiSession` carrying the new `leafId`.
 - A valid final JSON value without a newline is preserved and receives the
   delimiter before append. Only an invalid final fragment may be truncated, and
   corruption before it is always `StorageCorrupt`.
@@ -71,12 +87,15 @@ active `apiKey`, and `thinkingLevel` (global, from `settings.json`
 
 - **Good**: two prompts append against the current leaf and reload as the same
   Pi v3 tree after restart.
+- **Good**: switching to an old branch (`set_agent_session_leaf`) and appending
+  there extends that branch; restart keeps the selected branch via the sidecar.
 - **Good**: a v2 file loads once, keeps a `.pre-v3.bak`, and thereafter remains
   append-only v3.
 - **Base**: a newly created header-only session is visible before its first
   message and uses `expectedLeafId: null`.
-- **Bad**: an old concurrent prompt appends after another writer advanced the
-  file; Rust rejects it instead of creating a silent fork.
+- **Base**: a session without a sidecar (legacy) loads with `entries.last()`.
+- **Bad**: an old concurrent prompt appends with a ghost `expectedLeafId`; Rust
+  rejects it instead of creating a silent fork.
 - **Bad**: a model error containing a request URL or authorization material is
   forwarded to reducer state; transport/runtime code must redact it first.
 
@@ -87,8 +106,10 @@ active `apiKey`, and `thinkingLevel` (global, from `settings.json`
   rejection.
 - Traversal, symlink, non-file, size/line/batch caps, bad parents/timestamps, and
   duplicate/unknown session handling.
-- Concurrent stale-leaf rejection and edit/rewind separation between durable
-  expected leaf and branch parent.
+- Concurrent stale-leaf rejection (ghost id), old-branch continuation after a
+  `set_agent_session_leaf` switch, sidecar persistence / fallback / cleanup on
+  delete, and edit/rewind separation between durable expected leaf and branch
+  parent.
 - Built-in/custom runtime config resolution, API selection, cache invalidation,
   native transport origin/redirect guards, and credential redaction.
 

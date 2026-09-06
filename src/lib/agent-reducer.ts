@@ -4,6 +4,7 @@ import type {
   AgentMessage,
   AgentSessionSummary,
   AgentStatus,
+  AnchorBranchInfo,
   AssistantBlock,
 } from "@/types/agent";
 import { t } from "@/lib/i18n";
@@ -19,6 +20,10 @@ export interface AgentState {
   error: AgentError | null;
   compaction: { status: "compacting" | "compacted" } | null;
   sessionListRequestId: string | null;
+  /** Branch navigation per visible-message anchorId (empty when no forks). */
+  branchNavigation: Record<string, AnchorBranchInfo>;
+  /** Anchor entry ids, index-aligned with `messages` (visibleMessageEntries). */
+  branchAnchors: string[];
 }
 
 export type AgentAction =
@@ -42,6 +47,8 @@ export function createAgentState(bookId: string | null = null): AgentState {
     error: null,
     compaction: null,
     sessionListRequestId: null,
+    branchNavigation: {},
+    branchAnchors: [],
   };
 }
 
@@ -109,6 +116,17 @@ function updateLastAssistant(
   return [...messages, update({ role: "assistant", content: "", blocks: [] })];
 }
 
+function applyNavigation(
+  base: AgentState,
+  event: { anchors?: string[]; navigation?: Record<string, AnchorBranchInfo> },
+): AgentState {
+  return {
+    ...base,
+    branchAnchors: event.anchors ?? [],
+    branchNavigation: event.navigation ?? {},
+  };
+}
+
 function applyEvent(state: AgentState, event: AgentEvent): AgentState {
   if (event.version <= state.version) return state;
   const base = { ...state, version: event.version };
@@ -116,13 +134,13 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
   switch (event.type) {
     case "book_loading":
       return matchesBook(base, event.bookId)
-        ? { ...base, status: "loadingBook", sessionId: null, promptId: null, messages: [], sessions: [], error: null, compaction: null }
+        ? { ...base, status: "loadingBook", sessionId: null, promptId: null, messages: [], sessions: [], error: null, compaction: null, branchNavigation: {}, branchAnchors: [] }
         : base;
     case "book_ready":
       return matchesBook(base, event.bookId) ? { ...base, status: "bookReady", error: null } : base;
     case "book_closed":
       return matchesBook(base, event.bookId)
-        ? { ...base, status: "idle", sessionId: null, promptId: null, messages: [], sessions: [], error: null, compaction: null }
+        ? { ...base, status: "idle", sessionId: null, promptId: null, messages: [], sessions: [], error: null, compaction: null, branchNavigation: {}, branchAnchors: [] }
         : base;
     case "prompt_started":
       return matchesBook(base, event.bookId)
@@ -194,15 +212,22 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
       return base;
     case "prompt_end":
     case "prompt_aborted":
-      return matchesPrompt(base, event)
-        ? { ...base, status: "bookReady", promptId: null }
-        : base;
+      if (!matchesPrompt(base, event)) return base;
+      {
+        const next = { ...base, status: "bookReady" as const, promptId: null };
+        // Streaming deltas already maintained messages; the runtime's full
+        // projection replaces them (equal content) and refreshes navigation.
+        if (event.messages !== undefined) next.messages = event.messages;
+        return applyNavigation(next, event);
+      }
     case "session_created":
       return matchesBook(base, event.bookId)
         ? {
             ...base,
             sessionId: event.sessionId,
             messages: base.promptId ? base.messages : [],
+            branchNavigation: base.promptId ? base.branchNavigation : {},
+            branchAnchors: base.promptId ? base.branchAnchors : [],
             error: null,
             sessions: upsertSession(base.sessions, {
               id: event.sessionId,
@@ -214,8 +239,20 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
         : base;
     case "session_switched":
       return matchesBook(base, event.bookId)
-        ? { ...base, sessionId: event.sessionId, promptId: null, messages: event.messages, status: "bookReady", error: null, compaction: null }
+        ? applyNavigation({ ...base, sessionId: event.sessionId, promptId: null, messages: event.messages, status: "bookReady", error: null, compaction: null }, event)
         : base;
+    case "branch_switched":
+      if (!matchesBook(base, event.bookId)) return base;
+      if (base.sessionId !== null && base.sessionId !== event.sessionId) return base;
+      return {
+        ...base,
+        sessionId: event.sessionId,
+        messages: event.messages,
+        error: null,
+        compaction: null,
+        branchNavigation: event.navigation,
+        branchAnchors: event.anchors,
+      };
     case "session_rewound":
       return matchesBook(base, event.bookId)
         ? { ...base, sessionId: event.sessionId, messages: event.messages, error: null, compaction: null }
@@ -226,6 +263,8 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
         ...base,
         sessionId: base.sessionId === event.sessionId ? null : base.sessionId,
         messages: base.sessionId === event.sessionId ? [] : base.messages,
+        branchNavigation: base.sessionId === event.sessionId ? {} : base.branchNavigation,
+        branchAnchors: base.sessionId === event.sessionId ? [] : base.branchAnchors,
         sessions: base.sessions.filter((session) => session.id !== event.sessionId),
       };
     case "session_renamed":

@@ -1,4 +1,4 @@
-import type { KeyboardEvent } from "react";
+import type { KeyboardEvent, ReactNode } from "react";
 import { Check, Pencil, Quote, X } from "lucide-react";
 import type { AgentMessage } from "@/types/agent";
 import { useT } from "@/lib/i18n";
@@ -12,6 +12,8 @@ interface MessageBubbleProps {
   onSave: () => void;
   onCancel: () => void;
   editDisabled: boolean;
+  /** Optional branch switcher rendered in the reserved action row. */
+  branchSwitcher?: ReactNode;
 }
 
 export function MessageBubble({
@@ -23,6 +25,7 @@ export function MessageBubble({
   onSave,
   onCancel,
   editDisabled,
+  branchSwitcher,
 }: MessageBubbleProps) {
   const { t } = useT();
   const canSave = draft.trim().length > 0;
@@ -57,6 +60,7 @@ export function MessageBubble({
         </div>
       )}
       <div className="flex h-6 items-center justify-end gap-1">
+        {branchSwitcher}
         {editing ? (
           <>
             <button

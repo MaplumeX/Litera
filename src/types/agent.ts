@@ -23,6 +23,20 @@ export interface AgentSessionSummary {
   systemPrompt?: string;
 }
 
+export interface BranchOption {
+  /** The first user-message entry id of this sibling branch. */
+  anchorId: string;
+  /** Preview text of that first user message (truncated). */
+  preview: string;
+}
+
+export interface AnchorBranchInfo {
+  /** Sibling branches, ordered by first-user-message timestamp ascending. */
+  options: BranchOption[];
+  /** Index of the branch the current leafId is on; -1 when undetermined. */
+  activeIndex: number;
+}
+
 export interface AgentToolCall {
   toolCallId: string;
   tool: string;
@@ -68,10 +82,11 @@ export type AgentEvent = EventEnvelope & (
   | ({ type: "compaction_completed" } & PromptCorrelation)
   | ({ type: "compaction_failed" } & PromptCorrelation)
   | ({ type: "retry_scheduled"; attempt: number; maxAttempts: number; delayMs: number } & PromptCorrelation)
-  | ({ type: "prompt_end" } & PromptCorrelation)
-  | ({ type: "prompt_aborted" } & PromptCorrelation & RequestCorrelation)
+  | ({ type: "prompt_end"; messages?: AgentMessage[]; anchors?: string[]; navigation?: Record<string, AnchorBranchInfo> } & PromptCorrelation)
+  | ({ type: "prompt_aborted"; messages?: AgentMessage[]; anchors?: string[]; navigation?: Record<string, AnchorBranchInfo> } & PromptCorrelation & RequestCorrelation)
   | ({ type: "session_created" } & BookCorrelation & { sessionId: string } & RequestCorrelation)
-  | ({ type: "session_switched"; messages: AgentMessage[] } & BookCorrelation & { sessionId: string } & RequestCorrelation)
+  | ({ type: "session_switched"; messages: AgentMessage[]; anchors?: string[]; navigation?: Record<string, AnchorBranchInfo> } & BookCorrelation & { sessionId: string } & RequestCorrelation)
+  | ({ type: "branch_switched"; messages: AgentMessage[]; anchors: string[]; navigation: Record<string, AnchorBranchInfo> } & BookCorrelation & { sessionId: string } & RequestCorrelation)
   | ({ type: "session_rewound"; messages: AgentMessage[] } & PromptCorrelation & RequestCorrelation)
   | ({ type: "session_deleted" } & BookCorrelation & { sessionId: string } & RequestCorrelation)
   | ({ type: "session_renamed"; title: string } & BookCorrelation & { sessionId: string } & RequestCorrelation)

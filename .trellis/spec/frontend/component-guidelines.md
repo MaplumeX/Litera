@@ -278,7 +278,46 @@ scrollToAnchor(range, false); // only if off-screen
 
 **Related**: `src/components/chat/ChatPanel.tsx`.
 
-### Convention: chat user-message outline is a workspace rail
+### Convention: chat branch switcher renders in the reserved action row
+
+**What**: User messages that sit on a fork (edited history grows a sibling
+branch) show a `BranchSwitcher` (`[<] 2/3 [>]`) inside `MessageBubble`'s
+existing `h-6` action row, left of the edit button. Only user messages render
+it; assistant messages never do.
+
+**Why**: Editing rewinds `leafId` to the edit point's parent and grows a new
+branch — the old branch stays in the session tree but was unreachable.
+ChatGPT-style switching needs both a persisted active-leaf pointer (Rust
+`.jsonl.leaf` sidecar, `set_agent_session_leaf`) and a per-message control.
+
+**Rules**:
+- Render only when `branchAnchors[index]` resolves, `options.length > 1`, and
+  `activeIndex >= 0`. The streaming tail has `branchAnchors[index] ===
+  undefined` — tolerate it and render nothing.
+- `isStreaming` disables the switcher (UI) and `switchBranch` rejects while a
+  prompt is active (runtime) — double guard, both required.
+- Switching cancels an in-progress edit first (`setEditingIndex(null)` + clear
+draft), then calls `switchBranchAtAnchor` through the agent bridge, then jumps
+with `scrollToBottom(false)` (instant, same as session switch — the reducer
+swaps the whole `messages` array so preserving scroll position is not an
+  anchor-measurement problem worth solving for MVP).
+- The control passes the **target** branch's anchorId
+  (`options[activeIndex ± 1].anchorId`), not the current one;
+  `runtime.switchBranchAtAnchor` resolves any fork member to the same fork.
+- Icon buttons are `icon-xs` ghost (`ChevronLeft` / `ChevronRight`) with
+  `useT()` aria-labels (`chat.branchPrev` / `chat.branchNext`); the counter is
+  `text-xs text-muted-foreground tabular-nums`. No cycle at the edges.
+
+**Tests required**: fork renders `2/2`; no fork / stale anchors render nothing;
+prev/next click invokes the bridge with the target anchor and direction;
+streaming disables; editing + switch cancels the edit without calling
+`editPrompt`; runtime boundary rejections (unknown anchor, direction overflow,
+inactive session, streaming prompt).
+
+**Related**: `src/components/chat/BranchSwitcher.tsx`;
+`src/components/chat/MessageBubble.tsx`; frontend `state-management.md`
+branch-navigation paragraph; backend `tauri-commands.md` session-leaf
+contracts.
 
 **What**: Agent `ChatPanel` (`variant="workspace"`) derives a conversation outline from the current session's user messages and renders it as `ChatOutlineRail`: a quiet left-edge tick rail over the message column. Each tick is one user prompt. The attended tick (hover after intent delay, or keyboard focus) shows a 2-line preview to its right. Reader/docked chat has no outline UI.
 

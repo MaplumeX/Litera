@@ -135,6 +135,7 @@ pub fn run() {
             pi_sessions::list_agent_sessions,
             pi_sessions::load_agent_session,
             pi_sessions::append_agent_session_entries,
+            pi_sessions::set_agent_session_leaf,
             pi_sessions::delete_agent_session,
         ])
         .build(tauri::generate_context!())
