@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { AssistantMessage } from "./AssistantMessage";
+import { AssistantMessage, normalizeLatexDelimiters } from "./AssistantMessage";
 
 afterEach(() => {
   cleanup();
@@ -147,5 +147,68 @@ describe("AssistantMessage", () => {
       />,
     );
     expect(view.queryByText("已停止")).toBeNull();
+  });
+});
+
+describe("AssistantMessage math rendering", () => {
+  it("renders inline math as KaTeX HTML without the raw $...$ source (AC1)", () => {
+    const { container } = render(
+      <AssistantMessage message={{ role: "assistant", content: "能量 $E=mc^2$ 很有名。" }} />,
+    );
+    expect(container.querySelector(".katex")).toBeTruthy();
+    expect(container.textContent).not.toContain("$E=mc^2$");
+  });
+
+  it("renders block math as a .katex-display with a scrollable container (AC2)", () => {
+    const { container } = render(
+      <AssistantMessage message={{ role: "assistant", content: "公式：\n\n$$\\int_0^1 x\\,dx$$" }} />,
+    );
+    const display = container.querySelector(".katex-display");
+    expect(display).toBeTruthy();
+    const scrollable = display?.closest(".overflow-x-auto");
+    expect(scrollable).toBeTruthy();
+  });
+
+  it("does not throw on unclosed streaming fragments (AC3)", () => {
+    expect(() =>
+      render(<AssistantMessage message={{ role: "assistant", content: "计算 $\\frac{" }} streaming />),
+    ).not.toThrow();
+
+    const closedButBroken = render(
+      <AssistantMessage message={{ role: "assistant", content: "结果 $\\frac{$ 有问题。" }} />,
+    );
+    expect(closedButBroken.container.textContent).toContain("\\frac{");
+  });
+
+  it("renders an error placeholder for invalid LaTeX instead of a blank message (AC4)", () => {
+    const { container } = render(
+      <AssistantMessage message={{ role: "assistant", content: "坏的公式 $\\invalidcmd{$ 演示。" }} />,
+    );
+    expect(container.querySelector(".katex-error")).toBeTruthy();
+    // 整条消息其余部分仍然渲染
+    expect(container.textContent).toContain("坏的公式");
+    expect(container.textContent).toContain("演示。");
+  });
+
+  it("rewrites \\[...] and \$$...\$$ delimiters outside code spans", () => {
+    const text = "行内 \\(E=mc^2\\) 与块级\n\n\\[\\int_0^1 x\\,dx\\]";
+    const { container } = render(
+      <AssistantMessage message={{ role: "assistant", content: text }} />,
+    );
+    expect(container.querySelector(".katex")).toBeTruthy();
+    expect(container.querySelector(".katex-display")).toBeTruthy();
+  });
+});
+
+describe("normalizeLatexDelimiters", () => {
+  it("leaves fenced code blocks untouched", () => {
+    const input = ["前文 \\[x\\] 后文", "", "```ts", 'const s = "\\[x\\]";', "```"].join("\n");
+    const output = normalizeLatexDelimiters(input);
+    expect(output).toContain('const s = "\\[x\\]";');
+  });
+
+  it("leaves inline code untouched and rewrites prose", () => {
+    const output = normalizeLatexDelimiters("`\\(x\\)` 外 \\(x\\)");
+    expect(output).toBe("`\\(x\\)` 外 $x$");
   });
 });

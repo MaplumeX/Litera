@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import "katex/dist/katex.min.css";
 import { Bot, Brain, ChevronRight } from "lucide-react";
 import type { AgentMessage, AssistantBlock } from "@/types/agent";
 import { ToolCallCard } from "./ToolCallCard";
@@ -66,12 +69,38 @@ function ThinkingBlock({ thinking, active }: { thinking: string; active: boolean
   );
 }
 
+/**
+ * LaTeX 定界符预处理：
+ * 1. `\[...\]` / `\(...\)` → remark-math 认识的 `$$...$$` / `$...$`；
+ * 2. 单行 `$$...$$` → 独立成段的 flow 形式（remark-math 要求 `$$` 后换行
+ *    才解析为块级 math，单行形式会被当作行内公式）。
+ * 只处理围栏代码块与行内代码之外的内容；奇数下标是 split 捕获组命中的
+ * 代码片段，原样保留。
+ */
+export function normalizeLatexDelimiters(text: string): string {
+  return text
+    .split(/(```[\s\S]*?```|`[^`\n]*`)/g)
+    .map((segment, index) =>
+      index % 2 === 1
+        ? segment
+        : segment
+            .replace(/\\\[([\s\S]*?)\\\]/g, "\n\n$$$$\n$1\n$$$$\n\n")
+            .replace(/\\\(([\s\S]*?)\\\)/g, "$$$1$$")
+            .replace(/\$\$([^\n$]+)\$\$/g, "\n\n$$$$\n$1\n$$$$\n\n"),
+    )
+    .join("");
+}
+
 function TextBlock({ text, streaming }: { text: string; streaming: boolean }) {
   return (
     <div>
       <div className="prose prose-sm max-w-none overflow-x-auto dark:prose-invert">
-        <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-          {text}
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm, remarkMath]}
+          rehypePlugins={[rehypeKatex]}
+          components={markdownComponents}
+        >
+          {normalizeLatexDelimiters(text)}
         </ReactMarkdown>
         {streaming && (
           <span className="ml-0.5 inline-block h-4 w-2 animate-pulse bg-primary/70 motion-reduce:animate-none" />

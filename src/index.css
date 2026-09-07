@@ -181,6 +181,12 @@
   animation: chat-typing 1.2s ease-in-out infinite;
 }
 
+/* KaTeX 块级公式横向滚动兜底（长公式不撑破气泡布局）。 */
+.katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .chat-typing-dot {
     animation: none;

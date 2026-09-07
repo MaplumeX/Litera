@@ -21,6 +21,7 @@ npx shadcn@latest add <component-name>
 |---------|---------|
 | `react-resizable-panels` | Draggable split-pane layout (shadcn/ui Resizable component base) |
 | `react-markdown` + `remark-gfm` | Agent response Markdown rendering (lists, code blocks, tables) |
+| `remark-math` + `rehype-katex` + `katex` | LaTeX math in agent responses (`$...$` inline, `$$...$$` display) |
 | `lucide-react` | Icon library for all toolbar/action buttons |
 | `@fontsource-variable/geist` | Self-hosted Geist Variable for **app chrome only** |
 
@@ -277,6 +278,21 @@ scrollToAnchor(range, false); // only if off-screen
 - Session enter / switch must jump instantly (`scrollTop = scrollHeight`), never smooth-scroll. Smooth scrolling is reserved for streaming updates and explicit send / edit actions.
 
 **Related**: `src/components/chat/ChatPanel.tsx`.
+
+### Convention: assistant message math rendering (KaTeX)
+
+**What**: `AssistantMessage`'s `TextBlock` renders Markdown with `remark-gfm` + `remark-math` (remark) and `rehype-katex` (rehype), plus `katex/dist/katex.min.css`. Inline `$...$` and display `$$...$$` render as KaTeX HTML; the exported `normalizeLatexDelimiters` pre-pass rewrites model-common `\[...\]` → flow `$$` blocks and `\(...\)` → `$...$` before the Markdown parse, while leaving fenced and inline code spans untouched.
+
+**Why**: GFM has no math extension; without the plugins LaTeX source shows as raw text. `rehype-katex` runs with default options — do NOT set `output: "html"` (that drops the MathML screen-reader fallback; jsdom renders the default output fine). Single-line `$$...$$` parses as inline math (flow math requires a newline after `$$`), so the pre-pass also flow-ifies it to get `.katex-display`.
+
+**Rules**:
+- Keep math rendering in `TextBlock` only. User messages, `ThinkingBlock`, and `ToolCallCard` stay plain — no math plugins there.
+- KaTeX fonts ship as Vite-emitted `/assets/` resources and satisfy CSP `font-src 'self'`; never load KaTeX from a CDN or relax the CSP.
+- Long formulas scroll, never overflow the bubble: global `.katex-display { overflow-x: auto; overflow-y: hidden; }` in `src/index.css` plus the existing prose `overflow-x-auto`.
+- Invalid/incomplete LaTeX must degrade (rehype-katex `.katex-error` placeholder), never blank the message or crash streaming.
+- Pin `katex` to the `0.16` line — `rehype-katex@7` declares `katex ^0.16` and katex 0.18 breaks it.
+
+**Related**: `src/components/chat/AssistantMessage.tsx`; frontend `quality-guidelines.md` CSP `font-src`.
 
 ### Convention: chat branch switcher renders in the reserved action row
 
