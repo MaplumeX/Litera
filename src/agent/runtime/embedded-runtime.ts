@@ -154,7 +154,7 @@ export class LiteraAgentRuntime {
       const hasSnapshot=activeBranch(session).some((entry)=>entry.type==="custom_message"&&entry.customType==="bookSnapshot");
       if(!hasSnapshot){const snapshotEntry=newEntry("custom_message",pendingParent,{customType:"bookSnapshot",content:snapshot,display:false});pendingEntries.push(snapshotEntry);pendingParent=snapshotEntry.id;promptMessages.push({role:"custom",customType:"bookSnapshot",content:snapshot,display:false,timestamp:Date.now()} as PiMessage);}
       if(readingContext){const contextEntry=newEntry("custom_message",pendingParent,{customType:"readingContext",content:readingContext,display:false});pendingEntries.push(contextEntry);pendingParent=contextEntry.id;promptMessages.push({role:"custom",customType:"readingContext",content:readingContext,display:false,timestamp:Date.now()} as PiMessage);}
-      const user:PiMessage={role:"user",content:text,timestamp:Date.now()}; const userEntry=newEntry("message",pendingParent,{message:user});
+      const user:PiMessage={role:"user",content:text,timestamp:Date.now()};const userEntry=newEntry("message",pendingParent,{message:user,...(context.selection?{selection:context.selection}:{}),...(context.chapterHref?{chapterHref:context.chapterHref}:{})});
       pendingEntries.push(userEntry);
       const leaf=await this.sessions.append(promptBookId,session.header.id,persistedLeaf,pendingEntries);session.entries.push(...pendingEntries);session.leafId=leaf;
       if(configAtStart!==this.configRevision||this.bookId!==promptBookId)throw new Error("Agent context changed");

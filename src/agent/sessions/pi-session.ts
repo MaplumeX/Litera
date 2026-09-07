@@ -264,9 +264,15 @@ export function visibleMessages(session: DecodedPiSession): UiAgentMessage[] {
     }
     if (message.role !== "user" && message.role !== "assistant") continue;
     if (message.role === "user") {
-      output.push({ role: "user", content: contentText(message.content) });
+      // Prompt context (selection / chapterHref) is persisted on the entry
+      // payload next to `message` — the LLM-facing PiMessage protocol stays
+      // untouched. Old entries without these fields degrade to undefined.
+      const selection = string(entry.selection) ?? undefined;
+      const chapterHref = string(entry.chapterHref) ?? undefined;
+      output.push({ role: "user", content: contentText(message.content), ...(selection ? { selection } : {}), ...(chapterHref ? { chapterHref } : {}) });
       continue;
     }
+    const stopReason = message.stopReason === "aborted" || message.stopReason === "error" ? message.stopReason : undefined;
     const blocks: AssistantBlock[] = Array.isArray(message.content)
       ? message.content.flatMap((part): AssistantBlock[] => {
           const block = object(part);
@@ -301,8 +307,11 @@ export function visibleMessages(session: DecodedPiSession): UiAgentMessage[] {
         last.blocks.push(block);
       }
       last.content = textBlocksContent(last.blocks);
+      // The bubble's terminal state is the run's last persisted entry.
+      if (stopReason) last.stopReason = stopReason;
+      else delete last.stopReason;
     } else {
-      output.push({ role: "assistant", content: textBlocksContent(blocks), blocks });
+      output.push({ role: "assistant", content: textBlocksContent(blocks), blocks, ...(stopReason ? { stopReason } : {}) });
       blocks.forEach((block, blockIndex) => {
         if (block.type === "toolCall") {
           toolOwners.set(block.toolCall.toolCallId, { messageIndex: output.length - 1, blockIndex });

@@ -390,6 +390,79 @@ describe("Pi session decoder", () => {
     ], "a2");
     expect(visibleMessages(session).map((message) => message.content)).toEqual(["first", "again", "second"]);
   });
+  it("projects prompt context (selection / chapterHref) from the entry payload", () => {
+    const session = makeSession([
+      { type: "message", id: "u1", parentId: null, timestamp, selection: "a quoted passage", chapterHref: "OPS/ch1.xhtml", message: { role: "user", content: "what does this mean?", timestamp: 1 } },
+      entry("a1", "u1", "assistant", "answer"),
+    ], "a1");
+    expect(visibleMessages(session)[0]).toMatchObject({
+      role: "user",
+      content: "what does this mean?",
+      selection: "a quoted passage",
+      chapterHref: "OPS/ch1.xhtml",
+    });
+  });
+  it("degrades gracefully for legacy user entries without context fields", () => {
+    const session = makeSession([entry("u1", null, "user", "plain question")], "u1");
+    expect(visibleMessages(session)).toEqual([{ role: "user", content: "plain question" }]);
+  });
+  it("carries stopReason only for non-normal assistant terminal states", () => {
+    const session = makeSession([
+      entry("u1", null, "user", "q"),
+      { type: "message", id: "a1", parentId: "u1", timestamp, message: { role: "assistant", content: [{ type: "text", text: "stopped midway" }], stopReason: "aborted", timestamp: 2 } },
+      { type: "message", id: "u2", parentId: "a1", timestamp, message: { role: "user", content: "again", timestamp: 3 } },
+      { type: "message", id: "a2", parentId: "u2", timestamp, message: { role: "assistant", content: [{ type: "text", text: "full answer" }], stopReason: "stop", timestamp: 4 } },
+    ], "a2");
+    const visible = visibleMessages(session);
+    expect(visible[1]).toMatchObject({ role: "assistant", content: "stopped midway", stopReason: "aborted" });
+    expect(visible[3].stopReason).toBeUndefined();
+  });
+  it("takes the merged assistant bubble's stopReason from the run's last entry", () => {
+    const session = makeSession([
+      entry("u1", null, "user", "q"),
+      {
+        type: "message",
+        id: "a1",
+        parentId: "u1",
+        timestamp,
+        message: {
+          role: "assistant",
+          content: [{ type: "toolCall", id: "c1", name: "search_in_book", arguments: { queries: ["x"] } }],
+          stopReason: "toolUse",
+          timestamp: 1,
+        },
+      },
+      {
+        type: "message",
+        id: "r1",
+        parentId: "a1",
+        timestamp,
+        message: {
+          role: "toolResult",
+          toolCallId: "c1",
+          toolName: "search_in_book",
+          content: [{ type: "text", text: "[]" }],
+          isError: false,
+          timestamp: 2,
+        },
+      },
+      {
+        type: "message",
+        id: "a2",
+        parentId: "r1",
+        timestamp,
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "partial answer" }],
+          stopReason: "aborted",
+          timestamp: 3,
+        },
+      },
+    ], "a2");
+    // a1 (toolUse, a normal intermediate stop) + a2 (aborted) merge into one
+    // bubble; the terminal state is the run's last entry.
+    expect(visibleMessages(session)[1]).toMatchObject({ role: "assistant", content: "partial answer", stopReason: "aborted" });
+  });
   it("normalizes legacy null content and rejects malformed known messages", () => {
     const normalized = makeSession([{ type: "message", id: "a", parentId: null, timestamp, message: { role: "assistant", content: null } }], "a");
     expect((normalized.entries[0].message as { content: unknown }).content).toEqual([]);
