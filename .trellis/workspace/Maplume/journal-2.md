@@ -682,3 +682,24 @@ Implemented full branch-switching across all layers: branchNavigation/branchLeaf
 ### Status
 
 [OK] **Completed**
+
+
+## Session 117: Agent chat LaTeX math rendering
+
+**Date**: 2026-09-07
+**Task**: Agent chat LaTeX math rendering
+**Branch**: `emdash/whole-planets-roll-pj1nx`
+
+### Summary
+
+Added KaTeX math rendering to assistant chat messages: remark-math + rehype-katex (katex 0.16 line) in AssistantMessage TextBlock, normalizeLatexDelimiters pre-pass rewriting \[...\]/\(...\) delimiters and flow-ifying single-line $$...$$, global .katex-display overflow fallback. Check pass removed the output:'html' option to preserve the MathML screen-reader fallback. All 710 tests and npm run build pass; fonts ship as local /assets/ resources satisfying CSP. Spec updated in frontend/component-guidelines.md (companion library row + math rendering convention).
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2678951` | (see git log) |
+
+### Status
+
+[OK] **Completed**
