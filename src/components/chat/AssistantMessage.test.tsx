@@ -116,4 +116,36 @@ describe("AssistantMessage", () => {
     expect(container.querySelector("h1")?.textContent).toBe("Heading 1");
     expect(getByText("list item")).toBeTruthy();
   });
+
+  it("renders a stopped marker only on aborted assistant messages", () => {
+    const aborted = render(
+      <AssistantMessage
+        message={{ role: "assistant", content: "回答到一半", stopReason: "aborted" }}
+      />,
+    );
+    expect(aborted.getByText("已停止")).toBeTruthy();
+    aborted.unmount();
+
+    const normal = render(
+      <AssistantMessage message={{ role: "assistant", content: "完整回答" }} />,
+    );
+    expect(normal.queryByText("已停止")).toBeNull();
+    normal.unmount();
+    const errored = render(
+      <AssistantMessage
+        message={{ role: "assistant", content: "出错了", stopReason: "error" }}
+      />,
+    );
+    expect(errored.queryByText("已停止")).toBeNull();
+  });
+
+  it("does not render the stopped marker while streaming", () => {
+    const view = render(
+      <AssistantMessage
+        message={{ role: "assistant", content: "生成中", stopReason: "aborted" }}
+        streaming
+      />,
+    );
+    expect(view.queryByText("已停止")).toBeNull();
+  });
 });

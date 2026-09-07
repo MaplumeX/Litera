@@ -95,6 +95,7 @@ interface AssistantMessageProps {
 }
 
 export function AssistantMessage({ message, streaming = false }: AssistantMessageProps) {
+  const { t } = useT();
   const blocks = messageBlocks(message);
   const textBlocks = blocks.filter((block): block is Extract<AssistantBlock, { type: "text" }> => block.type === "text");
   const lastTextIndex = textBlocks.length > 0
@@ -116,6 +117,11 @@ export function AssistantMessage({ message, streaming = false }: AssistantMessag
           }
           return <TextBlock key={index} text={block.text} streaming={streaming && index === lastTextIndex} />;
         })}
+        {!streaming && message.stopReason === "aborted" && (
+          <div className="flex h-6 items-center">
+            <span className="text-[10px] text-muted-foreground/70">{t("chat.stopped")}</span>
+          </div>
+        )}
       </div>
     </div>
   );

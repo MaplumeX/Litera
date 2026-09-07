@@ -18,10 +18,14 @@ describe("LiteraAgentRuntime",()=>{
     const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret",thinkingLevel:"off"};
     const runtime=new LiteraAgentRuntime({sessions,book,loadConfig:async()=>config,loadStream:async()=>((requestModel,context,options)=>{order.push("network");return faux.streamSimple(requestModel,context,options);})});
     await runtime.openBook("book",new ArrayBuffer(1));
-    await runtime.prompt("question",{});
-    expect(order[0]).toBe("append:model_change,custom_message,message");
+    await runtime.prompt("question",{selection:"quoted text",chapterHref:"OPS/ch1.xhtml"});
+    expect(order[0]).toBe("append:model_change,custom_message,custom_message,message");
     expect(order[1]).toBe("network");
-    expect(batches[0][2].message).toMatchObject({role:"user",content:"question"});
+    const userEntry=batches[0][3];
+    expect(userEntry.message).toMatchObject({role:"user",content:"question"});
+    // Prompt context is persisted on the entry payload (not the PiMessage).
+    expect(userEntry).toMatchObject({selection:"quoted text",chapterHref:"OPS/ch1.xhtml"});
+    expect(userEntry.message).not.toHaveProperty("selection");
     expect(batches[1][0].message).toMatchObject({role:"assistant"});
   });
 

@@ -21,7 +21,6 @@ interface ChatInputProps {
   bookReady: boolean;
   pendingSelection: PendingSelection | null;
   onClearSelection: () => void;
-  retryHighlight: boolean;
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
   thinkingLevel: string;
   onThinkingLevelChange: (level: string) => void;
@@ -38,7 +37,6 @@ export function ChatInput({
   bookReady,
   pendingSelection,
   onClearSelection,
-  retryHighlight,
   textareaRef,
   thinkingLevel,
   onThinkingLevelChange,
@@ -92,7 +90,6 @@ export function ChatInput({
           className={cn(
             "w-full resize-none border-0 bg-transparent px-3 py-2 text-sm",
             "placeholder:text-muted-foreground outline-none ring-0 focus:outline-none focus:ring-0",
-            retryHighlight && "ring-2 ring-primary",
           )}
           rows={1}
           placeholder={t("chat.placeholder")}

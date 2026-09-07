@@ -57,6 +57,8 @@ export interface AgentMessage {
   selection?: string;
   chapterHref?: string;
   blocks?: AssistantBlock[];
+  /** Terminal state of the persisted assistant message (UI only cares about non-normal endings). */
+  stopReason?: "aborted" | "error";
 }
 
 type EventEnvelope = {

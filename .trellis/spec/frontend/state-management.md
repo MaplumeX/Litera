@@ -115,6 +115,27 @@ indexes. `activeBranch()` treats `leafId === null` as an empty branch (the
 Rust session port guarantees a non-null leaf whenever entries exist).
 Token usage/cost are not surfaced anywhere (deliberate product decision).
 
+Prompt context persistence and terminal-state projection: the runtime writes
+`selection` / `chapterHref` onto the **entry payload** next to `message`
+(the LLM-facing PiMessage protocol stays untouched — Rust `validate_entry`
+passes message payload fields through as `serde_json::Value`), and
+`visibleMessages()` transparently projects them back onto the user
+`AgentMessage`. Assistant messages project `stopReason` only for
+`"aborted"` / `"error"` endings; a merged assistant bubble takes the run's
+**last** persisted entry's terminal state. Legacy entries without these
+fields degrade to `undefined`.
+
+Abort UX convention: **abort = stop, regenerate = resend, edit = rewrite.**
+After an abort the composer stays empty (no input backfill, no highlight) —
+the aborted user/assistant messages stay in the flow and the assistant
+bubble shows a small `chat.stopped` label. Resending is an explicit,
+always-present (non-streaming, at least one user message) `chat.regenerate`
+ghost button at the bottom of the message list; it re-issues the last user
+message verbatim (content + projected `selection` / `chapterHref`) through
+`editPrompt`, which rewinds to that message's parent and grows a sibling
+branch the BranchSwitcher can toggle. Never reintroduce composer backfill
+after abort.
+
 `retry_scheduled` events (bounded retry via pi-ai `retryAssistantCall`, SDK
 `maxRetries: 3`) are emitted per backoff attempt but carry no reducer state;
 the UI hint is future work. Prompt failures are classified by

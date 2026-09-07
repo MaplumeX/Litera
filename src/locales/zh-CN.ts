@@ -229,6 +229,8 @@ export const zhCN = {
   "chat.switchModelFailed": "切换模型失败：{message}",
   "chat.branchPrev": "切换到上一个分支",
   "chat.branchNext": "切换到下一个分支",
+  "chat.regenerate": "重新生成",
+  "chat.stopped": "已停止",
 
   "agent.title": "LLM 设置",
   "agent.description": "配置 LLM 供应商、API Key 与模型。",

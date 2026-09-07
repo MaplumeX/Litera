@@ -21,7 +21,6 @@ function baseProps(overrides: Partial<Parameters<typeof ChatInput>[0]> = {}) {
     bookReady: true,
     pendingSelection: null as PendingSelection | null,
     onClearSelection: vi.fn(),
-    retryHighlight: false,
     textareaRef: { current: null },
     thinkingLevel: "medium",
     onThinkingLevelChange: vi.fn(),

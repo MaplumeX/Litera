@@ -6,7 +6,10 @@
   and prompt are allowed at a time.
 - Provider imports must remain browser-compatible and pinned to the matching
   `pi-ai` / `pi-agent-core` version.
-- The raw user message is appended before the network call. Completed assistant
+- The raw user message is appended before the network call, with the prompt's
+  `selection` / `chapterHref` recorded on the entry payload next to `message`
+  (UI-only context; the LLM-facing PiMessage stays clean, and Rust passes
+  message payload fields through as `serde_json::Value`). Completed assistant
   and tool-result messages are appended only after settlement.
 - Abort persists the terminal aborted assistant message when Pi settles.
 

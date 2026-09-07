@@ -661,3 +661,24 @@ Implemented full branch-switching across all layers: branchNavigation/branchLeaf
 ### Status
 
 [OK] **Completed**
+
+
+## Session 116: Replace abort input backfill with regenerate affordance
+
+**Date**: 2026-09-07
+**Task**: Replace abort input backfill with regenerate affordance
+**Branch**: `emdash/rare-olives-tan-ew0az`
+
+### Summary
+
+移除 abort 后回填输入框的旧设计（lastSentRef/abortedRef/retryHighlight），改为业界标准的三意图分离：abort=停止、regenerate=重发、edit=改写。新增对话流底部常驻 Regenerate 按钮（复用 editPrompt 原文重发生成 sibling branch）；用户消息 entry payload 持久化 selection/chapterHref 并经 visibleMessages 投影回 UI；aborted assistant 消息显示"已停止"标签。Rust 侧纯透传无需改动。全量 703 测试 + tsc 通过，spec 已更新（state-management.md / quality-guidelines.md）。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b7d1374` | (see git log) |
+
+### Status
+
+[OK] **Completed**

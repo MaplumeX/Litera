@@ -8,7 +8,7 @@ import {
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Button } from "@/components/ui/button";
-import { MessagesSquare, Settings, AlertCircle } from "lucide-react";
+import { MessagesSquare, Settings, AlertCircle, RefreshCw } from "lucide-react";
 import { useAgentBridge } from "@/lib/use-agent-bridge";
 import { useAgentConfig } from "@/lib/use-agent-config";
 import { invokeErrorMessage } from "@/lib/app-error";
@@ -78,7 +78,6 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     const [showConfig, setShowConfig] = useState(false);
     const [submitting, setSubmitting] = useState(false);
     const [invokeError, setInvokeError] = useState<string | null>(null);
-    const [retryHighlight, setRetryHighlight] = useState(false);
     const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
     const [editingTitle, setEditingTitle] = useState("");
     const [configSession, setConfigSession] = useState<SessionConfigTarget | null>(null);
@@ -95,8 +94,6 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     const suspendBottomFollowRef = useRef(false);
     const messageTocJumpTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const autoSwitchRef = useRef<string | null>(null);
-    const lastSentRef = useRef<{ text: string; selection?: string; chapterHref?: string } | null>(null);
-    const abortedRef = useRef(false);
 
     const isStreaming = submitting || state.status === "prompting";
     const bookReady = state.status === "bookReady" || state.status === "prompting";
@@ -107,6 +104,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         ? [{ messageIndex: index, preview: userMessagePreview(message.content) }]
         : [],
     );
+    const hasUserMessage = userMessageTocItems.length > 0;
     const showOutlineRail = isWorkspace && userMessageTocItems.length >= 2;
 
     const clearMessageTocJumpTimer = useCallback(() => {
@@ -237,20 +235,6 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       });
     }, [state.sessionId, state.sessions, state.status, switchSession]);
 
-    useEffect(() => {
-      if (!abortedRef.current || state.status !== "bookReady") return;
-      const last = lastSentRef.current;
-      if (!last) return;
-      abortedRef.current = false;
-      setInput(last.text);
-      if (last.selection) {
-        setPendingSelection({ text: last.selection, chapterHref: last.chapterHref });
-      }
-      setRetryHighlight(true);
-      const timer = setTimeout(() => setRetryHighlight(false), 2000);
-      return () => clearTimeout(timer);
-    }, [state.status]);
-
     const handleSend = useCallback(async () => {
       const text = input.trim();
       if (!text || isStreaming || !bookId) return;
@@ -258,7 +242,6 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       setEditDraft("");
       const selection = pendingSelection?.text;
       const chapterHref = pendingSelection?.chapterHref ?? currentChapterHref;
-      lastSentRef.current = { text, selection, chapterHref };
       setInput("");
       setPendingSelection(null);
       setInvokeError(null);
@@ -278,7 +261,6 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 
     const handleAbort = useCallback(async () => {
       setInvokeError(null);
-      abortedRef.current = true;
       try {
         await abort();
       } catch (error) {
@@ -312,11 +294,6 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       if (!original || original.role !== "user") return;
       const selection = original.selection;
       const chapterHref = original.chapterHref;
-      lastSentRef.current = {
-        text,
-        selection,
-        chapterHref: chapterHref ?? currentChapterHref,
-      };
       const index = editingIndex;
       setEditingIndex(null);
       setInvokeError(null);
@@ -335,7 +312,40 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         setSubmitting(false);
         setEditingIndex(index);
       }
-    }, [bookId, currentChapterHref, editDraft, editPrompt, editingIndex, isStreaming, scrollToBottom, state.messages]);
+    }, [bookId, editDraft, editPrompt, editingIndex, isStreaming, scrollToBottom, state.messages]);
+
+    const handleRegenerate = useCallback(async () => {
+      let lastIndex = -1;
+      for (let i = state.messages.length - 1; i >= 0; i--) {
+        if (state.messages[i].role === "user") {
+          lastIndex = i;
+          break;
+        }
+      }
+      if (lastIndex < 0 || isStreaming || !bookId) return;
+      const original = state.messages[lastIndex];
+      setEditingIndex(null);
+      setEditDraft("");
+      setInvokeError(null);
+      setSubmitting(true);
+      scrollToBottom();
+      try {
+        await editPrompt(
+          lastIndex,
+          original.content,
+          { selection: original.selection, chapterHref: original.chapterHref },
+          {
+            role: "user",
+            content: original.content,
+            selection: original.selection,
+            chapterHref: original.chapterHref,
+          },
+        );
+      } catch (error) {
+        setInvokeError(String(error));
+        setSubmitting(false);
+      }
+    }, [bookId, editPrompt, isStreaming, scrollToBottom, state.messages]);
 
     const handleSwitchBranch = useCallback(async (anchorId: string, direction: -1 | 1) => {
       if (isStreaming) return;
@@ -597,6 +607,19 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
           {state.compaction && (
             <CompactionChip status={state.compaction.status} />
           )}
+          {!isStreaming && bookReady && hasUserMessage && (
+            <div className="flex justify-center">
+              <button
+                type="button"
+                onClick={() => void handleRegenerate()}
+                className="flex items-center gap-1 text-xs text-muted-foreground/50 transition-colors hover:text-muted-foreground"
+                aria-label={t("chat.regenerate")}
+              >
+                <RefreshCw className="h-3.5 w-3.5" />
+                <span>{t("chat.regenerate")}</span>
+              </button>
+            </div>
+          )}
           <div ref={messagesEndRef} />
           </div>
           {showOutlineRail && (
@@ -618,7 +641,6 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
           bookReady={bookReady}
           pendingSelection={pendingSelection}
           onClearSelection={() => setPendingSelection(null)}
-          retryHighlight={retryHighlight}
           textareaRef={inputRef}
           thinkingLevel={thinkingLevel}
           onThinkingLevelChange={(level) => void handleThinkingLevelChange(level)}
