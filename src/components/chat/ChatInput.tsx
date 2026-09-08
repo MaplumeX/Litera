@@ -102,7 +102,7 @@ export function ChatInput({
           <div className="flex min-w-0 items-center gap-2">
             {leadingControls}
             <Select value={thinkingLevel} onValueChange={onThinkingLevelChange} disabled={isStreaming}>
-              <SelectTrigger className="h-6 w-auto gap-1 border-none bg-transparent px-1.5 text-[10px] text-muted-foreground shadow-none focus:ring-0" aria-label={t("chat.thinkingLevel")}>
+              <SelectTrigger className="h-6 w-auto gap-1 border-none bg-transparent px-1.5 text-[10px] text-muted-foreground shadow-none focus:ring-0 dark:bg-transparent dark:hover:bg-transparent" aria-label={t("chat.thinkingLevel")}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent position="popper" side="top" align="start">
