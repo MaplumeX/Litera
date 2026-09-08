@@ -130,7 +130,10 @@ After an abort the composer stays empty (no input backfill, no highlight) —
 the aborted user/assistant messages stay in the flow and the assistant
 bubble shows a small `chat.stopped` label. Resending is an explicit,
 always-present (non-streaming, at least one user message) `chat.regenerate`
-ghost button at the bottom of the message list; it re-issues the last user
+ghost button rendered inside the last visible assistant message's action
+row, next to its `CopyButton` (a text-block-free last assistant message falls
+back to its own action row; a user message last keeps a bottom-centered
+button); it re-issues the last user
 message verbatim (content + projected `selection` / `chapterHref`) through
 `editPrompt`, which rewinds to that message's parent and grows a sibling
 branch the BranchSwitcher can toggle. Never reintroduce composer backfill

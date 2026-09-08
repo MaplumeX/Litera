@@ -4,7 +4,7 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
-import { Bot, Brain, ChevronRight } from "lucide-react";
+import { Bot, Brain, ChevronRight, RefreshCw } from "lucide-react";
 import type { AgentMessage, AssistantBlock } from "@/types/agent";
 import { ToolCallCard } from "./ToolCallCard";
 import { CopyButton } from "./CopyButton";
@@ -91,7 +91,16 @@ export function normalizeLatexDelimiters(text: string): string {
     .join("");
 }
 
-function TextBlock({ text, streaming }: { text: string; streaming: boolean }) {
+function TextBlock({
+  text,
+  streaming,
+  onRegenerate,
+}: {
+  text: string;
+  streaming: boolean;
+  onRegenerate?: () => void;
+}) {
+  const { t } = useT();
   return (
     <div>
       <div className="prose prose-sm max-w-none overflow-x-auto dark:prose-invert">
@@ -106,8 +115,19 @@ function TextBlock({ text, streaming }: { text: string; streaming: boolean }) {
           <span className="ml-0.5 inline-block h-4 w-2 animate-pulse bg-primary/70 motion-reduce:animate-none" />
         )}
       </div>
-      <div className="flex h-6 items-center">
+      <div className="flex h-6 items-center gap-1">
         <CopyButton text={text} />
+        {onRegenerate && (
+          <button
+            type="button"
+            onClick={onRegenerate}
+            className="flex items-center gap-1 text-xs text-muted-foreground/50 transition-colors hover:text-muted-foreground"
+            aria-label={t("chat.regenerate")}
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+            <span>{t("chat.regenerate")}</span>
+          </button>
+        )}
       </div>
     </div>
   );
@@ -121,9 +141,10 @@ function messageBlocks(message: AgentMessage): AssistantBlock[] {
 interface AssistantMessageProps {
   message: AgentMessage;
   streaming?: boolean;
+  onRegenerate?: () => void;
 }
 
-export function AssistantMessage({ message, streaming = false }: AssistantMessageProps) {
+export function AssistantMessage({ message, streaming = false, onRegenerate }: AssistantMessageProps) {
   const { t } = useT();
   const blocks = messageBlocks(message);
   const textBlocks = blocks.filter((block): block is Extract<AssistantBlock, { type: "text" }> => block.type === "text");
@@ -144,8 +165,30 @@ export function AssistantMessage({ message, streaming = false }: AssistantMessag
           if (block.type === "toolCall") {
             return <ToolCallCard key={block.toolCall.toolCallId} call={block.toolCall} />;
           }
-          return <TextBlock key={index} text={block.text} streaming={streaming && index === lastTextIndex} />;
+          return (
+            <TextBlock
+              key={index}
+              text={block.text}
+              streaming={streaming && index === lastTextIndex}
+              onRegenerate={
+                !streaming && index === lastTextIndex ? onRegenerate : undefined
+              }
+            />
+          );
         })}
+        {!streaming && lastTextIndex === -1 && onRegenerate && (
+          <div className="flex h-6 items-center gap-1">
+            <button
+              type="button"
+              onClick={onRegenerate}
+              className="flex items-center gap-1 text-xs text-muted-foreground/50 transition-colors hover:text-muted-foreground"
+              aria-label={t("chat.regenerate")}
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+              <span>{t("chat.regenerate")}</span>
+            </button>
+          </div>
+        )}
         {!streaming && message.stopReason === "aborted" && (
           <div className="flex h-6 items-center">
             <span className="text-[10px] text-muted-foreground/70">{t("chat.stopped")}</span>
