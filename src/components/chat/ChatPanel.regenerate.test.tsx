@@ -131,6 +131,89 @@ describe("ChatPanel regenerate", () => {
     expect(view.queryByRole("button", { name: "重新生成" })).toBeNull();
   });
 
+  it("renders the button inside the last assistant message only", () => {
+    const view = renderWorkspace();
+    const buttons = view.getAllByRole("button", { name: "重新生成" });
+    expect(buttons).toHaveLength(1);
+    // 位于最后一条 assistant 消息气泡内（与复制按钮同一按钮行）
+    const copyButton = view.getAllByRole("button", { name: "复制" });
+    expect(copyButton.length).toBeGreaterThan(0);
+    expect(buttons[0].closest("div")).toBeTruthy();
+    const copyRow = copyButton[copyButton.length - 1].parentElement;
+    expect(buttons[0].parentElement).toBe(copyRow);
+  });
+
+  it("does not render the button for mid-conversation assistant messages", () => {
+    bridgeState = readyState({
+      messages: [
+        { role: "user", content: "第一问" },
+        { role: "assistant", content: "第一答" },
+        { role: "user", content: "第二问" },
+        { role: "assistant", content: "第二答" },
+        { role: "user", content: "第三问" },
+        { role: "assistant", content: "第三答" },
+      ],
+    });
+    const view = renderWorkspace();
+    expect(view.getAllByRole("button", { name: "重新生成" })).toHaveLength(1);
+  });
+
+  it("keeps the button available when the last message is a user message", async () => {
+    bridgeState = readyState({
+      messages: [
+        { role: "user", content: "第一问" },
+        { role: "assistant", content: "第一答" },
+        { role: "user", content: "出错前的问题" },
+      ],
+    });
+    const view = renderWorkspace();
+    const button = view.getByRole("button", { name: "重新生成" });
+    expect(button).toBeTruthy();
+    fireEvent.click(button);
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(editPrompt).toHaveBeenCalledWith(
+      2,
+      "出错前的问题",
+      { selection: undefined, chapterHref: undefined },
+      {
+        role: "user",
+        content: "出错前的问题",
+        selection: undefined,
+        chapterHref: undefined,
+      },
+    );
+  });
+
+  it("renders the fallback button when the last assistant message has no text blocks", async () => {
+    bridgeState = readyState({
+      messages: [
+        { role: "user", content: "第一问" },
+        {
+          role: "assistant",
+          content: "",
+          blocks: [{ type: "toolCall", toolCall: { toolCallId: "t1", tool: "search", params: {}, done: true } }],
+        },
+      ],
+    });
+    const view = renderWorkspace();
+    const button = view.getByRole("button", { name: "重新生成" });
+    expect(button).toBeTruthy();
+    fireEvent.click(button);
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(editPrompt).toHaveBeenCalledWith(
+      0,
+      "第一问",
+      { selection: undefined, chapterHref: undefined },
+      expect.anything(),
+    );
+  });
+
   it("does not render the button without user messages or in an empty session", () => {
     const view = renderWorkspace();
 

@@ -588,6 +588,11 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                 <AssistantMessage
                   message={message}
                   streaming={isStreaming && index === state.messages.length - 1}
+                  onRegenerate={
+                    !isStreaming && bookReady && hasUserMessage && index === state.messages.length - 1
+                      ? () => void handleRegenerate()
+                      : undefined
+                  }
                 />
               )}
             </div>
@@ -607,19 +612,22 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
           {state.compaction && (
             <CompactionChip status={state.compaction.status} />
           )}
-          {!isStreaming && bookReady && hasUserMessage && (
-            <div className="flex justify-center">
-              <button
-                type="button"
-                onClick={() => void handleRegenerate()}
-                className="flex items-center gap-1 text-xs text-muted-foreground/50 transition-colors hover:text-muted-foreground"
-                aria-label={t("chat.regenerate")}
-              >
-                <RefreshCw className="h-3.5 w-3.5" />
-                <span>{t("chat.regenerate")}</span>
-              </button>
-            </div>
-          )}
+          {(!lastMessage || lastMessage.role === "user") &&
+            !isStreaming &&
+            bookReady &&
+            hasUserMessage && (
+              <div className="flex justify-center">
+                <button
+                  type="button"
+                  onClick={() => void handleRegenerate()}
+                  className="flex items-center gap-1 text-xs text-muted-foreground/50 transition-colors hover:text-muted-foreground"
+                  aria-label={t("chat.regenerate")}
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                  <span>{t("chat.regenerate")}</span>
+                </button>
+              </div>
+            )}
           <div ref={messagesEndRef} />
           </div>
           {showOutlineRail && (

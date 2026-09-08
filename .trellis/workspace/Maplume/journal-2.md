@@ -705,6 +705,15 @@ Added KaTeX math rendering to assistant chat messages: remark-math + rehype-kate
 [OK] **Completed**
 
 
+## Session 119: Move regenerate button next to copy button
+
+**Date**: 2026-09-08
+**Task**: Move regenerate button next to copy button
+**Branch**: `feat/move-regenerate-next-to-copy`
+
+### Summary
+
+把「重新生成」按钮从消息流底部居中位置移到最后一条可见 assistant 消息的按钮行，与 CopyButton 并排（AssistantMessage 新增 onRegenerate prop，仅最后一个 text 块渲染；无 text 块消息回退到自身按钮行；最后一条是 user 消息时保留底部按钮）。handleRegenerate 逻辑与 i18n key 未变。check 阶段发现并修复了纯 thinking/toolCall 消息丢按钮的边界问题。全量 714 测试 + tsc 通过，spec（state-management.md regenerate 位置描述）已更新。
 ## Session 118: Fix thinking-level trigger dark-mode background
 
 **Date**: 2026-09-08
@@ -719,6 +728,7 @@ Fixed the chat thinking-level select showing a translucent white patch in dark m
 
 | Hash | Message |
 |------|---------|
+| `9ffc152` | (see git log) |
 | `a486fa2` | (see git log) |
 
 ### Status
