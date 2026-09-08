@@ -703,3 +703,24 @@ Added KaTeX math rendering to assistant chat messages: remark-math + rehype-kate
 ### Status
 
 [OK] **Completed**
+
+
+## Session 118: Fix thinking-level trigger dark-mode background
+
+**Date**: 2026-09-08
+**Task**: Fix thinking-level trigger dark-mode background
+**Branch**: `emdash/solid-dingos-retire-8o82g`
+
+### Summary
+
+Fixed the chat thinking-level select showing a translucent white patch in dark mode: SelectTrigger base styles (dark:bg-input/30 dark:hover:bg-input/50) were not overridden by the plain bg-transparent class in ChatInput. Added dark:bg-transparent dark:hover:bg-transparent overrides. Verified with ChatInput tests and tsc --noEmit. No Trellis task (direct small fix per user request).
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a486fa2` | (see git log) |
+
+### Status
+
+[OK] **Completed**
