@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 117
-- **Last Active**: 2026-09-07
+- **Total Sessions**: 118
+- **Last Active**: 2026-09-08
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~705 | Active |
+| `journal-2.md` | ~726 | Active |
 | `journal-1.md` | ~1996 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 118 | 2026-09-08 | Move regenerate button next to copy button | `9ffc152` | `emdash/grumpy-geese-kiss-gnay0` |
 | 117 | 2026-09-07 | Agent chat LaTeX math rendering | `2678951` | `emdash/whole-planets-roll-pj1nx` |
 | 116 | 2026-09-07 | Replace abort input backfill with regenerate affordance | `b7d1374` | `emdash/rare-olives-tan-ew0az` |
 | 115 | 2026-09-06 | ChatGPT-style message branch switching | `f24dfb9` | `feat/session-branch-message-switching` |
