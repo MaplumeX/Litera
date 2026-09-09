@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { Pencil, Plus, Settings, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -41,6 +42,14 @@ export function SessionList({
 }: SessionListProps) {
   const { t } = useT();
   const isRail = layout === "rail";
+  // Marks Enter/Esc as already committed so the following blur does not save again.
+  const renameCommittedRef = useRef(false);
+  // The input unmounts on Enter/Esc commit (React does not fire blur on unmount),
+  // so the flag can never be consumed there. Reset it whenever edit state changes
+  // to keep the next edit's blur-save working.
+  useEffect(() => {
+    renameCommittedRef.current = false;
+  }, [editingSessionId]);
   return (
     <div
       className={
@@ -88,34 +97,30 @@ export function SessionList({
             )}
           >
             {editingSessionId === session.id ? (
-              <>
-                <input
-                  className="flex-1 rounded border bg-background px-1 py-0.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                  value={editingTitle}
-                  onChange={(event) => onTitleChange(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.preventDefault();
-                      onSaveRename(session.id);
-                    } else if (event.key === "Escape") {
-                      onCancelRename();
-                    }
-                  }}
-                  autoFocus
-                />
-                <button
-                  className="px-1 text-xs text-primary hover:underline"
-                  onClick={() => onSaveRename(session.id)}
-                >
-                  {t("common.save")}
-                </button>
-                <button
-                  className="px-1 text-xs text-muted-foreground hover:underline"
-                  onClick={onCancelRename}
-                >
-                  {t("common.cancel")}
-                </button>
-              </>
+              <input
+                className="min-w-0 flex-1 rounded border bg-background px-1 py-0.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                value={editingTitle}
+                onChange={(event) => onTitleChange(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    renameCommittedRef.current = true;
+                    onSaveRename(session.id);
+                  } else if (event.key === "Escape") {
+                    event.preventDefault();
+                    renameCommittedRef.current = true;
+                    onCancelRename();
+                  }
+                }}
+                onBlur={() => {
+                  if (renameCommittedRef.current) {
+                    renameCommittedRef.current = false;
+                    return;
+                  }
+                  onSaveRename(session.id);
+                }}
+                autoFocus
+              />
             ) : (
               <>
                 <button

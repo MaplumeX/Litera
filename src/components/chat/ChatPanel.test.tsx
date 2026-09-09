@@ -189,7 +189,7 @@ describe("ChatPanel session layouts", () => {
 
     fireEvent.click(view.getAllByRole("button", { name: "重命名" })[0]);
     fireEvent.change(view.getByDisplayValue("新会话"), { target: { value: "新标题" } });
-    fireEvent.click(view.getByText("保存"));
+    fireEvent.keyDown(view.getByDisplayValue("新标题"), { key: "Enter" });
     await act(async () => {
       await Promise.resolve();
     });
@@ -200,6 +200,93 @@ describe("ChatPanel session layouts", () => {
       await Promise.resolve();
     });
     expect(deleteSession).toHaveBeenCalledWith("session-1");
+  });
+
+  it("saves the rename on blur and cancels on empty title", async () => {
+    bridgeState = readyState({
+      sessions: [
+        { id: "session-1", title: "新会话", createdAt: "1", updatedAt: "1" },
+      ],
+    });
+    const view = render(
+      <ChatPanel variant="workspace" currentChapterHref="OEBPS/ch1.xhtml" bookId="book-1" />,
+    );
+
+    fireEvent.click(view.getAllByRole("button", { name: "重命名" })[0]);
+    const input = view.getByDisplayValue("新会话");
+    fireEvent.change(input, { target: { value: "失焦保存" } });
+    fireEvent.blur(input);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(renameSession).toHaveBeenCalledWith("session-1", "失焦保存");
+    expect(view.queryByDisplayValue("失焦保存")).toBeNull();
+
+    renameSession.mockClear();
+    fireEvent.click(view.getAllByRole("button", { name: "重命名" })[0]);
+    const emptyInput = view.getByDisplayValue("新会话");
+    fireEvent.change(emptyInput, { target: { value: "   " } });
+    fireEvent.blur(emptyInput);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(renameSession).not.toHaveBeenCalled();
+    expect(view.queryByDisplayValue("   ")).toBeNull();
+  });
+
+  it("cancels the rename on Escape without saving", async () => {
+    bridgeState = readyState({
+      sessions: [
+        { id: "session-1", title: "新会话", createdAt: "1", updatedAt: "1" },
+      ],
+    });
+    const view = render(
+      <ChatPanel variant="workspace" currentChapterHref="OEBPS/ch1.xhtml" bookId="book-1" />,
+    );
+
+    fireEvent.click(view.getAllByRole("button", { name: "重命名" })[0]);
+    const input = view.getByDisplayValue("新会话");
+    fireEvent.change(input, { target: { value: "不保存的标题" } });
+    fireEvent.keyDown(input, { key: "Escape" });
+    fireEvent.blur(input);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(renameSession).not.toHaveBeenCalled();
+    expect(view.queryByDisplayValue("不保存的标题")).toBeNull();
+  });
+
+  it("saves a blur rename after a previous edit was committed via Enter", async () => {
+    bridgeState = readyState({
+      sessions: [
+        { id: "session-1", title: "新会话", createdAt: "1", updatedAt: "1" },
+      ],
+    });
+    const view = render(
+      <ChatPanel variant="workspace" currentChapterHref="OEBPS/ch1.xhtml" bookId="book-1" />,
+    );
+
+    // First edit: commit via Enter with an empty title (cancels, input unmounts
+    // without blur consuming the committed flag).
+    fireEvent.click(view.getAllByRole("button", { name: "重命名" })[0]);
+    const emptyInput = view.getByDisplayValue("新会话");
+    fireEvent.change(emptyInput, { target: { value: "" } });
+    fireEvent.keyDown(emptyInput, { key: "Enter" });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(renameSession).not.toHaveBeenCalled();
+
+    // Second edit: blur-save must still work.
+    renameSession.mockClear();
+    fireEvent.click(view.getAllByRole("button", { name: "重命名" })[0]);
+    const input = view.getByDisplayValue("新会话");
+    fireEvent.change(input, { target: { value: "第二次失焦" } });
+    fireEvent.blur(input);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(renameSession).toHaveBeenCalledWith("session-1", "第二次失焦");
   });
 
   it("creates a session from the workspace rail without closing it", async () => {
