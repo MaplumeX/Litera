@@ -734,3 +734,24 @@ Fixed the chat thinking-level select showing a translucent white patch in dark m
 ### Status
 
 [OK] **Completed**
+
+
+## Session 120: 重设计会话标题重命名交互
+
+**Date**: 2026-09-09
+**Task**: 重设计会话标题重命名交互
+**Branch**: `feat/redesign-session-title-rename`
+
+### Summary
+
+会话列表重命名编辑态移除保存/取消按钮，改为 Enter 保存 / Esc 取消 / blur 自动保存（空标题视为取消）；输入框加 min-w-0 修复长标题溢出；renameCommittedRef 防止 Esc 后 blur 双保存，并在编辑态变化时复位（React 卸载不触发 blur）。check 阶段发现并修复 ref 残留 bug，补回归测试，25/25 通过。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `cf31cd5` | (see git log) |
+
+### Status
+
+[OK] **Completed**

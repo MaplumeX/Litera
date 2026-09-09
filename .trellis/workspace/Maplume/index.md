@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-2.md`
-- **Total Sessions**: 119
-- **Last Active**: 2026-09-08
+- **Total Sessions**: 120
+- **Last Active**: 2026-09-09
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-2.md` | ~726 | Active |
+| `journal-2.md` | ~757 | Active |
 | `journal-1.md` | ~1996 | Archived |
 <!-- @@@/auto:active-documents -->
 
@@ -30,6 +30,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 120 | 2026-09-09 | 重设计会话标题重命名交互 | `cf31cd5` | `feat/redesign-session-title-rename` |
 <<<<<<< HEAD
 | 119 | 2026-09-08 | Move regenerate button next to copy button | `9ffc152` | `feat/move-regenerate-next-to-copy` |
 | 118 | 2026-09-08 | Fix thinking-level trigger dark-mode background | `a486fa2` | `emdash/solid-dingos-retire-8o82g` |
