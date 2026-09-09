@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.14] - 2026-09-09
+
+### Added
+
+- **重新生成按钮移位**：Regenerate 按钮从消息列表底部居中位置移到最后一条可见助手消息的操作行，与 Copy 按钮并排；无文本块的助手消息回退到自身操作行，末尾为用户消息时保留底部按钮，保证随时可重发。
+
+### Changed
+
+- **会话标题重命名交互精简**：移除保存/取消文本按钮，改为 Enter 保存、Escape 取消、失焦自动保存（空标题取消，同 Enter）；修复输入溢出问题。
+
+### Fixed
+
+- **暗色模式下思考级别触发器背景**：thinking-level 按钮的 `SelectTrigger` 基础样式中的 `dark:bg-input/30` 无法被 `bg-transparent` 覆盖，现添加 `dark:bg-transparent` 使其保持无边框幽灵样式。
+
 ## [0.2.13] - 2026-09-07
 
 ### Added
