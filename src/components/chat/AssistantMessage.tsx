@@ -121,11 +121,10 @@ function TextBlock({
           <button
             type="button"
             onClick={onRegenerate}
-            className="flex items-center gap-1 text-xs text-muted-foreground/50 transition-colors hover:text-muted-foreground"
+            className="text-xs text-muted-foreground/50 transition-colors hover:text-muted-foreground"
             aria-label={t("chat.regenerate")}
           >
             <RefreshCw className="h-3.5 w-3.5" />
-            <span>{t("chat.regenerate")}</span>
           </button>
         )}
       </div>
@@ -181,11 +180,10 @@ export function AssistantMessage({ message, streaming = false, onRegenerate }: A
             <button
               type="button"
               onClick={onRegenerate}
-              className="flex items-center gap-1 text-xs text-muted-foreground/50 transition-colors hover:text-muted-foreground"
+              className="text-xs text-muted-foreground/50 transition-colors hover:text-muted-foreground"
               aria-label={t("chat.regenerate")}
             >
               <RefreshCw className="h-3.5 w-3.5" />
-              <span>{t("chat.regenerate")}</span>
             </button>
           </div>
         )}

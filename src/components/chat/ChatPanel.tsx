@@ -620,11 +620,10 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                 <button
                   type="button"
                   onClick={() => void handleRegenerate()}
-                  className="flex items-center gap-1 text-xs text-muted-foreground/50 transition-colors hover:text-muted-foreground"
+                  className="text-xs text-muted-foreground/50 transition-colors hover:text-muted-foreground"
                   aria-label={t("chat.regenerate")}
                 >
                   <RefreshCw className="h-3.5 w-3.5" />
-                  <span>{t("chat.regenerate")}</span>
                 </button>
               </div>
             )}
