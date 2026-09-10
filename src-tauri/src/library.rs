@@ -1205,7 +1205,7 @@ impl LibraryStore {
         if let Some(mode) = &last_reader_mode {
             validate_reader_mode(mode)?;
         }
-        if let Some(cfi) = &last_cfi {
+        if let Some(ref cfi) = last_cfi {
             validate_cfi(cfi)?;
         }
 
@@ -1232,8 +1232,13 @@ impl LibraryStore {
         if let Some(layout) = last_layout {
             record.last_layout = Some(layout);
         }
-        if let Some(cfi) = last_cfi {
-            record.last_cfi = Some(cfi);
+        if let Some(ref cfi) = last_cfi {
+            record.last_cfi = Some(cfi.clone());
+        }
+        // Position changes refresh lastOpenedAt so sync can use it as the
+        // position's explicit updatedAt (newest position wins on merge).
+        if last_fraction.is_some() || last_cfi.is_some() {
+            record.last_opened_at = Some(chrono::Utc::now().to_rfc3339());
         }
         self.write_library(&library)
     }

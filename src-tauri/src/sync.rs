@@ -683,3 +683,48 @@ where
         .await
         .map_err(|error| AppError::storage_io(format!("Blocking sync worker failed: {error}")))?
 }
+
+#[cfg(test)]
+mod timestamp_tests {
+    use super::*;
+    use chrono::Utc;
+
+    fn temp_store() -> (tempfile::TempDir, LibraryStore) {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let store = LibraryStore::initialize(directory.path().to_path_buf()).expect("store");
+        (directory, store)
+    }
+
+    #[test]
+    fn reading_state_updates_refresh_the_position_timestamp() {
+        let (_dir, store) = temp_store();
+        let result = store
+            .import_bytes(
+                std::path::Path::new("/tmp/book.epub"),
+                "book.epub".to_string(),
+                b"epub".to_vec(),
+            )
+            .expect("import");
+        store
+            .update_reading_state(
+                &result.book_id,
+                Some(0.3),
+                None,
+                None,
+                None,
+                Some("epubcfi(/3)".into()),
+            )
+            .expect("state");
+
+        let manifest = export_local_manifest(&store, "device-a", &SyncManifestData::default())
+            .expect("export");
+        let book = manifest.books.get(&result.book_id).expect("book");
+        let position = book.position.as_ref().expect("position");
+
+        // The exported updatedAt is a fresh explicit timestamp, not the
+        // import time or an empty string.
+        let updated = chrono::DateTime::parse_from_rfc3339(&position.updated_at)
+            .expect("valid updatedAt");
+        assert!(Utc::now().signed_duration_since(updated).num_seconds() < 60);
+    }
+}
