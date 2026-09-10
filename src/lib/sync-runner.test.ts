@@ -78,6 +78,8 @@ function setupStore(): Store {
         });
       case "sync_apply_merged_manifest":
         return Promise.resolve(null);
+      case "sync_sessions":
+        return Promise.resolve({ uploaded: 0, downloaded: 0 });
       case "sync_upload_manifest": {
         const upload = {
           etag: args?.etag as string,
@@ -113,6 +115,7 @@ describe("runSyncOnce", () => {
       "sync_download_manifest",
       "sync_apply_merged_manifest",
       "sync_upload_manifest",
+      "sync_sessions",
     ]);
     // Both sides' books survive the merge and reach both apply and upload.
     const applied = invokeMock.mock.calls.find(
@@ -140,6 +143,8 @@ describe("runSyncOnce", () => {
           });
         case "sync_apply_merged_manifest":
           return Promise.resolve(null);
+        case "sync_sessions":
+          return Promise.resolve({ uploaded: 0, downloaded: 0 });
         case "sync_upload_manifest": {
           attempts += 1;
           if (attempts === 1) {
@@ -169,6 +174,8 @@ describe("runSyncOnce", () => {
           return Promise.resolve({ etag: "etag-1", manifest: remoteManifest() });
         case "sync_apply_merged_manifest":
           return Promise.resolve(null);
+        case "sync_sessions":
+          return Promise.resolve({ uploaded: 0, downloaded: 0 });
         case "sync_upload_manifest":
           return Promise.reject({
             code: "StorageIo",

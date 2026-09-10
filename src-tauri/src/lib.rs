@@ -116,6 +116,7 @@ pub fn run() {
             sync::sync_upload_book_files,
             sync::sync_download_book_file,
             sync::sync_ensure_cover,
+            sync::sync_sessions,
             sync_config::get_sync_config,
             sync_config::save_sync_config,
             sync_config::test_sync_connection,

@@ -742,6 +742,17 @@ pub struct BookRevisionState {
     pub cover_revision: Option<String>,
 }
 
+/// Session sync bookkeeping: what we last uploaded, and the backend etag we
+/// last saw for the session object.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionRevisionState {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub seen_etag: Option<String>,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SyncState {
@@ -763,6 +774,9 @@ pub struct SyncState {
     /// knows them; drives upload skip and on-demand download addressing.
     #[serde(default)]
     pub book_revisions: std::collections::BTreeMap<String, BookRevisionState>,
+    /// Per-session sync bookkeeping, keyed "<bookId>/<sessionId>".
+    #[serde(default)]
+    pub session_revisions: std::collections::BTreeMap<String, SessionRevisionState>,
     /// Whether the user confirmed the first bulk upload estimate.
     #[serde(default)]
     pub bulk_upload_confirmed: bool,
@@ -1440,6 +1454,7 @@ async fn upload_multipart_attempt(
 
 /// Delete every object stored under a book's file prefix: the 30-day
 /// Tombstone retention has elapsed, so the cloud object set is cleaned up.
+/// Session objects for the book are released by the same rule.
 async fn purge_book_objects(
     object_store: &object_store::aws::AmazonS3,
     book_id: &str,
@@ -1455,7 +1470,7 @@ async fn purge_book_objects(
             .await
             .map_err(map_object_store_error)?;
     }
-    Ok(())
+    purge_session_objects(object_store, book_id).await
 }
 
 fn expired_book_tombstones(state: &SyncState) -> Vec<String> {
@@ -1839,4 +1854,153 @@ mod file_sync_tests {
 
         assert_eq!(expired_book_tombstones(&state), vec!["expired-book"]);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Ticket 06: Session sync — whole-session objects, union merge so diverged
+// branches both survive. API keys never leave the device (auth.json is not
+// part of session files).
+// ---------------------------------------------------------------------------
+
+pub const SESSION_OBJECT_PREFIX: &str = "litera/sessions";
+
+fn session_object_key(book_id: &str, session_id: &str) -> ObjectPath {
+    ObjectPath::from(format!("{SESSION_OBJECT_PREFIX}/{book_id}/{session_id}.jsonl"))
+}
+
+#[derive(Debug, Serialize, Clone, PartialEq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionSyncSummary {
+    pub uploaded: u64,
+    pub downloaded: u64,
+}
+
+/// Upload locally changed sessions, download remote changes, and merge both
+/// sides (entry union by id, both branches kept).
+#[tauri::command]
+pub async fn sync_sessions(app: tauri::AppHandle) -> AppResult<SessionSyncSummary> {
+    use futures::TryStreamExt;
+
+    let root = sync_root(&app)?;
+    let config = crate::sync_config::read_sync_config(&root)?
+        .ok_or_else(|| AppError::invalid_input("Sync is not configured"))?;
+    let object_store = crate::sync_config::build_sync_store(&config)?;
+
+    let state_root = root.clone();
+    let (local_files, mut state) = run_sync_blocking(move || {
+        let store = crate::pi_sessions::PiSessionStore::new(state_root.clone())?;
+        let files = store.list_all_session_files()?;
+        let state = read_sync_state(&state_root)?;
+        Ok((files, state))
+    })
+    .await?;
+
+    let mut summary = SessionSyncSummary::default();
+
+    // 1. Upload sessions whose content changed since the last upload.
+    for file in &local_files {
+        let content = fs::read_to_string(&file.path).map_err(|error| {
+            AppError::storage_io(format!("Failed to read session for upload: {error}"))
+        })?;
+        let hash = crate::library::sha256_hex(content.as_bytes());
+        let key = format!("{}/{}", file.book_id, file.session_id);
+        let entry = state.session_revisions.entry(key).or_default();
+        if entry.content_hash.as_deref() == Some(hash.as_str()) {
+            continue;
+        }
+        let result = object_store
+            .put(
+                &session_object_key(&file.book_id, &file.session_id),
+                PutPayload::from(content.into_bytes()),
+            )
+            .await
+            .map_err(map_object_store_error)?;
+        entry.content_hash = Some(hash);
+        entry.seen_etag = result.e_tag;
+        summary.uploaded += 1;
+    }
+
+    // 2. Download remote sessions we have not yet seen (etag moved or new).
+    let remote_objects: Vec<object_store::ObjectMeta> = object_store
+        .list(Some(&ObjectPath::from(SESSION_OBJECT_PREFIX)))
+        .try_collect()
+        .await
+        .map_err(map_object_store_error)?;
+    for object in remote_objects {
+        let location = object.location.to_string();
+        let Some(rest) = location.strip_prefix(&format!("{SESSION_OBJECT_PREFIX}/")) else {
+            continue;
+        };
+        let Some((book_id, session_file)) = rest.split_once('/') else {
+            continue;
+        };
+        let Some(session_id) = session_file.strip_suffix(".jsonl") else {
+            continue;
+        };
+        if session_id.is_empty()
+            || book_id.is_empty()
+            || book_id.contains("..")
+            || session_id.contains("..")
+        {
+            continue;
+        }
+        let key = format!("{book_id}/{session_id}");
+        let entry = state.session_revisions.entry(key).or_default();
+        if entry.seen_etag.is_some() && entry.seen_etag == object.e_tag {
+            continue;
+        }
+        let result = object_store
+            .get(&object.location)
+            .await
+            .map_err(map_object_store_error)?;
+        let bytes = result
+            .bytes()
+            .await
+            .map_err(map_object_store_error)?;
+        let content = String::from_utf8(bytes.to_vec()).map_err(|_| {
+            AppError::storage_corrupt("Synced session is not valid UTF-8")
+        })?;
+        let merge_root = root.clone();
+        let merge_book_id = book_id.to_string();
+        let merged = run_sync_blocking(move || {
+            let store = crate::pi_sessions::PiSessionStore::new(merge_root)?;
+            store.merge_remote_session(&merge_book_id, &content)
+        })
+        .await?;
+        entry.seen_etag = object.e_tag.clone();
+        entry.content_hash = Some(crate::library::sha256_hex(merged.as_bytes()));
+        summary.downloaded += 1;
+    }
+
+    // 3. Opportunistic cleanup: expired Tombstones release their session
+    // objects alongside their book files.
+    let expired = expired_book_tombstones(&state);
+    for book_id in &expired {
+        let _ = purge_session_objects(&object_store, book_id).await;
+    }
+
+    let write_root = root.clone();
+    run_sync_blocking(move || write_sync_state(&write_root, &state)).await?;
+
+    Ok(summary)
+}
+
+/// Delete every object stored under a book's session prefix: the 30-day
+/// Tombstone retention has elapsed.
+async fn purge_session_objects(
+    object_store: &object_store::aws::AmazonS3,
+    book_id: &str,
+) -> AppResult<()> {
+    use futures::TryStreamExt;
+
+    let prefix = ObjectPath::from(format!("{SESSION_OBJECT_PREFIX}/{book_id}"));
+    let stream = object_store.list(Some(&prefix));
+    let objects: Vec<_> = stream.try_collect().await.map_err(map_object_store_error)?;
+    for object in objects {
+        object_store
+            .delete(&object.location)
+            .await
+            .map_err(map_object_store_error)?;
+    }
+    Ok(())
 }

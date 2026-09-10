@@ -52,6 +52,10 @@ export async function runSyncOnce(
         manifest: merged,
         etag: downloaded.etag,
       });
+      // Sessions sync after the Manifest converges: upload locally changed
+      // session files, download and merge (union, both branches kept) remote
+      // ones.
+      await invoke("sync_sessions");
       return;
     } catch (error) {
       if (attempt < MAX_SYNC_ATTEMPTS - 1 && isPreconditionFailure(error)) {
