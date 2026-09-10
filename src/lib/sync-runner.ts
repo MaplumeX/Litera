@@ -22,11 +22,18 @@ function isPreconditionFailure(error: unknown): boolean {
 }
 
 /**
- * One full sync pass: export local → download remote → merge (pure) →
- * apply merged locally → upload merged with `If-Match` on the downloaded
- * etag, retrying the download+merge+upload loop on precondition conflicts.
+ * One full sync pass: optionally upload pending book files first (so the
+ * Manifest carries their fresh revisions), then export local → download
+ * remote → merge (pure) → apply merged locally → upload merged with `If-Match`
+ * on the downloaded etag, retrying the download+merge+upload loop on
+ * precondition conflicts.
  */
-export async function runSyncOnce(): Promise<void> {
+export async function runSyncOnce(
+  options: { uploadFiles?: boolean } = {},
+): Promise<void> {
+  if (options.uploadFiles) {
+    await invoke("sync_upload_book_files");
+  }
   for (let attempt = 0; attempt < MAX_SYNC_ATTEMPTS; attempt += 1) {
     const local = await invoke<SyncManifest>("sync_export_local_manifest");
     const downloaded = await invoke<DownloadedManifest>("sync_download_manifest");

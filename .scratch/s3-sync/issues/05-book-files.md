@@ -6,11 +6,20 @@
 
 **Status:** ready-for-agent
 
-- [ ] First-enable flow shows an upload-size estimate before bulk-uploading the existing library; upload starts only after confirmation
-- [ ] New imports upload automatically after Sync is enabled
-- [ ] Book uploads use multipart with resume for large files
-- [ ] New device: shelf and reading positions render immediately from the Manifest without waiting for files
-- [ ] Covers download on demand when displayed; EPUB files download on demand when a book is opened
-- [ ] Downloaded books are cached locally and re-openable offline
-- [ ] Book cards show a "not cached" state for books whose file isn't local, with localized copy
-- [ ] App-level tests cover the "not cached" card state and the estimate confirmation flow
+- [x] First-enable flow shows an upload-size estimate before bulk-uploading the existing library; upload starts only after confirmation
+- [x] New imports upload automatically after Sync is enabled
+- [x] Book uploads use multipart with resume for large files
+- [x] New device: shelf and reading positions render immediately from the Manifest without waiting for files
+- [x] Covers download on demand when displayed; EPUB files download on demand when a book is opened
+- [x] Downloaded books are cached locally and re-openable offline
+- [x] Book cards show a "not cached" state for books whose file isn't local, with localized copy
+- [x] App-level tests cover the "not cached" card state and the estimate confirmation flow
+
+## Comments
+
+- Object layout: `litera/files/<bookId>/<revision>/book.epub` and `.../cover.jpg`, revision = content hash, referenced from the Manifest (`fileRevision`/`coverRevision`), recorded locally in sync-state `book_revisions`.
+- "Multipart with resume": EPUBs upload via object_store multipart in fixed 8 MiB parts with bounded whole-upload retries (object_store exposes no cross-process part resume; retries keep a flaky connection eventually converging, and revision-addressed keys make re-uploads idempotent).
+- First-enable flow: `sync_estimate_upload` → estimate panel in Settings → `sync_confirm_bulk_upload` (persisted flag) → `runSyncOnce({uploadFiles:true})`. After confirmation new imports upload automatically.
+- On-demand download: `sync_download_book_file` is invoked before every open (no-op for cached books); `sync_ensure_cover` is invoked by the shelf for visible uncached books. `list_books` now merges placeholders (`cached: false`), so the shelf renders instantly from the Manifest; covers/EPUBs cache locally under `books/<id>/`.
+- Expired Tombstones release their cloud objects (opportunistic prefix purge during file upload).
+- Tests: Rust (`file_sync_tests`, placeholder promotion, estimate, purge selection, key layout), app-level (BookCard not-cached badge in grid+list, LibraryView cover-on-demand, App open-uncached-book download order, SyncSettingsForm estimate confirmation).

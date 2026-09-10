@@ -42,6 +42,8 @@ export interface BookRecord {
   contentHash?: string;
   lastReaderMode?: "reader" | "agent";
   lastLayout?: ReaderLayout;
+  /** Derived: false when the EPUB is not on this device (sync placeholder). */
+  cached?: boolean;
 }
 
 export type ImportStatus = "new" | "overwrite" | "duplicate";

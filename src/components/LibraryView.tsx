@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import type { BookRecord } from "@/types/library";
@@ -104,6 +104,40 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
   useEffect(() => {
     void refreshBooks();
   }, [refreshBooks]);
+
+  // Synced books whose EPUB has not downloaded yet: fetch their cover on
+  // demand the first time the shelf renders them, so a new device's shelf
+  // looks right without downloading whole books. Attempted once per book
+  // per session; failures are silent (sync may not be configured).
+  const coverAttemptsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const missing = books.filter(
+      (book) =>
+        book.cached === false &&
+        !book.coverPath &&
+        !coverAttemptsRef.current.has(book.id),
+    );
+    if (missing.length === 0) return;
+    for (const book of missing) coverAttemptsRef.current.add(book.id);
+    let cancelled = false;
+    void (async () => {
+      let downloaded = false;
+      for (const book of missing) {
+        try {
+          const fetched = await invoke<boolean>("sync_ensure_cover", {
+            bookId: book.id,
+          });
+          if (fetched) downloaded = true;
+        } catch {
+          // No cover on the backend — the initial-letter fallback renders.
+        }
+      }
+      if (!cancelled && downloaded) await refreshBooks();
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [books, refreshBooks]);
 
   const handleImport = useCallback(async () => {
     if (importingRef.current) return;

@@ -18,6 +18,12 @@ export interface SyncConfigPublic {
   enabled: boolean;
 }
 
+interface UploadEstimate {
+  bytes: number;
+  books: number;
+  confirmed: boolean;
+}
+
 interface SyncBackendConfigDraft {
   schemaVersion: number;
   endpoint: string;
@@ -54,6 +60,7 @@ export function SyncSettingsForm() {
   const [syncing, setSyncing] = useState(false);
   const [syncedAt, setSyncedAt] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [estimate, setEstimate] = useState<UploadEstimate | null>(null);
 
   useEffect(() => {
     let disposed = false;
@@ -121,14 +128,49 @@ export function SyncSettingsForm() {
     setSyncing(true);
     setSyncedAt(false);
     setSyncError(null);
+    setEstimate(null);
     try {
-      await runSyncOnce();
+      // The first bulk upload of an existing library starts only after the
+      // user sees and confirms the upload-size estimate.
+      const pending = await invoke<UploadEstimate>("sync_estimate_upload");
+      if (pending.books > 0 && !pending.confirmed) {
+        setEstimate(pending);
+        return;
+      }
+      await runSyncOnce({ uploadFiles: true });
       setSyncedAt(true);
     } catch (error) {
       setSyncError(invokeErrorMessage(error));
     } finally {
       setSyncing(false);
     }
+  }
+
+  async function confirmUpload() {
+    setSyncing(true);
+    setSyncError(null);
+    setEstimate(null);
+    try {
+      await invoke("sync_confirm_bulk_upload");
+      await runSyncOnce({ uploadFiles: true });
+      setSyncedAt(true);
+    } catch (error) {
+      setSyncError(invokeErrorMessage(error));
+    } finally {
+      setSyncing(false);
+    }
+  }
+
+  function formatBytes(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`;
+    const units = ["KB", "MB", "GB"];
+    let value = bytes / 1024;
+    let unit = 0;
+    while (value >= 1024 && unit < units.length - 1) {
+      value /= 1024;
+      unit += 1;
+    }
+    return `${value >= 10 ? Math.round(value) : Math.round(value * 10) / 10} ${units[unit]}`;
   }
 
   const fieldClass = "h-8 w-full";
@@ -291,6 +333,32 @@ export function SyncSettingsForm() {
         <p className="text-xs text-green-600 dark:text-green-400">
           {t("settings.sync.test.success")}
         </p>
+      )}
+      {estimate && (
+        <div className="space-y-2 rounded-md border border-border p-3">
+          <div className="text-xs font-medium">
+            {t("settings.sync.estimate.title")}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {t("settings.sync.estimate.body", {
+              size: formatBytes(estimate.bytes),
+              count: estimate.books,
+            })}
+          </p>
+          <div className="flex items-center gap-2">
+            <Button type="button" size="sm" onClick={() => void confirmUpload()}>
+              {t("settings.sync.estimate.confirm")}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => setEstimate(null)}
+            >
+              {t("settings.sync.estimate.cancel")}
+            </Button>
+          </div>
+        </div>
       )}
       {testError && <p className="text-xs text-destructive">{testError}</p>}
       {saveError && <p className="text-xs text-destructive">{saveError}</p>}

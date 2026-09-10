@@ -219,18 +219,17 @@ fn validate_sync_id(id: &str) -> AppResult<()> {
 /// caller, which persists its own sync state.
 pub fn export_local_manifest(
     store: &LibraryStore,
-    device_id: &str,
-    local: &SyncManifestData,
-    annotations_updated_at: &std::collections::BTreeMap<String, String>,
+    state: &SyncState,
 ) -> AppResult<SyncManifestData> {
+    let device_id = &state.device_id;
     let library = store.read_library_public()?;
 
     let mut manifest = SyncManifestData {
         schema_version: 1,
         books: std::collections::BTreeMap::new(),
-        tombstones: local.tombstones.clone(),
-        preferences: local.preferences.clone(),
-        provider: local.provider.clone(),
+        tombstones: state.tombstones.clone(),
+        preferences: state.preferences.clone(),
+        provider: state.provider.clone(),
     };
 
     for book in &library.books {
@@ -258,19 +257,20 @@ pub fn export_local_manifest(
             Ok(annotations) => annotations,
             Err(_) => AnnotationsFile::empty(),
         };
-        let previous = local.books.get(&book.id);
+        let revisions = state.book_revisions.get(&book.id);
         manifest.books.insert(
             book.id.clone(),
             SyncedBookData {
                 metadata,
                 position,
                 annotations,
-                annotations_updated_at: annotations_updated_at
+                annotations_updated_at: state
+                    .annotations_updated_at
                     .get(&book.id)
                     .cloned()
                     .unwrap_or_default(),
-                file_revision: previous.and_then(|book| book.file_revision.clone()),
-                cover_revision: previous.and_then(|book| book.cover_revision.clone()),
+                file_revision: revisions.and_then(|entry| entry.file_revision.clone()),
+                cover_revision: revisions.and_then(|entry| entry.cover_revision.clone()),
             },
         );
     }
@@ -543,8 +543,14 @@ mod tests {
             .expect("state");
         let local = SyncManifestData::default();
 
-        let manifest =
-            export_local_manifest(&store, "device-a", &local, &Default::default()).expect("export");
+        let state = SyncState {
+            device_id: "device-a".to_string(),
+            tombstones: local.tombstones.clone(),
+            preferences: local.preferences.clone(),
+            provider: local.provider.clone(),
+            ..SyncState::default()
+        };
+        let manifest = export_local_manifest(&store, &state).expect("export");
 
         let book = manifest.books.get(&result.book_id).expect("book present");
         let position = book.position.as_ref().expect("position");
@@ -724,6 +730,18 @@ fn sync_state_path(root: &Path) -> PathBuf {
     root.join("sync-state.json")
 }
 
+/**
+ * Revisions of a book's file objects as last seen in the Manifest.
+ */
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct BookRevisionState {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_revision: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cover_revision: Option<String>,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SyncState {
@@ -741,6 +759,13 @@ pub struct SyncState {
     /// file mtimes, so the merge engine can order annotation activity.
     #[serde(default)]
     pub annotations_updated_at: std::collections::BTreeMap<String, String>,
+    /// Revisions (content hashes) of book EPUBs and covers as the Manifest
+    /// knows them; drives upload skip and on-demand download addressing.
+    #[serde(default)]
+    pub book_revisions: std::collections::BTreeMap<String, BookRevisionState>,
+    /// Whether the user confirmed the first bulk upload estimate.
+    #[serde(default)]
+    pub bulk_upload_confirmed: bool,
     /// The etag of the remote manifest we last saw (blank: never synced).
     #[serde(default)]
     pub last_etag: String,
@@ -784,19 +809,7 @@ pub async fn sync_export_local_manifest(
     let root = sync_root(&app)?;
     run_sync_blocking(move || {
         let state = read_sync_state(&root)?;
-        let local = SyncManifestData {
-            schema_version: 1,
-            books: Default::default(),
-            tombstones: state.tombstones.clone(),
-            preferences: state.preferences.clone(),
-            provider: state.provider.clone(),
-        };
-        let manifest = export_local_manifest(
-            &store,
-            &state.device_id,
-            &local,
-            &state.annotations_updated_at,
-        )?;
+        let manifest = export_local_manifest(&store, &state)?;
         serde_json::to_value(manifest)
             .map_err(|error| AppError::storage_io(format!("Failed to serialize manifest: {error}")))
     })
@@ -837,6 +850,13 @@ pub async fn sync_apply_merged_manifest(
             state
                 .annotations_updated_at
                 .insert(book_id.clone(), synced.annotations_updated_at.clone());
+            let entry = state.book_revisions.entry(book_id.clone()).or_default();
+            if let Some(revision) = &synced.file_revision {
+                entry.file_revision = Some(revision.clone());
+            }
+            if let Some(revision) = &synced.cover_revision {
+                entry.cover_revision = Some(revision.clone());
+            }
         }
         write_sync_state(&root, &state)
     })
@@ -910,9 +930,11 @@ mod timestamp_tests {
             )
             .expect("state");
 
-        let manifest =
-            export_local_manifest(&store, "device-a", &SyncManifestData::default(), &Default::default())
-                .expect("export");
+        let state = SyncState {
+            device_id: "device-a".to_string(),
+            ..SyncState::default()
+        };
+        let manifest = export_local_manifest(&store, &state).expect("export");
         let book = manifest.books.get(&result.book_id).expect("book");
         let position = book.position.as_ref().expect("position");
 
@@ -1263,5 +1285,558 @@ mod tombstone_tests {
 
         let library = store.read_library_public().expect("library");
         assert!(library.books.iter().any(|book| book.id == result.book_id));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Ticket 05: EPUB and cover objects — upload with confirmation, on-demand
+// download, and opportunistic purge of expired Tombstones' objects.
+// ---------------------------------------------------------------------------
+
+pub const FILE_OBJECT_PREFIX: &str = "litera/files";
+/// Fixed part size for multipart uploads: comfortably above the 5 MiB
+/// minimum every common S3-compatible backend enforces for non-final parts.
+const UPLOAD_PART_BYTES: usize = 8 * 1024 * 1024;
+/// Bounded retries so a large book over a flaky connection eventually makes
+/// it; each attempt restarts the multipart upload (parts are re-sent).
+const MAX_UPLOAD_ATTEMPTS: usize = 3;
+
+fn epub_object_key(book_id: &str, revision: &str) -> ObjectPath {
+    ObjectPath::from(format!("{FILE_OBJECT_PREFIX}/{book_id}/{revision}/book.epub"))
+}
+
+fn cover_object_key(book_id: &str, revision: &str) -> ObjectPath {
+    ObjectPath::from(format!("{FILE_OBJECT_PREFIX}/{book_id}/{revision}/cover.jpg"))
+}
+
+/// Upload estimate for the books not yet present on the Sync Backend.
+#[derive(Debug, Serialize, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct UploadEstimate {
+    pub bytes: u64,
+    pub books: u64,
+    pub confirmed: bool,
+}
+
+#[derive(Debug, Serialize, Clone, PartialEq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct UploadSummary {
+    pub books: u64,
+    pub covers: u64,
+    pub bytes: u64,
+}
+
+struct PendingUpload {
+    book_id: String,
+    epub_path: PathBuf,
+    revision: String,
+    cover_path: Option<PathBuf>,
+}
+
+fn pending_uploads(store: &LibraryStore, state: &SyncState) -> AppResult<Vec<PendingUpload>> {
+    let library = store.read_library_public()?;
+    let mut pending = Vec::new();
+    for book in &library.books {
+        let (epub_path, cover_path) = store.book_files(&book.id)?;
+        if !epub_path.is_file() {
+            continue;
+        }
+        let recorded = state.book_revisions.get(&book.id);
+        let revision = book
+            .content_hash
+            .clone()
+            .or_else(|| fs::read(&epub_path).ok().map(|bytes| crate::library::sha256_hex(&bytes)))
+            .unwrap_or_default();
+        if recorded.and_then(|entry| entry.file_revision.as_deref()) == Some(revision.as_str()) {
+            continue;
+        }
+        pending.push(PendingUpload {
+            book_id: book.id.clone(),
+            epub_path,
+            revision,
+            cover_path: if cover_path.is_file() { Some(cover_path) } else { None },
+        });
+    }
+    Ok(pending)
+}
+
+pub fn estimate_pending_upload(store: &LibraryStore, state: &SyncState) -> AppResult<UploadEstimate> {
+    let pending = pending_uploads(store, state)?;
+    let mut bytes = 0u64;
+    let mut books = 0u64;
+    for upload in &pending {
+        books += 1;
+        bytes += fs::metadata(&upload.epub_path)
+            .map(|meta| meta.len())
+            .unwrap_or(0);
+        if let Some(cover) = &upload.cover_path {
+            bytes += fs::metadata(cover).map(|meta| meta.len()).unwrap_or(0);
+        }
+    }
+    Ok(UploadEstimate {
+        bytes,
+        books,
+        confirmed: state.bulk_upload_confirmed,
+    })
+}
+
+async fn put_epub_multipart(
+    object_store: &object_store::aws::AmazonS3,
+    path: &ObjectPath,
+    file: &Path,
+) -> AppResult<()> {
+    let mut last_error = None;
+    for _ in 0..MAX_UPLOAD_ATTEMPTS {
+        match upload_multipart_attempt(object_store, path, file).await {
+            Ok(()) => return Ok(()),
+            Err(error) => last_error = Some(error),
+        }
+    }
+    Err(last_error.expect("at least one upload attempt"))
+}
+
+async fn upload_multipart_attempt(
+    object_store: &object_store::aws::AmazonS3,
+    path: &ObjectPath,
+    file: &Path,
+) -> AppResult<()> {
+    use std::io::Read;
+
+    let mut upload = object_store
+        .put_multipart(path)
+        .await
+        .map_err(map_object_store_error)?;
+    let mut file = fs::File::open(file)
+        .map_err(|error| AppError::storage_io(format!("Failed to open EPUB for upload: {error}")))?;
+    let mut buffer = vec![0u8; UPLOAD_PART_BYTES];
+    loop {
+        let mut filled = 0;
+        while filled < buffer.len() {
+            let read = file
+                .read(&mut buffer[filled..])
+                .map_err(|error| AppError::storage_io(format!("Failed to read EPUB: {error}")))?;
+            if read == 0 {
+                break;
+            }
+            filled += read;
+        }
+        if filled == 0 {
+            break;
+        }
+        upload
+            .put_part(PutPayload::from(buffer[..filled].to_vec()))
+            .await
+            .map_err(map_object_store_error)?;
+        if filled < buffer.len() {
+            break;
+        }
+    }
+    if let Err(error) = upload.complete().await {
+        let _ = upload.abort().await;
+        return Err(map_object_store_error(error));
+    }
+    Ok(())
+}
+
+/// Delete every object stored under a book's file prefix: the 30-day
+/// Tombstone retention has elapsed, so the cloud object set is cleaned up.
+async fn purge_book_objects(
+    object_store: &object_store::aws::AmazonS3,
+    book_id: &str,
+) -> AppResult<()> {
+    use futures::TryStreamExt;
+
+    let prefix = ObjectPath::from(format!("{FILE_OBJECT_PREFIX}/{book_id}"));
+    let stream = object_store.list(Some(&prefix));
+    let objects: Vec<_> = stream.try_collect().await.map_err(map_object_store_error)?;
+    for object in objects {
+        object_store
+            .delete(&object.location)
+            .await
+            .map_err(map_object_store_error)?;
+    }
+    Ok(())
+}
+
+fn expired_book_tombstones(state: &SyncState) -> Vec<String> {
+    state
+        .tombstones
+        .iter()
+        .filter(|tombstone| tombstone.kind == "book" && !is_tombstone_active(tombstone))
+        .map(|tombstone| tombstone.book_id.clone())
+        .collect()
+}
+
+#[tauri::command]
+pub async fn sync_estimate_upload(
+    app: tauri::AppHandle,
+    store: tauri::State<'_, LibraryStore>,
+) -> AppResult<UploadEstimate> {
+    let store = store.inner().clone();
+    let root = sync_root(&app)?;
+    run_sync_blocking(move || {
+        let state = read_sync_state(&root)?;
+        estimate_pending_upload(&store, &state)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn sync_confirm_bulk_upload(app: tauri::AppHandle) -> AppResult<()> {
+    let root = sync_root(&app)?;
+    run_sync_blocking(move || {
+        let mut state = read_sync_state(&root)?;
+        state.bulk_upload_confirmed = true;
+        write_sync_state(&root, &state)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn sync_upload_book_files(
+    app: tauri::AppHandle,
+    store: tauri::State<'_, LibraryStore>,
+) -> AppResult<UploadSummary> {
+    let root = sync_root(&app)?;
+    let config = crate::sync_config::read_sync_config(&root)?
+        .ok_or_else(|| AppError::invalid_input("Sync is not configured"))?;
+    let store = store.inner().clone();
+    let state_root = root.clone();
+    let pending = run_sync_blocking(move || {
+        let state = read_sync_state(&state_root)?;
+        let pending = pending_uploads(&store, &state)?;
+        // The first bulk upload of an existing library happens only after the
+        // user confirmed the estimate; afterwards new imports flow automatically.
+        if !state.bulk_upload_confirmed && !pending.is_empty() {
+            return Err(AppError::invalid_input(
+                "Confirm the upload estimate before uploading the library",
+            ));
+        }
+        Ok(pending)
+    })
+    .await?;
+    if pending.is_empty() {
+        return Ok(UploadSummary::default());
+    }
+
+    let object_store = crate::sync_config::build_sync_store(&config)?;
+    let mut summary = UploadSummary::default();
+    let mut revisions: std::collections::BTreeMap<String, BookRevisionState> =
+        std::collections::BTreeMap::new();
+    for upload in pending {
+        put_epub_multipart(&object_store, &epub_object_key(&upload.book_id, &upload.revision), &upload.epub_path)
+            .await?;
+        summary.books += 1;
+        summary.bytes += fs::metadata(&upload.epub_path)
+            .map(|meta| meta.len())
+            .unwrap_or(0);
+        let entry = revisions
+            .entry(upload.book_id.clone())
+            .or_default();
+        entry.file_revision = Some(upload.revision.clone());
+        if let Some(cover_path) = upload.cover_path {
+            let bytes = fs::read(&cover_path).map_err(|error| {
+                AppError::storage_io(format!("Failed to read cover for upload: {error}"))
+            })?;
+            summary.bytes += bytes.len() as u64;
+            let revision = crate::library::sha256_hex(&bytes);
+            object_store
+                .put(&cover_object_key(&upload.book_id, &revision), PutPayload::from(bytes))
+                .await
+                .map_err(map_object_store_error)?;
+            entry.cover_revision = Some(revision);
+            summary.covers += 1;
+        }
+    }
+
+    // Opportunistic cleanup: expired Tombstones release their objects.
+    let root_for_state = root.clone();
+    let expired = run_sync_blocking(move || {
+        let state = read_sync_state(&root_for_state)?;
+        Ok(expired_book_tombstones(&state))
+    })
+    .await?;
+    for book_id in expired {
+        let _ = purge_book_objects(&object_store, &book_id).await;
+    }
+
+    let root_for_write = root.clone();
+    run_sync_blocking(move || {
+        let mut state = read_sync_state(&root_for_write)?;
+        for (book_id, entry) in revisions {
+            state.book_revisions.insert(book_id, entry);
+        }
+        write_sync_state(&root_for_write, &state)
+    })
+    .await?;
+
+    Ok(summary)
+}
+
+#[tauri::command]
+pub async fn sync_download_book_file(
+    app: tauri::AppHandle,
+    store: tauri::State<'_, LibraryStore>,
+    book_id: String,
+) -> AppResult<()> {
+    // A book that is already local needs nothing — callers invoke this on
+    // every open, and for cached books it must stay a cheap no-op.
+    let store = store.inner().clone();
+    let already_local = run_sync_blocking({
+        let store = store.clone();
+        let book_id = book_id.clone();
+        move || {
+            Ok(store
+                .read_library_public()?
+                .books
+                .iter()
+                .any(|book| book.id == book_id))
+        }
+    })
+    .await?;
+    if already_local {
+        return Ok(());
+    }
+
+    let root = sync_root(&app)?;
+    let config = crate::sync_config::read_sync_config(&root)?
+        .ok_or_else(|| AppError::invalid_input("Sync is not configured"))?;
+    let state = read_sync_state(&root)?;
+    let revision = state
+        .book_revisions
+        .get(&book_id)
+        .and_then(|entry| entry.file_revision.clone())
+        .ok_or_else(|| {
+            AppError::invalid_input("Book file is not available on the sync backend")
+        })?;
+
+    let object_store = crate::sync_config::build_sync_store(&config)?;
+    let result = object_store
+        .get(&epub_object_key(&book_id, &revision))
+        .await
+        .map_err(map_object_store_error)?;
+    let bytes = result
+        .bytes()
+        .await
+        .map_err(map_object_store_error)?;
+
+    run_sync_blocking(move || store.install_synced_book(&book_id, bytes.to_vec())).await
+}
+
+/// Download the cover for a book on demand. Returns whether a cover was
+/// actually downloaded (false when the cover is already local or the Sync
+/// Backend has none).
+#[tauri::command]
+pub async fn sync_ensure_cover(
+    app: tauri::AppHandle,
+    store: tauri::State<'_, LibraryStore>,
+    book_id: String,
+) -> AppResult<bool> {
+    let store = store.inner().clone();
+    if store.has_local_cover(&book_id) {
+        return Ok(false);
+    }
+    let root = sync_root(&app)?;
+    let config = crate::sync_config::read_sync_config(&root)?
+        .ok_or_else(|| AppError::invalid_input("Sync is not configured"))?;
+    let state = run_sync_blocking({
+        let root = root.clone();
+        move || read_sync_state(&root)
+    })
+    .await?;
+    let revision = state
+        .book_revisions
+        .get(&book_id)
+        .and_then(|entry| entry.cover_revision.clone())
+        .ok_or_else(|| {
+            AppError::invalid_input("Cover is not available on the sync backend")
+        })?;
+
+    let object_store = crate::sync_config::build_sync_store(&config)?;
+    let result = object_store
+        .get(&cover_object_key(&book_id, &revision))
+        .await
+        .map_err(map_object_store_error)?;
+    let bytes = result
+        .bytes()
+        .await
+        .map_err(map_object_store_error)?;
+
+    run_sync_blocking(move || store.install_synced_cover(&book_id, &bytes)).await?;
+    Ok(true)
+}
+
+#[cfg(test)]
+mod file_sync_tests {
+    use super::*;
+
+    fn temp_store() -> (tempfile::TempDir, LibraryStore) {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let store = LibraryStore::initialize(directory.path().to_path_buf()).expect("store");
+        (directory, store)
+    }
+
+    fn imported_book(store: &LibraryStore) -> String {
+        let result = store
+            .import_bytes(
+                std::path::Path::new("/tmp/book.epub"),
+                "book.epub".to_string(),
+                b"epub-bytes".to_vec(),
+            )
+            .expect("import");
+        result.book_id
+    }
+
+    #[test]
+    fn object_keys_are_namespaced_by_book_and_revision() {
+        assert_eq!(
+            epub_object_key("book-1", "abc123").to_string(),
+            "litera/files/book-1/abc123/book.epub"
+        );
+        assert_eq!(
+            cover_object_key("book-1", "def456").to_string(),
+            "litera/files/book-1/def456/cover.jpg"
+        );
+    }
+
+    #[test]
+    fn estimate_counts_books_without_a_recorded_revision() {
+        let (_dir, store) = temp_store();
+        let book_id = imported_book(&store);
+        let state = SyncState::default();
+
+        let estimate = estimate_pending_upload(&store, &state).expect("estimate");
+        assert_eq!(estimate.books, 1);
+        assert_eq!(estimate.bytes, b"epub-bytes".len() as u64);
+        assert!(!estimate.confirmed);
+
+        // After the revision is recorded (uploaded), the estimate drops to zero.
+        let state = SyncState {
+            book_revisions: [(
+                book_id.clone(),
+                BookRevisionState {
+                    file_revision: store
+                        .read_library_public()
+                        .expect("library")
+                        .books
+                        .iter()
+                        .find(|book| book.id == book_id)
+                        .and_then(|book| book.content_hash.clone()),
+                    cover_revision: None,
+                },
+            )]
+            .into_iter()
+            .collect(),
+            bulk_upload_confirmed: true,
+            ..SyncState::default()
+        };
+        let estimate = estimate_pending_upload(&store, &state).expect("estimate");
+        assert_eq!(estimate.books, 0);
+        assert_eq!(estimate.bytes, 0);
+        assert!(estimate.confirmed);
+    }
+
+    #[test]
+    fn export_carries_recorded_file_revisions() {
+        let (_dir, store) = temp_store();
+        let book_id = imported_book(&store);
+        let state = SyncState {
+            device_id: "device-a".to_string(),
+            book_revisions: [(
+                book_id.clone(),
+                BookRevisionState {
+                    file_revision: Some("rev-1".to_string()),
+                    cover_revision: Some("cover-1".to_string()),
+                },
+            )]
+            .into_iter()
+            .collect(),
+            ..SyncState::default()
+        };
+
+        let manifest = export_local_manifest(&store, &state).expect("export");
+        let book = manifest.books.get(&book_id).expect("book");
+        assert_eq!(book.file_revision.as_deref(), Some("rev-1"));
+        assert_eq!(book.cover_revision.as_deref(), Some("cover-1"));
+    }
+
+    #[test]
+    fn list_books_renders_placeholders_as_uncached_and_promotes_on_install() {
+        let (_dir, store) = temp_store();
+        store
+            .save_placeholder("remotebook1", "Remote Book", "Author", Some(0.25), None)
+            .expect("placeholder");
+
+        let books = store.list_books().expect("list");
+        let placeholder = books
+            .iter()
+            .find(|book| book.id == "remotebook1")
+            .expect("placeholder listed");
+        assert!(!placeholder.cached);
+        assert_eq!(placeholder.cover_path, "");
+
+        store
+            .install_synced_book("remotebook1", b"epub-bytes".to_vec())
+            .expect("install");
+
+        let books = store.list_books().expect("list");
+        let promoted = books
+            .iter()
+            .find(|book| book.id == "remotebook1")
+            .expect("promoted book");
+        assert!(promoted.cached);
+        assert_eq!(promoted.title, "Remote Book");
+        assert_eq!(promoted.author, "Author");
+        assert_eq!(promoted.last_fraction, Some(0.25));
+        let expected_revision = crate::library::sha256_hex(b"epub-bytes");
+        assert_eq!(promoted.content_hash.as_deref(), Some(expected_revision.as_str()));
+        assert!(promoted.content_version.is_some());
+        // Opening works without any further download.
+        assert!(store
+            .book_files("remotebook1")
+            .expect("files")
+            .0
+            .is_file());
+    }
+
+    #[test]
+    fn installing_a_cover_backfills_the_record_cover_path() {
+        let (_dir, store) = temp_store();
+        let book_id = imported_book(&store);
+        assert!(!store.has_local_cover(&book_id));
+
+        store
+            .install_synced_cover(&book_id, b"jpeg-bytes")
+            .expect("cover");
+
+        assert!(store.has_local_cover(&book_id));
+        let books = store.list_books().expect("list");
+        let record = books.iter().find(|book| book.id == book_id).expect("book");
+        assert!(record.cover_path.ends_with("cover.jpg"));
+    }
+
+    #[test]
+    fn expired_tombstones_select_their_book_objects_for_purge() {
+        let state = SyncState {
+            tombstones: vec![
+                SyncTombstoneData {
+                    kind: "book".to_string(),
+                    book_id: "expired-book".to_string(),
+                    annotation_id: None,
+                    device_id: "device-a".to_string(),
+                    deleted_at: "2020-01-01T00:00:00Z".to_string(),
+                },
+                SyncTombstoneData {
+                    kind: "book".to_string(),
+                    book_id: "fresh-book".to_string(),
+                    annotation_id: None,
+                    device_id: "device-a".to_string(),
+                    deleted_at: chrono::Utc::now().to_rfc3339(),
+                },
+            ],
+            ..SyncState::default()
+        };
+
+        assert_eq!(expired_book_tombstones(&state), vec!["expired-book"]);
     }
 }

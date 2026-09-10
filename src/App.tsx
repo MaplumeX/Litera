@@ -438,6 +438,9 @@ function App() {
     // letting two book workers complete out of order.
     const request = openBookControllerRef.current.run(async () => {
       await flushReadingState();
+      // A synced book that isn't cached locally downloads on demand; for
+      // cached books this is a cheap no-op.
+      await invoke("sync_download_book_file", { bookId });
       const context = await invoke<BookOpenContext>("get_book_open_context", { bookId });
       const buffer = await invoke<ArrayBuffer>("open_book_bytes", {
         bookId,

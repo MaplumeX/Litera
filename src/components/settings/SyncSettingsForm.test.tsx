@@ -199,6 +199,9 @@ describe("SyncSettingsForm — Sync now", () => {
           enabled: true,
         });
       }
+      if (cmd === "sync_estimate_upload") {
+        return Promise.resolve({ bytes: 0, books: 0, confirmed: true });
+      }
       if (cmd === "sync_export_local_manifest") {
         return Promise.resolve({
           schemaVersion: 1,
@@ -249,6 +252,9 @@ describe("SyncSettingsForm — Sync now", () => {
           enabled: true,
         });
       }
+      if (cmd === "sync_estimate_upload") {
+        return Promise.resolve({ bytes: 0, books: 0, confirmed: true });
+      }
       if (cmd === "sync_export_local_manifest") {
         return Promise.resolve({
           schemaVersion: 1,
@@ -277,5 +283,68 @@ describe("SyncSettingsForm — Sync now", () => {
     await waitFor(() => {
       expect(screen.getByText(/sync failed/i)).toBeTruthy();
     });
+  });
+
+  it("shows an upload-size estimate before the first bulk upload and syncs only after confirmation", async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "get_sync_config") {
+        return Promise.resolve({
+          schemaVersion: 1,
+          endpoint: "https://s3.example.com",
+          region: "us-east-1",
+          bucket: "litera-books",
+          pathStyle: true,
+          accessKey: "AKIAEXAMPLE",
+          secretKey: null,
+          hasSecretKey: true,
+          enabled: true,
+        });
+      }
+      if (cmd === "sync_estimate_upload") {
+        return Promise.resolve({ bytes: 15 * 1024 * 1024, books: 3, confirmed: false });
+      }
+      if (cmd === "sync_export_local_manifest") {
+        return Promise.resolve({
+          schemaVersion: 1,
+          books: {},
+          tombstones: [],
+          preferences: null,
+          provider: null,
+        });
+      }
+      if (cmd === "sync_download_manifest") {
+        return Promise.resolve({
+          etag: "etag-1",
+          manifest: { schemaVersion: 1, books: {}, tombstones: [], preferences: null, provider: null },
+        });
+      }
+      return Promise.resolve(null);
+    });
+
+    renderForm();
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /sync now/i })).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /sync now/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/upload your library/i)).toBeTruthy();
+    });
+    expect(screen.getByText(/15 MB/)).toBeTruthy();
+    // No sync pass ran yet — only the estimate.
+    const before = invokeMock.mock.calls.map(([cmd]) => cmd);
+    expect(before).not.toContain("sync_export_local_manifest");
+    expect(before).not.toContain("sync_confirm_bulk_upload");
+
+    fireEvent.click(screen.getByRole("button", { name: /^upload$/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/synced/i)).toBeTruthy();
+    });
+    const commands = invokeMock.mock.calls.map(([cmd]) => cmd);
+    expect(commands).toContain("sync_confirm_bulk_upload");
+    expect(commands).toContain("sync_upload_book_files");
+    expect(commands).toContain("sync_upload_manifest");
   });
 });

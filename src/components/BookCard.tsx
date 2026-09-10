@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { Check, X } from "lucide-react";
+import { Check, CloudOff, X } from "lucide-react";
 import type { BookRecord } from "@/types/library";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
@@ -84,6 +84,7 @@ export function BookCard({
 }: BookCardProps) {
   const { t } = useT();
   const pct = progressPercent(book.lastFraction);
+  const uncached = book.cached === false;
   const actions = {
     onOpen: () => {
       void onOpen(book.id);
@@ -112,6 +113,15 @@ export function BookCard({
         aria-pressed={selectMode ? selected : undefined}
       >
         <BookCoverImage book={book} coverRev={coverRev} />
+        {uncached && !selectMode && (
+          <span
+            className="absolute left-1.5 top-1.5 flex items-center gap-1 rounded-sm bg-background/85 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+            title={t("library.notCached")}
+          >
+            <CloudOff className="size-3" aria-hidden />
+            {t("library.notCached")}
+          </span>
+        )}
         {pct != null && !opening && (
           <>
             <span className="absolute inset-x-0 bottom-0 h-0.5 bg-foreground/15">
@@ -214,6 +224,7 @@ export function BookListRow({
 }: BookListRowProps) {
   const { t, locale } = useT();
   const pct = progressPercent(book.lastFraction);
+  const uncached = book.cached === false;
   const actions = {
     onOpen: () => {
       void onOpen(book.id);
@@ -272,6 +283,15 @@ export function BookListRow({
         <span className="w-12 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
           {pct == null ? t("library.noProgress") : `${pct}%`}
         </span>
+        {uncached && (
+          <span
+            className="flex w-20 shrink-0 items-center justify-end gap-1 text-xs text-muted-foreground"
+            title={t("library.notCached")}
+          >
+            <CloudOff className="size-3" aria-hidden />
+            {t("library.notCached")}
+          </span>
+        )}
         <span className="hidden w-36 shrink-0 truncate text-right text-xs text-muted-foreground md:block">
           {book.lastOpenedAt
             ? formatLibraryTimestamp(book.lastOpenedAt, locale)

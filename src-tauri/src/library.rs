@@ -231,6 +231,10 @@ pub struct BookRecord {
         skip_serializing_if = "Option::is_none"
     )]
     pub(crate) content_version: Option<String>,
+    /// Whether the EPUB is present on this device. Derived (never stored):
+    /// real library records are always cached; sync placeholders are not.
+    #[serde(skip)]
+    pub cached: bool,
     #[serde(
         rename = "lastReaderMode",
         default,
@@ -380,6 +384,7 @@ impl BookPlaceholder {
     /// Present as a BookRecord; the missing book.epub marks the uncached state.
     fn to_record(&self, book_dir: PathBuf) -> Option<BookRecord> {
         let epub = book_dir.join("book.epub");
+        let cover = book_dir.join("cover.jpg");
         Some(BookRecord {
             id: self.id.clone(),
             title: self.title.clone(),
@@ -388,7 +393,13 @@ impl BookPlaceholder {
             publisher: None,
             language: None,
             series: None,
-            cover_path: book_dir.join("cover.jpg").to_string_lossy().into_owned(),
+            // The cover displays only once it has been downloaded on
+            // demand; an empty path keeps BookCard from a broken image.
+            cover_path: if cover.is_file() {
+                cover.to_string_lossy().into_owned()
+            } else {
+                String::new()
+            },
             file_path: epub.to_string_lossy().into_owned(),
             imported_at: String::new(),
             last_fraction: self.last_fraction,
@@ -399,6 +410,7 @@ impl BookPlaceholder {
             last_reader_mode: None,
             last_layout: None,
             content_version: None,
+            cached: false,
         })
     }
 }
@@ -571,6 +583,105 @@ impl LibraryStore {
         Ok(placeholders)
     }
 
+    /// Turn a sync placeholder into a real local book: write the downloaded
+    /// EPUB, promote the placeholder's metadata into a library record, and
+    /// drop the placeholder marker. `revision` is the content hash the
+    /// Sync Backend stored the file under.
+    pub fn install_synced_book(&self, book_id: &str, bytes: Vec<u8>) -> AppResult<()> {
+        validate_book_id(book_id)?;
+        if bytes.is_empty() {
+            return Err(AppError::invalid_input("Downloaded EPUB is empty"));
+        }
+        let _guard = self.transaction()?;
+        let mut library = self.read_library()?;
+        if library.books.iter().any(|book| book.id == book_id) {
+            // Already local (e.g. a duplicate download race): nothing to do.
+            return Ok(());
+        }
+        let placeholder = self
+            .list_placeholders()?
+            .into_iter()
+            .find(|book| book.id == book_id);
+        let book_dir = self.ensure_book_dir(book_id)?;
+        let epub_path = book_dir.join("book.epub");
+        if fs::symlink_metadata(&epub_path).is_ok() {
+            return Err(AppError::storage_corrupt(format!(
+                "Uncached book {book_id} already has an EPUB"
+            )));
+        }
+        atomic_write(&epub_path, &bytes, "downloaded EPUB")?;
+        let cover = book_dir.join("cover.jpg");
+        let record = BookRecord {
+            id: book_id.to_string(),
+            title: placeholder.as_ref().map(|p| p.title.clone()).unwrap_or_default(),
+            author: placeholder.as_ref().map(|p| p.author.clone()).unwrap_or_default(),
+            description: None,
+            publisher: None,
+            language: None,
+            series: None,
+            cover_path: if cover.is_file() {
+                cover.to_string_lossy().into_owned()
+            } else {
+                String::new()
+            },
+            file_path: epub_path.to_string_lossy().into_owned(),
+            imported_at: Utc::now().to_rfc3339(),
+            last_fraction: placeholder.as_ref().and_then(|p| p.last_fraction),
+            last_cfi: placeholder.as_ref().and_then(|p| p.last_cfi.clone()),
+            settings: None,
+            last_opened_at: None,
+            content_hash: Some(sha256_hex(&bytes)),
+            content_version: Some(uuid::Uuid::new_v4().simple().to_string()),
+            last_reader_mode: None,
+            last_layout: None,
+            cached: true,
+        };
+        library.books.push(record);
+        if let Err(error) = self.write_library(&library) {
+            let _ = fs::remove_file(&epub_path);
+            return Err(error);
+        }
+        // Inline placeholder removal: remove_placeholder re-acquires the
+        // transaction lock this method already holds.
+        let _ = fs::remove_file(book_dir.join(".sync-placeholder.json"));
+        sync_parent_directory(&book_dir, "downloaded book directory")
+    }
+
+    /// Store a downloaded cover for a book. Placeholders already present the
+    /// cover path; a real record gets its coverPath backfilled.
+    pub fn install_synced_cover(&self, book_id: &str, bytes: &[u8]) -> AppResult<()> {
+        validate_book_id(book_id)?;
+        if bytes.is_empty() {
+            return Err(AppError::invalid_input("Downloaded cover is empty"));
+        }
+        let _guard = self.transaction()?;
+        let book_dir = self.ensure_book_dir(book_id)?;
+        let cover_path = book_dir.join("cover.jpg");
+        atomic_write(&cover_path, bytes, "downloaded cover")?;
+        let mut library = self.read_library()?;
+        if let Some(record) = library.books.iter_mut().find(|book| book.id == book_id) {
+            if record.cover_path.is_empty() {
+                record.cover_path = cover_path.to_string_lossy().into_owned();
+                self.write_library(&library)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Paths of the stored EPUB and cover for a book. The cover may not
+    /// exist on disk (coverless book, or not yet downloaded).
+    pub fn book_files(&self, book_id: &str) -> AppResult<(PathBuf, PathBuf)> {
+        let dir = self.book_dir(book_id)?;
+        Ok((dir.join("book.epub"), dir.join("cover.jpg")))
+    }
+
+    /// Whether a cover file is present for the book (best effort).
+    pub fn has_local_cover(&self, book_id: &str) -> bool {
+        self.book_files(book_id)
+            .map(|(_, cover)| cover.is_file())
+            .unwrap_or(false)
+    }
+
     pub(crate) fn ensure_book_dir(&self, book_id: &str) -> AppResult<PathBuf> {
         let dir = self.book_dir(book_id)?;
         std::fs::create_dir_all(&dir).map_err(|error| {
@@ -614,6 +725,22 @@ impl LibraryStore {
     pub fn list_books(&self) -> AppResult<Vec<BookRecord>> {
         let _guard = self.transaction()?;
         let mut books = self.read_library()?.books;
+        books.sort_by(|left, right| {
+            match (&left.last_opened_at, &right.last_opened_at) {
+                (Some(left_opened), Some(right_opened)) => right_opened.cmp(left_opened),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => std::cmp::Ordering::Equal,
+            }
+            .then_with(|| right.imported_at.cmp(&left.imported_at))
+        });
+        for book in books.iter_mut() {
+            book.cached = true;
+        }
+        // Sync placeholders (books synced from the Manifest whose EPUB has
+        // not downloaded yet) render on the shelf alongside local books.
+        let mut placeholders = self.list_placeholders()?;
+        books.append(&mut placeholders);
         books.sort_by(|left, right| {
             match (&left.last_opened_at, &right.last_opened_at) {
                 (Some(left_opened), Some(right_opened)) => right_opened.cmp(left_opened),
@@ -718,6 +845,7 @@ impl LibraryStore {
                 content_version: Some(import_id.clone()),
                 last_reader_mode: None,
                 last_layout: None,
+                cached: true,
             });
             if let Err(error) = self.write_library(&library) {
                 let rollback = fs::remove_dir_all(&book_dir);
@@ -2185,7 +2313,7 @@ fn compress_cover(raw: &[u8]) -> Vec<u8> {
     }
 }
 
-fn sha256_hex(bytes: &[u8]) -> String {
+pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
     // sha2 0.11 removed the LowerHex impl on digest output, so encode manually.
     use std::fmt::Write as _;
     let digest = Sha256::digest(bytes);
