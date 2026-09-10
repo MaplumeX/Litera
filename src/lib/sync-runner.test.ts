@@ -186,6 +186,19 @@ describe("runSyncOnce", () => {
     expect(uploads.length).toBeLessThanOrEqual(5);
   });
 
+  it("passes the pre-merge local snapshot as the apply base", async () => {
+    setupStore();
+
+    await runSyncOnce();
+
+    const applied = invokeMock.mock.calls.find(
+      ([cmd]) => cmd === "sync_apply_merged_manifest",
+    )![1] as Record<string, unknown>;
+    // The base is the manifest as it was *before* the merge, so Rust can
+    // detect local edits that raced the sync pass.
+    expect(applied.base).toEqual(localManifest());
+  });
+
   it("applies the merged manifest before uploading, never after", async () => {
     setupStore();
     const order: string[] = [];

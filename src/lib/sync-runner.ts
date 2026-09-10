@@ -34,6 +34,9 @@ export async function runSyncOnce(): Promise<void> {
 
     await invoke("sync_apply_merged_manifest", {
       manifest: merged,
+      // The pre-merge local snapshot: Rust uses it to avoid clobbering
+      // local edits that happened while the network round trip was in flight.
+      base: local,
       etag: downloaded.etag,
     });
 

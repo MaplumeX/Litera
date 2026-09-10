@@ -579,6 +579,16 @@ impl LibraryStore {
         Ok(dir)
     }
 
+    #[cfg(test)]
+    pub(crate) fn book_dir_path(&self, book_id: &str) -> AppResult<PathBuf> {
+        self.book_dir(book_id)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn trash_root_path(&self) -> PathBuf {
+        self.trash_root()
+    }
+
     fn read_library(&self) -> AppResult<LibraryData> {
         require_real_directory(&self.books_root(), "books")?;
         require_real_directory(&self.trash_root(), "library trash")?;
@@ -1083,17 +1093,14 @@ impl LibraryStore {
         Ok(BookContent { bytes })
     }
 
-    pub fn delete_book(&self, book_id: &str) -> AppResult<()> {
-        validate_book_id(book_id)?;
-        let _guard = self.transaction()?;
-        let mut library = self.read_library()?;
-        let record_index = library
-            .books
-            .iter()
-            .position(|book| book.id == book_id)
-            .ok_or_else(|| AppError::book_not_found(book_id))?;
+    /// Stage a book's directory into the local trash (recovery window),
+    /// leaving library.json untouched. Shared by local deletion and sync
+    /// deletion propagation; the local trash itself never syncs.
+    fn stage_book_directory_to_trash(&self, book_id: &str) -> AppResult<Option<PathBuf>> {
         let book_dir = self.book_dir(book_id)?;
-
+        if fs::symlink_metadata(&book_dir).is_err() {
+            return Ok(None);
+        }
         // Revalidate immediately before the rename. Initialization validation is
         // not enough because a local process could replace `.trash` while Litera
         // is running; following such a symlink would move book data outside the
@@ -1111,15 +1118,57 @@ impl LibraryStore {
             restore_staged_book(&trash_path, &book_dir, &error)?;
             return Err(error);
         }
+        Ok(Some(trash_path))
+    }
+
+    pub fn delete_book(&self, book_id: &str) -> AppResult<()> {
+        validate_book_id(book_id)?;
+        let _guard = self.transaction()?;
+        let mut library = self.read_library()?;
+        let record_index = library
+            .books
+            .iter()
+            .position(|book| book.id == book_id)
+            .ok_or_else(|| AppError::book_not_found(book_id))?;
+
+        let staged = self.stage_book_directory_to_trash(book_id)?;
 
         library.books.remove(record_index);
         if let Err(error) = self.write_library(&library) {
-            restore_staged_book(&trash_path, &book_dir, &error)?;
+            if let Some(trash_path) = staged {
+                let book_dir = self.book_dir(book_id)?;
+                restore_staged_book(&trash_path, &book_dir, &error)?;
+            }
             return Err(error);
         }
 
         // Intentionally retain staged directories. A separate retention policy may
         // clean `.trash` later; this operation itself remains recoverable.
+        self.remove_book_sessions(book_id)
+    }
+
+    /// Delete a book because a synced Tombstone says another device deleted
+    /// it. Unlike `delete_book` this tolerates unknown ids (never seen
+    /// locally) and placeholder-only books: whatever exists locally is moved
+    /// into the local trash, which itself never syncs.
+    pub fn delete_book_for_sync(&self, book_id: &str) -> AppResult<()> {
+        validate_book_id(book_id)?;
+        let _guard = self.transaction()?;
+        let mut library = self.read_library()?;
+
+        let staged = self.stage_book_directory_to_trash(book_id)?;
+
+        let before = library.books.len();
+        library.books.retain(|book| book.id != book_id);
+        if library.books.len() != before {
+            if let Err(error) = self.write_library(&library) {
+                if let Some(trash_path) = staged {
+                    let book_dir = self.book_dir(book_id)?;
+                    restore_staged_book(&trash_path, &book_dir, &error)?;
+                }
+                return Err(error);
+            }
+        }
         self.remove_book_sessions(book_id)
     }
 
@@ -1656,6 +1705,7 @@ fn rollback_moves(moved: &[(PathBuf, PathBuf)]) -> AppResult<()> {
     }
     Ok(())
 }
+
 
 fn restore_staged_book(staged: &Path, book_dir: &Path, original_error: &AppError) -> AppResult<()> {
     fs::rename(staged, book_dir).map_err(|rollback_error| {
@@ -2654,9 +2704,20 @@ pub async fn open_book_bytes(
 }
 
 #[tauri::command]
-pub async fn delete_book(store: tauri::State<'_, LibraryStore>, book_id: String) -> AppResult<()> {
+pub async fn delete_book(
+    app: tauri::AppHandle,
+    store: tauri::State<'_, LibraryStore>,
+    book_id: String,
+) -> AppResult<()> {
     let store = store.inner().clone();
-    run_blocking(move || store.delete_book(&book_id)).await
+    let root = crate::sync::sync_root(&app)?;
+    run_blocking(move || {
+        store.delete_book(&book_id)?;
+        // Record the deletion as a Tombstone so the merge on other devices
+        // drops the book instead of resurrecting it from their copy.
+        crate::sync::record_book_tombstone(&root, &book_id)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -2695,12 +2756,22 @@ pub async fn get_annotations(
 
 #[tauri::command]
 pub async fn save_annotations(
+    app: tauri::AppHandle,
     store: tauri::State<'_, LibraryStore>,
     book_id: String,
     data: AnnotationsFile,
 ) -> AppResult<()> {
     let store = store.inner().clone();
-    run_blocking(move || store.save_annotations(&book_id, data)).await
+    let root = crate::sync::sync_root(&app)?;
+    run_blocking(move || {
+        let before = store.get_annotations(&book_id)?;
+        let removed = crate::sync::removed_annotation_ids(&before, &data);
+        store.save_annotations(&book_id, data)?;
+        // Locally removed annotations become Tombstones so a later union
+        // merge on another device cannot resurrect them.
+        crate::sync::note_annotations_saved(&root, &book_id, &removed)
+    })
+    .await
 }
 
 #[cfg(test)]
