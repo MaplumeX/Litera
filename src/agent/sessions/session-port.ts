@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { notifySyncActivity } from "@/lib/sync-activity";
 import type { AgentSessionSummary } from "@/types/agent";
 import {
   decodePiSession,
@@ -25,8 +26,15 @@ export const tauriSessionPort: SessionPort = {
   },
   async load(bookId, sessionId) { return decodePiSession(await invoke("load_agent_session", { bookId, sessionId })); },
   async setLeaf(bookId, sessionId, leafId) { return decodePiSession(await invoke("set_agent_session_leaf", { bookId, sessionId, leafId })); },
-  append(bookId, sessionId, expectedLeafId, entries) {
-    return invoke<string | null>("append_agent_session_entries", { bookId, sessionId, expectedLeafId, entries });
+  async append(bookId, sessionId, expectedLeafId, entries) {
+    const leafId = await invoke<string | null>("append_agent_session_entries", {
+      bookId,
+      sessionId,
+      expectedLeafId,
+      entries,
+    });
+    notifySyncActivity();
+    return leafId;
   },
   delete(bookId, sessionId) { return invoke("delete_agent_session", { bookId, sessionId }); },
 };

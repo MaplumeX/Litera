@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { notifySyncActivity } from "@/lib/sync-activity";
 import type { BookRecord } from "@/types/library";
 import { Button } from "@/components/ui/button";
 import {
@@ -117,6 +118,7 @@ export function BookDetailsDialog({
       };
       if (coverBytes) args.coverBytes = coverBytes;
       const updated = await invoke<BookRecord>("update_book_metadata", args);
+      notifySyncActivity();
       onSaved(updated, Boolean(coverBytes));
       onOpenChange(false);
     } catch (err) {

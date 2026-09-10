@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useDebouncedCallback } from "@/lib/use-debounced-callback";
+import { notifySyncActivity } from "@/lib/sync-activity";
 import {
   DEFAULT_TYPOGRAPHY,
   DEFAULT_THEME,
@@ -84,6 +85,7 @@ export function usePreferences() {
         overrideFont: next.overrideFont,
         overrideLayout: next.overrideLayout,
       });
+      notifySyncActivity();
     },
     300,
     (error) => console.error("Failed to save preferences:", error),

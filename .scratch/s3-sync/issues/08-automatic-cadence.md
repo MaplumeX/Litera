@@ -6,11 +6,20 @@
 
 **Status:** ready-for-agent
 
-- [ ] Sync runs automatically at app startup when enabled
-- [ ] Local changes (page turns, annotations, sessions, preference edits) trigger a debounced push
-- [ ] Periodic re-sync runs on the order of minutes during long sessions
-- [ ] Transient failures retry silently with no UI
-- [ ] A non-blocking toast appears only after several consecutive failures; dismissable, never modal
-- [ ] Settings Sync section shows last sync time and last status/error
-- [ ] README (English and Simplified Chinese) privacy statements rewritten
-- [ ] App-level tests cover the toast threshold and startup sync trigger
+- [x] Sync runs automatically at app startup when enabled
+- [x] Local changes (page turns, annotations, sessions, preference edits) trigger a debounced push
+- [x] Periodic re-sync runs on the order of minutes during long sessions
+- [x] Transient failures retry silently with no UI
+- [x] A non-blocking toast appears only after several consecutive failures; dismissable, never modal
+- [x] Settings Sync section shows last sync time and last status/error
+- [x] README (English and Simplified Chinese) privacy statements rewritten
+- [x] App-level tests cover the toast threshold and startup sync trigger
+
+## Comments
+
+- `useSyncScheduler` (App-level hook): startup sync when enabled, 30s debounce after local-change signals, 5-minute periodic re-sync. Signals (`notifySyncActivity`) are fired by: reading-position updates, annotation saves, session appends (session-port), preference saves, book imports, deletes, and metadata edits.
+- Failures are silent; a dismissable non-blocking banner (`SyncFailureBanner`, role=status) appears only after 3 consecutive failures and clears on the next success. Sync UI never interrupts reading.
+- Settings Sync section shows last-run time and last error (`sync_note_result` records outcomes; `get_sync_state` exposes them).
+- Auto-sync passes `uploadFiles: true`; Rust silently skips file uploads until the first bulk-upload estimate is confirmed, so the Manifest still converges.
+- README privacy statements rewritten in English and Simplified Chinese ("books stay on your machine until you enable Sync; synced data is stored as-is on the bucket you choose").
+- Tests: `use-sync-scheduler.test.ts` (startup trigger, disabled no-op, debounce coalescing, periodic, toast threshold + dismissal + recovery) and SyncSettingsForm status display.

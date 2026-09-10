@@ -24,6 +24,7 @@ import {
   BookImportNotices,
 } from "@/components/BookImportFeedback";
 import { invokeErrorMessage } from "@/lib/app-error";
+import { notifySyncActivity } from "@/lib/sync-activity";
 import { useBookImport } from "@/lib/use-book-import";
 import { useT, type MessageKey } from "@/lib/i18n";
 import {
@@ -200,6 +201,7 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
     for (const book of targets) {
       try {
         await invoke("delete_book", { bookId: book.id });
+        notifySyncActivity();
       } catch (err) {
         console.error("delete error:", err);
         failures.push(book.title);

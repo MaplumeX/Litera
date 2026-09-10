@@ -28,6 +28,9 @@ beforeEach(() => {
     if (cmd === "get_sync_config") {
       return Promise.resolve(null);
     }
+    if (cmd === "get_sync_state") {
+      return Promise.resolve({ lastSyncedAt: null, lastError: null });
+    }
     return Promise.reject(new Error(`unexpected invoke: ${cmd}`));
   });
 });
@@ -228,7 +231,7 @@ describe("SyncSettingsForm — Sync now", () => {
     fireEvent.click(screen.getByRole("button", { name: /sync now/i }));
 
     await waitFor(() => {
-      expect(screen.getByText(/synced/i)).toBeTruthy();
+      expect(screen.getByText("Synced")).toBeTruthy();
     });
     const commands = invokeMock.mock.calls.map(([cmd]) => cmd);
     expect(commands).toContain("sync_export_local_manifest");
@@ -283,6 +286,27 @@ describe("SyncSettingsForm — Sync now", () => {
     await waitFor(() => {
       expect(screen.getByText(/sync failed/i)).toBeTruthy();
     });
+  });
+
+  it("shows the last sync time and last error from sync state", async () => {
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "get_sync_config") {
+        return Promise.resolve(null);
+      }
+      if (cmd === "get_sync_state") {
+        return Promise.resolve({
+          lastSyncedAt: "2026-06-01T12:00:00+00:00",
+          lastError: "Sync backend error: connection reset",
+        });
+      }
+      return Promise.resolve(null);
+    });
+
+    renderForm();
+    await waitFor(() => {
+      expect(screen.getByText(/last sync: 2026-06-01T12:00:00\+00:00/i)).toBeTruthy();
+    });
+    expect(screen.getByText(/last error: sync backend error: connection reset/i)).toBeTruthy();
   });
 
   it("shows an upload-size estimate before the first bulk upload and syncs only after confirmation", async () => {
@@ -340,7 +364,7 @@ describe("SyncSettingsForm — Sync now", () => {
     fireEvent.click(screen.getByRole("button", { name: /^upload$/i }));
 
     await waitFor(() => {
-      expect(screen.getByText(/synced/i)).toBeTruthy();
+      expect(screen.getByText("Synced")).toBeTruthy();
     });
     const commands = invokeMock.mock.calls.map(([cmd]) => cmd);
     expect(commands).toContain("sync_confirm_bulk_upload");

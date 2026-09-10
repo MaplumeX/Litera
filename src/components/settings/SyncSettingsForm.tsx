@@ -24,6 +24,11 @@ interface UploadEstimate {
   confirmed: boolean;
 }
 
+interface SyncStatePublic {
+  lastSyncedAt?: string | null;
+  lastError?: string | null;
+}
+
 interface SyncBackendConfigDraft {
   schemaVersion: number;
   endpoint: string;
@@ -61,6 +66,24 @@ export function SyncSettingsForm() {
   const [syncedAt, setSyncedAt] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [estimate, setEstimate] = useState<UploadEstimate | null>(null);
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
+  const [lastError, setLastError] = useState<string | null>(null);
+
+  function refreshStatus() {
+    void invoke<SyncStatePublic | null>("get_sync_state")
+      .then((state) => {
+        if (!state) return;
+        setLastSyncedAt(state.lastSyncedAt ?? null);
+        setLastError(state.lastError ?? null);
+      })
+      .catch(() => {
+        // Status display is best-effort; sync errors surface elsewhere.
+      });
+  }
+
+  useEffect(() => {
+    refreshStatus();
+  }, []);
 
   useEffect(() => {
     let disposed = false;
@@ -138,9 +161,14 @@ export function SyncSettingsForm() {
         return;
       }
       await runSyncOnce({ uploadFiles: true });
+      await invoke("sync_note_result", { success: true, error: null });
       setSyncedAt(true);
+      refreshStatus();
     } catch (error) {
-      setSyncError(invokeErrorMessage(error));
+      const message = invokeErrorMessage(error);
+      await invoke("sync_note_result", { success: false, error: message }).catch(() => {});
+      setSyncError(message);
+      refreshStatus();
     } finally {
       setSyncing(false);
     }
@@ -153,9 +181,14 @@ export function SyncSettingsForm() {
     try {
       await invoke("sync_confirm_bulk_upload");
       await runSyncOnce({ uploadFiles: true });
+      await invoke("sync_note_result", { success: true, error: null });
       setSyncedAt(true);
+      refreshStatus();
     } catch (error) {
-      setSyncError(invokeErrorMessage(error));
+      const message = invokeErrorMessage(error);
+      await invoke("sync_note_result", { success: false, error: message }).catch(() => {});
+      setSyncError(message);
+      refreshStatus();
     } finally {
       setSyncing(false);
     }
@@ -365,6 +398,14 @@ export function SyncSettingsForm() {
       {syncError && (
         <p className="text-xs text-destructive">{t("settings.sync.failed", { message: syncError })}</p>
       )}
+      <div className="text-xs text-muted-foreground">
+        <div>
+          {lastSyncedAt
+            ? t("settings.sync.status.lastRun", { time: lastSyncedAt })
+            : t("settings.sync.status.never")}
+        </div>
+        {lastError && <div>{t("settings.sync.status.error", { message: lastError })}</div>}
+      </div>
     </div>
   );
 }

@@ -820,6 +820,10 @@ pub struct SyncState {
     pub last_etag: String,
     #[serde(default)]
     pub last_synced_at: Option<String>,
+    /// The last sync failure message, surfaced in Settings (null when the
+    /// last run succeeded).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
 }
 
 pub fn read_sync_state(root: &Path) -> AppResult<SyncState> {
@@ -1061,6 +1065,27 @@ pub async fn sync_upload_manifest(
     let config = crate::sync_config::read_sync_config(&root)?
         .ok_or_else(|| AppError::invalid_input("Sync is not configured"))?;
     upload_manifest(&config, &manifest, &etag).await
+}
+
+/// Record the outcome of a sync pass for the Settings status area.
+#[tauri::command]
+pub async fn sync_note_result(
+    app: tauri::AppHandle,
+    success: bool,
+    error: Option<String>,
+) -> AppResult<()> {
+    let root = sync_root(&app)?;
+    run_sync_blocking(move || {
+        let mut state = read_sync_state(&root)?;
+        if success {
+            state.last_synced_at = Some(chrono::Utc::now().to_rfc3339());
+            state.last_error = None;
+        } else {
+            state.last_error = error;
+        }
+        write_sync_state(&root, &state)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -1696,10 +1721,11 @@ pub async fn sync_upload_book_files(
         let pending = pending_uploads(&store, &state)?;
         // The first bulk upload of an existing library happens only after the
         // user confirmed the estimate; afterwards new imports flow automatically.
+        // The first bulk upload happens only after the user confirmed the
+        // estimate; until then automatic syncs silently skip file uploads
+        // (the Manifest still converges).
         if !state.bulk_upload_confirmed && !pending.is_empty() {
-            return Err(AppError::invalid_input(
-                "Confirm the upload estimate before uploading the library",
-            ));
+            return Ok(Vec::new());
         }
         Ok(pending)
     })
