@@ -273,8 +273,15 @@ pub async fn save_sync_config(
     config: SyncBackendConfig,
 ) -> AppResult<SyncConfigPublic> {
     let root = sync_config_root(&app)?;
+    let was_enabled = read_sync_config(&root)?.is_some_and(|previous| previous.enabled);
+    let newly_enabled = config.enabled && !was_enabled;
     let config = run_blocking(move || {
         write_sync_config(&root, &config)?;
+        // First enable: the current local preferences and provider settings
+        // become this device's sync baseline.
+        if newly_enabled {
+            crate::sync::note_sync_enabled(&root)?;
+        }
         Ok(config)
     })
     .await?;

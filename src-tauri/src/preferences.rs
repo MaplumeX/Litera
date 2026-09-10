@@ -274,8 +274,9 @@ impl From<PreferencesData> for PreferencesResponse {
     }
 }
 
-#[derive(Debug, Default)]
-struct PreferencesPatch {
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub(crate) struct PreferencesPatch {
     theme: Option<String>,
     font_size: Option<f64>,
     font_family: Option<String>,
@@ -418,6 +419,12 @@ impl PreferencesStore {
             theme: Some(theme.to_string()),
             ..PreferencesPatch::default()
         })
+    }
+
+    /// Replace stored preferences from a synced envelope (the whole patch at
+    /// once — sync owns the complete record, not a partial edit).
+    pub(crate) fn apply_synced(&self, patch: PreferencesPatch) -> AppResult<()> {
+        self.save(patch)
     }
 
     fn save(&self, patch: PreferencesPatch) -> AppResult<()> {
@@ -593,8 +600,10 @@ pub async fn save_preferences(
     column_count: Option<i64>,
     override_font: Option<bool>,
     override_layout: Option<bool>,
+    app: tauri::AppHandle,
 ) -> AppResult<()> {
     let store = store.inner().clone();
+    let root = crate::sync::sync_root(&app)?;
     tauri::async_runtime::spawn_blocking(move || {
         store.save(PreferencesPatch {
             theme,
@@ -610,7 +619,10 @@ pub async fn save_preferences(
             column_count,
             override_font,
             override_layout,
-        })
+        })?;
+        // A local edit marks the preferences as locally newer so Sync can
+        // order the merge without relying on file mtimes.
+        crate::sync::note_preferences_saved(&root)
     })
     .await
     .map_err(|e| AppError::storage_io(format!("Preferences write worker failed: {e}")))?

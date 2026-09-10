@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { getLocale } from "./i18n";
 import { mergeManifests, type SyncManifest } from "./sync-merge";
 
 /** Bounded retries for etag conflicts on the conditional Manifest PUT. */
@@ -35,7 +36,9 @@ export async function runSyncOnce(
     await invoke("sync_upload_book_files");
   }
   for (let attempt = 0; attempt < MAX_SYNC_ATTEMPTS; attempt += 1) {
-    const local = await invoke<SyncManifest>("sync_export_local_manifest");
+    const local = await invoke<SyncManifest>("sync_export_local_manifest", {
+      locale: getLocale(),
+    });
     const downloaded = await invoke<DownloadedManifest>("sync_download_manifest");
     const merged = mergeManifests(local, downloaded.manifest, new Date().toISOString());
 
@@ -46,6 +49,14 @@ export async function runSyncOnce(
       base: local,
       etag: downloaded.etag,
     });
+    // Synced preferences (and the UI language riding in the envelope) apply
+    // without a restart: tell the app to re-read them.
+    if (merged.preferences) {
+      const language = (merged.preferences.data as { language?: string } | null)?.language;
+      window.dispatchEvent(
+        new CustomEvent("litera:sync-applied", { detail: { language } }),
+      );
+    }
 
     try {
       await invoke("sync_upload_manifest", {

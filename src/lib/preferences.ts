@@ -106,6 +106,22 @@ export function usePreferences() {
     };
   }, []);
 
+  // A sync pass may have applied synced preferences underneath us; re-read
+  // them so theme and typography converge without a restart.
+  useEffect(() => {
+    const reload = () => {
+      void invoke<PreferencesResponse>("get_preferences")
+        .then((response) => setPreferencesState(normalizePreferences(response)))
+        .catch((error) => {
+          console.error("Failed to reload preferences:", error);
+        });
+    };
+    window.addEventListener("litera:sync-applied", reload);
+    return () => {
+      window.removeEventListener("litera:sync-applied", reload);
+    };
+  }, []);
+
   const updatePreferences = useCallback(
     (patch: Partial<AppPreferences>) => {
       setPreferencesState((prev) => {

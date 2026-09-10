@@ -207,6 +207,35 @@ pub fn note_annotations_saved(root: &Path, book_id: &str, removed_ids: &[String]
     write_sync_state(root, &state)
 }
 
+/// A local preferences edit: marks the local envelope as newest for the merge.
+pub fn note_preferences_saved(root: &Path) -> AppResult<()> {
+    let mut state = read_sync_state(root)?;
+    state.preferences_updated_at = Some(chrono::Utc::now().to_rfc3339());
+    write_sync_state(root, &state)
+}
+
+/// A local provider-settings edit: marks the local envelope as newest.
+pub fn note_provider_saved(root: &Path) -> AppResult<()> {
+    let mut state = read_sync_state(root)?;
+    state.provider_updated_at = Some(chrono::Utc::now().to_rfc3339());
+    write_sync_state(root, &state)
+}
+
+/// Sync being enabled for the first time: the current local preferences and
+/// provider settings become this device's baseline (timestamps, only when
+/// the device has never recorded an edit).
+pub fn note_sync_enabled(root: &Path) -> AppResult<()> {
+    let mut state = read_sync_state(root)?;
+    let now = chrono::Utc::now().to_rfc3339();
+    if state.preferences_updated_at.is_none() {
+        state.preferences_updated_at = Some(now.clone());
+    }
+    if state.provider_updated_at.is_none() {
+        state.provider_updated_at = Some(now);
+    }
+    write_sync_state(root, &state)
+}
+
 fn validate_sync_id(id: &str) -> AppResult<()> {
     if id.is_empty() || id.contains('/') || id.contains('\\') || id.contains("..") {
         return Err(AppError::invalid_input("Invalid sync id"));
@@ -777,6 +806,12 @@ pub struct SyncState {
     /// Per-session sync bookkeeping, keyed "<bookId>/<sessionId>".
     #[serde(default)]
     pub session_revisions: std::collections::BTreeMap<String, SessionRevisionState>,
+    /// Explicit recorded timestamps of the last local preferences / provider
+    /// edits (never file mtimes): the merge orders envelopes by these.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preferences_updated_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_updated_at: Option<String>,
     /// Whether the user confirmed the first bulk upload estimate.
     #[serde(default)]
     pub bulk_upload_confirmed: bool,
@@ -814,16 +849,79 @@ pub fn write_sync_state(root: &Path, state: &SyncState) -> AppResult<()> {
     crate::library::atomic_write(&sync_state_path(root), &json, "sync-state.json")
 }
 
+/// The provider envelope covers agent/settings.json and agent/models.json
+/// (provider choice, model, custom providers) — never auth.json, so API
+/// keys stay per-device.
+fn read_agent_object(root: &Path, file: &str) -> serde_json::Value {
+    match fs::read(root.join("agent").join(file)) {
+        Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null),
+        Err(_) => serde_json::Value::Null,
+    }
+}
+
+fn build_preferences_envelope(
+    preferences_store: &crate::preferences::PreferencesStore,
+    state: &mut SyncState,
+    locale: Option<&str>,
+) -> AppResult<Option<SyncEnvelopeData>> {
+    let response = preferences_store.get()?;
+    let mut data = serde_json::to_value(&response)
+        .map_err(|error| AppError::storage_io(format!("Failed to serialize preferences: {error}")))?;
+    if let Some(language) = locale {
+        if let Some(last) = &state.preferences {
+            let changed = last
+                .data
+                .get("language")
+                .and_then(|value| value.as_str())
+                != Some(language);
+            if changed {
+                state.preferences_updated_at = Some(chrono::Utc::now().to_rfc3339());
+            }
+        }
+        data.as_object_mut()
+            .expect("preferences response serializes to an object")
+            .insert("language".to_string(), serde_json::Value::String(language.to_string()));
+    }
+    Ok(state
+        .preferences_updated_at
+        .as_ref()
+        .map(|updated_at| SyncEnvelopeData {
+            updated_at: updated_at.clone(),
+            device_id: state.device_id.clone(),
+            data,
+        }))
+}
+
+fn build_provider_envelope(root: &Path, state: &SyncState) -> Option<SyncEnvelopeData> {
+    state.provider_updated_at.as_ref().map(|updated_at| {
+        SyncEnvelopeData {
+            updated_at: updated_at.clone(),
+            device_id: state.device_id.clone(),
+            data: serde_json::json!({
+                "settings": read_agent_object(root, "settings.json"),
+                "models": read_agent_object(root, "models.json"),
+            }),
+        }
+    })
+}
+
 #[tauri::command]
 pub async fn sync_export_local_manifest(
     app: tauri::AppHandle,
     store: tauri::State<'_, LibraryStore>,
+    preferences: tauri::State<'_, crate::preferences::PreferencesStore>,
+    locale: Option<String>,
 ) -> AppResult<serde_json::Value> {
     let store = store.inner().clone();
+    let preferences = preferences.inner().clone();
     let root = sync_root(&app)?;
     run_sync_blocking(move || {
-        let state = read_sync_state(&root)?;
-        let manifest = export_local_manifest(&store, &state)?;
+        let mut state = read_sync_state(&root)?;
+        let mut manifest = export_local_manifest(&store, &state)?;
+        manifest.preferences =
+            build_preferences_envelope(&preferences, &mut state, locale.as_deref())?;
+        manifest.provider = build_provider_envelope(&root, &state);
+        write_sync_state(&root, &state)?;
         serde_json::to_value(manifest)
             .map_err(|error| AppError::storage_io(format!("Failed to serialize manifest: {error}")))
     })
@@ -842,19 +940,95 @@ pub async fn sync_download_manifest(
         .map_err(|error| AppError::storage_io(format!("Failed to serialize: {error}")))?)
 }
 
+fn write_agent_object(root: &Path, file: &str, value: &serde_json::Value) -> AppResult<()> {
+    if value.is_null() {
+        return Ok(());
+    }
+    let bytes = serde_json::to_vec_pretty(value).map_err(|error| {
+        AppError::storage_io(format!("Failed to serialize agent {file}: {error}"))
+    })?;
+    let agent_dir = root.join("agent");
+    fs::create_dir_all(&agent_dir).map_err(|error| {
+        AppError::storage_io(format!("Failed to create agent directory: {error}"))
+    })?;
+    crate::library::atomic_write(&agent_dir.join(file), &bytes, file)
+}
+
+/// Apply a merged envelope when it is strictly newer than any local edit:
+/// protects a local change made while the network round trip was in flight.
+fn envelope_is_newer(envelope: &SyncEnvelopeData, local_dirty: Option<&String>) -> bool {
+    match local_dirty {
+        Some(dirty) => envelope.updated_at > *dirty,
+        None => true,
+    }
+}
+
+/// Apply the merged preferences and provider envelopes to local storage.
+/// Writes happen only when the merged envelope is strictly newer than any
+/// local edit (mid-sync local changes win and re-propagate next pass);
+/// auth.json is never touched, so API keys stay per-device.
+pub fn apply_preference_envelopes(
+    root: &Path,
+    preferences: &crate::preferences::PreferencesStore,
+    state: &mut SyncState,
+    manifest: &SyncManifestData,
+) -> AppResult<()> {
+    if let Some(envelope) = &manifest.preferences {
+        let is_newer = envelope_is_newer(envelope, state.preferences_updated_at.as_ref());
+        if state.preferences.as_ref() != Some(envelope) && is_newer {
+            // Language is frontend-owned (localStorage); the rest is the
+            // stored preferences record.
+            let mut data = envelope.data.clone();
+            if let Some(object) = data.as_object_mut() {
+                object.remove("language");
+            }
+            let patch: crate::preferences::PreferencesPatch =
+                serde_json::from_value(data).map_err(|error| {
+                    AppError::storage_corrupt(format!("Synced preferences are invalid: {error}"))
+                })?;
+            preferences.apply_synced(patch)?;
+        }
+        state.preferences = Some(envelope.clone());
+        if is_newer {
+            state.preferences_updated_at = Some(envelope.updated_at.clone());
+        }
+    }
+
+    if let Some(envelope) = &manifest.provider {
+        let is_newer = envelope_is_newer(envelope, state.provider_updated_at.as_ref());
+        if state.provider.as_ref() != Some(envelope) && is_newer {
+            if let Some(settings) = envelope.data.get("settings") {
+                write_agent_object(root, "settings.json", settings)?;
+            }
+            if let Some(models) = envelope.data.get("models") {
+                write_agent_object(root, "models.json", models)?;
+            }
+        }
+        state.provider = Some(envelope.clone());
+        if is_newer {
+            state.provider_updated_at = Some(envelope.updated_at.clone());
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn sync_apply_merged_manifest(
     app: tauri::AppHandle,
     store: tauri::State<'_, LibraryStore>,
+    preferences: tauri::State<'_, crate::preferences::PreferencesStore>,
     manifest: SyncManifestData,
     base: SyncManifestData,
     etag: String,
 ) -> AppResult<()> {
     let store = store.inner().clone();
+    let preferences = preferences.inner().clone();
     let root = sync_root(&app)?;
     run_sync_blocking(move || {
         let mut state = read_sync_state(&root)?;
         apply_merged_manifest(&store, &manifest, &base)?;
+
+        apply_preference_envelopes(&root, &preferences, &mut state, &manifest)?;
         state.tombstones = manifest.tombstones.clone();
         state.preferences = manifest.preferences.clone();
         state.provider = manifest.provider.clone();
@@ -2003,4 +2177,224 @@ async fn purge_session_objects(
             .map_err(map_object_store_error)?;
     }
     Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Ticket 07: preferences and provider settings sync via the Manifest.
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod preference_sync_tests {
+    use super::*;
+
+    fn temp() -> (tempfile::TempDir, crate::preferences::PreferencesStore) {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let store = crate::preferences::PreferencesStore::initialize(dir.path().to_path_buf())
+            .expect("preferences store");
+        (dir, store)
+    }
+
+    fn envelope(updated_at: &str, data: serde_json::Value) -> SyncEnvelopeData {
+        SyncEnvelopeData {
+            updated_at: updated_at.to_string(),
+            device_id: "device-b".to_string(),
+            data,
+        }
+    }
+
+    #[test]
+    fn local_edits_bump_the_dirty_timestamp() {
+        let dir = tempfile::tempdir().expect("temp dir");
+
+        note_preferences_saved(dir.path()).expect("note");
+        note_provider_saved(dir.path()).expect("note");
+
+        let state = read_sync_state(dir.path()).expect("state");
+        assert!(state.preferences_updated_at.is_some());
+        assert!(state.provider_updated_at.is_some());
+    }
+
+    #[test]
+    fn enabling_sync_baselines_only_missing_timestamps() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        note_preferences_saved(dir.path()).expect("existing edit");
+        let before = read_sync_state(dir.path()).expect("state").preferences_updated_at;
+
+        note_sync_enabled(dir.path()).expect("enable");
+
+        let state = read_sync_state(dir.path()).expect("state");
+        assert_eq!(state.preferences_updated_at, before);
+        assert!(state.provider_updated_at.is_some());
+    }
+
+    #[test]
+    fn a_newer_synced_envelope_rewrites_local_preferences() {
+        let (dir, preferences) = temp();
+
+        let manifest = SyncManifestData {
+            schema_version: 1,
+            books: Default::default(),
+            tombstones: Vec::new(),
+            preferences: Some(envelope(
+                "2026-06-01T00:00:00Z",
+                serde_json::json!({ "theme": "dark", "fontSize": 18.0, "language": "zh-CN" }),
+            )),
+            provider: None,
+        };
+        let mut state = SyncState {
+            preferences_updated_at: Some("2026-01-01T00:00:00Z".to_string()),
+            ..SyncState::default()
+        };
+
+        apply_preference_envelopes(dir.path(), &preferences, &mut state, &manifest)
+            .expect("apply");
+
+        let response = preferences.get().expect("preferences");
+        assert_eq!(response.theme, "dark");
+        assert_eq!(response.font_size, 18.0);
+        assert_eq!(
+            state.preferences_updated_at.as_deref(),
+            Some("2026-06-01T00:00:00Z")
+        );
+    }
+
+    #[test]
+    fn a_local_edit_newer_than_the_envelope_wins() {
+        let (dir, preferences) = temp();
+
+        let manifest = SyncManifestData {
+            schema_version: 1,
+            books: Default::default(),
+            tombstones: Vec::new(),
+            preferences: Some(envelope(
+                "2026-01-01T00:00:00Z",
+                serde_json::json!({ "theme": "dark" }),
+            )),
+            provider: None,
+        };
+        let mut state = SyncState {
+            preferences_updated_at: Some("2026-06-01T00:00:00Z".to_string()),
+            ..SyncState::default()
+        };
+
+        apply_preference_envelopes(dir.path(), &preferences, &mut state, &manifest)
+            .expect("apply");
+
+        let response = preferences.get().expect("preferences");
+        assert_eq!(response.theme, "light");
+        assert_eq!(
+            state.preferences_updated_at.as_deref(),
+            Some("2026-06-01T00:00:00Z")
+        );
+    }
+
+    #[test]
+    fn a_newer_synced_provider_envelope_rewrites_settings_but_not_auth() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        std::fs::create_dir_all(dir.path().join("agent")).expect("agent dir");
+        std::fs::write(
+            dir.path().join("agent").join("auth.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "anthropic": { "type": "api_key", "key": "local-secret" }
+            }))
+            .expect("auth bytes"),
+        )
+        .expect("auth write");
+
+        let manifest = SyncManifestData {
+            schema_version: 1,
+            books: Default::default(),
+            tombstones: Vec::new(),
+            preferences: None,
+            provider: Some(envelope(
+                "2026-06-01T00:00:00Z",
+                serde_json::json!({
+                    "settings": {
+                        "defaultProvider": "custom-abcd1234",
+                        "defaultModel": "some-model",
+                        "defaultThinkingLevel": "high"
+                    },
+                    "models": {
+                        "providers": {
+                            "custom-abcd1234": {
+                                "name": "My provider",
+                                "baseUrl": "https://example.com/v1",
+                                "models": [{ "id": "some-model" }]
+                            }
+                        }
+                    }
+                }),
+            )),
+        };
+        let mut state = SyncState::default();
+
+        apply_preference_envelopes(dir.path(), &temp().1, &mut state, &manifest).expect("apply");
+
+        let settings: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(dir.path().join("agent").join("settings.json")).expect("settings"),
+        )
+        .expect("json");
+        assert_eq!(settings["defaultProvider"], "custom-abcd1234");
+        assert_eq!(settings["defaultThinkingLevel"], "high");
+        let auth: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(dir.path().join("agent").join("auth.json")).expect("auth"),
+        )
+        .expect("json");
+        // API keys never leave the device — and the synced envelope never
+        // overwrites them: the local key is intact and the new provider has
+        // none yet (the UI will ask for it).
+        assert_eq!(auth["anthropic"]["key"], "local-secret");
+        assert!(auth.get("custom-abcd1234").is_none());
+    }
+
+    #[test]
+    fn export_envelopes_carry_language_and_agent_settings() {
+        let (dir, preferences) = temp();
+        let mut state = SyncState {
+            device_id: "device-a".to_string(),
+            preferences_updated_at: Some("2026-06-01T00:00:00Z".to_string()),
+            provider_updated_at: Some("2026-06-01T00:00:00Z".to_string()),
+            ..SyncState::default()
+        };
+        std::fs::create_dir_all(dir.path().join("agent")).expect("agent dir");
+        std::fs::write(
+            dir.path().join("agent").join("settings.json"),
+            br#"{"defaultProvider":"anthropic","defaultModel":"claude"}"#,
+        )
+        .expect("settings");
+
+        let preferences_envelope =
+            build_preferences_envelope(&preferences, &mut state, Some("zh-CN")).expect("prefs");
+        let provider_envelope = build_provider_envelope(dir.path(), &state).expect("provider");
+
+        assert_eq!(preferences_envelope.unwrap().data["language"], "zh-CN");
+        assert_eq!(
+            provider_envelope.data["settings"]["defaultModel"],
+            "claude"
+        );
+    }
+
+    #[test]
+    fn a_locale_change_counts_as_a_preferences_edit() {
+        let (dir, preferences) = temp();
+        let mut state = SyncState {
+            device_id: "device-a".to_string(),
+            preferences_updated_at: Some("2026-01-01T00:00:00Z".to_string()),
+            preferences: Some(SyncEnvelopeData {
+                updated_at: "2026-01-01T00:00:00Z".to_string(),
+                device_id: "device-a".to_string(),
+                data: serde_json::json!({ "language": "en" }),
+            }),
+            ..SyncState::default()
+        };
+
+        build_preferences_envelope(&preferences, &mut state, Some("zh-CN")).expect("build");
+
+        // The recorded language changed → the local envelope is newer than the
+        // old timestamp.
+        assert_ne!(
+            state.preferences_updated_at.as_deref(),
+            Some("2026-01-01T00:00:00Z")
+        );
+    }
 }

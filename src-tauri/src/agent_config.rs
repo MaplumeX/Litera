@@ -100,8 +100,10 @@ pub async fn save_agent_config(
     }
 
     let agent_dir = resolve_agent_dir(&app)?;
+    let sync_root = crate::sync::sync_root(&app)?;
     tauri::async_runtime::spawn_blocking(move || {
-        save_config(&agent_dir, &provider, &api_key, &model)
+        save_config(&agent_dir, &provider, &api_key, &model)?;
+        crate::sync::note_provider_saved(&sync_root)
     })
     .await
     .map_err(|error| AppError::storage_io(format!("Agent config write worker failed: {error}")))?
@@ -126,8 +128,11 @@ pub async fn add_custom_provider(
     }
 
     let agent_dir = resolve_agent_dir(&app)?;
+    let sync_root = crate::sync::sync_root(&app)?;
     tauri::async_runtime::spawn_blocking(move || {
-        add_custom_provider_impl(&agent_dir, &name, &base_url, &api_key, &models)
+        let entry = add_custom_provider_impl(&agent_dir, &name, &base_url, &api_key, &models)?;
+        crate::sync::note_provider_saved(&sync_root)?;
+        Ok(entry)
     })
     .await
     .map_err(|error| AppError::storage_io(format!("Agent config write worker failed: {error}")))?
@@ -142,8 +147,10 @@ pub async fn delete_custom_provider(app: tauri::AppHandle, provider_id: String) 
     }
 
     let agent_dir = resolve_agent_dir(&app)?;
+    let sync_root = crate::sync::sync_root(&app)?;
     tauri::async_runtime::spawn_blocking(move || {
-        delete_custom_provider_impl(&agent_dir, &provider_id)
+        delete_custom_provider_impl(&agent_dir, &provider_id)?;
+        crate::sync::note_provider_saved(&sync_root)
     })
     .await
     .map_err(|error| AppError::storage_io(format!("Agent config write worker failed: {error}")))?
@@ -175,15 +182,18 @@ pub async fn update_custom_provider(
     }
 
     let agent_dir = resolve_agent_dir(&app)?;
+    let sync_root = crate::sync::sync_root(&app)?;
     tauri::async_runtime::spawn_blocking(move || {
-        update_custom_provider_impl(
+        let entry = update_custom_provider_impl(
             &agent_dir,
             &provider_id,
             &name,
             &base_url,
             &api_key,
             &models,
-        )
+        )?;
+        crate::sync::note_provider_saved(&sync_root)?;
+        Ok(entry)
     })
     .await
     .map_err(|error| AppError::storage_io(format!("Agent config write worker failed: {error}")))?
@@ -230,8 +240,10 @@ pub async fn switch_provider(
     }
 
     let agent_dir = resolve_agent_dir(&app)?;
+    let sync_root = crate::sync::sync_root(&app)?;
     tauri::async_runtime::spawn_blocking(move || {
-        switch_provider_impl(&agent_dir, &provider_id, &model)
+        switch_provider_impl(&agent_dir, &provider_id, &model)?;
+        crate::sync::note_provider_saved(&sync_root)
     })
     .await
     .map_err(|error| AppError::storage_io(format!("Agent config write worker failed: {error}")))?
@@ -244,7 +256,11 @@ pub async fn set_thinking_level(app: tauri::AppHandle, level: String) -> AppResu
     }
 
     let agent_dir = resolve_agent_dir(&app)?;
-    tauri::async_runtime::spawn_blocking(move || set_thinking_level_impl(&agent_dir, &level))
+    let sync_root = crate::sync::sync_root(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        set_thinking_level_impl(&agent_dir, &level)?;
+        crate::sync::note_provider_saved(&sync_root)
+    })
         .await
         .map_err(|error| AppError::storage_io(format!("Agent config write worker failed: {error}")))?
 }
