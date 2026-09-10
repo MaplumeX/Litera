@@ -8,6 +8,8 @@ mod library;
 mod open_paths;
 mod pi_sessions;
 mod preferences;
+mod sync;
+mod sync_config;
 
 use library::LibraryStore;
 use preferences::PreferencesStore;
@@ -104,6 +106,14 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            sync::sync_export_local_manifest,
+            sync::sync_download_manifest,
+            sync::sync_apply_merged_manifest,
+            sync::sync_upload_manifest,
+            sync::get_sync_state,
+            sync_config::get_sync_config,
+            sync_config::save_sync_config,
+            sync_config::test_sync_connection,
             library::import_book,
             library::import_paths,
             open_paths::take_pending_open_paths,

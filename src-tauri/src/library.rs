@@ -230,7 +230,7 @@ pub struct BookRecord {
         default,
         skip_serializing_if = "Option::is_none"
     )]
-    content_version: Option<String>,
+    pub(crate) content_version: Option<String>,
     #[serde(
         rename = "lastReaderMode",
         default,
@@ -325,7 +325,7 @@ pub struct AnnotationsFile {
 }
 
 impl AnnotationsFile {
-    fn empty() -> Self {
+    pub(crate) fn empty() -> Self {
         Self {
             schema_version: ANNOTATIONS_SCHEMA_VERSION,
             bookmarks: Vec::new(),
@@ -341,9 +341,9 @@ pub(crate) struct BookContent {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct LibraryData {
+pub(crate) struct LibraryData {
     schema_version: u32,
-    books: Vec<BookRecord>,
+    pub(crate) books: Vec<BookRecord>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -361,6 +361,45 @@ impl LibraryData {
             schema_version: SCHEMA_VERSION,
             books: Vec::new(),
         }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct BookPlaceholder {
+    id: String,
+    title: String,
+    author: String,
+    #[serde(rename = "lastFraction", default, skip_serializing_if = "Option::is_none")]
+    last_fraction: Option<f64>,
+    #[serde(rename = "lastCfi", default, skip_serializing_if = "Option::is_none")]
+    last_cfi: Option<String>,
+}
+
+impl BookPlaceholder {
+    /// Present as a BookRecord; the missing book.epub marks the uncached state.
+    fn to_record(&self, book_dir: PathBuf) -> Option<BookRecord> {
+        let epub = book_dir.join("book.epub");
+        Some(BookRecord {
+            id: self.id.clone(),
+            title: self.title.clone(),
+            author: self.author.clone(),
+            description: None,
+            publisher: None,
+            language: None,
+            series: None,
+            cover_path: book_dir.join("cover.jpg").to_string_lossy().into_owned(),
+            file_path: epub.to_string_lossy().into_owned(),
+            imported_at: String::new(),
+            last_fraction: self.last_fraction,
+            last_cfi: self.last_cfi.clone(),
+            settings: None,
+            last_opened_at: None,
+            content_hash: None,
+            last_reader_mode: None,
+            last_layout: None,
+            content_version: None,
+        })
     }
 }
 
@@ -399,7 +438,7 @@ impl LibraryStore {
         }
     }
 
-    fn transaction(&self) -> AppResult<MutexGuard<'_, ()>> {
+    pub(crate) fn transaction(&self) -> AppResult<MutexGuard<'_, ()>> {
         if let Some(error) = &self.initialization_error {
             return Err(error.clone());
         }
@@ -442,6 +481,102 @@ impl LibraryStore {
             return Err(AppError::invalid_input("Invalid importId path"));
         }
         Ok(target)
+    }
+
+    pub(crate) fn read_library_public(&self) -> AppResult<LibraryData> {
+        self.read_library()
+    }
+
+    pub(crate) fn write_library_public(&self, data: &LibraryData) -> AppResult<()> {
+        self.write_library(data)
+    }
+
+    /// A synced book whose EPUB has not been downloaded to this device yet.
+    /// Placeholders live as per-book sidecar files (library.json records
+    /// always have real files); the sync layer merges them into list output.
+    pub fn save_placeholder(
+        &self,
+        book_id: &str,
+        title: &str,
+        author: &str,
+        last_fraction: Option<f64>,
+        last_cfi: Option<String>,
+    ) -> AppResult<()> {
+        validate_book_id(book_id)?;
+        let _guard = self.transaction()?;
+        let placeholder = BookPlaceholder {
+            id: book_id.to_string(),
+            title: title.to_string(),
+            author: author.to_string(),
+            last_fraction,
+            last_cfi,
+        };
+        let dir = self.book_dir(book_id)?;
+        std::fs::create_dir_all(&dir).map_err(|error| {
+            AppError::storage_io(format!("Failed to create book directory: {error}"))
+        })?;
+        let json = serde_json::to_vec_pretty(&placeholder).map_err(|error| {
+            AppError::storage_io(format!("Failed to serialize placeholder: {error}"))
+        })?;
+        recoverable_atomic_write(&dir.join(".sync-placeholder.json"), &json, "placeholder")
+    }
+
+    pub fn remove_placeholder(&self, book_id: &str) -> AppResult<()> {
+        validate_book_id(book_id)?;
+        let _guard = self.transaction()?;
+        let path = self.book_dir(book_id)?.join(".sync-placeholder.json");
+        match std::fs::remove_file(&path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(AppError::storage_io(format!(
+                "Failed to remove placeholder: {error}"
+            ))),
+        }
+    }
+
+    pub fn list_placeholders(&self) -> AppResult<Vec<BookRecord>> {
+        let books_root = self.books_root();
+        let mut placeholders = Vec::new();
+        let entries = match std::fs::read_dir(&books_root) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(placeholders),
+            Err(error) => {
+                return Err(AppError::storage_io(format!(
+                    "Failed to read books root: {error}"
+                )))
+            }
+        };
+        for entry in entries {
+            let entry = entry.map_err(|error| {
+                AppError::storage_io(format!("Failed to read books entry: {error}"))
+            })?;
+            let path = entry.path().join(".sync-placeholder.json");
+            let bytes = match std::fs::read(&path) {
+                Ok(bytes) => bytes,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => {
+                    return Err(AppError::storage_io(format!(
+                        "Failed to read placeholder: {error}"
+                    )))
+                }
+            };
+            let placeholder: BookPlaceholder = serde_json::from_slice(&bytes).map_err(|error| {
+                AppError::storage_corrupt(format!("Failed to parse placeholder: {error}"))
+            })?;
+            if let Some(record) = placeholder.to_record(entry.path()) {
+                placeholders.push(record);
+            }
+        }
+        placeholders.sort_by(|left, right| left.id.cmp(&right.id));
+        Ok(placeholders)
+    }
+
+    pub(crate) fn ensure_book_dir(&self, book_id: &str) -> AppResult<PathBuf> {
+        let dir = self.book_dir(book_id)?;
+        std::fs::create_dir_all(&dir).map_err(|error| {
+            AppError::storage_io(format!("Failed to create book directory: {error}"))
+        })?;
+        Ok(dir)
     }
 
     fn read_library(&self) -> AppResult<LibraryData> {
@@ -1109,12 +1244,15 @@ impl LibraryStore {
 
     fn require_existing_book(&self, book_id: &str) -> AppResult<()> {
         let library = self.read_library()?;
-        library
-            .books
-            .iter()
-            .find(|book| book.id == book_id)
-            .ok_or_else(|| AppError::book_not_found(book_id))?;
-        Ok(())
+        if library.books.iter().any(|book| book.id == book_id) {
+            return Ok(());
+        }
+        // Sync placeholders are real books-in-waiting: annotations may be
+        // saved for a book whose EPUB has not downloaded yet.
+        if self.book_dir(book_id)?.join(".sync-placeholder.json").is_file() {
+            return Ok(());
+        }
+        Err(AppError::book_not_found(book_id))
     }
 
     pub fn get_annotations(&self, book_id: &str) -> AppResult<AnnotationsFile> {
@@ -3701,8 +3839,8 @@ mod tests {
         let json = serde_json::to_string(&with_count).expect("serialize");
         assert!(json.contains("\"columnCount\":3"));
 
-        let without_count: ReadingSettings = serde_json::from_str(r#"{"fontSize":18.0}"#)
-            .expect("settings without columnCount");
+        let without_count: ReadingSettings =
+            serde_json::from_str(r#"{"fontSize":18.0}"#).expect("settings without columnCount");
         let json = serde_json::to_string(&without_count).expect("serialize");
         assert!(!json.contains("columnCount"));
 
