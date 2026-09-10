@@ -1,5 +1,0 @@
-{"_example": "Fill with {\"file\": \"<path>\", \"reason\": \"<why>\"}. Put spec/research files only — no code paths. Run `python3 .trellis/scripts/get_context.py --mode packages` to list available specs. Delete this line once real entries are added."}
-{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "shadcn/ui 组件约定、chat 视觉语言、provider dropdown draft-only 约定（ModelSwitcher 是显式运行时切换例外）"}
-{"file": ".trellis/spec/frontend/i18n.md", "reason": "新增文案必须 en + zh-CN 双语并遵循 useT 键名规范"}
-{"file": ".trellis/spec/frontend/state-management.md", "reason": "useAgentConfig hook 既有状态流，switchProvider 复用方式"}
-{"file": ".trellis/spec/frontend/type-safety.md", "reason": "前端类型安全约定"}

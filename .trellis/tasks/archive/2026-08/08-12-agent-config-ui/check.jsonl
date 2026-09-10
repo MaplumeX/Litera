@@ -1,3 +1,0 @@
-{"file": ".trellis/spec/backend/tauri-commands.md", "reason": "Verify command contract patterns"}
-{"file": ".trellis/spec/backend/error-handling.md", "reason": "Verify error handling"}
-{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "Verify UI consistency"}

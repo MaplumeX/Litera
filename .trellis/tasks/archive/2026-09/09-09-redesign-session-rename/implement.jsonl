@@ -1,3 +1,0 @@
-{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "SessionList 组件编辑态 UI 改动需遵循组件规范"}
-{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "前端质量规范，含测试要求"}
-{"file": ".trellis/spec/frontend/i18n.md", "reason": "移除保存/取消按钮后需确认 i18n key 的清理规范"}

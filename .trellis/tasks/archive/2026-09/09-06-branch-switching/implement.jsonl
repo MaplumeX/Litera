@@ -1,9 +1,0 @@
-{"file": ".trellis/tasks/09-06-branch-switching/prd.md", "reason": "需求与验收标准"}
-{"file": ".trellis/tasks/09-06-branch-switching/design.md", "reason": "技术设计：branchNavigation 算法、Rust 旁文件指针、事件契约、UI 集成"}
-{"file": ".trellis/tasks/09-06-branch-switching/implement.md", "reason": "分阶段执行清单与验证命令"}
-{"file": ".trellis/spec/backend/tauri-commands.md", "reason": "Tauri IPC 命令契约与 embedded agent 边界规范"}
-{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "embedded agent 持久化边界：append 时序与 abort 语义"}
-{"file": ".trellis/spec/frontend/state-management.md", "reason": "状态归属边界：runtime 拥有 session leaf，React 拥有投影"}
-{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "shadcn/ui 组件模式与 chrome 视觉语言"}
-{"file": ".trellis/spec/frontend/i18n.md", "reason": "新增文案的 i18n 规范"}
-{"file": ".trellis/spec/frontend/type-safety.md", "reason": "事件类型扩展的类型安全规范"}

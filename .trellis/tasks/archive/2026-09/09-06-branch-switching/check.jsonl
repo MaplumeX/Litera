@@ -1,5 +1,0 @@
-{"file": ".trellis/tasks/09-06-branch-switching/prd.md", "reason": "对照验收标准逐条核验"}
-{"file": ".trellis/tasks/09-06-branch-switching/design.md", "reason": "核验实现与设计契约一致（事件字段、乐观锁语义、anchors 对应关系）"}
-{"file": ".trellis/tasks/09-06-branch-switching/implement.md", "reason": "核验各阶段验证命令与 review 门已执行"}
-{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "核验 Rust 侧 append/乐观锁改动不破坏既有持久化时序"}
-{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "核验前端测试覆盖与质量标准"}

@@ -1,2 +1,0 @@
-{"file": ".trellis/spec/frontend/component-guidelines.md", "reason": "聊天组件规范；line 23 登记 react-markdown+remark-gfm 为 agent 回答渲染方案，本任务在其上扩展数学插件"}
-{"file": ".trellis/tasks/09-07-chat-latex-math/design.md", "reason": "本任务技术设计：remark-math + rehype-katex + katex 接入点、CSP 兼容性、流式残缺公式降级策略"}
