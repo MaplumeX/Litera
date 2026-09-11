@@ -288,7 +288,7 @@ fn merge_blank_secret(
 #[tauri::command]
 pub async fn save_sync_config(
     app: tauri::AppHandle,
-    mut config: SyncBackendConfig,
+    config: SyncBackendConfig,
 ) -> AppResult<SyncConfigPublic> {
     let root = sync_config_root(&app)?;
     let previous = read_sync_config(&root)?;

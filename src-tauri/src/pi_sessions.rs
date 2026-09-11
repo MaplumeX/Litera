@@ -468,8 +468,8 @@ impl PiSessionStore {
         };
         let (header, entries) = match local_path.as_ref() {
             Some(path) => {
-                recover_truncated_tail(&path)?;
-                let (local_header, mut merged) = load_and_migrate(&path)?;
+                recover_truncated_tail(path)?;
+                let (local_header, mut merged) = load_and_migrate(path)?;
                 let ids: HashSet<String> = merged
                     .iter()
                     .filter_map(entry_id)

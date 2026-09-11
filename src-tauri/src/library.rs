@@ -552,6 +552,10 @@ impl LibraryStore {
         recoverable_atomic_write(&dir.join(".sync-placeholder.json"), &json, "placeholder")
     }
 
+    /// Drop a placeholder without touching anything else. `install_synced_book`
+    /// inlines this (it holds the transaction lock); the standalone form
+    /// covers the promote-on-import path and tests.
+    #[allow(dead_code)]
     pub fn remove_placeholder(&self, book_id: &str) -> AppResult<()> {
         validate_book_id(book_id)?;
         let _guard = self.transaction()?;

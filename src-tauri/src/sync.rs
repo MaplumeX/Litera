@@ -701,8 +701,6 @@ use object_store::{ObjectStore, ObjectStoreExt};
 use object_store::path::Path as ObjectPath;
 use object_store::{Error as ObjectStoreError, PutMode, PutOptions, PutPayload, UpdateVersion};
 
-pub const MANIFEST_MAX_RETRIES: usize = 3;
-
 fn manifest_path() -> ObjectPath {
     ObjectPath::from(MANIFEST_OBJECT_KEY)
 }
@@ -1034,8 +1032,8 @@ pub async fn sync_download_manifest(
     let config = crate::sync_config::read_sync_config(&root)?
         .ok_or_else(|| AppError::invalid_input("Sync is not configured"))?;
     let downloaded = download_manifest(&config).await?;
-    Ok(serde_json::to_value(downloaded)
-        .map_err(|error| AppError::storage_io(format!("Failed to serialize: {error}")))?)
+    serde_json::to_value(downloaded)
+        .map_err(|error| AppError::storage_io(format!("Failed to serialize: {error}")))
 }
 
 fn write_agent_object(root: &Path, file: &str, value: &serde_json::Value) -> AppResult<()> {
@@ -2290,7 +2288,7 @@ pub async fn sync_sessions(app: tauri::AppHandle) -> AppResult<SessionSyncSummar
     let object_store = crate::sync_config::build_sync_store(&config)?;
 
     let state_root = root.clone();
-    let (local_files, mut state) = run_sync_blocking(move || {
+    let (_initial_session_files, mut state) = run_sync_blocking(move || {
         let store = crate::pi_sessions::PiSessionStore::new(state_root.clone())?;
         let files = store.list_all_session_files()?;
         let state = read_sync_state(&state_root)?;
