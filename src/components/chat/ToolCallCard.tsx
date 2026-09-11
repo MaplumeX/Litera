@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
 import type { AgentToolCall } from "@/types/agent";
 import { CopyButton } from "./CopyButton";
+import { MindmapCard } from "./MindmapCard";
 
 const RESULT_TRUNCATE_LIMIT = 2000;
 
@@ -44,11 +45,69 @@ function paramsSummary(params: unknown): string {
   return stringifyValue(params);
 }
 
+/**
+ * The collapsible header row shared by every tool-call card: status icon
+ * (running / error / success), the tool name, the error label, and a summary.
+ * This is also the destructive-styling path error states reuse.
+ */
+export function ToolCallHeader({
+  call,
+  expanded,
+  onToggle,
+  summary,
+}: {
+  call: AgentToolCall;
+  expanded: boolean;
+  onToggle: () => void;
+  summary?: string;
+}) {
+  const { t } = useT();
+  const running = !call.done;
+  const error = call.done && call.isError === true;
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className="flex w-full items-center gap-1.5 py-0.5 text-left"
+      aria-expanded={expanded}
+    >
+      <ChevronRight
+        className={cn(
+          "h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform",
+          expanded && "rotate-90",
+        )}
+      />
+      {running && (
+        <Loader2
+          className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground motion-reduce:animate-none"
+          aria-hidden="true"
+        />
+      )}
+      {error && <CircleX className="h-3.5 w-3.5 shrink-0 text-destructive" aria-hidden="true" />}
+      {!running && !error && (
+        <Check className="h-3.5 w-3.5 shrink-0 text-green-600" aria-hidden="true" />
+      )}
+      <span
+        className={cn(
+          "shrink-0 text-xs font-medium",
+          error ? "text-destructive" : "text-foreground",
+          running && "animate-pulse motion-reduce:animate-none",
+        )}
+      >
+        {call.tool}
+      </span>
+      {error && <span className="shrink-0 text-xs text-destructive">{t("chat.toolError")}</span>}
+      {summary && <span className="truncate text-xs text-muted-foreground/70">{summary}</span>}
+    </button>
+  );
+}
+
 export function ToolCallCard({ call }: { call: AgentToolCall }) {
   const { t } = useT();
   const [expanded, setExpanded] = useState(false);
-  const running = !call.done;
-  const error = call.done && call.isError === true;
+  // Mind maps render as their own card: the outline is the payload, not a
+  // parameter dump, and expanding reveals the interactive map.
+  if (call.tool === "draw_mindmap") return <MindmapCard call={call} />;
   const summary = paramsSummary(call.params);
   const entries = paramEntries(call.params);
   const fullResult = call.result != null ? resultText(call.result) : "";
@@ -57,42 +116,12 @@ export function ToolCallCard({ call }: { call: AgentToolCall }) {
 
   return (
     <div className="-ml-1 rounded px-1 transition-colors hover:bg-muted/40">
-      <button
-        type="button"
-        onClick={() => setExpanded((value) => !value)}
-        className="flex w-full items-center gap-1.5 py-0.5 text-left"
-        aria-expanded={expanded}
-      >
-        <ChevronRight
-          className={cn(
-            "h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform",
-            expanded && "rotate-90",
-          )}
-        />
-        {running && (
-          <Loader2
-            className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground motion-reduce:animate-none"
-            aria-hidden="true"
-          />
-        )}
-        {error && <CircleX className="h-3.5 w-3.5 shrink-0 text-destructive" aria-hidden="true" />}
-        {!running && !error && (
-          <Check className="h-3.5 w-3.5 shrink-0 text-green-600" aria-hidden="true" />
-        )}
-        <span
-          className={cn(
-            "shrink-0 text-xs font-medium",
-            error ? "text-destructive" : "text-foreground",
-            running && "animate-pulse motion-reduce:animate-none",
-          )}
-        >
-          {call.tool}
-        </span>
-        {error && <span className="shrink-0 text-xs text-destructive">{t("chat.toolError")}</span>}
-        {summary && (
-          <span className="truncate text-xs text-muted-foreground/70">{summary}</span>
-        )}
-      </button>
+      <ToolCallHeader
+        call={call}
+        expanded={expanded}
+        onToggle={() => setExpanded((value) => !value)}
+        summary={summary}
+      />
       {expanded && (
         <div className="space-y-1 pb-1">
           {entries.length > 0 && (
