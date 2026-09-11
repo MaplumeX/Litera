@@ -252,6 +252,7 @@ export const zhCN = {
   "chat.copyResult": "复制结果",
   "chat.resultTruncated": "已截断，共 {count} 字符",
   "chat.toolError": "调用失败",
+  "chat.exportSvg": "导出 SVG",
   "chat.clearPrompt": "清空",
   "chat.compacting": "正在压缩上下文…",
   "chat.compacted": "上下文已压缩",

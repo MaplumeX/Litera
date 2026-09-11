@@ -4,6 +4,7 @@ use tauri_plugin_window_state::{Builder as WindowStateBuilder, StateFlags};
 
 mod agent_config;
 mod error;
+mod export;
 mod library;
 mod open_paths;
 mod pi_sessions;
@@ -136,6 +137,7 @@ pub fn run() {
             library::update_reading_state,
             library::get_annotations,
             library::save_annotations,
+            export::save_text_file,
             agent_config::get_agent_config,
             agent_config::get_agent_runtime_config,
             agent_config::save_agent_config,

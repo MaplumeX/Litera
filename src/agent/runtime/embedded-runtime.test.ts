@@ -466,6 +466,71 @@ describe("LiteraAgentRuntime",()=>{
     expect(events).toContain("prompt_end");
   });
 
+  it("persists a draw_mindmap receipt and the intact tool-call params",async()=>{
+    const current=session();const batches:PiSessionEntry[][]=[];
+    const sessions:SessionPort={create:async()=>current,list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,entries)=>{batches.push(entries);return entries[entries.length-1]?.id??null;}};
+    const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:1}),toc:async()=>[],readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:1,text:"chapter"}),search:async()=>[],close:()=>{}};
+    const outline="## Main idea\n- point one\n  - detail\n- point two";
+    const faux=createFauxCore({tokensPerSecond:10_000});faux.setResponses([fauxAssistantMessage(fauxToolCall("draw_mindmap",{title:"Chapter 3 structure",outline}),{stopReason:"toolUse"}),fauxAssistantMessage("here is the map")]);
+    const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret",thinkingLevel:"off"};
+    const runtime=new LiteraAgentRuntime({sessions,book,loadConfig:async()=>config,loadStream:async()=>faux.streamSimple});
+    await runtime.openBook("book",new ArrayBuffer(1));
+    await runtime.prompt("summarize the structure visually",{});
+    const result=toolResult(batches,"draw_mindmap");
+    expect(result?.isError).toBe(false);
+    expect(JSON.parse(result!.text)).toEqual({status:"drawn",title:"Chapter 3 structure",nodes:4});
+    // The receipt is lightweight: it never echoes the outline back to the model.
+    expect(result!.text).not.toContain("point one");
+    // The persisted tool-call entry keeps the original params (the derived view's data source).
+    expect(mindmapToolCallArgs(batches)).toEqual({title:"Chapter 3 structure",outline});
+  });
+
+  it("returns a structured error for an over-depth draw_mindmap outline",async()=>{
+    const current=session();const batches:PiSessionEntry[][]=[];
+    const sessions:SessionPort={create:async()=>current,list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,entries)=>{batches.push(entries);return entries[entries.length-1]?.id??null;}};
+    const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:1}),toc:async()=>[],readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:1,text:"chapter"}),search:async()=>[],close:()=>{}};
+    const outline="# A\n## B\n### C\n#### D\n##### E";
+    const faux=createFauxCore({tokensPerSecond:10_000});faux.setResponses([fauxAssistantMessage(fauxToolCall("draw_mindmap",{title:"Too deep",outline}),{stopReason:"toolUse"}),fauxAssistantMessage("retrying smaller")]);
+    const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret",thinkingLevel:"off"};
+    const runtime=new LiteraAgentRuntime({sessions,book,loadConfig:async()=>config,loadStream:async()=>faux.streamSimple});
+    await runtime.openBook("book",new ArrayBuffer(1));
+    await runtime.prompt("draw it",{});
+    const result=toolResult(batches,"draw_mindmap");
+    expect(result?.isError).toBe(true);
+    expect(result?.text).toContain("4");
+    expect(mindmapToolCallArgs(batches)).toEqual({title:"Too deep",outline});
+  });
+
+  it("returns a structured error for an over-count draw_mindmap outline",async()=>{
+    const current=session();const batches:PiSessionEntry[][]=[];
+    const sessions:SessionPort={create:async()=>current,list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,entries)=>{batches.push(entries);return entries[entries.length-1]?.id??null;}};
+    const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:1}),toc:async()=>[],readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:1,text:"chapter"}),search:async()=>[],close:()=>{}};
+    const outline=Array.from({length:101},(_,index)=>`- point ${index+1}`).join("\n");
+    const faux=createFauxCore({tokensPerSecond:10_000});faux.setResponses([fauxAssistantMessage(fauxToolCall("draw_mindmap",{title:"Too wide",outline}),{stopReason:"toolUse"}),fauxAssistantMessage("retrying smaller")]);
+    const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret",thinkingLevel:"off"};
+    const runtime=new LiteraAgentRuntime({sessions,book,loadConfig:async()=>config,loadStream:async()=>faux.streamSimple});
+    await runtime.openBook("book",new ArrayBuffer(1));
+    await runtime.prompt("draw it",{});
+    const result=toolResult(batches,"draw_mindmap");
+    expect(result?.isError).toBe(true);
+    expect(result?.text).toContain("100");
+  });
+
+  it("returns a structured error for an over-long draw_mindmap line",async()=>{
+    const current=session();const batches:PiSessionEntry[][]=[];
+    const sessions:SessionPort={create:async()=>current,list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,entries)=>{batches.push(entries);return entries[entries.length-1]?.id??null;}};
+    const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:1}),toc:async()=>[],readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:1,text:"chapter"}),search:async()=>[],close:()=>{}};
+    const outline=`- ${"x".repeat(201)}`;
+    const faux=createFauxCore({tokensPerSecond:10_000});faux.setResponses([fauxAssistantMessage(fauxToolCall("draw_mindmap",{title:"Too long",outline}),{stopReason:"toolUse"}),fauxAssistantMessage("retrying smaller")]);
+    const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret",thinkingLevel:"off"};
+    const runtime=new LiteraAgentRuntime({sessions,book,loadConfig:async()=>config,loadStream:async()=>faux.streamSimple});
+    await runtime.openBook("book",new ArrayBuffer(1));
+    await runtime.prompt("draw it",{});
+    const result=toolResult(batches,"draw_mindmap");
+    expect(result?.isError).toBe(true);
+    expect(result?.text).toContain("200");
+  });
+
   it("rejects a stale list_annotations execute after the bookId switches",async()=>{
     const current=session();const batches:PiSessionEntry[][]=[];
     const sessions:SessionPort={create:async()=>current,list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,entries)=>{batches.push(entries);return entries[entries.length-1]?.id??null;}};
@@ -513,4 +578,14 @@ function listAnnotationsPayload(batches:PiSessionEntry[][]):unknown{
   expect(result?.isError).toBe(false);
   expect(result?.text).toBeTruthy();
   return JSON.parse(result!.text);
+}
+
+function mindmapToolCallArgs(batches:PiSessionEntry[][]):{title?:unknown;outline?:unknown}|undefined{
+  for(const entry of batches.flat()){
+    if(entry.type!=="message")continue;
+    const message=entry.message as {role?:string;content?:Array<{type?:string;name?:string;arguments?:unknown}>};
+    if(message.role!=="assistant")continue;
+    const block=message.content?.find((item)=>item.type==="toolCall"&&item.name==="draw_mindmap");
+    if(block)return block.arguments as {title?:unknown;outline?:unknown};
+  }
 }

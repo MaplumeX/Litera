@@ -254,6 +254,7 @@ export const en: { [K in MessageKey]: string } = {
   "chat.copyResult": "Copy result",
   "chat.resultTruncated": "Truncated, {count} chars total",
   "chat.toolError": "Failed",
+  "chat.exportSvg": "Export SVG",
   "chat.clearPrompt": "Clear",
   "chat.compacting": "Compacting context…",
   "chat.compacted": "Context compacted",

@@ -32,6 +32,10 @@ _Avoid_: Cloud, server
 The single JSON object on the Sync Backend holding all small sync data: book metadata, reading positions, annotations, tombstones, and per-item timestamps. Book files and covers live as separate objects referenced by it.
 _Avoid_: Index, sync database
 
+**Mind Map**:
+A visual outline rendered inside a Session's message flow, derived from a single tool call's markdown outline. Not a stored object; it lives exactly as long as the tool call entry that produced it.
+_Avoid_: Note, diagram, knowledge graph
+
 **Tombstone**:
 A sync record marking a deletion, kept in the Manifest so deletions propagate to other devices instead of being resurrected by merges.
 _Avoid_: Deletion record, kill bit
