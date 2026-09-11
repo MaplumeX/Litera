@@ -19,3 +19,7 @@
 - API keys never sync: they live in agent auth.json which is not a session file.
 - Expired book Tombstones purge their session objects along with book files.
 - Tests: Rust (`sync_merge_tests`: branch preservation, unseen-session creation, summary/system-prompt retention, file enumeration) and runner-level (sync_sessions invoked after the manifest upload).
+
+## Comments (post-review)
+
+- Review fix: `sync_sessions` now downloads and merges remote sessions BEFORE uploading, so every PUT carries the union — a device can no longer overwrite a remote copy without first unioning with it (a diverged branch used to survive only on its own device until its next sync).

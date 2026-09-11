@@ -18,3 +18,7 @@
 - Provider envelope covers agent/settings.json + models.json (provider choice, model, custom providers) — auth.json is never read into or written from the envelope, so API keys stay per-device (`has_api_key` shows them as missing on a new device).
 - Apply guards mid-sync local edits: envelopes apply only when strictly newer than the local dirty timestamp.
 - Tests: Rust `preference_sync_tests` (dirty bumps, enable baseline, newer-wins both directions, auth untouched, envelope contents, locale-change bump) and a runner test asserting the language event.
+
+## Comments (post-review)
+
+- Review fix: first-enable baselines are the epoch, not "now" — a device enabling Sync loses merges against envelopes other devices actually edited, so the new device feels pre-configured instead of clobbering the backend with untouched defaults.

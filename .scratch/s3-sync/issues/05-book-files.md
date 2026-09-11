@@ -21,5 +21,12 @@
 - "Multipart with resume": EPUBs upload via object_store multipart in fixed 8 MiB parts with bounded whole-upload retries (object_store exposes no cross-process part resume; retries keep a flaky connection eventually converging, and revision-addressed keys make re-uploads idempotent).
 - First-enable flow: `sync_estimate_upload` → estimate panel in Settings → `sync_confirm_bulk_upload` (persisted flag) → `runSyncOnce({uploadFiles:true})`. After confirmation new imports upload automatically.
 - On-demand download: `sync_download_book_file` is invoked before every open (no-op for cached books); `sync_ensure_cover` is invoked by the shelf for visible uncached books. `list_books` now merges placeholders (`cached: false`), so the shelf renders instantly from the Manifest; covers/EPUBs cache locally under `books/<id>/`.
-- Expired Tombstones release their cloud objects (opportunistic prefix purge during file upload).
+- Expired Tombstones release their Sync Backend objects (opportunistic prefix purge during the session phase of a sync pass).
 - Tests: Rust (`file_sync_tests`, placeholder promotion, estimate, purge selection, key layout), app-level (BookCard not-cached badge in grid+list, LibraryView cover-on-demand, App open-uncached-book download order, SyncSettingsForm estimate confirmation).
+
+## Comments (post-review)
+
+- Review fix: `BookRecord.cached` uses `#[serde(default = "default_true", skip_serializing_if = ...)]` so it actually crosses IPC for placeholders (the previous `#[serde(skip)]` made the "not downloaded" badge and cover-on-demand dead code) without being persisted into library.json.
+- Review fix: a cover-only edit counts as pending (the stored cover's hash is compared against the recorded revision); the EPUB PUT is skipped when its revision is unchanged.
+- Review fix: expired-Tombstone purge moved into `sync_sessions` (always the last step of a pass) and now also removes purged Tombstones from local state; no early return skips it.
+- Deviation (documented): true cross-process multipart resume is not exposed by `object_store`; uploads use fixed 8 MiB parts with bounded whole-upload retries and revision-addressed (idempotent) keys.

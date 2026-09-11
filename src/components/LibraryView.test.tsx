@@ -721,6 +721,33 @@ describe("LibraryView — synced covers on demand", () => {
     });
   });
 
+  it("refreshes the shelf when a sync pass lands", async () => {
+    const listCalls = vi.fn(() => [book]);
+    setupInvoke({
+      list_books: () => listCalls(),
+    });
+    const { findByText } = render(
+      <LibraryView onOpenBook={() => {}} onOpenSettings={() => {}} />,
+    );
+    await waitFor(() => {
+      expect(listCalls.mock.calls.length).toBeGreaterThanOrEqual(1);
+    });
+
+    const syncedBook: BookRecord = {
+      ...book,
+      id: "remote-1",
+      title: "Synced In Book",
+      cached: false,
+    };
+    listCalls.mockReturnValue([book, syncedBook]);
+
+    window.dispatchEvent(
+      new CustomEvent("litera:sync-applied", { detail: { preferencesSynced: false } }),
+    );
+
+    expect(await findByText("Synced In Book")).toBeTruthy();
+  });
+
   it("does not request covers for cached books", async () => {
     setupInvoke({
       list_books: () => [{ ...book, cached: true }],

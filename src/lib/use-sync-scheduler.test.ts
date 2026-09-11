@@ -66,6 +66,17 @@ describe("useSyncScheduler", () => {
     expect(syncRuns()).toBe(1);
   });
 
+  it("records sync outcomes for the Settings status area", async () => {
+    setupSync({ enabled: true, fail: false });
+    renderHook(() => useSyncScheduler());
+    await flush();
+
+    const successCall = invokeMock.mock.calls.find(
+      ([cmd]) => cmd === "sync_note_result",
+    );
+    expect(successCall?.[1]).toEqual({ success: true, error: null });
+  });
+
   it("never syncs when Sync is disabled", async () => {
     setupSync({ enabled: false });
 
@@ -136,6 +147,14 @@ describe("useSyncScheduler", () => {
 
     expect(syncRuns()).toBe(SYNC_FAILURE_THRESHOLD);
     expect(result.current.persistentFailure).toContain("backend unreachable");
+    const failureCall = invokeMock.mock.calls.find(
+      ([cmd]) => cmd === "sync_note_result" && (invokeMock.mock.calls.findLast?.(() => true), true),
+    );
+    void failureCall;
+    const failureCalls = invokeMock.mock.calls.filter(
+      ([cmd]) => cmd === "sync_note_result",
+    );
+    expect(failureCalls.length).toBeGreaterThanOrEqual(SYNC_FAILURE_THRESHOLD);
 
     // The notice is dismissable and never modal.
     act(() => {

@@ -39,12 +39,17 @@ export function useSyncScheduler(): SyncScheduler {
       const config = await invoke<SyncConfigLike | null>("get_sync_config");
       if (!config?.enabled) return;
       await runSyncOnce({ uploadFiles: true });
+      await invoke("sync_note_result", { success: true, error: null });
       consecutiveFailuresRef.current = 0;
       setPersistentFailure(null);
     } catch (error) {
+      const message = invokeErrorMessage(error);
+      // The Settings status area stays accurate even for automatic runs;
+      // recording the failure must not mask the failure itself.
+      await invoke("sync_note_result", { success: false, error: message }).catch(() => {});
       consecutiveFailuresRef.current += 1;
       if (consecutiveFailuresRef.current >= SYNC_FAILURE_THRESHOLD) {
-        setPersistentFailure(invokeErrorMessage(error));
+        setPersistentFailure(message);
       }
     } finally {
       runningRef.current = false;

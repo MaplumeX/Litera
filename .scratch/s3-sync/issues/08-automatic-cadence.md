@@ -23,3 +23,8 @@
 - Auto-sync passes `uploadFiles: true`; Rust silently skips file uploads until the first bulk-upload estimate is confirmed, so the Manifest still converges.
 - README privacy statements rewritten in English and Simplified Chinese ("books stay on your machine until you enable Sync; synced data is stored as-is on the bucket you choose").
 - Tests: `use-sync-scheduler.test.ts` (startup trigger, disabled no-op, debounce coalescing, periodic, toast threshold + dismissal + recovery) and SyncSettingsForm status display.
+
+## Comments (post-review)
+
+- Review fix: the scheduler records outcomes via `sync_note_result`, so the Settings status stays accurate for automatic runs (failures recorded, recovery clears the last error).
+- Review fix: `runSyncOnce` always emits `litera:sync-applied`; the shelf re-reads the Library on it (new placeholders, promotions, deletions render without a remount), while preferences reload is gated on the event's `preferencesSynced` flag to avoid visually reverting mid-edit local changes.

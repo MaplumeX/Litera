@@ -49,14 +49,19 @@ export async function runSyncOnce(
       base: local,
       etag: downloaded.etag,
     });
-    // Synced preferences (and the UI language riding in the envelope) apply
-    // without a restart: tell the app to re-read them.
-    if (merged.preferences) {
-      const language = (merged.preferences.data as { language?: string } | null)?.language;
-      window.dispatchEvent(
-        new CustomEvent("litera:sync-applied", { detail: { language } }),
-      );
-    }
+    // Tell the app a sync landed: the shelf re-reads the Library, and
+    // synced preferences (plus the UI language riding in the envelope)
+    // apply without a restart.
+    const preferences = merged.preferences;
+    const language = (preferences?.data as { language?: string } | null)?.language;
+    // Only signal a preferences reload when the merged envelope is newer
+    // than what we exported — a mid-sync local edit should not be reverted
+    // by a redundant reload.
+    const preferencesSynced =
+      preferences != null && preferences.updatedAt > (local.preferences?.updatedAt ?? "");
+    window.dispatchEvent(
+      new CustomEvent("litera:sync-applied", { detail: { language, preferencesSynced } }),
+    );
 
     try {
       await invoke("sync_upload_manifest", {

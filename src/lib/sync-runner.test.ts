@@ -208,11 +208,13 @@ describe("runSyncOnce", () => {
 
   it("announces synced preferences so the app can switch language live", async () => {
     const store = setupStore();
-    store.local = {
-      ...localManifest(),
+    // The remote envelope is newer and carries the language another device
+    // set — the merge adopts it and the event must surface it.
+    store.remote = {
+      ...remoteManifest(),
       preferences: {
-        updatedAt: "2026-01-01T00:00:00Z",
-        deviceId: "device-a",
+        updatedAt: "2026-01-03T00:00:00Z",
+        deviceId: "device-b",
         data: { theme: "dark", language: "en" },
       },
     };
@@ -222,15 +224,36 @@ describe("runSyncOnce", () => {
         return Promise.resolve({ etag: "etag-1", manifest: structuredClone(store.remote) });
       return Promise.resolve(null);
     });
-    const events: Array<{ language?: string }> = [];
+    const events: Array<{ language?: string; preferencesSynced?: boolean }> = [];
     window.addEventListener("litera:sync-applied", (event) => {
-      events.push((event as CustomEvent<{ language?: string }>).detail);
+      events.push((event as CustomEvent<{ language?: string; preferencesSynced?: boolean }>).detail);
     });
 
     await runSyncOnce();
 
     expect(events).toHaveLength(1);
     expect(events[0].language).toBe("en");
+    expect(events[0].preferencesSynced).toBe(true);
+  });
+
+  it("announces every applied sync even without preferences, for the shelf refresh", async () => {
+    const store = setupStore();
+    store.local = { ...localManifest(), preferences: null };
+    invokeMock.mockImplementation((cmd: string) => {
+      if (cmd === "sync_export_local_manifest") return Promise.resolve(structuredClone(store.local));
+      if (cmd === "sync_download_manifest")
+        return Promise.resolve({ etag: "etag-1", manifest: structuredClone(store.remote) });
+      return Promise.resolve(null);
+    });
+    const events: Array<{ language?: string; preferencesSynced?: boolean }> = [];
+    window.addEventListener("litera:sync-applied", (event) => {
+      events.push((event as CustomEvent<{ language?: string; preferencesSynced?: boolean }>).detail);
+    });
+
+    await runSyncOnce();
+
+    expect(events).toHaveLength(1);
+    expect(events[0].preferencesSynced).toBe(false);
   });
 
   it("applies the merged manifest before uploading, never after", async () => {

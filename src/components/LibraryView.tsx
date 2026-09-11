@@ -106,6 +106,18 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
     void refreshBooks();
   }, [refreshBooks]);
 
+  // A sync pass may have rendered new placeholders, promoted downloads, or
+  // propagated deletions: re-read the shelf without waiting for a remount.
+  useEffect(() => {
+    const onSyncApplied = () => {
+      void refreshBooks();
+    };
+    window.addEventListener("litera:sync-applied", onSyncApplied);
+    return () => {
+      window.removeEventListener("litera:sync-applied", onSyncApplied);
+    };
+  }, [refreshBooks]);
+
   // Synced books whose EPUB has not downloaded yet: fetch their cover on
   // demand the first time the shelf renders them, so a new device's shelf
   // looks right without downloading whole books. Attempted once per book

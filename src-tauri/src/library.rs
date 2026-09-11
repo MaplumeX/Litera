@@ -187,6 +187,24 @@ pub struct ReaderLayout {
     pub session_rail_open: bool,
 }
 
+fn sort_books_by_recency(left: &BookRecord, right: &BookRecord) -> std::cmp::Ordering {
+    match (&left.last_opened_at, &right.last_opened_at) {
+        (Some(left_opened), Some(right_opened)) => right_opened.cmp(left_opened),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => std::cmp::Ordering::Equal,
+    }
+    .then_with(|| right.imported_at.cmp(&left.imported_at))
+}
+
+fn default_cached_true() -> bool {
+    true
+}
+
+fn skip_cached_true(value: &bool) -> bool {
+    *value
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct BookRecord {
@@ -231,9 +249,10 @@ pub struct BookRecord {
         skip_serializing_if = "Option::is_none"
     )]
     pub(crate) content_version: Option<String>,
-    /// Whether the EPUB is present on this device. Derived (never stored):
-    /// real library records are always cached; sync placeholders are not.
-    #[serde(skip)]
+    /// Whether the EPUB is present on this device. Derived (never stored in
+    /// library.json): real records are always cached; sync placeholders are
+    /// not. Omitted from JSON when true, so stored records never carry it.
+    #[serde(default = "default_cached_true", skip_serializing_if = "skip_cached_true")]
     pub cached: bool,
     #[serde(
         rename = "lastReaderMode",
@@ -725,31 +744,14 @@ impl LibraryStore {
     pub fn list_books(&self) -> AppResult<Vec<BookRecord>> {
         let _guard = self.transaction()?;
         let mut books = self.read_library()?.books;
-        books.sort_by(|left, right| {
-            match (&left.last_opened_at, &right.last_opened_at) {
-                (Some(left_opened), Some(right_opened)) => right_opened.cmp(left_opened),
-                (Some(_), None) => std::cmp::Ordering::Less,
-                (None, Some(_)) => std::cmp::Ordering::Greater,
-                (None, None) => std::cmp::Ordering::Equal,
-            }
-            .then_with(|| right.imported_at.cmp(&left.imported_at))
-        });
         for book in books.iter_mut() {
             book.cached = true;
         }
         // Sync placeholders (books synced from the Manifest whose EPUB has
         // not downloaded yet) render on the shelf alongside local books.
-        let mut placeholders = self.list_placeholders()?;
-        books.append(&mut placeholders);
-        books.sort_by(|left, right| {
-            match (&left.last_opened_at, &right.last_opened_at) {
-                (Some(left_opened), Some(right_opened)) => right_opened.cmp(left_opened),
-                (Some(_), None) => std::cmp::Ordering::Less,
-                (None, Some(_)) => std::cmp::Ordering::Greater,
-                (None, None) => std::cmp::Ordering::Equal,
-            }
-            .then_with(|| right.imported_at.cmp(&left.imported_at))
-        });
+        let placeholders = self.list_placeholders()?;
+        books.extend(placeholders);
+        books.sort_by(sort_books_by_recency);
         Ok(books)
     }
 
@@ -5356,5 +5358,49 @@ mod tests {
         let raw = vec![0u8; 64];
         let compressed = compress_cover(&raw);
         assert_eq!(compressed, raw);
+    }
+}
+
+#[cfg(test)]
+mod cached_flag_tests {
+    use super::*;
+
+    #[test]
+    fn cached_crosses_ipc_for_placeholders_and_defaults_true_for_real_books() {
+        // Real book: the derived flag is omitted from JSON (never stored),
+        // and a record missing it deserializes as cached.
+        let real = BookRecord {
+            id: "book1".to_string(),
+            title: "T".to_string(),
+            author: String::new(),
+            description: None,
+            publisher: None,
+            language: None,
+            series: None,
+            cover_path: String::new(),
+            file_path: "/tmp/book.epub".to_string(),
+            imported_at: String::new(),
+            last_fraction: None,
+            last_cfi: None,
+            settings: None,
+            last_opened_at: None,
+            content_hash: None,
+            last_reader_mode: None,
+            last_layout: None,
+            content_version: None,
+            cached: true,
+        };
+        let json = serde_json::to_string(&real).expect("serialize");
+        assert!(!json.contains("cached"));
+
+        let parsed: BookRecord = serde_json::from_str(&json).expect("deserialize");
+        assert!(parsed.cached);
+
+        // Placeholder: the false flag must survive the IPC boundary.
+        let placeholder = BookRecord { cached: false, ..real };
+        let json = serde_json::to_string(&placeholder).expect("serialize");
+        assert!(json.contains("\"cached\":false"));
+        let parsed: BookRecord = serde_json::from_str(&json).expect("deserialize");
+        assert!(!parsed.cached);
     }
 }

@@ -109,9 +109,12 @@ export function usePreferences() {
   }, []);
 
   // A sync pass may have applied synced preferences underneath us; re-read
-  // them so theme and typography converge without a restart.
+  // them so theme and typography converge without a restart. Gated on the
+  // event's preferencesSynced flag so local edits are not visually reverted.
   useEffect(() => {
-    const reload = () => {
+    const reload = (event: Event) => {
+      const detail = (event as CustomEvent<{ preferencesSynced?: boolean }>).detail;
+      if (!detail?.preferencesSynced) return;
       void invoke<PreferencesResponse>("get_preferences")
         .then((response) => setPreferencesState(normalizePreferences(response)))
         .catch((error) => {

@@ -147,6 +147,21 @@ export function SyncSettingsForm() {
     }
   }
 
+  /** Run one full sync pass and record its outcome for the status area. */
+  async function runFullSyncPass() {
+    try {
+      await runSyncOnce({ uploadFiles: true });
+      await invoke("sync_note_result", { success: true, error: null });
+      setSyncedAt(true);
+    } catch (error) {
+      const message = invokeErrorMessage(error);
+      await invoke("sync_note_result", { success: false, error: message }).catch(() => {});
+      setSyncError(message);
+    } finally {
+      refreshStatus();
+    }
+  }
+
   async function syncNow() {
     setSyncing(true);
     setSyncedAt(false);
@@ -160,15 +175,7 @@ export function SyncSettingsForm() {
         setEstimate(pending);
         return;
       }
-      await runSyncOnce({ uploadFiles: true });
-      await invoke("sync_note_result", { success: true, error: null });
-      setSyncedAt(true);
-      refreshStatus();
-    } catch (error) {
-      const message = invokeErrorMessage(error);
-      await invoke("sync_note_result", { success: false, error: message }).catch(() => {});
-      setSyncError(message);
-      refreshStatus();
+      await runFullSyncPass();
     } finally {
       setSyncing(false);
     }
@@ -180,15 +187,7 @@ export function SyncSettingsForm() {
     setEstimate(null);
     try {
       await invoke("sync_confirm_bulk_upload");
-      await runSyncOnce({ uploadFiles: true });
-      await invoke("sync_note_result", { success: true, error: null });
-      setSyncedAt(true);
-      refreshStatus();
-    } catch (error) {
-      const message = invokeErrorMessage(error);
-      await invoke("sync_note_result", { success: false, error: message }).catch(() => {});
-      setSyncError(message);
-      refreshStatus();
+      await runFullSyncPass();
     } finally {
       setSyncing(false);
     }

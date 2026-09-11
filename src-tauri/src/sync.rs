@@ -108,6 +108,10 @@ pub const MANIFEST_OBJECT_KEY: &str = "litera/manifest.json";
 /// Mirrors TOMBSTONE_TTL_MS in the TS merge engine.
 pub const TOMBSTONE_TTL_SECS: i64 = 30 * 24 * 60 * 60;
 
+/// Pre-dates every real edit timestamp; used as the baseline for envelopes
+/// recorded when Sync is first enabled on a device.
+const EPOCH_BASELINE: &str = "1970-01-01T00:00:00+00:00";
+
 fn is_tombstone_active(tombstone: &SyncTombstoneData) -> bool {
     let Ok(deleted_at) = chrono::DateTime::parse_from_rfc3339(&tombstone.deleted_at) else {
         return true;
@@ -135,6 +139,32 @@ pub fn removed_annotation_ids(
         .filter(|id| !live.contains(id.as_str()))
         .cloned()
         .collect()
+}
+
+/// Union of the currently-stored and the merged Tombstones, newest
+/// deletedAt per key. Expired annotation Tombstones drop out (they are
+/// inert and own no objects); expired book Tombstones are kept so their
+/// objects can still be purged.
+fn merge_local_tombstones(
+    current: Vec<SyncTombstoneData>,
+    incoming: Vec<SyncTombstoneData>,
+) -> Vec<SyncTombstoneData> {
+    let mut by_key: std::collections::BTreeMap<String, SyncTombstoneData> =
+        std::collections::BTreeMap::new();
+    for tombstone in current.into_iter().chain(incoming) {
+        let keep = !(tombstone.kind == "annotation" && !is_tombstone_active(&tombstone));
+        if !keep {
+            continue;
+        }
+        let key = tombstone_key(&tombstone);
+        match by_key.get(&key) {
+            Some(existing) if existing.deleted_at >= tombstone.deleted_at => {}
+            _ => {
+                by_key.insert(key, tombstone);
+            }
+        }
+    }
+    by_key.into_values().collect()
 }
 
 fn tombstone_key(tombstone: &SyncTombstoneData) -> String {
@@ -226,12 +256,16 @@ pub fn note_provider_saved(root: &Path) -> AppResult<()> {
 /// the device has never recorded an edit).
 pub fn note_sync_enabled(root: &Path) -> AppResult<()> {
     let mut state = read_sync_state(root)?;
-    let now = chrono::Utc::now().to_rfc3339();
+    // Epoch baseline, not "now": a device enabling Sync for the first time
+    // must lose merges against any envelope another device actually edited,
+    // so the new device feels pre-configured rather than clobbering the
+    // backend with its untouched defaults.
+    let epoch = EPOCH_BASELINE.to_string();
     if state.preferences_updated_at.is_none() {
-        state.preferences_updated_at = Some(now.clone());
+        state.preferences_updated_at = Some(epoch.clone());
     }
     if state.provider_updated_at.is_none() {
-        state.provider_updated_at = Some(now);
+        state.provider_updated_at = Some(epoch);
     }
     write_sync_state(root, &state)
 }
@@ -1033,7 +1067,10 @@ pub async fn sync_apply_merged_manifest(
         apply_merged_manifest(&store, &manifest, &base)?;
 
         apply_preference_envelopes(&root, &preferences, &mut state, &manifest)?;
-        state.tombstones = manifest.tombstones.clone();
+        // Deletions recorded while the network round trip was in flight must
+        // survive: union by tombstone key with the newest deletedAt winning.
+        // Expired book Tombstones are retained until their objects are purged.
+        state.tombstones = merge_local_tombstones(state.tombstones.clone(), manifest.tombstones.clone());
         state.preferences = manifest.preferences.clone();
         state.provider = manifest.provider.clone();
         state.last_etag = etag;
@@ -1302,6 +1339,30 @@ mod tombstone_tests {
     }
 
     #[test]
+    fn tombstones_recorded_mid_sync_survive_the_apply_overwrite() {
+        let current = vec![SyncTombstoneData {
+            kind: "book".to_string(),
+            book_id: "book-late".to_string(),
+            annotation_id: None,
+            device_id: "device-a".to_string(),
+            // Deleted while the network round trip was in flight.
+            deleted_at: "2026-06-02T00:00:00Z".to_string(),
+        }];
+        let merged = vec![SyncTombstoneData {
+            kind: "book".to_string(),
+            book_id: "book-early".to_string(),
+            annotation_id: None,
+            device_id: "device-a".to_string(),
+            deleted_at: "2026-06-01T00:00:00Z".to_string(),
+        }];
+
+        let union = merge_local_tombstones(current, merged);
+
+        assert_eq!(union.len(), 2);
+        assert!(union.iter().any(|tombstone| tombstone.book_id == "book-late"));
+    }
+
+    #[test]
     fn apply_removes_a_tombstoned_placeholder() {
         let (_dir, store) = temp_store();
         store
@@ -1560,7 +1621,23 @@ fn pending_uploads(store: &LibraryStore, state: &SyncState) -> AppResult<Vec<Pen
             .clone()
             .or_else(|| fs::read(&epub_path).ok().map(|bytes| crate::library::sha256_hex(&bytes)))
             .unwrap_or_default();
-        if recorded.and_then(|entry| entry.file_revision.as_deref()) == Some(revision.as_str()) {
+        let file_current = recorded.and_then(|entry| entry.file_revision.as_deref())
+            == Some(revision.as_str());
+        // A cover-only edit must still upload: compare the stored cover's
+        // hash with the recorded revision. (Cover removal is not synced.)
+        let has_cover = cover_path.is_file();
+        let cover_current = if has_cover {
+            fs::read(&cover_path)
+                .ok()
+                .map(|bytes| {
+                    recorded.and_then(|entry| entry.cover_revision.as_deref())
+                        == Some(crate::library::sha256_hex(&bytes).as_str())
+                })
+                .unwrap_or(true)
+        } else {
+            true
+        };
+        if file_current && cover_current {
             continue;
         }
         pending.push(PendingUpload {
@@ -1652,23 +1729,17 @@ async fn upload_multipart_attempt(
 }
 
 /// Delete every object stored under a book's file prefix: the 30-day
-/// Tombstone retention has elapsed, so the cloud object set is cleaned up.
-/// Session objects for the book are released by the same rule.
+/// Tombstone retention has elapsed, so the Sync Backend object set is
+/// cleaned up. Session objects for the book are released by the same rule.
 async fn purge_book_objects(
     object_store: &object_store::aws::AmazonS3,
     book_id: &str,
 ) -> AppResult<()> {
-    use futures::TryStreamExt;
-
-    let prefix = ObjectPath::from(format!("{FILE_OBJECT_PREFIX}/{book_id}"));
-    let stream = object_store.list(Some(&prefix));
-    let objects: Vec<_> = stream.try_collect().await.map_err(map_object_store_error)?;
-    for object in objects {
-        object_store
-            .delete(&object.location)
-            .await
-            .map_err(map_object_store_error)?;
-    }
+    delete_prefix(
+        object_store,
+        &ObjectPath::from(format!("{FILE_OBJECT_PREFIX}/{book_id}")),
+    )
+    .await?;
     purge_session_objects(object_store, book_id).await
 }
 
@@ -1716,7 +1787,7 @@ pub async fn sync_upload_book_files(
         .ok_or_else(|| AppError::invalid_input("Sync is not configured"))?;
     let store = store.inner().clone();
     let state_root = root.clone();
-    let pending = run_sync_blocking(move || {
+    let (pending, recorded_revisions) = run_sync_blocking(move || {
         let state = read_sync_state(&state_root)?;
         let pending = pending_uploads(&store, &state)?;
         // The first bulk upload of an existing library happens only after the
@@ -1725,9 +1796,9 @@ pub async fn sync_upload_book_files(
         // estimate; until then automatic syncs silently skip file uploads
         // (the Manifest still converges).
         if !state.bulk_upload_confirmed && !pending.is_empty() {
-            return Ok(Vec::new());
+            return Ok((Vec::new(), state.book_revisions.clone()));
         }
-        Ok(pending)
+        Ok((pending, state.book_revisions.clone()))
     })
     .await?;
     if pending.is_empty() {
@@ -1739,12 +1810,19 @@ pub async fn sync_upload_book_files(
     let mut revisions: std::collections::BTreeMap<String, BookRevisionState> =
         std::collections::BTreeMap::new();
     for upload in pending {
-        put_epub_multipart(&object_store, &epub_object_key(&upload.book_id, &upload.revision), &upload.epub_path)
-            .await?;
+        // The EPUB only goes out when its revision moved; a cover-only edit
+        // reuses the object already stored under the same revision key.
+        let recorded_revision = recorded_revisions
+            .get(&upload.book_id)
+            .and_then(|entry| entry.file_revision.clone());
+        if recorded_revision.as_deref() != Some(upload.revision.as_str()) {
+            put_epub_multipart(&object_store, &epub_object_key(&upload.book_id, &upload.revision), &upload.epub_path)
+                .await?;
+            summary.bytes += fs::metadata(&upload.epub_path)
+                .map(|meta| meta.len())
+                .unwrap_or(0);
+        }
         summary.books += 1;
-        summary.bytes += fs::metadata(&upload.epub_path)
-            .map(|meta| meta.len())
-            .unwrap_or(0);
         let entry = revisions
             .entry(upload.book_id.clone())
             .or_default();
@@ -1764,16 +1842,8 @@ pub async fn sync_upload_book_files(
         }
     }
 
-    // Opportunistic cleanup: expired Tombstones release their objects.
-    let root_for_state = root.clone();
-    let expired = run_sync_blocking(move || {
-        let state = read_sync_state(&root_for_state)?;
-        Ok(expired_book_tombstones(&state))
-    })
-    .await?;
-    for book_id in expired {
-        let _ = purge_book_objects(&object_store, &book_id).await;
-    }
+    // Opportunistic cleanup of expired Tombstones lives in sync_sessions,
+    // which always runs at the end of a sync pass with the freshest state.
 
     let root_for_write = root.clone();
     run_sync_blocking(move || {
@@ -2031,6 +2101,79 @@ mod file_sync_tests {
     }
 
     #[test]
+    fn a_cover_only_edit_stays_pending_and_reuploads_only_the_cover() {
+        let (_dir, store) = temp_store();
+        let book_id = imported_book(&store);
+        // Record the EPUB as uploaded, with a stale cover revision.
+        store
+            .install_synced_cover(&book_id, b"old-cover")
+            .expect("cover");
+        let epub_hash = store
+            .read_library_public()
+            .expect("library")
+            .books
+            .iter()
+            .find(|book| book.id == book_id)
+            .and_then(|book| book.content_hash.clone())
+            .expect("hash");
+        let state = SyncState {
+            book_revisions: [(
+                book_id.clone(),
+                // A stale revision from before the cover was edited.
+                BookRevisionState {
+                    file_revision: Some(epub_hash),
+                    cover_revision: Some(crate::library::sha256_hex(b"previous-cover")),
+                },
+            )]
+            .into_iter()
+            .collect(),
+            bulk_upload_confirmed: true,
+            ..SyncState::default()
+        };
+
+        assert!(store.has_local_cover(&book_id));
+
+        // The EPUB is unchanged, but pending_uploads must not skip the book:
+        // the recorded cover revision no longer matches the stored cover.
+        let pending = pending_uploads(&store, &state).expect("pending");
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].book_id, book_id);
+    }
+
+    #[test]
+    fn a_unchanged_book_and_cover_are_not_pending() {
+        let (_dir, store) = temp_store();
+        let book_id = imported_book(&store);
+        store
+            .install_synced_cover(&book_id, b"the-cover")
+            .expect("cover");
+        let epub_hash = store
+            .read_library_public()
+            .expect("library")
+            .books
+            .iter()
+            .find(|book| book.id == book_id)
+            .and_then(|book| book.content_hash.clone())
+            .expect("hash");
+        let state = SyncState {
+            book_revisions: [(
+                book_id.clone(),
+                BookRevisionState {
+                    file_revision: Some(epub_hash),
+                    cover_revision: Some(crate::library::sha256_hex(b"the-cover")),
+                },
+            )]
+            .into_iter()
+            .collect(),
+            bulk_upload_confirmed: true,
+            ..SyncState::default()
+        };
+
+        let pending = pending_uploads(&store, &state).expect("pending");
+        assert!(pending.is_empty());
+    }
+
+    #[test]
     fn expired_tombstones_select_their_book_objects_for_purge() {
         let state = SyncState {
             tombstones: vec![
@@ -2097,30 +2240,10 @@ pub async fn sync_sessions(app: tauri::AppHandle) -> AppResult<SessionSyncSummar
 
     let mut summary = SessionSyncSummary::default();
 
-    // 1. Upload sessions whose content changed since the last upload.
-    for file in &local_files {
-        let content = fs::read_to_string(&file.path).map_err(|error| {
-            AppError::storage_io(format!("Failed to read session for upload: {error}"))
-        })?;
-        let hash = crate::library::sha256_hex(content.as_bytes());
-        let key = format!("{}/{}", file.book_id, file.session_id);
-        let entry = state.session_revisions.entry(key).or_default();
-        if entry.content_hash.as_deref() == Some(hash.as_str()) {
-            continue;
-        }
-        let result = object_store
-            .put(
-                &session_object_key(&file.book_id, &file.session_id),
-                PutPayload::from(content.into_bytes()),
-            )
-            .await
-            .map_err(map_object_store_error)?;
-        entry.content_hash = Some(hash);
-        entry.seen_etag = result.e_tag;
-        summary.uploaded += 1;
-    }
-
-    // 2. Download remote sessions we have not yet seen (etag moved or new).
+    // 1. Download remote sessions we have not yet seen (etag moved or new)
+    // and merge them locally BEFORE any upload: a PUT must never overwrite a
+    // remote copy without first unioning with it, or another device's
+    // diverged branch would exist only on that device until it syncs again.
     let remote_objects: Vec<object_store::ObjectMeta> = object_store
         .list(Some(&ObjectPath::from(SESSION_OBJECT_PREFIX)))
         .try_collect()
@@ -2172,11 +2295,45 @@ pub async fn sync_sessions(app: tauri::AppHandle) -> AppResult<SessionSyncSummar
         summary.downloaded += 1;
     }
 
-    // 3. Opportunistic cleanup: expired Tombstones release their session
-    // objects alongside their book files.
-    let expired = expired_book_tombstones(&state);
-    for book_id in &expired {
-        let _ = purge_session_objects(&object_store, book_id).await;
+    // 2. Upload sessions whose content changed since the last upload (the
+    // downloads above may have merged remote branches in, growing content).
+    let upload_root = root.clone();
+    let local_files = run_sync_blocking(move || {
+        let store = crate::pi_sessions::PiSessionStore::new(upload_root.clone())?;
+        store.list_all_session_files()
+    })
+    .await?;
+    for file in &local_files {
+        let content = fs::read_to_string(&file.path).map_err(|error| {
+            AppError::storage_io(format!("Failed to read session for upload: {error}"))
+        })?;
+        let hash = crate::library::sha256_hex(content.as_bytes());
+        let key = format!("{}/{}", file.book_id, file.session_id);
+        let entry = state.session_revisions.entry(key).or_default();
+        if entry.content_hash.as_deref() == Some(hash.as_str()) {
+            continue;
+        }
+        let result = object_store
+            .put(
+                &session_object_key(&file.book_id, &file.session_id),
+                PutPayload::from(content.into_bytes()),
+            )
+            .await
+            .map_err(map_object_store_error)?;
+        entry.content_hash = Some(hash);
+        entry.seen_etag = result.e_tag;
+        summary.uploaded += 1;
+    }
+
+    // 3. Opportunistic cleanup: expired Tombstones release their book file
+    // and session objects on the Sync Backend; once purged, the Tombstone
+    // itself is dropped from local state.
+    for book_id in expired_book_tombstones(&state) {
+        if purge_book_objects(&object_store, &book_id).await.is_ok() {
+            state
+                .tombstones
+                .retain(|tombstone| tombstone_key(tombstone) != format!("book:{book_id}"));
+        }
     }
 
     let write_root = root.clone();
@@ -2191,11 +2348,25 @@ async fn purge_session_objects(
     object_store: &object_store::aws::AmazonS3,
     book_id: &str,
 ) -> AppResult<()> {
+    delete_prefix(
+        object_store,
+        &ObjectPath::from(format!("{SESSION_OBJECT_PREFIX}/{book_id}")),
+    )
+    .await
+}
+
+/// Delete every object under a Sync Backend prefix.
+async fn delete_prefix(
+    object_store: &object_store::aws::AmazonS3,
+    prefix: &ObjectPath,
+) -> AppResult<()> {
     use futures::TryStreamExt;
 
-    let prefix = ObjectPath::from(format!("{SESSION_OBJECT_PREFIX}/{book_id}"));
-    let stream = object_store.list(Some(&prefix));
-    let objects: Vec<_> = stream.try_collect().await.map_err(map_object_store_error)?;
+    let objects: Vec<_> = object_store
+        .list(Some(prefix))
+        .try_collect()
+        .await
+        .map_err(map_object_store_error)?;
     for object in objects {
         object_store
             .delete(&object.location)
@@ -2238,6 +2409,20 @@ mod preference_sync_tests {
         let state = read_sync_state(dir.path()).expect("state");
         assert!(state.preferences_updated_at.is_some());
         assert!(state.provider_updated_at.is_some());
+    }
+
+    #[test]
+    fn the_enable_baseline_loses_to_any_real_envelope() {
+        let dir = tempfile::tempdir().expect("temp dir");
+
+        note_sync_enabled(dir.path()).expect("enable");
+        let state = read_sync_state(dir.path()).expect("state");
+
+        // The baseline predates every real edit, so an envelope another
+        // device actually saved wins the merge and applies locally.
+        let remote = envelope("2026-01-01T00:00:00Z", serde_json::json!({ "theme": "dark" }));
+        let baseline = state.preferences_updated_at.expect("baseline");
+        assert!(envelope_is_newer(&remote, Some(&baseline)));
     }
 
     #[test]
