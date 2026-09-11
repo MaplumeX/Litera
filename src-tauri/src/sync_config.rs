@@ -267,14 +267,34 @@ pub async fn get_sync_config(app: tauri::AppHandle) -> AppResult<Option<SyncConf
     Ok(config.as_ref().map(SyncConfigPublic::from))
 }
 
+/// The secret is never sent back to the UI, so a blank one on save means
+/// "keep the stored secret" (the form's placeholder says exactly that).
+/// Everything else must still be provided. A blank secret with nothing
+/// stored stays blank and fails validation, as it should.
+fn merge_blank_secret(
+    mut config: SyncBackendConfig,
+    previous: Option<&SyncBackendConfig>,
+) -> SyncBackendConfig {
+    if config.secret_key.trim().is_empty() {
+        if let Some(previous) = previous {
+            if !previous.secret_key.trim().is_empty() {
+                config.secret_key = previous.secret_key.clone();
+            }
+        }
+    }
+    config
+}
+
 #[tauri::command]
 pub async fn save_sync_config(
     app: tauri::AppHandle,
-    config: SyncBackendConfig,
+    mut config: SyncBackendConfig,
 ) -> AppResult<SyncConfigPublic> {
     let root = sync_config_root(&app)?;
-    let was_enabled = read_sync_config(&root)?.is_some_and(|previous| previous.enabled);
+    let previous = read_sync_config(&root)?;
+    let was_enabled = previous.as_ref().is_some_and(|previous| previous.enabled);
     let newly_enabled = config.enabled && !was_enabled;
+    let config = merge_blank_secret(config, previous.as_ref());
     let config = run_blocking(move || {
         write_sync_config(&root, &config)?;
         // First enable: the current local preferences and provider settings
@@ -307,4 +327,57 @@ where
     tauri::async_runtime::spawn_blocking(operation)
         .await
         .map_err(|error| AppError::storage_io(format!("Blocking sync worker failed: {error}")))?
+}
+
+#[cfg(test)]
+mod blank_secret_tests {
+    use super::*;
+
+    fn stored_config(secret: &str) -> SyncBackendConfig {
+        SyncBackendConfig {
+            schema_version: 1,
+            endpoint: "https://example.r2.cloudflarestorage.com".to_string(),
+            region: "us-east-1".to_string(),
+            bucket: "bucket".to_string(),
+            path_style: true,
+            access_key: "access".to_string(),
+            secret_key: secret.to_string(),
+            enabled: false,
+        }
+    }
+
+    #[test]
+    fn a_blank_secret_merges_back_the_stored_secret() {
+        // The UI never receives the secret back, so a re-save arrives with
+        // a blank secret and must keep the stored one while applying other
+        // field edits.
+        let previous = stored_config("stored-secret");
+        let mut resave = previous.clone();
+        resave.endpoint = "https://changed.example.com".to_string();
+        resave.secret_key = String::new();
+
+        let merged = merge_blank_secret(resave, Some(&previous));
+
+        assert_eq!(merged.endpoint, "https://changed.example.com");
+        assert_eq!(merged.secret_key, "stored-secret");
+    }
+
+    #[test]
+    fn a_blank_secret_with_nothing_stored_stays_blank() {
+        // First-time configuration must still require a secret.
+        let resave = stored_config("");
+        let merged = merge_blank_secret(resave, None);
+        assert_eq!(merged.secret_key, "");
+    }
+
+    #[test]
+    fn a_supplied_secret_overwrites_the_stored_one() {
+        let previous = stored_config("stored-secret");
+        let mut resave = previous.clone();
+        resave.secret_key = "new-secret".to_string();
+
+        let merged = merge_blank_secret(resave, Some(&previous));
+
+        assert_eq!(merged.secret_key, "new-secret");
+    }
 }

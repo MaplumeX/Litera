@@ -14,3 +14,7 @@
 - [ ] S3 credentials are stored locally in plaintext JSON, never written anywhere remote
 - [ ] UI copy in English and Simplified Chinese via the existing i18n mechanism
 - [ ] Settings dialog tests follow the existing pattern (jsdom + RTL, mocked invoke)
+
+## Comments (post-review)
+
+- Bug fix (found in real use): saving twice in a row failed with "Endpoint, region, bucket, access key, and secret are all required". The secret is never sent back to the UI, so after the first save the form's secret field is blank; the second save then failed validation. `save_sync_config` now merges a blank secret with the stored one ("leave blank to keep", as the form's placeholder promises); a blank secret with nothing stored still fails. Covered by `blank_secret_tests`.
