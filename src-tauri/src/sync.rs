@@ -713,10 +713,26 @@ pub async fn download_manifest(
     config: &crate::sync_config::SyncBackendConfig,
 ) -> AppResult<DownloadedManifest> {
     let store = crate::sync_config::build_sync_store(config)?;
-    let result = store
-        .get(&manifest_path())
-        .await
-        .map_err(map_object_store_error)?;
+    download_manifest_from(&store).await
+}
+
+/// Store-generic core of [`download_manifest`], so the first-sync path
+/// (missing object → empty Manifest) is testable without network access.
+pub async fn download_manifest_from(
+    store: &impl ObjectStore,
+) -> AppResult<DownloadedManifest> {
+    let result = match store.get(&manifest_path()).await {
+        Ok(result) => result,
+        // First sync ever on this Sync Backend: no Manifest exists yet.
+        // Treat it as an empty one so the pass converges instead of failing.
+        Err(ObjectStoreError::NotFound { .. }) => {
+            return Ok(DownloadedManifest {
+                etag: String::new(),
+                manifest: SyncManifestData::default(),
+            })
+        }
+        Err(error) => return Err(map_object_store_error(error)),
+    };
     let etag = result
         .meta
         .e_tag
@@ -741,9 +757,28 @@ pub async fn upload_manifest(
     etag: &str,
 ) -> AppResult<()> {
     let store = crate::sync_config::build_sync_store(config)?;
+    upload_manifest_to(&store, manifest, etag).await
+}
+
+/// Store-generic core of [`upload_manifest`], so the create-vs-update
+/// etag contract is testable without network access.
+pub async fn upload_manifest_to(
+    store: &impl ObjectStore,
+    manifest: &SyncManifestData,
+    etag: &str,
+) -> AppResult<()> {
     let bytes = serde_json::to_vec(manifest).map_err(|error| {
         AppError::storage_io(format!("Failed to serialize manifest: {error}"))
     })?;
+    if etag.is_empty() {
+        // No remote Manifest existed when we downloaded: a plain PUT
+        // creates it (an If-Match on a missing object cannot succeed).
+        store
+            .put(&manifest_path(), PutPayload::from(bytes))
+            .await
+            .map_err(map_object_store_error)?;
+        return Ok(());
+    }
     let version = UpdateVersion {
         e_tag: Some(etag.to_string()),
         version: None,
@@ -767,6 +802,31 @@ mod transport_tests {
     #[test]
     fn manifest_object_key_is_namespaced() {
         assert_eq!(MANIFEST_OBJECT_KEY, "litera/manifest.json");
+    }
+
+    #[test]
+    fn first_sync_treats_a_missing_manifest_as_empty_and_creates_it() {
+        tauri::async_runtime::block_on(async {
+            let store = object_store::memory::InMemory::new();
+
+            // Nothing on the Sync Backend yet: the download reports an empty
+            // Manifest rather than failing, so the first pass can converge.
+            let downloaded = download_manifest_from(&store).await.expect("download");
+            assert!(downloaded.etag.is_empty());
+            assert_eq!(downloaded.manifest, SyncManifestData::default());
+
+            // A blank etag uploads with a plain PUT (If-Match on a missing
+            // object cannot succeed).
+            let manifest = SyncManifestData {
+                schema_version: 1,
+                ..SyncManifestData::default()
+            };
+            upload_manifest_to(&store, &manifest, "").await.expect("create");
+
+            // The created Manifest downloads back intact.
+            let reread = download_manifest_from(&store).await.expect("re-download");
+            assert_eq!(reread.manifest, manifest);
+        });
     }
 
     #[test]

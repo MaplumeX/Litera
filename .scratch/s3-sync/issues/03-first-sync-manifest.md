@@ -14,3 +14,7 @@
 - [ ] Sync errors are reported in the Settings sync status area (toast cadence is ticket 08)
 - [ ] Rust-side Manifest serialization round-trip and etag retry loop covered by inline unit tests
 - [ ] Manifest is a single object; book files/covers are separate objects referenced by revision (upload of files themselves is ticket 05)
+
+## Comments (post-review)
+
+- Bug fix (found during real first-sync testing): a missing remote Manifest (first sync ever on the Sync Backend, HTTP 404 NoSuchKey) failed the whole pass. `download_manifest` now maps `Error::NotFound` to an empty Manifest with a blank etag, and `upload_manifest` uses a plain PUT when the etag is blank (If-Match on a missing object cannot succeed). Covered by an in-memory store unit test (`first_sync_treats_a_missing_manifest_as_empty_and_creates_it`).
