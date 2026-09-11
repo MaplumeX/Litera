@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { notifySyncActivity } from "@/lib/sync-activity";
 import type { ImportBookResult } from "@/types/library";
 import { invokeErrorMessage, isInvokeAppError } from "@/lib/app-error";
 import {
@@ -57,6 +58,7 @@ export function useBookImport() {
     setImporting(true);
     try {
       const results = await invoke<ImportBookResult[]>("import_book");
+      if (results.length > 0) notifySyncActivity();
       return await processImportResults(results, {
         askConfirm,
         onNotice: pushNotice,

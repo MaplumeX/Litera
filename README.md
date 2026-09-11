@@ -2,7 +2,7 @@
 
 **English** | [简体中文](README.zh-CN.md)
 
-A desktop EPUB reader with a built-in reading assistant. Books stay on your machine; the assistant only talks to the LLM provider you configure.
+A desktop EPUB reader with a built-in reading assistant. Books stay on your machine until you enable Sync; the assistant only talks to the LLM provider you configure.
 
 ![Library](docs/photos/1.png)
 
@@ -29,6 +29,13 @@ A desktop EPUB reader with a built-in reading assistant. Books stay on your mach
 - Typography: font, size, line height, measure, padding, tracking, paragraph spacing, first-line indent, alignment
 - Optional overrides for the book’s embedded fonts and chapter layout (independently)
 - Light / dark / system theme; UI font and size are separate from the page
+
+### Sync (opt-in)
+
+- Mirror your library across devices via any S3-compatible bucket you own (AWS S3, Cloudflare R2, Backblaze B2, MinIO, ...)
+- Reading positions, bookmarks, highlights and notes, assistant sessions, typography, and app preferences converge automatically; merges are item-level (nothing is clobbered by whole-database overwrites)
+- Large books upload with multipart; new devices download the Manifest first and fetch book files on demand
+- Off by default. Synced data is stored as-is (plaintext) on the bucket you choose; LLM API keys and S3 credentials never leave the device
 
 ### Reading assistant
 

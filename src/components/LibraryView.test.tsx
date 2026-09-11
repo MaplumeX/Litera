@@ -53,6 +53,7 @@ vi.mock("@/lib/book-utils", () => ({
 }));
 
 import { LibraryView } from "@/components/LibraryView";
+import { setLocale } from "@/lib/i18n";
 import { formatLibraryTimestamp } from "@/lib/library-shelf";
 import { LIBRARY_SORT_KEY, LIBRARY_VIEW_KEY } from "@/lib/library-shelf-prefs";
 
@@ -680,5 +681,82 @@ describe("LibraryView", () => {
     getByRole("button", { name: "选择" }).click();
     expect(await findByText("已选 0")).toBeTruthy();
     expect(queryByRole("button", { name: "更多操作" })).toBeNull();
+  });
+});
+
+describe("LibraryView — synced covers on demand", () => {
+  beforeEach(() => {
+    setLocale("en");
+  });
+
+  it("downloads covers for uncached synced books once, then refreshes", async () => {
+    const uncached: BookRecord = {
+      ...book,
+      id: "remote-1",
+      title: "Remote Book",
+      cached: false,
+    };
+    const coversFetched = vi.fn(() => true);
+    const listCalls = vi.fn(() => [uncached]);
+    setupInvoke({
+      list_books: () => listCalls(),
+      sync_ensure_cover: () => {
+        coversFetched();
+        return true;
+      },
+    });
+
+    const { findByText } = render(
+      <LibraryView onOpenBook={() => {}} onOpenSettings={() => {}} />,
+    );
+
+    // The uncached book renders with its "not downloaded" mark.
+    expect(await findByText("Not downloaded")).toBeTruthy();
+    await waitFor(() => {
+      expect(coversFetched).toHaveBeenCalledTimes(1);
+    });
+    // The refresh after the cover download re-lists the books.
+    await waitFor(() => {
+      expect(listCalls.mock.calls.length).toBeGreaterThanOrEqual(2);
+    });
+  });
+
+  it("refreshes the shelf when a sync pass lands", async () => {
+    const listCalls = vi.fn(() => [book]);
+    setupInvoke({
+      list_books: () => listCalls(),
+    });
+    const { findByText } = render(
+      <LibraryView onOpenBook={() => {}} onOpenSettings={() => {}} />,
+    );
+    await waitFor(() => {
+      expect(listCalls.mock.calls.length).toBeGreaterThanOrEqual(1);
+    });
+
+    const syncedBook: BookRecord = {
+      ...book,
+      id: "remote-1",
+      title: "Synced In Book",
+      cached: false,
+    };
+    listCalls.mockReturnValue([book, syncedBook]);
+
+    window.dispatchEvent(
+      new CustomEvent("litera:sync-applied", { detail: { preferencesSynced: false } }),
+    );
+
+    expect(await findByText("Synced In Book")).toBeTruthy();
+  });
+
+  it("does not request covers for cached books", async () => {
+    setupInvoke({
+      list_books: () => [{ ...book, cached: true }],
+    });
+
+    render(<LibraryView onOpenBook={() => {}} onOpenSettings={() => {}} />);
+
+    await waitFor(() => {
+      expect(invokeMock.mock.calls.some(([cmd]) => cmd === "sync_ensure_cover")).toBe(false);
+    });
   });
 });

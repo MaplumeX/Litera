@@ -187,6 +187,24 @@ pub struct ReaderLayout {
     pub session_rail_open: bool,
 }
 
+fn sort_books_by_recency(left: &BookRecord, right: &BookRecord) -> std::cmp::Ordering {
+    match (&left.last_opened_at, &right.last_opened_at) {
+        (Some(left_opened), Some(right_opened)) => right_opened.cmp(left_opened),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => std::cmp::Ordering::Equal,
+    }
+    .then_with(|| right.imported_at.cmp(&left.imported_at))
+}
+
+fn default_cached_true() -> bool {
+    true
+}
+
+fn skip_cached_true(value: &bool) -> bool {
+    *value
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct BookRecord {
@@ -230,7 +248,12 @@ pub struct BookRecord {
         default,
         skip_serializing_if = "Option::is_none"
     )]
-    content_version: Option<String>,
+    pub(crate) content_version: Option<String>,
+    /// Whether the EPUB is present on this device. Derived (never stored in
+    /// library.json): real records are always cached; sync placeholders are
+    /// not. Omitted from JSON when true, so stored records never carry it.
+    #[serde(default = "default_cached_true", skip_serializing_if = "skip_cached_true")]
+    pub cached: bool,
     #[serde(
         rename = "lastReaderMode",
         default,
@@ -325,7 +348,7 @@ pub struct AnnotationsFile {
 }
 
 impl AnnotationsFile {
-    fn empty() -> Self {
+    pub(crate) fn empty() -> Self {
         Self {
             schema_version: ANNOTATIONS_SCHEMA_VERSION,
             bookmarks: Vec::new(),
@@ -341,9 +364,9 @@ pub(crate) struct BookContent {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct LibraryData {
+pub(crate) struct LibraryData {
     schema_version: u32,
-    books: Vec<BookRecord>,
+    pub(crate) books: Vec<BookRecord>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -361,6 +384,53 @@ impl LibraryData {
             schema_version: SCHEMA_VERSION,
             books: Vec::new(),
         }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct BookPlaceholder {
+    id: String,
+    title: String,
+    author: String,
+    #[serde(rename = "lastFraction", default, skip_serializing_if = "Option::is_none")]
+    last_fraction: Option<f64>,
+    #[serde(rename = "lastCfi", default, skip_serializing_if = "Option::is_none")]
+    last_cfi: Option<String>,
+}
+
+impl BookPlaceholder {
+    /// Present as a BookRecord; the missing book.epub marks the uncached state.
+    fn to_record(&self, book_dir: PathBuf) -> Option<BookRecord> {
+        let epub = book_dir.join("book.epub");
+        let cover = book_dir.join("cover.jpg");
+        Some(BookRecord {
+            id: self.id.clone(),
+            title: self.title.clone(),
+            author: self.author.clone(),
+            description: None,
+            publisher: None,
+            language: None,
+            series: None,
+            // The cover displays only once it has been downloaded on
+            // demand; an empty path keeps BookCard from a broken image.
+            cover_path: if cover.is_file() {
+                cover.to_string_lossy().into_owned()
+            } else {
+                String::new()
+            },
+            file_path: epub.to_string_lossy().into_owned(),
+            imported_at: String::new(),
+            last_fraction: self.last_fraction,
+            last_cfi: self.last_cfi.clone(),
+            settings: None,
+            last_opened_at: None,
+            content_hash: None,
+            last_reader_mode: None,
+            last_layout: None,
+            content_version: None,
+            cached: false,
+        })
     }
 }
 
@@ -399,7 +469,7 @@ impl LibraryStore {
         }
     }
 
-    fn transaction(&self) -> AppResult<MutexGuard<'_, ()>> {
+    pub(crate) fn transaction(&self) -> AppResult<MutexGuard<'_, ()>> {
         if let Some(error) = &self.initialization_error {
             return Err(error.clone());
         }
@@ -444,6 +514,215 @@ impl LibraryStore {
         Ok(target)
     }
 
+    pub(crate) fn read_library_public(&self) -> AppResult<LibraryData> {
+        self.read_library()
+    }
+
+    pub(crate) fn write_library_public(&self, data: &LibraryData) -> AppResult<()> {
+        self.write_library(data)
+    }
+
+    /// A synced book whose EPUB has not been downloaded to this device yet.
+    /// Placeholders live as per-book sidecar files (library.json records
+    /// always have real files); the sync layer merges them into list output.
+    pub fn save_placeholder(
+        &self,
+        book_id: &str,
+        title: &str,
+        author: &str,
+        last_fraction: Option<f64>,
+        last_cfi: Option<String>,
+    ) -> AppResult<()> {
+        validate_book_id(book_id)?;
+        let _guard = self.transaction()?;
+        let placeholder = BookPlaceholder {
+            id: book_id.to_string(),
+            title: title.to_string(),
+            author: author.to_string(),
+            last_fraction,
+            last_cfi,
+        };
+        let dir = self.book_dir(book_id)?;
+        std::fs::create_dir_all(&dir).map_err(|error| {
+            AppError::storage_io(format!("Failed to create book directory: {error}"))
+        })?;
+        let json = serde_json::to_vec_pretty(&placeholder).map_err(|error| {
+            AppError::storage_io(format!("Failed to serialize placeholder: {error}"))
+        })?;
+        recoverable_atomic_write(&dir.join(".sync-placeholder.json"), &json, "placeholder")
+    }
+
+    /// Drop a placeholder without touching anything else. `install_synced_book`
+    /// inlines this (it holds the transaction lock); the standalone form
+    /// covers the promote-on-import path and tests.
+    #[allow(dead_code)]
+    pub fn remove_placeholder(&self, book_id: &str) -> AppResult<()> {
+        validate_book_id(book_id)?;
+        let _guard = self.transaction()?;
+        let path = self.book_dir(book_id)?.join(".sync-placeholder.json");
+        match std::fs::remove_file(&path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(AppError::storage_io(format!(
+                "Failed to remove placeholder: {error}"
+            ))),
+        }
+    }
+
+    pub fn list_placeholders(&self) -> AppResult<Vec<BookRecord>> {
+        let books_root = self.books_root();
+        let mut placeholders = Vec::new();
+        let entries = match std::fs::read_dir(&books_root) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(placeholders),
+            Err(error) => {
+                return Err(AppError::storage_io(format!(
+                    "Failed to read books root: {error}"
+                )))
+            }
+        };
+        for entry in entries {
+            let entry = entry.map_err(|error| {
+                AppError::storage_io(format!("Failed to read books entry: {error}"))
+            })?;
+            let path = entry.path().join(".sync-placeholder.json");
+            let bytes = match std::fs::read(&path) {
+                Ok(bytes) => bytes,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => {
+                    return Err(AppError::storage_io(format!(
+                        "Failed to read placeholder: {error}"
+                    )))
+                }
+            };
+            let placeholder: BookPlaceholder = serde_json::from_slice(&bytes).map_err(|error| {
+                AppError::storage_corrupt(format!("Failed to parse placeholder: {error}"))
+            })?;
+            if let Some(record) = placeholder.to_record(entry.path()) {
+                placeholders.push(record);
+            }
+        }
+        placeholders.sort_by(|left, right| left.id.cmp(&right.id));
+        Ok(placeholders)
+    }
+
+    /// Turn a sync placeholder into a real local book: write the downloaded
+    /// EPUB, promote the placeholder's metadata into a library record, and
+    /// drop the placeholder marker. `revision` is the content hash the
+    /// Sync Backend stored the file under.
+    pub fn install_synced_book(&self, book_id: &str, bytes: Vec<u8>) -> AppResult<()> {
+        validate_book_id(book_id)?;
+        if bytes.is_empty() {
+            return Err(AppError::invalid_input("Downloaded EPUB is empty"));
+        }
+        let _guard = self.transaction()?;
+        let mut library = self.read_library()?;
+        if library.books.iter().any(|book| book.id == book_id) {
+            // Already local (e.g. a duplicate download race): nothing to do.
+            return Ok(());
+        }
+        let placeholder = self
+            .list_placeholders()?
+            .into_iter()
+            .find(|book| book.id == book_id);
+        let book_dir = self.ensure_book_dir(book_id)?;
+        let epub_path = book_dir.join("book.epub");
+        if fs::symlink_metadata(&epub_path).is_ok() {
+            return Err(AppError::storage_corrupt(format!(
+                "Uncached book {book_id} already has an EPUB"
+            )));
+        }
+        atomic_write(&epub_path, &bytes, "downloaded EPUB")?;
+        let cover = book_dir.join("cover.jpg");
+        let record = BookRecord {
+            id: book_id.to_string(),
+            title: placeholder.as_ref().map(|p| p.title.clone()).unwrap_or_default(),
+            author: placeholder.as_ref().map(|p| p.author.clone()).unwrap_or_default(),
+            description: None,
+            publisher: None,
+            language: None,
+            series: None,
+            cover_path: if cover.is_file() {
+                cover.to_string_lossy().into_owned()
+            } else {
+                String::new()
+            },
+            file_path: epub_path.to_string_lossy().into_owned(),
+            imported_at: Utc::now().to_rfc3339(),
+            last_fraction: placeholder.as_ref().and_then(|p| p.last_fraction),
+            last_cfi: placeholder.as_ref().and_then(|p| p.last_cfi.clone()),
+            settings: None,
+            last_opened_at: None,
+            content_hash: Some(sha256_hex(&bytes)),
+            content_version: Some(uuid::Uuid::new_v4().simple().to_string()),
+            last_reader_mode: None,
+            last_layout: None,
+            cached: true,
+        };
+        library.books.push(record);
+        if let Err(error) = self.write_library(&library) {
+            let _ = fs::remove_file(&epub_path);
+            return Err(error);
+        }
+        // Inline placeholder removal: remove_placeholder re-acquires the
+        // transaction lock this method already holds.
+        let _ = fs::remove_file(book_dir.join(".sync-placeholder.json"));
+        sync_parent_directory(&book_dir, "downloaded book directory")
+    }
+
+    /// Store a downloaded cover for a book. Placeholders already present the
+    /// cover path; a real record gets its coverPath backfilled.
+    pub fn install_synced_cover(&self, book_id: &str, bytes: &[u8]) -> AppResult<()> {
+        validate_book_id(book_id)?;
+        if bytes.is_empty() {
+            return Err(AppError::invalid_input("Downloaded cover is empty"));
+        }
+        let _guard = self.transaction()?;
+        let book_dir = self.ensure_book_dir(book_id)?;
+        let cover_path = book_dir.join("cover.jpg");
+        atomic_write(&cover_path, bytes, "downloaded cover")?;
+        let mut library = self.read_library()?;
+        if let Some(record) = library.books.iter_mut().find(|book| book.id == book_id) {
+            if record.cover_path.is_empty() {
+                record.cover_path = cover_path.to_string_lossy().into_owned();
+                self.write_library(&library)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Paths of the stored EPUB and cover for a book. The cover may not
+    /// exist on disk (coverless book, or not yet downloaded).
+    pub fn book_files(&self, book_id: &str) -> AppResult<(PathBuf, PathBuf)> {
+        let dir = self.book_dir(book_id)?;
+        Ok((dir.join("book.epub"), dir.join("cover.jpg")))
+    }
+
+    /// Whether a cover file is present for the book (best effort).
+    pub fn has_local_cover(&self, book_id: &str) -> bool {
+        self.book_files(book_id)
+            .map(|(_, cover)| cover.is_file())
+            .unwrap_or(false)
+    }
+
+    pub(crate) fn ensure_book_dir(&self, book_id: &str) -> AppResult<PathBuf> {
+        let dir = self.book_dir(book_id)?;
+        std::fs::create_dir_all(&dir).map_err(|error| {
+            AppError::storage_io(format!("Failed to create book directory: {error}"))
+        })?;
+        Ok(dir)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn book_dir_path(&self, book_id: &str) -> AppResult<PathBuf> {
+        self.book_dir(book_id)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn trash_root_path(&self) -> PathBuf {
+        self.trash_root()
+    }
+
     fn read_library(&self) -> AppResult<LibraryData> {
         require_real_directory(&self.books_root(), "books")?;
         require_real_directory(&self.trash_root(), "library trash")?;
@@ -469,15 +748,14 @@ impl LibraryStore {
     pub fn list_books(&self) -> AppResult<Vec<BookRecord>> {
         let _guard = self.transaction()?;
         let mut books = self.read_library()?.books;
-        books.sort_by(|left, right| {
-            match (&left.last_opened_at, &right.last_opened_at) {
-                (Some(left_opened), Some(right_opened)) => right_opened.cmp(left_opened),
-                (Some(_), None) => std::cmp::Ordering::Less,
-                (None, Some(_)) => std::cmp::Ordering::Greater,
-                (None, None) => std::cmp::Ordering::Equal,
-            }
-            .then_with(|| right.imported_at.cmp(&left.imported_at))
-        });
+        for book in books.iter_mut() {
+            book.cached = true;
+        }
+        // Sync placeholders (books synced from the Manifest whose EPUB has
+        // not downloaded yet) render on the shelf alongside local books.
+        let placeholders = self.list_placeholders()?;
+        books.extend(placeholders);
+        books.sort_by(sort_books_by_recency);
         Ok(books)
     }
 
@@ -573,6 +851,7 @@ impl LibraryStore {
                 content_version: Some(import_id.clone()),
                 last_reader_mode: None,
                 last_layout: None,
+                cached: true,
             });
             if let Err(error) = self.write_library(&library) {
                 let rollback = fs::remove_dir_all(&book_dir);
@@ -948,17 +1227,14 @@ impl LibraryStore {
         Ok(BookContent { bytes })
     }
 
-    pub fn delete_book(&self, book_id: &str) -> AppResult<()> {
-        validate_book_id(book_id)?;
-        let _guard = self.transaction()?;
-        let mut library = self.read_library()?;
-        let record_index = library
-            .books
-            .iter()
-            .position(|book| book.id == book_id)
-            .ok_or_else(|| AppError::book_not_found(book_id))?;
+    /// Stage a book's directory into the local trash (recovery window),
+    /// leaving library.json untouched. Shared by local deletion and sync
+    /// deletion propagation; the local trash itself never syncs.
+    fn stage_book_directory_to_trash(&self, book_id: &str) -> AppResult<Option<PathBuf>> {
         let book_dir = self.book_dir(book_id)?;
-
+        if fs::symlink_metadata(&book_dir).is_err() {
+            return Ok(None);
+        }
         // Revalidate immediately before the rename. Initialization validation is
         // not enough because a local process could replace `.trash` while Litera
         // is running; following such a symlink would move book data outside the
@@ -976,15 +1252,57 @@ impl LibraryStore {
             restore_staged_book(&trash_path, &book_dir, &error)?;
             return Err(error);
         }
+        Ok(Some(trash_path))
+    }
+
+    pub fn delete_book(&self, book_id: &str) -> AppResult<()> {
+        validate_book_id(book_id)?;
+        let _guard = self.transaction()?;
+        let mut library = self.read_library()?;
+        let record_index = library
+            .books
+            .iter()
+            .position(|book| book.id == book_id)
+            .ok_or_else(|| AppError::book_not_found(book_id))?;
+
+        let staged = self.stage_book_directory_to_trash(book_id)?;
 
         library.books.remove(record_index);
         if let Err(error) = self.write_library(&library) {
-            restore_staged_book(&trash_path, &book_dir, &error)?;
+            if let Some(trash_path) = staged {
+                let book_dir = self.book_dir(book_id)?;
+                restore_staged_book(&trash_path, &book_dir, &error)?;
+            }
             return Err(error);
         }
 
         // Intentionally retain staged directories. A separate retention policy may
         // clean `.trash` later; this operation itself remains recoverable.
+        self.remove_book_sessions(book_id)
+    }
+
+    /// Delete a book because a synced Tombstone says another device deleted
+    /// it. Unlike `delete_book` this tolerates unknown ids (never seen
+    /// locally) and placeholder-only books: whatever exists locally is moved
+    /// into the local trash, which itself never syncs.
+    pub fn delete_book_for_sync(&self, book_id: &str) -> AppResult<()> {
+        validate_book_id(book_id)?;
+        let _guard = self.transaction()?;
+        let mut library = self.read_library()?;
+
+        let staged = self.stage_book_directory_to_trash(book_id)?;
+
+        let before = library.books.len();
+        library.books.retain(|book| book.id != book_id);
+        if library.books.len() != before {
+            if let Err(error) = self.write_library(&library) {
+                if let Some(trash_path) = staged {
+                    let book_dir = self.book_dir(book_id)?;
+                    restore_staged_book(&trash_path, &book_dir, &error)?;
+                }
+                return Err(error);
+            }
+        }
         self.remove_book_sessions(book_id)
     }
 
@@ -1070,7 +1388,7 @@ impl LibraryStore {
         if let Some(mode) = &last_reader_mode {
             validate_reader_mode(mode)?;
         }
-        if let Some(cfi) = &last_cfi {
+        if let Some(ref cfi) = last_cfi {
             validate_cfi(cfi)?;
         }
 
@@ -1097,8 +1415,13 @@ impl LibraryStore {
         if let Some(layout) = last_layout {
             record.last_layout = Some(layout);
         }
-        if let Some(cfi) = last_cfi {
-            record.last_cfi = Some(cfi);
+        if let Some(ref cfi) = last_cfi {
+            record.last_cfi = Some(cfi.clone());
+        }
+        // Position changes refresh lastOpenedAt so sync can use it as the
+        // position's explicit updatedAt (newest position wins on merge).
+        if last_fraction.is_some() || last_cfi.is_some() {
+            record.last_opened_at = Some(chrono::Utc::now().to_rfc3339());
         }
         self.write_library(&library)
     }
@@ -1109,12 +1432,15 @@ impl LibraryStore {
 
     fn require_existing_book(&self, book_id: &str) -> AppResult<()> {
         let library = self.read_library()?;
-        library
-            .books
-            .iter()
-            .find(|book| book.id == book_id)
-            .ok_or_else(|| AppError::book_not_found(book_id))?;
-        Ok(())
+        if library.books.iter().any(|book| book.id == book_id) {
+            return Ok(());
+        }
+        // Sync placeholders are real books-in-waiting: annotations may be
+        // saved for a book whose EPUB has not downloaded yet.
+        if self.book_dir(book_id)?.join(".sync-placeholder.json").is_file() {
+            return Ok(());
+        }
+        Err(AppError::book_not_found(book_id))
     }
 
     pub fn get_annotations(&self, book_id: &str) -> AppResult<AnnotationsFile> {
@@ -1513,6 +1839,7 @@ fn rollback_moves(moved: &[(PathBuf, PathBuf)]) -> AppResult<()> {
     }
     Ok(())
 }
+
 
 fn restore_staged_book(staged: &Path, book_dir: &Path, original_error: &AppError) -> AppResult<()> {
     fs::rename(staged, book_dir).map_err(|rollback_error| {
@@ -1992,7 +2319,7 @@ fn compress_cover(raw: &[u8]) -> Vec<u8> {
     }
 }
 
-fn sha256_hex(bytes: &[u8]) -> String {
+pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
     // sha2 0.11 removed the LowerHex impl on digest output, so encode manually.
     use std::fmt::Write as _;
     let digest = Sha256::digest(bytes);
@@ -2511,9 +2838,20 @@ pub async fn open_book_bytes(
 }
 
 #[tauri::command]
-pub async fn delete_book(store: tauri::State<'_, LibraryStore>, book_id: String) -> AppResult<()> {
+pub async fn delete_book(
+    app: tauri::AppHandle,
+    store: tauri::State<'_, LibraryStore>,
+    book_id: String,
+) -> AppResult<()> {
     let store = store.inner().clone();
-    run_blocking(move || store.delete_book(&book_id)).await
+    let root = crate::sync::sync_root(&app)?;
+    run_blocking(move || {
+        store.delete_book(&book_id)?;
+        // Record the deletion as a Tombstone so the merge on other devices
+        // drops the book instead of resurrecting it from their copy.
+        crate::sync::record_book_tombstone(&root, &book_id)
+    })
+    .await
 }
 
 #[tauri::command]
@@ -2552,12 +2890,22 @@ pub async fn get_annotations(
 
 #[tauri::command]
 pub async fn save_annotations(
+    app: tauri::AppHandle,
     store: tauri::State<'_, LibraryStore>,
     book_id: String,
     data: AnnotationsFile,
 ) -> AppResult<()> {
     let store = store.inner().clone();
-    run_blocking(move || store.save_annotations(&book_id, data)).await
+    let root = crate::sync::sync_root(&app)?;
+    run_blocking(move || {
+        let before = store.get_annotations(&book_id)?;
+        let removed = crate::sync::removed_annotation_ids(&before, &data);
+        store.save_annotations(&book_id, data)?;
+        // Locally removed annotations become Tombstones so a later union
+        // merge on another device cannot resurrect them.
+        crate::sync::note_annotations_saved(&root, &book_id, &removed)
+    })
+    .await
 }
 
 #[cfg(test)]
@@ -3701,8 +4049,8 @@ mod tests {
         let json = serde_json::to_string(&with_count).expect("serialize");
         assert!(json.contains("\"columnCount\":3"));
 
-        let without_count: ReadingSettings = serde_json::from_str(r#"{"fontSize":18.0}"#)
-            .expect("settings without columnCount");
+        let without_count: ReadingSettings =
+            serde_json::from_str(r#"{"fontSize":18.0}"#).expect("settings without columnCount");
         let json = serde_json::to_string(&without_count).expect("serialize");
         assert!(!json.contains("columnCount"));
 
@@ -5014,5 +5362,49 @@ mod tests {
         let raw = vec![0u8; 64];
         let compressed = compress_cover(&raw);
         assert_eq!(compressed, raw);
+    }
+}
+
+#[cfg(test)]
+mod cached_flag_tests {
+    use super::*;
+
+    #[test]
+    fn cached_crosses_ipc_for_placeholders_and_defaults_true_for_real_books() {
+        // Real book: the derived flag is omitted from JSON (never stored),
+        // and a record missing it deserializes as cached.
+        let real = BookRecord {
+            id: "book1".to_string(),
+            title: "T".to_string(),
+            author: String::new(),
+            description: None,
+            publisher: None,
+            language: None,
+            series: None,
+            cover_path: String::new(),
+            file_path: "/tmp/book.epub".to_string(),
+            imported_at: String::new(),
+            last_fraction: None,
+            last_cfi: None,
+            settings: None,
+            last_opened_at: None,
+            content_hash: None,
+            last_reader_mode: None,
+            last_layout: None,
+            content_version: None,
+            cached: true,
+        };
+        let json = serde_json::to_string(&real).expect("serialize");
+        assert!(!json.contains("cached"));
+
+        let parsed: BookRecord = serde_json::from_str(&json).expect("deserialize");
+        assert!(parsed.cached);
+
+        // Placeholder: the false flag must survive the IPC boundary.
+        let placeholder = BookRecord { cached: false, ..real };
+        let json = serde_json::to_string(&placeholder).expect("serialize");
+        assert!(json.contains("\"cached\":false"));
+        let parsed: BookRecord = serde_json::from_str(&json).expect("deserialize");
+        assert!(!parsed.cached);
     }
 }

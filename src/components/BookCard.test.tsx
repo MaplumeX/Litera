@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 import type { ComponentProps } from "react";
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { BookCard } from "@/components/BookCard";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { BookCard, BookListRow } from "@/components/BookCard";
 import type { BookRecord } from "@/types/library";
+import { setLocale } from "@/lib/i18n";
 
 vi.mock("@tauri-apps/api/core", () => ({
   convertFileSrc: (path: string) => path,
@@ -150,5 +151,45 @@ describe("BookCard", () => {
       coverRev: 7,
     });
     expect(getByAltText("Test Book").getAttribute("src")).toBe("/covers/a.jpg?v=7");
+  });
+});
+
+describe("BookCard — not cached state", () => {
+  beforeEach(() => {
+    setLocale("en");
+  });
+
+  it("marks a book whose file is not local as not downloaded", () => {
+    const { getByText } = renderCard({
+      book: { ...book, cached: false },
+    });
+    expect(getByText("Not downloaded")).toBeTruthy();
+  });
+
+  it("does not mark cached books", () => {
+    const { queryByText } = renderCard({
+      book: { ...book, cached: true },
+    });
+    expect(queryByText("Not downloaded")).toBeNull();
+  });
+});
+
+describe("BookListRow — not cached state", () => {
+  beforeEach(() => {
+    setLocale("en");
+  });
+
+  const rowBook: BookRecord = { ...book, cached: false };
+
+  it("marks an uncached book in list view", () => {
+    const { getByText } = render(
+      <BookListRow
+        book={rowBook}
+        onOpen={() => {}}
+        onDelete={() => {}}
+        onDetails={() => {}}
+      />,
+    );
+    expect(getByText("Not downloaded")).toBeTruthy();
   });
 });

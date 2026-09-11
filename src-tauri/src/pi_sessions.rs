@@ -371,6 +371,184 @@ impl PiSessionStore {
         }
         Ok(())
     }
+
+    /// A local session file located for the Sync Backend.
+    pub fn list_all_session_files(&self) -> AppResult<Vec<SyncSessionFile>> {
+        let sessions_root = self.sessions_root();
+        let books = match fs::read_dir(&sessions_root) {
+            Ok(books) => books,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => {
+                return Err(AppError::storage_io(format!(
+                    "Failed to list sessions: {error}"
+                )))
+            }
+        };
+        let mut files = Vec::new();
+        for book in books {
+            let book = book.map_err(|error| {
+                AppError::storage_io(format!("Failed to read sessions directory: {error}"))
+            })?;
+            let path = book.path();
+            match fs::symlink_metadata(&path) {
+                Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {}
+                _ => continue,
+            }
+            let book_id = path
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or_default()
+                .to_string();
+            if validate_id("bookId", &book_id).is_err() {
+                continue;
+            }
+            let sessions = match fs::read_dir(&path) {
+                Ok(sessions) => sessions,
+                Err(error) => {
+                    return Err(AppError::storage_io(format!(
+                        "Failed to list book sessions: {error}"
+                    )))
+                }
+            };
+            for session in sessions {
+                let session = session.map_err(|error| {
+                    AppError::storage_io(format!(
+                        "Failed to read book session directory: {error}"
+                    ))
+                })?;
+                let session_path = session.path();
+                if session_path.extension().and_then(|value| value.to_str()) != Some("jsonl") {
+                    continue;
+                }
+                let session_id = session_path
+                    .file_stem()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or_default()
+                    .to_string();
+                if validate_id("sessionId", &session_id).is_err() {
+                    continue;
+                }
+                files.push(SyncSessionFile {
+                    book_id: book_id.clone(),
+                    session_id,
+                    path: session_path,
+                });
+            }
+        }
+        Ok(files)
+    }
+
+    /// Merge a remote copy of a session into this device. Entries union by
+    /// id — local order first, remote-only entries appended in remote order —
+    /// so diverged branches on either device survive the merge (both remain
+    /// navigable; the active-branch leaf pointer stays per-device). Creates
+    /// the session locally when this device has never seen it. Returns the
+    /// content now stored locally.
+    pub fn merge_remote_session(&self, book_id: &str, remote_content: &str) -> AppResult<String> {
+        validate_id("bookId", book_id)?;
+        let _guard = self
+            .gate
+            .lock()
+            .map_err(|_| AppError::storage_io("Session lock is poisoned"))?;
+        let (mut remote_header, mut remote_entries) = parse_remote_session(remote_content)?;
+        let session_id = remote_header
+            .get("id")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        validate_id("sessionId", &session_id)?;
+        // Bring the remote copy up to the current session format first so
+        // entry ids exist to union on.
+        let _ = migrate(&mut remote_header, &mut remote_entries)?;
+
+        let local_path = match self.find_file(book_id, &session_id) {
+            Ok(path) => Some(path),
+            Err(error) if is_unknown_session(&error) => None,
+            Err(error) => return Err(error),
+        };
+        let (header, entries) = match local_path.as_ref() {
+            Some(path) => {
+                recover_truncated_tail(path)?;
+                let (local_header, mut merged) = load_and_migrate(path)?;
+                let ids: HashSet<String> = merged
+                    .iter()
+                    .filter_map(entry_id)
+                    .map(str::to_string)
+                    .collect();
+                for entry in remote_entries {
+                    let Some(id) = entry_id(&entry) else { continue };
+                    if !ids.contains(id) {
+                        merged.push(entry);
+                    }
+                }
+                (local_header, merged)
+            }
+            None => (remote_header, remote_entries),
+        };
+
+        validate_entries(&entries)?;
+        let mut content = serde_json::to_string(&header)
+            .map_err(|error| AppError::storage_io(format!("Failed to serialize session: {error}")))?;
+        content.push('\n');
+        for entry in &entries {
+            let line = serde_json::to_string(entry).map_err(|error| {
+                AppError::storage_io(format!("Failed to serialize session entry: {error}"))
+            })?;
+            content.push_str(&line);
+            content.push('\n');
+        }
+        if content.len() as u64 > MAX_FILE_BYTES {
+            return Err(AppError::invalid_input("Merged session is too large"));
+        }
+        match local_path {
+            Some(path) => {
+                crate::library::atomic_write(&path, content.as_bytes(), "merged session")?;
+            }
+            None => {
+                let dir = self.book_dir(book_id, true)?;
+                let path = dir.join(format!("{session_id}.jsonl"));
+                crate::library::atomic_write(&path, content.as_bytes(), "synced session")?;
+            }
+        }
+        Ok(content)
+    }
+}
+
+/// A local session file located for the Sync Backend.
+#[derive(Debug, Clone)]
+pub struct SyncSessionFile {
+    pub book_id: String,
+    pub session_id: String,
+    pub path: PathBuf,
+}
+
+fn is_unknown_session(error: &AppError) -> bool {
+    matches!(error.code, crate::error::AppErrorCode::InvalidInput)
+        && error.message.contains("Unknown session")
+}
+
+fn parse_remote_session(content: &str) -> AppResult<(Value, Vec<Value>)> {
+    let mut header: Option<Value> = None;
+    let mut entries = Vec::new();
+    for line in content.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        if line.len() > MAX_LINE_BYTES {
+            return Err(AppError::storage_corrupt("Synced session line is too large"));
+        }
+        let value: Value = serde_json::from_str(line)
+            .map_err(|error| AppError::storage_corrupt(format!("Invalid synced session: {error}")))?;
+        if header.is_none() {
+            validate_header(&value)?;
+            header = Some(value);
+        } else {
+            entries.push(value);
+        }
+    }
+    let header = header
+        .ok_or_else(|| AppError::storage_corrupt("Synced session header is missing"))?;
+    Ok((header, entries))
 }
 
 fn validate_id(label: &str, value: &str) -> AppResult<()> {
@@ -1159,5 +1337,149 @@ mod tests {
         let outside = tempfile::tempdir().unwrap();
         symlink(outside.path(), temp.path().join("sessions/linked")).unwrap();
         assert!(store.create("linked").is_err());
+    }
+}
+
+#[cfg(test)]
+mod sync_merge_tests {
+    use super::*;
+
+    fn store() -> (tempfile::TempDir, PiSessionStore) {
+        let temp = tempfile::tempdir().unwrap();
+        fs::create_dir(temp.path().join("sessions")).unwrap();
+        let store = PiSessionStore::new(temp.path().to_path_buf()).unwrap();
+        (temp, store)
+    }
+
+    fn message(id: &str, parent: Option<&str>, content: &str) -> Value {
+        json!({
+            "type": "message",
+            "id": id,
+            "parentId": parent,
+            "timestamp": Utc::now().to_rfc3339(),
+            "message": {"role": "user", "content": content, "timestamp": 1},
+        })
+    }
+
+    fn session_content(store: &PiSessionStore, book: &str, session: &str) -> String {
+        let path = store.find_file(book, session).unwrap();
+        fs::read_to_string(&path).unwrap()
+    }
+
+    #[test]
+    fn merging_a_remote_session_keeps_both_diverged_branches() {
+        let (_temp, store) = store();
+        let created = store.create("book-1").unwrap();
+        let id = created.header["id"].as_str().unwrap().to_string();
+
+        // Shared prefix, then a local-only branch.
+        store
+            .append("book-1", &id, None, vec![message("entry001", None, "shared")])
+            .unwrap();
+        store
+            .append(
+                "book-1",
+                &id,
+                Some("entry001"),
+                vec![message("local0001", Some("entry001"), "local branch")],
+            )
+            .unwrap();
+
+        // Another device diverged from the same shared prefix.
+        let remote = format!(
+            "{}\n{}\n{}\n",
+            serde_json::to_string(&json!({
+                "type": "session", "version": 3, "id": id,
+                "timestamp": "2026-01-01T00:00:00Z", "cwd": "",
+            }))
+            .unwrap(),
+            serde_json::to_string(&message("entry001", None, "shared")).unwrap(),
+            serde_json::to_string(&message("remote001", Some("entry001"), "remote branch")).unwrap(),
+        );
+
+        store.merge_remote_session("book-1", &remote).unwrap();
+
+        let loaded = store.load("book-1", &id).unwrap();
+        let ids: Vec<&str> = loaded.entries.iter().filter_map(entry_id).collect();
+        // Union by id: the shared entry once, and both branches survive.
+        assert_eq!(ids, vec!["entry001", "local0001", "remote001"]);
+        // Both branches remain navigable (the existing branch UI works off
+        // the leaf pointer).
+        store.set_leaf("book-1", &id, "local0001").unwrap();
+        store.set_leaf("book-1", &id, "remote001").unwrap();
+    }
+
+    #[test]
+    fn merging_an_unseen_session_creates_it_locally() {
+        let (_temp, store) = store();
+        let remote = format!(
+            "{}\n{}\n",
+            serde_json::to_string(&json!({
+                "type": "session", "version": 3, "id": "session42",
+                "timestamp": "2026-01-01T00:00:00Z", "cwd": "",
+            }))
+            .unwrap(),
+            serde_json::to_string(&message("entry001", None, "from another device")).unwrap(),
+        );
+
+        store.merge_remote_session("book-1", &remote).unwrap();
+
+        let loaded = store.load("book-1", "session42").unwrap();
+        assert_eq!(loaded.entries.len(), 1);
+        let summaries = store.list("book-1").unwrap();
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].id, "session42");
+    }
+
+    #[test]
+    fn merging_a_session_with_a_summary_and_system_prompt_keeps_them() {
+        let (_temp, store) = store();
+        let created = store.create("book-1").unwrap();
+        let id = created.header["id"].as_str().unwrap().to_string();
+        let remote = format!(
+            "{}\n{}\n{}\n{}\n",
+            serde_json::to_string(&json!({
+                "type": "session", "version": 3, "id": id,
+                "timestamp": "2026-01-01T00:00:00Z", "cwd": "",
+            }))
+            .unwrap(),
+            serde_json::to_string(&message("entry001", None, "question")).unwrap(),
+            serde_json::to_string(&json!({
+                "type": "session_info", "id": "info0001", "parentId": "entry001",
+                "timestamp": "2026-01-02T00:00:00Z", "name": "Summary title",
+            }))
+            .unwrap(),
+            serde_json::to_string(&json!({
+                "type": "session_config", "id": "conf0001", "parentId": "info0001",
+                "timestamp": "2026-01-02T00:00:00Z", "systemPrompt": "Discuss this book",
+            }))
+            .unwrap(),
+        );
+
+        store.merge_remote_session("book-1", &remote).unwrap();
+
+        let summaries = store.list("book-1").unwrap();
+        assert_eq!(summaries[0].title, "Summary title");
+        assert_eq!(summaries[0].system_prompt.as_deref(), Some("Discuss this book"));
+        // The returned content matches what is on disk.
+        assert!(session_content(&store, "book-1", &id).contains("Summary title"));
+    }
+
+    #[test]
+    fn list_all_session_files_walks_books_and_sessions() {
+        let (_temp, store) = store();
+        let created = store.create("book-1").unwrap();
+        let id = created.header["id"].as_str().unwrap().to_string();
+        store
+            .append("book-1", &id, None, vec![message("entry001", None, "hi")])
+            .unwrap();
+        store.create("book-2").unwrap();
+
+        let files = store.list_all_session_files().unwrap();
+        assert_eq!(files.len(), 2);
+        assert!(files
+            .iter()
+            .any(|file| file.book_id == "book-1" && file.session_id == id));
+        assert!(files.iter().all(|file| file.path.extension().and_then(|v| v.to_str()) == Some("jsonl")));
     }
 }

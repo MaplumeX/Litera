@@ -81,6 +81,8 @@ import { epubBytesFromIpc } from "@/lib/ipc-bytes";
 import { createLatestSerializedTaskController } from "@/lib/latest-serialized-task";
 import { useBookImport } from "@/lib/use-book-import";
 import { useOpenPaths } from "@/lib/use-open-paths";
+import { notifySyncActivity } from "@/lib/sync-activity";
+import { useSyncScheduler } from "@/lib/use-sync-scheduler";
 import { useT } from "@/lib/i18n";
 import { clampTocWidth, loadTocWidth, saveTocWidth } from "@/lib/toc-sidebar-width";
 import {
@@ -135,9 +137,32 @@ function PersistenceErrorBanner({
   );
 }
 
-function App() {
+function SyncFailureBanner({
+  message,
+  onDismiss,
+}: {
+  message: string | null;
+  onDismiss: () => void;
+}) {
   const { t } = useT();
+  if (!message) return null;
+  return (
+    <div
+      role="status"
+      className="flex items-center gap-3 border-b border-border bg-muted px-4 py-2 text-sm text-muted-foreground"
+    >
+      <span className="min-w-0 flex-1">{t("sync.failureNotice", { message })}</span>
+      <Button size="sm" variant="ghost" onClick={onDismiss}>
+        {t("common.close")}
+      </Button>
+    </div>
+  );
+}
+
+function App() {
+  const { t, setLocale, locale } = useT();
   const titlebarDrag = useTitlebarWindowDrag();
+  const syncScheduler = useSyncScheduler();
   const [view, setView] = useState<"library" | "reader">("library");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [fileData, setFileData] = useState<FileData | null>(null);
@@ -246,6 +271,7 @@ function App() {
         lastFraction: fraction,
         ...(cfi ? { lastCfi: cfi } : {}),
       });
+      notifySyncActivity();
     },
     500,
     reportPersistenceError,
@@ -408,6 +434,7 @@ function App() {
     async (bookId: string, next: AnnotationsFile) => {
       try {
         await invoke("save_annotations", { bookId, data: next });
+        notifySyncActivity();
       } catch (error) {
         reportPersistenceError(error);
         throw error;
@@ -438,6 +465,9 @@ function App() {
     // letting two book workers complete out of order.
     const request = openBookControllerRef.current.run(async () => {
       await flushReadingState();
+      // A synced book that isn't cached locally downloads on demand; for
+      // cached books this is a cheap no-op.
+      await invoke("sync_download_book_file", { bookId });
       const context = await invoke<BookOpenContext>("get_book_open_context", { bookId });
       const buffer = await invoke<ArrayBuffer>("open_book_bytes", {
         bookId,
@@ -617,6 +647,21 @@ function App() {
       unionKeys(current, ancestorKeysForHref(toc, progress.chapterHref)),
     );
   }, [progress.chapterHref, toc]);
+
+  // Sync may deliver a new UI language in the preferences envelope; apply it
+  // live (typography/theme refresh via usePreferences' own listener).
+  useEffect(() => {
+    const applySynced = (event: Event) => {
+      const language = (event as CustomEvent<{ language?: string }>).detail?.language;
+      if (language === "en" || language === "zh-CN") {
+        if (language !== locale) setLocale(language);
+      }
+    };
+    window.addEventListener("litera:sync-applied", applySynced);
+    return () => {
+      window.removeEventListener("litera:sync-applied", applySynced);
+    };
+  }, [locale, setLocale]);
 
   const handleCloseSettings = useCallback(async () => {
     try {
@@ -933,6 +978,10 @@ function App() {
           message={persistenceError}
           onDismiss={() => setPersistenceError(null)}
         />
+        <SyncFailureBanner
+          message={syncScheduler.persistentFailure}
+          onDismiss={syncScheduler.clearPersistentFailure}
+        />
         <BookImportNotices
           notices={bookImport.notices}
           dismissNotice={bookImport.dismissNotice}
@@ -959,6 +1008,10 @@ function App() {
       <PersistenceErrorBanner
         message={persistenceError}
         onDismiss={() => setPersistenceError(null)}
+      />
+      <SyncFailureBanner
+        message={syncScheduler.persistentFailure}
+        onDismiss={syncScheduler.clearPersistentFailure}
       />
       <BookImportNotices
         notices={bookImport.notices}

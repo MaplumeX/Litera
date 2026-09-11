@@ -24,6 +24,7 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Slider } from "@/components/ui/slider";
 import { AgentConfigForm } from "@/components/AgentConfigForm";
+import { SyncSettingsForm } from "@/components/settings/SyncSettingsForm";
 import { TypographyPreview } from "@/components/settings/TypographyPreview";
 import { cn } from "@/lib/utils";
 import {
@@ -55,12 +56,13 @@ import {
   saveUiFontSize,
 } from "@/lib/ui-chrome-font";
 
-type SettingsSection = "typography" | "appearance" | "ai" | "about";
+type SettingsSection = "typography" | "appearance" | "ai" | "sync" | "about";
 
 const SECTIONS: { id: SettingsSection; labelKey: MessageKey }[] = [
   { id: "typography", labelKey: "settings.typography" },
   { id: "appearance", labelKey: "settings.appearance" },
   { id: "ai", labelKey: "settings.ai" },
+  { id: "sync", labelKey: "settings.sync" },
   { id: "about", labelKey: "settings.about" },
 ];
 
@@ -753,7 +755,11 @@ export function SettingsDialog({
           ) : (
             <div className="min-h-0 flex-1 overflow-y-auto p-6">
               <DialogDescription className="mb-5">
-                {section === "about" ? t("settings.about.description") : scopeCopy}
+                {section === "about"
+                  ? t("settings.about.description")
+                  : section === "sync"
+                    ? t("settings.sync.description")
+                    : scopeCopy}
               </DialogDescription>
               {section === "appearance" && (
                 <div className="max-w-md space-y-5">
@@ -833,6 +839,12 @@ export function SettingsDialog({
               {section === "ai" && (
                 <div className="max-w-md">
                   <AgentConfigForm />
+                </div>
+              )}
+
+              {section === "sync" && (
+                <div className="max-w-md">
+                  <SyncSettingsForm />
                 </div>
               )}
 

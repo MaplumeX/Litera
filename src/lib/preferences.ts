@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useDebouncedCallback } from "@/lib/use-debounced-callback";
+import { notifySyncActivity } from "@/lib/sync-activity";
 import {
   DEFAULT_TYPOGRAPHY,
   DEFAULT_THEME,
@@ -84,6 +85,7 @@ export function usePreferences() {
         overrideFont: next.overrideFont,
         overrideLayout: next.overrideLayout,
       });
+      notifySyncActivity();
     },
     300,
     (error) => console.error("Failed to save preferences:", error),
@@ -103,6 +105,25 @@ export function usePreferences() {
       });
     return () => {
       disposed = true;
+    };
+  }, []);
+
+  // A sync pass may have applied synced preferences underneath us; re-read
+  // them so theme and typography converge without a restart. Gated on the
+  // event's preferencesSynced flag so local edits are not visually reverted.
+  useEffect(() => {
+    const reload = (event: Event) => {
+      const detail = (event as CustomEvent<{ preferencesSynced?: boolean }>).detail;
+      if (!detail?.preferencesSynced) return;
+      void invoke<PreferencesResponse>("get_preferences")
+        .then((response) => setPreferencesState(normalizePreferences(response)))
+        .catch((error) => {
+          console.error("Failed to reload preferences:", error);
+        });
+    };
+    window.addEventListener("litera:sync-applied", reload);
+    return () => {
+      window.removeEventListener("litera:sync-applied", reload);
     };
   }, []);
 
