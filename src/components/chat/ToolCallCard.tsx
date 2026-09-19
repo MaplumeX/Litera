@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import { Check, ChevronRight, CircleX, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
@@ -102,7 +102,7 @@ export function ToolCallHeader({
   );
 }
 
-export function ToolCallCard({ call }: { call: AgentToolCall }) {
+export const ToolCallCard = memo(function ToolCallCard({ call }: { call: AgentToolCall }) {
   const { t } = useT();
   const [expanded, setExpanded] = useState(false);
   // Mind maps render as their own card: the outline is the payload, not a
@@ -157,4 +157,4 @@ export function ToolCallCard({ call }: { call: AgentToolCall }) {
       )}
     </div>
   );
-}
+});

@@ -588,11 +588,10 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                 <AssistantMessage
                   message={message}
                   streaming={isStreaming && index === state.messages.length - 1}
-                  onRegenerate={
+                  canRegenerate={
                     !isStreaming && bookReady && hasUserMessage && index === state.messages.length - 1
-                      ? () => void handleRegenerate()
-                      : undefined
                   }
+                  onRegenerate={handleRegenerate}
                 />
               )}
             </div>

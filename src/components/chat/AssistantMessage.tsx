@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -31,7 +31,7 @@ export function BotAvatar() {
   );
 }
 
-function ThinkingBlock({ thinking, active }: { thinking: string; active: boolean }) {
+const ThinkingBlock = memo(function ThinkingBlock({ thinking, active }: { thinking: string; active: boolean }) {
   const { t } = useT();
   const [expanded, setExpanded] = useState(active);
   useEffect(() => {
@@ -67,7 +67,7 @@ function ThinkingBlock({ thinking, active }: { thinking: string; active: boolean
       )}
     </div>
   );
-}
+});
 
 /**
  * LaTeX 定界符预处理：
@@ -91,7 +91,22 @@ export function normalizeLatexDelimiters(text: string): string {
     .join("");
 }
 
-function TextBlock({
+/** The expensive part (remark/rehype + KaTeX) isolated so it only re-runs
+ * when the text itself changes — never when sibling props (like the
+ * regenerate button attachment) flip. */
+const MarkdownBody = memo(function MarkdownBody({ text }: { text: string }) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm, remarkMath]}
+      rehypePlugins={[rehypeKatex]}
+      components={markdownComponents}
+    >
+      {text}
+    </ReactMarkdown>
+  );
+});
+
+const TextBlock = memo(function TextBlock({
   text,
   streaming,
   onRegenerate,
@@ -101,16 +116,14 @@ function TextBlock({
   onRegenerate?: () => void;
 }) {
   const { t } = useT();
+  // Memoized: every keystroke in the chat input re-renders the whole panel,
+  // and re-running this regex pipeline plus the markdown/KaTeX parse per
+  // keystroke is what froze long sessions.
+  const normalized = useMemo(() => normalizeLatexDelimiters(text), [text]);
   return (
     <div>
       <div className="prose prose-sm max-w-none overflow-x-auto dark:prose-invert">
-        <ReactMarkdown
-          remarkPlugins={[remarkGfm, remarkMath]}
-          rehypePlugins={[rehypeKatex]}
-          components={markdownComponents}
-        >
-          {normalizeLatexDelimiters(text)}
-        </ReactMarkdown>
+        <MarkdownBody text={normalized} />
         {streaming && (
           <span className="ml-0.5 inline-block h-4 w-2 animate-pulse bg-primary/70 motion-reduce:animate-none" />
         )}
@@ -130,7 +143,7 @@ function TextBlock({
       </div>
     </div>
   );
-}
+});
 
 function messageBlocks(message: AgentMessage): AssistantBlock[] {
   if (message.blocks) return message.blocks;
@@ -140,10 +153,18 @@ function messageBlocks(message: AgentMessage): AssistantBlock[] {
 interface AssistantMessageProps {
   message: AgentMessage;
   streaming?: boolean;
+  /** Whether the caller allows regeneration at all (e.g. not while streaming). */
+  canRegenerate?: boolean;
+  /** Stable callback: inline arrows would defeat memoization of the whole list. */
   onRegenerate?: () => void;
 }
 
-export function AssistantMessage({ message, streaming = false, onRegenerate }: AssistantMessageProps) {
+export const AssistantMessage = memo(function AssistantMessage({
+  message,
+  streaming = false,
+  canRegenerate = true,
+  onRegenerate,
+}: AssistantMessageProps) {
   const { t } = useT();
   const blocks = messageBlocks(message);
   const textBlocks = blocks.filter((block): block is Extract<AssistantBlock, { type: "text" }> => block.type === "text");
@@ -170,12 +191,12 @@ export function AssistantMessage({ message, streaming = false, onRegenerate }: A
               text={block.text}
               streaming={streaming && index === lastTextIndex}
               onRegenerate={
-                !streaming && index === lastTextIndex ? onRegenerate : undefined
+                canRegenerate && !streaming && index === lastTextIndex ? onRegenerate : undefined
               }
             />
           );
         })}
-        {!streaming && lastTextIndex === -1 && onRegenerate && (
+        {!streaming && canRegenerate && lastTextIndex === -1 && onRegenerate && (
           <div className="flex h-6 items-center gap-1">
             <button
               type="button"
@@ -195,4 +216,4 @@ export function AssistantMessage({ message, streaming = false, onRegenerate }: A
       </div>
     </div>
   );
-}
+});
