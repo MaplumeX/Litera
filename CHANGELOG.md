@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-09-19
+
+### Added
+
+- **思维导图卡片渲染**：助手可调用 `draw_mindmap` 工具在消息流中内联渲染思维导图卡片。
+
+### Changed
+
+- **聊天渲染性能优化**：对消息组件进行 memoize,消除长会话滚动时的主线程冻结。
+- 升级 npm / Cargo 依赖（含 uuid 及 minor-and-patch 组共 12 项更新）。
+
 ## [0.3.0] - 2026-09-11
 
 ### Added
