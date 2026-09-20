@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-09-20
+
+### Fixed
+
+- **思维导图画布尺寸与暗色模式**：markmap-view 不会自行设置 svg 尺寸，浏览器默认 300×150 小框导致整棵树被挤在左上角，现显式设置 100% 宽高填满画布；同时将 markmap 内嵌样式表写死的浅色（文字 #333、空心圆背景 #fff、代码块背景 #f0f0f0）通过高优先级规则映射到应用主题 token，夜间模式可正常阅读，导出的 SVG 同样内联当前主题色。
+
 ## [0.3.1] - 2026-09-19
 
 ### Added
