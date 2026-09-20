@@ -187,6 +187,19 @@
   overflow-y: hidden;
 }
 
+/* 思维导图画布：markmap 内嵌样式把文字/圆圈/代码块颜色写死为浅色值
+ * （--markmap-text-color:#333 等），夜间模式下不可读。
+ * 用更高优先级选择器把它们映射到主题 token，light/dark 自动适配。 */
+.mindmap-canvas .markmap {
+  --markmap-text-color: var(--foreground);
+  --markmap-code-bg: var(--muted);
+  --markmap-code-color: var(--muted-foreground);
+  --markmap-circle-open-bg: var(--background);
+  --markmap-a-color: var(--primary);
+  --markmap-a-hover-color: var(--primary);
+  --markmap-highlight-bg: var(--accent);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .chat-typing-dot {
     animation: none;

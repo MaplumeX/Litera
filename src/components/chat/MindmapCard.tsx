@@ -22,6 +22,8 @@ interface MindmapTheme {
   colors: string[];
   background: string;
   foreground: string;
+  muted: string;
+  mutedForeground: string;
 }
 
 /** Bind the markmap palette to the app's CSS theme tokens so dark mode works. */
@@ -37,6 +39,8 @@ function readMindmapTheme(): MindmapTheme {
     ),
     background: read("--background", "#ffffff"),
     foreground: read("--foreground", "#000000"),
+    muted: read("--muted", "#f0f0f0"),
+    mutedForeground: read("--muted-foreground", "#555555"),
   };
 }
 
@@ -77,7 +81,12 @@ function MindmapCanvas({ params }: { params: MindmapParams }) {
       color: theme.colors,
     });
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    // markmap-view never sizes the svg itself; without explicit dimensions the
+    // browser defaults it to a tiny box and fit() squeezes the tree into it.
     svg.setAttribute("class", "markmap");
+    svg.setAttribute("width", "100%");
+    svg.setAttribute("height", "100%");
+    svg.setAttribute("style", "display:block");
     holder.replaceChildren(svg);
     const markmap = Markmap.create(svg, options, root);
     void markmap.fit();
@@ -111,8 +120,14 @@ function MindmapCanvas({ params }: { params: MindmapParams }) {
     clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
     clone.setAttribute("width", String(width));
     clone.setAttribute("height", String(height));
+    // Inline CSS variables beat markmap's embedded stylesheet, whose hardcoded
+    // light-mode colors would otherwise win over a `<style>` rule of equal origin.
+    clone.style.setProperty("--markmap-text-color", theme.foreground);
+    clone.style.setProperty("--markmap-code-bg", theme.muted);
+    clone.style.setProperty("--markmap-code-color", theme.mutedForeground);
+    clone.style.setProperty("--markmap-circle-open-bg", theme.background);
     const style = document.createElementNS("http://www.w3.org/2000/svg", "style");
-    style.textContent = `${globalCSS}\n.markmap{color:${theme.foreground};}\nsvg{background-color:${theme.background};}`;
+    style.textContent = `${globalCSS}\nsvg{background-color:${theme.background};}`;
     clone.insertBefore(style, clone.firstChild);
     const xml = `<?xml version="1.0" encoding="UTF-8"?>\n${new XMLSerializer().serializeToString(clone)}`;
     try {
