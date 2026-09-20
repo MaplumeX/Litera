@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ToolCallCard } from "./ToolCallCard";
 
@@ -50,6 +50,20 @@ describe("MindmapCard (via ToolCallCard)", () => {
     fireEvent.click(getByRole("button", { name: /draw_mindmap/ }));
     expect(container.querySelector(".mindmap-canvas")).toBeTruthy();
     expect(getByRole("button", { name: "导出 SVG" })).toBeTruthy();
+  });
+
+  it("sizes the canvas svg to fill its container so the map is not squeezed into a corner", async () => {
+    const { container, getByRole } = render(<ToolCallCard call={makeMindmapCall()} />);
+    fireEvent.click(getByRole("button", { name: /draw_mindmap/ }));
+    const svg = await waitFor(() => {
+      const el = container.querySelector(".mindmap-canvas svg");
+      expect(el).toBeTruthy();
+      return el as SVGSVGElement;
+    });
+    // markmap-view never sets dimensions itself; without these the browser
+    // defaults the svg to a tiny box in the top-left corner of the container.
+    expect(svg.getAttribute("width")).toBe("100%");
+    expect(svg.getAttribute("height")).toBe("100%");
   });
 
   it("returns to collapsed on a second click", () => {
