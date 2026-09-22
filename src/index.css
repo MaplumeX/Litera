@@ -187,6 +187,15 @@
   overflow-y: hidden;
 }
 
+/* 流式思考块：内容钳高可滚但隐藏滚动条——消息气泡内部出现
+ * 独立滚动条会跟外层对话滚动区打架，视觉上像“消息里套滚动条”。 */
+.chat-thinking-body {
+  scrollbar-width: none;
+}
+.chat-thinking-body::-webkit-scrollbar {
+  display: none;
+}
+
 /* 思维导图画布：markmap 内嵌样式把文字/圆圈/代码块颜色写死为浅色值
  * （--markmap-text-color:#333 等），夜间模式下不可读。
  * 用更高优先级选择器把它们映射到主题 token，light/dark 自动适配。 */

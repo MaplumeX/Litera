@@ -88,6 +88,37 @@ describe("AssistantMessage", () => {
     expect(first.queryByText("推理中")).toBeNull();
   });
 
+  it("hides the thinking block's own scrollbar and follows the stream tail while streaming", () => {
+    const { container, rerender } = render(
+      <AssistantMessage
+        message={{ role: "assistant", content: "", blocks: [{ type: "thinking", text: "第一段" }] }}
+        streaming
+      />,
+    );
+    const body = container.querySelector(".chat-thinking-body") as HTMLDivElement;
+    expect(body).toBeTruthy();
+
+    // 滚动条隐藏靠 CSS（jsdom 不算样式）；行为层面验证的是：内容增长时容器贴底。
+    let scrolledTo = -1;
+    Object.defineProperty(body, "scrollHeight", { value: 300, configurable: true });
+    Object.defineProperty(body, "clientHeight", { value: 240, configurable: true });
+    Object.defineProperty(body, "scrollTop", {
+      get: () => scrolledTo,
+      set: (value: number) => {
+        scrolledTo = value;
+      },
+      configurable: true,
+    });
+
+    rerender(
+      <AssistantMessage
+        message={{ role: "assistant", content: "", blocks: [{ type: "thinking", text: "第一段\n第二段很长" }] }}
+        streaming
+      />,
+    );
+    expect(scrolledTo).toBe(300);
+  });
+
   it("renders blocks in array order with thinking before an earlier tool card", () => {
     const { container } = render(
       <AssistantMessage
