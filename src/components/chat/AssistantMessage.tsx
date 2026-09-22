@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -34,9 +34,16 @@ export function BotAvatar() {
 const ThinkingBlock = memo(function ThinkingBlock({ thinking, active }: { thinking: string; active: boolean }) {
   const { t } = useT();
   const [expanded, setExpanded] = useState(active);
+  const bodyRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!active) setExpanded(false);
   }, [active]);
+  // 流式期间思考文本增长时贴底：滚动条是隐藏的，若不跟随滚动，
+  // 新推理会滚出可视区，看起来像思考卡住了。
+  useEffect(() => {
+    const body = bodyRef.current;
+    if (active && body) body.scrollTop = body.scrollHeight;
+  }, [active, thinking, expanded]);
   return (
     <div className="-ml-1 rounded px-1 transition-colors hover:bg-muted/40">
       <button
@@ -61,7 +68,10 @@ const ThinkingBlock = memo(function ThinkingBlock({ thinking, active }: { thinki
         <span className="text-xs italic text-muted-foreground/70">{t("chat.thinking")}</span>
       </button>
       {expanded && (
-        <div className="max-h-60 overflow-y-auto whitespace-pre-wrap pb-1 text-xs text-muted-foreground/70">
+        <div
+          ref={bodyRef}
+          className="chat-thinking-body max-h-60 overflow-y-auto whitespace-pre-wrap pb-1 text-xs text-muted-foreground/70"
+        >
           {thinking}
         </div>
       )}
