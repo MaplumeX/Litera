@@ -536,6 +536,22 @@ describe("ChatPanel scroll behavior", () => {
     expect(paddingTokens(view)).toContain("p-3");
     expect(paddingTokens(view)).not.toContain("pl-12");
   });
+
+  it("marks the message flow container so nested scrollbars hide via CSS", () => {
+    // 滚动条隐藏本身靠全局样式表（jsdom 不算样式）；这里验证的是
+    // 接线：滚动容器带上 chat-message-scroll class，无论是否有大纲栏。
+    function classTokens(view: ReturnType<typeof render>) {
+      return view.getByTestId("chat-message-scroll").className.split(/\s+/);
+    }
+
+    bridgeState = readyState({ messages: twoQuestionMessages() });
+    const view = renderWorkspace();
+    expect(classTokens(view)).toContain("chat-message-scroll");
+    expect(classTokens(view)).toContain("overflow-y-auto");
+
+    view.rerender(<ChatPanel currentChapterHref="OEBPS/ch1.xhtml" bookId="book-1" />);
+    expect(classTokens(view)).toContain("chat-message-scroll");
+  });
 });
 
 function rect(top: number, bottom: number): DOMRect {
