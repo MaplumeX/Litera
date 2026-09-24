@@ -187,12 +187,15 @@
   overflow-y: hidden;
 }
 
-/* 流式思考块：内容钳高可滚但隐藏滚动条——消息气泡内部出现
- * 独立滚动条会跟外层对话滚动区打架，视觉上像“消息里套滚动条”。 */
-.chat-thinking-body {
+/* 对话消息流：消息气泡内的嵌套可滚区域（思考块、代码块、长表格、
+ * 长公式、工具结果等）统一隐藏滚动条但仍可滚——气泡内部出现独立
+ * 滚动条会跟外层对话滚动区打架，视觉上像“消息里套滚动条”。
+ * 外层消息流容器本身的滚动条不受影响；弹窗等 portal 到 body 的
+ * 元素在容器之外，也保留自己的滚动条。 */
+.chat-message-scroll * {
   scrollbar-width: none;
 }
-.chat-thinking-body::-webkit-scrollbar {
+.chat-message-scroll *::-webkit-scrollbar {
   display: none;
 }
 

@@ -519,9 +519,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
             onScrollEnd={finishMessageTocJump}
             data-testid="chat-message-scroll"
             className={
-              showOutlineRail
-                ? "h-full space-y-4 overflow-y-auto py-3 pr-3 pl-12"
-                : "h-full space-y-4 overflow-y-auto p-3"
+              "chat-message-scroll h-full space-y-4 overflow-y-auto " +
+              (showOutlineRail ? "py-3 pr-3 pl-12" : "p-3")
             }
           >
           {configSnapshot && !configSnapshot.configured && (
