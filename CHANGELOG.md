@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-09-23
+
+### Fixed
+
+- **思考块滚动条与流式跟随**：隐藏思考块自带的滚动条，流式输出时自动滚动跟随内容底部，避免新内容被截断在可视区外。
+
+### Changed
+
+- 升级 npm / Cargo 依赖（lucide-react、tailwind-merge、typebox、vitest、tauri-plugin-http、object_store 等共 8 项更新）。
+
 ## [0.3.2] - 2026-09-20
 
 ### Fixed
