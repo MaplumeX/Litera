@@ -2,6 +2,7 @@ import type { AnnotationsFile, HighlightRecord, BookmarkRecord } from "@/types/l
 import { describe, expect, it } from "vitest";
 import {
   type SyncManifest,
+  type SyncedBook,
   type DeviceId,
   TOMBSTONE_TTL_MS,
   mergeManifests,
@@ -53,6 +54,18 @@ function baseRemote(now = Date.now()): SyncManifest {
     tombstones: [],
     preferences: null,
     provider: null,
+  };
+}
+
+function syncedBook(overrides: Partial<SyncedBook> = {}): SyncedBook {
+  return {
+    metadata: { title: "Title", author: "Author" },
+    position: null,
+    annotations: annotationsFile([]),
+    annotationsUpdatedAt: iso(10 * DAY_MS),
+    fileRevision: null,
+    coverRevision: null,
+    ...overrides,
   };
 }
 
@@ -402,5 +415,168 @@ describe("mergeManifests — empty-device bootstrap", () => {
     expect(Object.keys(merged.books)).toEqual(["book-1"]);
     expect(merged.books["book-1"].fileRevision).toBe("rev-1");
     expect(merged.books["book-1"].metadata.title).toBe("A");
+  });
+});
+
+describe("mergeManifests — book revision and Tombstone revival", () => {
+  it("orders metadata by bookUpdatedAt rather than reading activity", () => {
+    const local = baseRemote();
+    local.books["book-1"] = syncedBook({
+      metadata: { title: "Locally Edited", author: "Author" },
+      bookUpdatedAt: iso(0),
+      position: { updatedAt: iso(30 * DAY_MS), fraction: 0.1, cfi: "cfi-a", deviceId: DEVICE_A },
+      annotationsUpdatedAt: iso(30 * DAY_MS),
+    });
+    const remote = baseRemote();
+    remote.books["book-1"] = syncedBook({
+      metadata: { title: "Remotely Edited", author: "Author" },
+      bookUpdatedAt: iso(5 * DAY_MS),
+      position: { updatedAt: iso(0), fraction: 0.9, cfi: "cfi-b", deviceId: DEVICE_B },
+      annotationsUpdatedAt: iso(0),
+    });
+
+    const merged = mergeManifests(local, remote, NOW);
+
+    // The metadata edit is newer even though the other device read further:
+    // this is the behaviour the revision timestamp exists for.
+    expect(merged.books["book-1"].metadata.title).toBe("Locally Edited");
+    // Position still follows its own timestamp.
+    expect(merged.books["book-1"].position?.fraction).toBe(0.9);
+  });
+
+  it("falls back to reading activity when neither side has bookUpdatedAt", () => {
+    const local = baseRemote();
+    local.books["book-1"] = syncedBook({
+      metadata: { title: "Local", author: "Author" },
+      position: { updatedAt: iso(DAY_MS), fraction: 0.2, cfi: "cfi-a", deviceId: DEVICE_A },
+    });
+    const remote = baseRemote();
+    remote.books["book-1"] = syncedBook({
+      metadata: { title: "Remote", author: "Author" },
+      position: { updatedAt: iso(0), fraction: 0.8, cfi: "cfi-b", deviceId: DEVICE_B },
+    });
+
+    const merged = mergeManifests(local, remote, NOW);
+
+    expect(merged.books["book-1"].metadata.title).toBe("Remote");
+    // An older manifest is not retro-fitted with a revision timestamp.
+    expect(merged.books["book-1"].bookUpdatedAt).toBeUndefined();
+  });
+
+  it("revives a book whose revision is newer than its Tombstone", () => {
+    const local = baseRemote();
+    local.books["book-1"] = syncedBook({ bookUpdatedAt: iso(0) });
+    const remote = baseRemote();
+    remote.tombstones = [
+      { kind: "book", bookId: "book-1", deviceId: DEVICE_B, deletedAt: iso(DAY_MS) },
+    ];
+
+    const merged = mergeManifests(local, remote, NOW);
+
+    expect(merged.books["book-1"]).toBeDefined();
+    expect(merged.tombstones).toEqual([]);
+  });
+
+  it("still deletes a book whose Tombstone is newer", () => {
+    const local = baseRemote();
+    local.books["book-1"] = syncedBook({ bookUpdatedAt: iso(2 * DAY_MS) });
+    const remote = baseRemote();
+    remote.tombstones = [
+      { kind: "book", bookId: "book-1", deviceId: DEVICE_B, deletedAt: iso(DAY_MS) },
+    ];
+
+    const merged = mergeManifests(local, remote, NOW);
+
+    expect(merged.books["book-1"]).toBeUndefined();
+    expect(merged.tombstones).toHaveLength(1);
+  });
+
+  it("resolves revival the same way in both merge orders", () => {
+    const a = baseRemote();
+    a.books["book-1"] = syncedBook({
+      metadata: { title: "A", author: "X" },
+      bookUpdatedAt: iso(0),
+    });
+    a.books["book-2"] = syncedBook({
+      metadata: { title: "B", author: "Y" },
+      bookUpdatedAt: iso(0),
+    });
+    a.tombstones = [
+      { kind: "book", bookId: "book-2", deviceId: DEVICE_A, deletedAt: iso(DAY_MS) },
+    ];
+    const b = baseRemote();
+    b.tombstones = [
+      { kind: "book", bookId: "book-1", deviceId: DEVICE_B, deletedAt: iso(DAY_MS) },
+    ];
+
+    const forward = mergeManifests(a, b, NOW);
+    const backward = mergeManifests(b, a, NOW);
+
+    expect(forward).toEqual(backward);
+    expect(Object.keys(forward.books).sort()).toEqual(["book-1", "book-2"]);
+    expect(forward.tombstones).toEqual([]);
+  });
+
+  it("carries reading status and star through a metadata merge", () => {
+    const local = baseRemote();
+    local.books["book-1"] = syncedBook({
+      metadata: { title: "Title", author: "Author", readingStatus: "reading", starred: true },
+      bookUpdatedAt: iso(0),
+    });
+    const remote = baseRemote();
+    remote.books["book-1"] = syncedBook({
+      metadata: { title: "Title", author: "Author", readingStatus: "unread" },
+      bookUpdatedAt: iso(DAY_MS),
+    });
+
+    const merged = mergeManifests(local, remote, NOW);
+
+    // The newer revision's curation wins wholesale, per the documented
+    // single-timestamp rule for metadata.
+    expect(merged.books["book-1"].metadata.readingStatus).toBe("reading");
+    expect(merged.books["book-1"].metadata.starred).toBe(true);
+  });
+
+  it("orders metadata the same way in both merge orders", () => {
+    const local = baseRemote();
+    local.books["book-1"] = syncedBook({
+      metadata: { title: "Locally Edited", author: "Author" },
+      bookUpdatedAt: iso(0),
+    });
+    const remote = baseRemote();
+    remote.books["book-1"] = syncedBook({
+      metadata: { title: "Remotely Edited", author: "Author" },
+      bookUpdatedAt: iso(5 * DAY_MS),
+    });
+
+    const forward = mergeManifests(local, remote, NOW);
+    const backward = mergeManifests(remote, local, NOW);
+
+    expect(forward).toEqual(backward);
+    expect(forward.books["book-1"].metadata.title).toBe("Locally Edited");
+  });
+
+  it("resolves curation the same way in both merge orders", () => {
+    const local = baseRemote();
+    local.books["book-1"] = syncedBook({
+      metadata: {
+        title: "Title",
+        author: "Author",
+        readingStatus: "reading",
+        starred: true,
+      },
+      bookUpdatedAt: iso(0),
+    });
+    const remote = baseRemote();
+    remote.books["book-1"] = syncedBook({
+      metadata: { title: "Title", author: "Author", readingStatus: "unread" },
+      bookUpdatedAt: iso(DAY_MS),
+    });
+
+    const forward = mergeManifests(local, remote, NOW);
+    const backward = mergeManifests(remote, local, NOW);
+
+    expect(forward).toEqual(backward);
+    expect(forward.books["book-1"].metadata.readingStatus).toBe("reading");
   });
 });

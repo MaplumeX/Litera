@@ -41,7 +41,19 @@ const MAX_FONT_FAMILY_CHARS: usize = 128;
 const VALID_THEMES: [&str; 3] = ["light", "dark", "sepia"];
 const VALID_PAGE_MARGINS: [&str; 3] = ["narrow", "normal", "wide"];
 const VALID_TEXT_ALIGNS: [&str; 2] = ["start", "justify"];
+/// Reader-assigned reading statuses. Absent is distinct from `unread`, which is
+/// an explicit choice.
+const VALID_READING_STATUSES: [&str; 3] = ["unread", "reading", "finished"];
 static OPERATION_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Deleted books and their Sessions stay recoverable in the local trash for
+/// this long before the opportunistic sweeper removes them. Matches
+/// `sync::TOMBSTONE_TTL_SECS` so a restored book is never outlived by the
+/// Tombstone its own deletion wrote.
+const TRASH_TTL_SECS: i64 = 30 * 24 * 60 * 60;
+/// Suffixes appended to a staged entry's name for its sidecar payloads.
+const TRASH_DESCRIPTOR_SUFFIX: &str = ".json";
+const TRASH_SESSIONS_SUFFIX: &str = ".sessions";
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default)]
 #[serde(deny_unknown_fields)]
@@ -266,6 +278,27 @@ pub struct BookRecord {
         skip_serializing_if = "Option::is_none"
     )]
     pub last_layout: Option<ReaderLayout>,
+    /// The last local edit to the record itself: metadata, curation, or a
+    /// Restore. Never bumped by reading-position or annotation writes, so the
+    /// merge engine can compare metadata edits on their own merits and treat a
+    /// book newer than its Tombstone as a revival.
+    #[serde(
+        rename = "updatedAt",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub updated_at: Option<String>,
+    /// Reader-assigned curation. Absent means the reader has not curated the
+    /// book; `unread` is an explicit choice rather than a default. Never
+    /// derived from `last_fraction`.
+    #[serde(
+        rename = "readingStatus",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub reading_status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub starred: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Clone, Copy, PartialEq, Eq)]
@@ -387,6 +420,66 @@ impl LibraryData {
     }
 }
 
+/// Where a Trash entry came from. Only a reader deletion may be restored: a
+/// book deleted by a remote Tombstone would be deleted again by the next Sync.
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum TrashOrigin {
+    Local,
+    Sync,
+}
+
+/// The three payloads of one Trash entry, all guaranteed to be direct children
+/// of the trash root.
+struct TrashEntryPaths {
+    book: PathBuf,
+    sessions: PathBuf,
+    descriptor: PathBuf,
+}
+
+/// Written next to a staged deletion so the Trash UI can show what it holds
+/// and Restore can put a complete BookRecord back. Local only; never synced.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+struct TrashDescriptor {
+    /// Snapshot of the deleted record. Absent for crash remnants and for
+    /// orphan staging, which have no record to restore.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    record: Option<BookRecord>,
+    deleted_at: String,
+    origin: TrashOrigin,
+    /// Size at deletion time. The listing prefers a fresh walk of the payloads
+    /// and falls back to this when they can no longer be read.
+    #[serde(default)]
+    size_bytes: u64,
+}
+
+/// One entry in the local trash, as the Trash UI sees it. Absent optional
+/// fields mean "this entry does not have one", never a placeholder string.
+#[derive(Debug, Serialize, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TrashEntry {
+    /// Opaque id used to address this entry in restore/purge commands.
+    pub entry_id: String,
+    /// The Book's id; absent for orphan staging, which has no record.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub book_id: Option<String>,
+    /// Empty when nothing identifies the entry (an orphan staged at startup).
+    pub title: String,
+    pub author: String,
+    /// Staged cover path; absent when the entry has none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cover_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deleted_at: Option<String>,
+    pub origin: TrashOrigin,
+    pub size_bytes: u64,
+    pub has_sessions: bool,
+    /// False when there is no record snapshot to put back, so the entry can
+    /// only be purged.
+    pub restorable: bool,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct BookPlaceholder {
@@ -430,6 +523,9 @@ impl BookPlaceholder {
             last_layout: None,
             content_version: None,
             cached: false,
+            updated_at: None,
+            reading_status: None,
+            starred: None,
         })
     }
 }
@@ -658,6 +754,10 @@ impl LibraryStore {
             last_reader_mode: None,
             last_layout: None,
             cached: true,
+            // A freshly downloaded EPUB has no local edit of its own yet.
+            updated_at: None,
+            reading_status: None,
+            starred: None,
         };
         library.books.push(record);
         if let Err(error) = self.write_library(&library) {
@@ -852,6 +952,9 @@ impl LibraryStore {
                 last_reader_mode: None,
                 last_layout: None,
                 cached: true,
+                updated_at: None,
+                reading_status: None,
+                starred: None,
             });
             if let Err(error) = self.write_library(&library) {
                 let rollback = fs::remove_dir_all(&book_dir);
@@ -1078,6 +1181,9 @@ impl LibraryStore {
             record.publisher = publisher;
             record.language = language;
             record.series = series;
+            // Metadata edits are ordered by their own timestamp, not by
+            // reading activity.
+            record.updated_at = Some(Utc::now().to_rfc3339());
             if new_cover.is_some() {
                 record.cover_path = cover_path.to_string_lossy().into_owned();
             }
@@ -1091,6 +1197,48 @@ impl LibraryStore {
             return Err(error);
         }
 
+        Ok(updated)
+    }
+
+    /// Set or clear the reader's curation for a book. `None` leaves a field
+    /// alone (so a status-only write cannot clear a star), while an empty
+    /// `reading_status` clears the status.
+    pub fn update_book_curation(
+        &self,
+        book_id: &str,
+        reading_status: Option<String>,
+        starred: Option<bool>,
+    ) -> AppResult<BookRecord> {
+        validate_book_id(book_id)?;
+        if let Some(status) = &reading_status {
+            if !status.is_empty() && !VALID_READING_STATUSES.contains(&status.as_str()) {
+                return Err(AppError::invalid_input(format!(
+                    "readingStatus must be empty or one of {}",
+                    VALID_READING_STATUSES.join(", ")
+                )));
+            }
+        }
+
+        let _guard = self.transaction()?;
+        let mut library = self.read_library()?;
+        let record_index = library
+            .books
+            .iter()
+            .position(|book| book.id == book_id)
+            .ok_or_else(|| AppError::book_not_found(book_id))?;
+        {
+            let record = &mut library.books[record_index];
+            if let Some(status) = reading_status {
+                record.reading_status = if status.is_empty() { None } else { Some(status) };
+            }
+            if starred.is_some() {
+                record.starred = starred;
+            }
+            // Curation is an edit: it must order against other devices' edits.
+            record.updated_at = Some(Utc::now().to_rfc3339());
+        }
+        let updated = library.books[record_index].clone();
+        self.write_library(&library)?;
         Ok(updated)
     }
 
@@ -1227,10 +1375,22 @@ impl LibraryStore {
         Ok(BookContent { bytes })
     }
 
+    /// Resolve the three payload paths of one trash entry. The stem comes
+    /// either from `new_trash_stem` (trusted) or from a command argument, so
+    /// the parent check is what keeps a crafted name inside the trash root.
+    fn trash_paths_for_stem(&self, stem: &str) -> AppResult<TrashEntryPaths> {
+        trash_entry_paths(&self.trash_root(), stem)
+            .ok_or_else(|| AppError::invalid_input("Invalid trash entry path"))
+    }
+
     /// Stage a book's directory into the local trash (recovery window),
     /// leaving library.json untouched. Shared by local deletion and sync
     /// deletion propagation; the local trash itself never syncs.
-    fn stage_book_directory_to_trash(&self, book_id: &str) -> AppResult<Option<PathBuf>> {
+    fn stage_book_directory_to_trash(
+        &self,
+        book_id: &str,
+        stem: &str,
+    ) -> AppResult<Option<PathBuf>> {
         let book_dir = self.book_dir(book_id)?;
         if fs::symlink_metadata(&book_dir).is_err() {
             return Ok(None);
@@ -1240,9 +1400,7 @@ impl LibraryStore {
         // is running; following such a symlink would move book data outside the
         // controlled app-data root.
         ensure_real_directory(&self.trash_root(), "library trash")?;
-        let trash_path = self
-            .trash_root()
-            .join(format!("{}-{}", book_id, operation_id()));
+        let trash_path = self.trash_paths_for_stem(stem)?.book;
         fs::rename(&book_dir, &trash_path).map_err(|error| {
             AppError::storage_io(format!("Failed to stage book deletion: {error}"))
         })?;
@@ -1255,6 +1413,137 @@ impl LibraryStore {
         Ok(Some(trash_path))
     }
 
+    /// Stage a book's Sessions beside its staged directory. Sessions leave
+    /// `sessions/<bookId>` immediately — Sync must never see a deleted book's
+    /// sessions — but survive in the trash so Restore is not a hollow shell.
+    fn stage_book_sessions_to_trash(
+        &self,
+        book_id: &str,
+        stem: &str,
+    ) -> AppResult<Option<PathBuf>> {
+        validate_book_id(book_id)?;
+        let sessions_root = self.sessions_root();
+        require_real_directory(&sessions_root, "sessions")?;
+        let session_dir = sessions_root.join(book_id);
+        if session_dir.parent() != Some(sessions_root.as_path()) {
+            return Err(AppError::invalid_input("Invalid bookId path"));
+        }
+        match fs::symlink_metadata(&session_dir) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(AppError::storage_io(format!(
+                "Failed to inspect book sessions: {error}"
+            ))),
+            Ok(metadata) if metadata.file_type().is_dir() => {
+                ensure_real_directory(&self.trash_root(), "library trash")?;
+                let trash_path = self.trash_paths_for_stem(stem)?.sessions;
+                fs::rename(&session_dir, &trash_path).map_err(|error| {
+                    AppError::storage_io(format!("Failed to stage book sessions: {error}"))
+                })?;
+                if let Err(error) = sync_parent_directory(&sessions_root, "sessions")
+                    .and_then(|_| sync_parent_directory(&self.trash_root(), "library trash"))
+                {
+                    restore_staged_book(&trash_path, &session_dir, &error)?;
+                    return Err(error);
+                }
+                Ok(Some(trash_path))
+            }
+            Ok(_) => Err(AppError::storage_corrupt(format!(
+                "Book session path is not a real directory: {}",
+                session_dir.display()
+            ))),
+        }
+    }
+
+    /// Move a Book's directory and Sessions into the trash and write the
+    /// descriptor that makes the deletion recoverable. Returns the entry id,
+    /// or None when there was nothing on disk to stage.
+    fn stage_book_with_descriptor(
+        &self,
+        book_id: &str,
+        origin: TrashOrigin,
+        snapshot: Option<BookRecord>,
+    ) -> AppResult<Option<String>> {
+        let stem = new_trash_stem(book_id);
+        let staged_book = self.stage_book_directory_to_trash(book_id, &stem)?;
+        let staged_sessions = match self.stage_book_sessions_to_trash(book_id, &stem) {
+            Ok(staged) => staged,
+            Err(error) => {
+                if let Some(book_path) = &staged_book {
+                    let book_dir = self.book_dir(book_id)?;
+                    restore_staged_book(book_path, &book_dir, &error)?;
+                }
+                return Err(error);
+            }
+        };
+        if staged_book.is_none() && staged_sessions.is_none() {
+            return Ok(None);
+        }
+        // Record the deletion size so a listing can still report it if the
+        // payloads become unreadable later.
+        let size_bytes = staged_book
+            .as_ref()
+            .map(|path| directory_size(path))
+            .unwrap_or(0)
+            .saturating_add(
+                staged_sessions
+                    .as_ref()
+                    .map(|path| directory_size(path))
+                    .unwrap_or(0),
+            );
+        let descriptor = TrashDescriptor {
+            record: snapshot,
+            deleted_at: Utc::now().to_rfc3339(),
+            origin,
+            size_bytes,
+        };
+        let json = serde_json::to_vec_pretty(&descriptor).map_err(|error| {
+            AppError::storage_io(format!("Failed to serialize trash descriptor: {error}"))
+        })?;
+        let descriptor_path = self.trash_paths_for_stem(&stem)?.descriptor;
+        if let Err(error) = atomic_write(&descriptor_path, &json, "trash descriptor") {
+            // The payloads are already moved; without a descriptor the book
+            // would be silently unrecoverable, so put them back.
+            if let Some(sessions_path) = &staged_sessions {
+                let session_dir = self.sessions_root().join(book_id);
+                restore_staged_book(sessions_path, &session_dir, &error)?;
+            }
+            if let Some(book_path) = &staged_book {
+                let book_dir = self.book_dir(book_id)?;
+                restore_staged_book(book_path, &book_dir, &error)?;
+            }
+            return Err(error);
+        }
+        sync_parent_directory(&self.trash_root(), "library trash")?;
+        Ok(Some(stem))
+    }
+
+    /// Undo `stage_book_with_descriptor` after a later step of the deletion
+    /// failed. Payloads go back first; the descriptor is dropped last so an
+    /// interrupted rollback still leaves a listable trash entry.
+    fn rollback_staged_deletion(
+        &self,
+        book_id: &str,
+        stem: &str,
+        original_error: &AppError,
+    ) -> AppResult<()> {
+        let paths = self.trash_paths_for_stem(stem)?;
+        if fs::symlink_metadata(&paths.sessions).is_ok() {
+            let session_dir = self.sessions_root().join(book_id);
+            restore_staged_book(&paths.sessions, &session_dir, original_error)?;
+        }
+        if fs::symlink_metadata(&paths.book).is_ok() {
+            let book_dir = self.book_dir(book_id)?;
+            restore_staged_book(&paths.book, &book_dir, original_error)?;
+        }
+        match fs::remove_file(&paths.descriptor) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(AppError::rollback_failed(format!(
+                "Operation failed ({original_error}); failed to remove trash descriptor: {error}"
+            ))),
+        }
+    }
+
     pub fn delete_book(&self, book_id: &str) -> AppResult<()> {
         validate_book_id(book_id)?;
         let _guard = self.transaction()?;
@@ -1264,71 +1553,310 @@ impl LibraryStore {
             .iter()
             .position(|book| book.id == book_id)
             .ok_or_else(|| AppError::book_not_found(book_id))?;
+        let snapshot = library.books[record_index].clone();
 
-        let staged = self.stage_book_directory_to_trash(book_id)?;
+        let staged = self.stage_book_with_descriptor(book_id, TrashOrigin::Local, Some(snapshot))?;
 
         library.books.remove(record_index);
         if let Err(error) = self.write_library(&library) {
-            if let Some(trash_path) = staged {
-                let book_dir = self.book_dir(book_id)?;
-                restore_staged_book(&trash_path, &book_dir, &error)?;
+            if let Some(stem) = &staged {
+                self.rollback_staged_deletion(book_id, stem, &error)?;
             }
             return Err(error);
         }
-
-        // Intentionally retain staged directories. A separate retention policy may
-        // clean `.trash` later; this operation itself remains recoverable.
-        self.remove_book_sessions(book_id)
+        Ok(())
     }
 
     /// Delete a book because a synced Tombstone says another device deleted
     /// it. Unlike `delete_book` this tolerates unknown ids (never seen
     /// locally) and placeholder-only books: whatever exists locally is moved
-    /// into the local trash, which itself never syncs.
+    /// into the local trash, which itself never syncs. Trash entries recorded
+    /// this way are listed but cannot be restored, because the remote
+    /// Tombstone would delete the book again on the next Sync.
     pub fn delete_book_for_sync(&self, book_id: &str) -> AppResult<()> {
         validate_book_id(book_id)?;
         let _guard = self.transaction()?;
         let mut library = self.read_library()?;
+        let snapshot = library
+            .books
+            .iter()
+            .find(|book| book.id == book_id)
+            .cloned();
 
-        let staged = self.stage_book_directory_to_trash(book_id)?;
+        let staged = self.stage_book_with_descriptor(book_id, TrashOrigin::Sync, snapshot)?;
 
         let before = library.books.len();
         library.books.retain(|book| book.id != book_id);
         if library.books.len() != before {
             if let Err(error) = self.write_library(&library) {
-                if let Some(trash_path) = staged {
-                    let book_dir = self.book_dir(book_id)?;
-                    restore_staged_book(&trash_path, &book_dir, &error)?;
+                if let Some(stem) = &staged {
+                    self.rollback_staged_deletion(book_id, stem, &error)?;
                 }
                 return Err(error);
             }
         }
-        self.remove_book_sessions(book_id)
+        Ok(())
     }
 
-    fn remove_book_sessions(&self, book_id: &str) -> AppResult<()> {
-        let sessions_root = self.sessions_root();
-        require_real_directory(&sessions_root, "sessions")?;
-        let session_dir = sessions_root.join(book_id);
-        if session_dir.parent() != Some(sessions_root.as_path()) {
-            return Err(AppError::invalid_input("Invalid bookId path"));
+    /// Every trash entry, newest deletion first. Assumes the transaction lock
+    /// is already held so `purge_all_trashed_books` can reuse it.
+    fn list_trashed_entries(&self) -> AppResult<Vec<TrashEntry>> {
+        let trash_root = self.trash_root();
+        match fs::symlink_metadata(&trash_root) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(error) => {
+                return Err(AppError::storage_io(format!(
+                    "Failed to inspect library trash: {error}"
+                )))
+            }
+            Ok(metadata) if !metadata.file_type().is_dir() => {
+                return Err(AppError::storage_corrupt(format!(
+                    "Library trash is not a real directory: {}",
+                    trash_root.display()
+                )))
+            }
+            Ok(_) => {}
         }
-        match fs::symlink_metadata(&session_dir) {
+
+        let mut entries = Vec::new();
+        for stem in trash_stems(&trash_root)? {
+            let Some(paths) = trash_entry_paths(&trash_root, &stem) else {
+                continue;
+            };
+            if fs::symlink_metadata(&paths.book).is_err()
+                && fs::symlink_metadata(&paths.sessions).is_err()
+            {
+                // A descriptor whose payloads are gone: nothing to show.
+                continue;
+            }
+            let descriptor = match self.read_trash_descriptor(&paths.descriptor) {
+                Ok(descriptor) => descriptor,
+                Err(error) => {
+                    // One unreadable descriptor must not hide the whole Trash.
+                    eprintln!("[library] Skipping unreadable trash entry {stem}: {error}");
+                    continue;
+                }
+            };
+            let record = descriptor.as_ref().and_then(|item| item.record.as_ref());
+            let book_id = record
+                .map(|item| item.id.clone())
+                .or_else(|| book_id_of_stem(&stem));
+            // Nothing identifies an orphan staged at startup, so leave the
+            // title empty and let the UI label it rather than leaking a stem.
+            let (title, author) = match record {
+                Some(record) => (record.title.clone(), record.author.clone()),
+                None => staged_placeholder_identity(&paths.book).unwrap_or_default(),
+            };
+            let deleted_at = descriptor
+                .as_ref()
+                .map(|item| item.deleted_at.clone())
+                .or_else(|| path_modified_rfc3339(&paths.book))
+                .or_else(|| path_modified_rfc3339(&paths.sessions));
+            let origin = descriptor
+                .as_ref()
+                .map(|item| item.origin)
+                .unwrap_or(TrashOrigin::Local);
+            // A book deleted by another device's Tombstone would be deleted
+            // again by the next Sync, so offering Restore for it would lie.
+            let restorable = record.is_some() && origin == TrashOrigin::Local;
+            let walked =
+                directory_size(&paths.book).saturating_add(directory_size(&paths.sessions));
+            entries.push(TrashEntry {
+                entry_id: stem,
+                book_id,
+                title,
+                author,
+                cover_path: staged_cover_name(&paths.book)
+                    .map(|name| paths.book.join(name).to_string_lossy().into_owned()),
+                deleted_at,
+                origin,
+                // Prefer a fresh walk; fall back to the deletion-time size
+                // when the payloads can no longer be read.
+                size_bytes: if walked > 0 {
+                    walked
+                } else {
+                    descriptor.as_ref().map(|item| item.size_bytes).unwrap_or(0)
+                },
+                has_sessions: fs::symlink_metadata(&paths.sessions).is_ok(),
+                restorable,
+            });
+        }
+        entries.sort_by(|left, right| right.deleted_at.cmp(&left.deleted_at));
+        Ok(entries)
+    }
+
+    pub fn list_trashed_books(&self) -> AppResult<Vec<TrashEntry>> {
+        let _guard = self.transaction()?;
+        self.list_trashed_entries()
+    }
+
+    fn read_trash_descriptor(&self, path: &Path) -> AppResult<Option<TrashDescriptor>> {
+        match fs::read(path) {
+            Ok(bytes) => serde_json::from_slice(&bytes).map(Some).map_err(|error| {
+                AppError::storage_corrupt(format!("Failed to parse trash descriptor: {error}"))
+            }),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(AppError::storage_io(format!(
+                "Failed to read trash descriptor: {error}"
+            ))),
+        }
+    }
+
+    /// Put a trashed book back exactly as it was: directory, Sessions, and the
+    /// record snapshot. Fails without touching anything when the id is already
+    /// occupied, so a retry cannot produce a duplicated Book.
+    pub fn restore_trashed_book(&self, entry_id: &str) -> AppResult<BookRecord> {
+        let _guard = self.transaction()?;
+        let paths = self.trash_paths_for_stem(entry_id)?;
+        let descriptor = self
+            .read_trash_descriptor(&paths.descriptor)?
+            .ok_or_else(|| AppError::invalid_input("This trash entry cannot be restored"))?;
+        let mut record = descriptor
+            .record
+            .ok_or_else(|| AppError::invalid_input("This trash entry cannot be restored"))?;
+        let book_id = record.id.clone();
+        validate_book_id(&book_id)?;
+        if descriptor.origin == TrashOrigin::Sync {
+            return Err(AppError::invalid_input(
+                "A book deleted by another device cannot be restored here",
+            ));
+        }
+        if book_id_of_stem(entry_id).as_deref() != Some(book_id.as_str()) {
+            return Err(AppError::storage_corrupt(
+                "Trash descriptor does not match its entry id",
+            ));
+        }
+
+        let mut library = self.read_library()?;
+        if library.books.iter().any(|book| book.id == book_id) {
+            return Err(AppError::invalid_input(format!(
+                "Book {book_id} is already in the library"
+            )));
+        }
+        let book_dir = self.book_dir(&book_id)?;
+        if fs::symlink_metadata(&book_dir).is_ok() {
+            return Err(AppError::storage_corrupt(format!(
+                "Book directory for {book_id} already exists"
+            )));
+        }
+        if fs::symlink_metadata(&paths.book).is_err() {
+            return Err(AppError::storage_corrupt(
+                "The book files for this trash entry are missing",
+            ));
+        }
+
+        // Rebuild the paths from the current app-data root: the snapshot's
+        // absolute paths may name a different directory. The cover keeps its
+        // original file name, which the store accepts as jpg or png.
+        record.file_path = book_dir.join("book.epub").to_string_lossy().into_owned();
+        record.cover_path = staged_cover_name(&paths.book)
+            .map(|name| book_dir.join(name).to_string_lossy().into_owned())
+            .unwrap_or_default();
+        record.cached = true;
+        // A Restore is an edit: the book must look newer than the Tombstone
+        // its deletion wrote, or the next Sync would delete it again.
+        record.updated_at = Some(Utc::now().to_rfc3339());
+
+        fs::rename(&paths.book, &book_dir).map_err(|error| {
+            AppError::storage_io(format!("Failed to restore book directory: {error}"))
+        })?;
+        let sessions_root = self.sessions_root();
+        let staged_sessions = fs::symlink_metadata(&paths.sessions).is_ok();
+        if staged_sessions {
+            ensure_real_directory(&sessions_root, "sessions")?;
+            let session_dir = sessions_root.join(&book_id);
+            if let Err(error) = fs::rename(&paths.sessions, &session_dir) {
+                rollback_restored_payloads(
+                    &book_dir,
+                    &paths.book,
+                    None,
+                    &AppError::storage_io(format!("Failed to restore book sessions: {error}")),
+                )?;
+                return Err(AppError::storage_io(format!(
+                    "Failed to restore book sessions: {error}"
+                )));
+            }
+        }
+
+        library.books.push(record.clone());
+        if let Err(error) = self.write_library(&library) {
+            let sessions = staged_sessions.then(|| {
+                (
+                    sessions_root.join(&book_id),
+                    paths.sessions.clone(),
+                )
+            });
+            rollback_restored_payloads(
+                &book_dir,
+                &paths.book,
+                sessions.as_ref().map(|(target, staged)| (target.as_path(), staged.as_path())),
+                &error,
+            )?;
+            return Err(error);
+        }
+
+        // Committed: the payloads are back in place, so the descriptor has
+        // served its purpose.
+        match fs::remove_file(&paths.descriptor) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(AppError::storage_io(format!(
+                    "Book restored but its trash descriptor could not be removed: {error}"
+                )))
+            }
+        }
+        sync_parent_directory(&self.books_root(), "books directory")?;
+        sync_parent_directory(&self.trash_root(), "library trash")?;
+        Ok(record)
+    }
+
+    fn remove_trash_payload(&self, path: &Path, label: &str) -> AppResult<()> {
+        match fs::symlink_metadata(path) {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(error) => Err(AppError::storage_io(format!(
-                "Failed to inspect book sessions: {error}"
+                "Failed to inspect trash {label}: {error}"
             ))),
             Ok(metadata) if metadata.file_type().is_dir() => {
-                fs::remove_dir_all(&session_dir).map_err(|error| {
-                    AppError::storage_io(format!("Failed to delete book sessions: {error}"))
-                })?;
-                sync_parent_directory(&sessions_root, "sessions")
+                fs::remove_dir_all(path).map_err(|error| {
+                    AppError::storage_io(format!("Failed to delete trash {label}: {error}"))
+                })
             }
             Ok(_) => Err(AppError::storage_corrupt(format!(
-                "Book session path is not a real directory: {}",
-                session_dir.display()
+                "Trash {label} is not a real directory: {}",
+                path.display()
             ))),
         }
+    }
+
+    /// Assumes the transaction lock is already held.
+    fn purge_trash_entry(&self, entry_id: &str) -> AppResult<()> {
+        let paths = self.trash_paths_for_stem(entry_id)?;
+        self.remove_trash_payload(&paths.book, "book")?;
+        self.remove_trash_payload(&paths.sessions, "book sessions")?;
+        match fs::remove_file(&paths.descriptor) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(AppError::storage_io(format!(
+                    "Failed to delete trash descriptor: {error}"
+                )))
+            }
+        }
+        sync_parent_directory(&self.trash_root(), "library trash")
+    }
+
+    pub fn purge_trashed_book(&self, entry_id: &str) -> AppResult<()> {
+        let _guard = self.transaction()?;
+        self.purge_trash_entry(entry_id)
+    }
+
+    pub fn purge_all_trashed_books(&self) -> AppResult<()> {
+        let _guard = self.transaction()?;
+        for entry in self.list_trashed_entries()? {
+            self.purge_trash_entry(&entry.entry_id)?;
+        }
+        Ok(())
     }
 
     fn backfill_missing_content_hashes(&self, library: &mut LibraryData) -> AppResult<bool> {
@@ -1513,6 +2041,9 @@ fn initialize_root(root: &Path) -> AppResult<()> {
                 stage_orphaned_book_directories(root, &data)?;
                 recover_import_transactions(root, &data)?;
                 validate_library_files(root, &data)?;
+                // Retention runs last: every recovery path has already had its
+                // chance to bring a still-referenced book back.
+                purge_expired_trash(root)?;
                 return Ok(());
             }
             Some(version) => {
@@ -1639,6 +2170,16 @@ fn recover_staged_deletions(root: &Path, data: &LibraryData) -> AppResult<()> {
                 continue;
             };
             if name.starts_with(&prefix) && entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+                // A staged Sessions directory is not a book directory, and an
+                // entry with a descriptor belongs to the Trash UI: crash
+                // recovery must not resurrect either.
+                if name.ends_with(TRASH_SESSIONS_SUFFIX) {
+                    continue;
+                }
+                let descriptor = trash_root.join(format!("{name}{TRASH_DESCRIPTOR_SUFFIX}"));
+                if fs::symlink_metadata(&descriptor).is_ok() {
+                    continue;
+                }
                 candidates.push(entry.path());
             }
         }
@@ -2377,6 +2918,221 @@ fn operation_id() -> String {
     format!("{}{:x}", Utc::now().format("%Y%m%d%H%M%S%f"), counter)
 }
 
+/// The shared name stem of one trash entry: its book directory, its
+/// `.sessions` sidecar, and its `.json` descriptor all hang off this.
+fn new_trash_stem(book_id: &str) -> String {
+    format!("{}-{}", book_id, operation_id())
+}
+
+/// Recover the book id from a stem we generated. `None` for orphan staging
+/// (whose name starts with `orphan-`) and for anything that is not ours.
+fn book_id_of_stem(stem: &str) -> Option<String> {
+    if stem.starts_with("orphan-") {
+        return None;
+    }
+    let (book_id, _) = stem.split_once('-')?;
+    validate_book_id(book_id).ok()?;
+    Some(book_id.to_string())
+}
+
+/// Strip a sidecar suffix so a descriptor, a Sessions directory, and a book
+/// directory all fold onto the same entry id.
+fn trash_stem_of(name: &str) -> &str {
+    name.strip_suffix(TRASH_DESCRIPTOR_SUFFIX)
+        .or_else(|| name.strip_suffix(TRASH_SESSIONS_SUFFIX))
+        .unwrap_or(name)
+}
+
+/// The three payload paths of one entry, or None when the stem would escape
+/// the trash root. Every trash operation resolves its paths through this.
+fn trash_entry_paths(trash_root: &Path, stem: &str) -> Option<TrashEntryPaths> {
+    if stem.is_empty()
+        || stem.len() > 200
+        || stem.contains('/')
+        || stem.contains('\\')
+        || stem.contains('\0')
+        || stem == "."
+        || stem == ".."
+    {
+        return None;
+    }
+    let book = trash_root.join(stem);
+    let sessions = trash_root.join(format!("{stem}{TRASH_SESSIONS_SUFFIX}"));
+    let descriptor = trash_root.join(format!("{stem}{TRASH_DESCRIPTOR_SUFFIX}"));
+    for path in [&book, &sessions, &descriptor] {
+        if path.parent() != Some(trash_root) {
+            return None;
+        }
+    }
+    Some(TrashEntryPaths {
+        book,
+        sessions,
+        descriptor,
+    })
+}
+
+/// The entry id of every staged deletion in the trash: a book directory and
+/// its `.sessions` / `.json` sidecars fold onto one stem.
+fn trash_stems(trash_root: &Path) -> AppResult<std::collections::BTreeSet<String>> {
+    let mut stems = std::collections::BTreeSet::new();
+    let entries = match fs::read_dir(trash_root) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(stems),
+        Err(error) => {
+            return Err(AppError::storage_io(format!(
+                "Failed to inspect library trash: {error}"
+            )))
+        }
+        Ok(entries) => entries,
+    };
+    for entry in entries {
+        let entry = entry.map_err(|error| {
+            AppError::storage_io(format!("Failed to inspect trash entry: {error}"))
+        })?;
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        let stem = trash_stem_of(name);
+        if !stem.is_empty() {
+            stems.insert(stem.to_string());
+        }
+    }
+    Ok(stems)
+}
+
+/// The staged cover file name, if any. The store accepts either `cover.jpg`
+/// or `cover.png`, and a legacy PNG-cover book must not come back with its
+/// cover unreferenced.
+fn staged_cover_name(book_path: &Path) -> Option<&'static str> {
+    ["cover.jpg", "cover.png"]
+        .into_iter()
+        .find(|name| book_path.join(name).is_file())
+}
+
+/// Recursive byte size, tolerant of unreadable entries (they count as 0).
+fn directory_size(path: &Path) -> u64 {
+    fn walk(path: &Path, total: &mut u64) {
+        let Ok(entries) = fs::read_dir(path) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if file_type.is_dir() {
+                walk(&entry.path(), total);
+            } else if let Ok(metadata) = entry.metadata() {
+                *total = total.saturating_add(metadata.len());
+            }
+        }
+    }
+    let mut total = 0;
+    walk(path, &mut total);
+    total
+}
+
+fn path_modified_rfc3339(path: &Path) -> Option<String> {
+    let modified = fs::metadata(path).ok()?.modified().ok()?;
+    Some(chrono::DateTime::<Utc>::from(modified).to_rfc3339())
+}
+
+/// Title and author of a staged sync placeholder, so a purge-only entry still
+/// shows something meaningful in the trash list.
+fn staged_placeholder_identity(book_path: &Path) -> Option<(String, String)> {
+    let bytes = fs::read(book_path.join(".sync-placeholder.json")).ok()?;
+    let placeholder: BookPlaceholder = serde_json::from_slice(&bytes).ok()?;
+    Some((placeholder.title, placeholder.author))
+}
+
+/// Undo a partially-completed restore. Sessions go back first, then the book
+/// directory, so the trash entry stays coherent if this itself fails.
+fn rollback_restored_payloads(
+    book_dir: &Path,
+    book_path: &Path,
+    sessions: Option<(&Path, &Path)>,
+    original_error: &AppError,
+) -> AppResult<()> {
+    if let Some((target, staged)) = sessions {
+        if let Err(error) = fs::rename(target, staged) {
+            return Err(AppError::rollback_failed(format!(
+                "Operation failed ({original_error}); failed to re-stage book sessions: {error}"
+            )));
+        }
+    }
+    if let Err(error) = fs::rename(book_dir, book_path) {
+        return Err(AppError::rollback_failed(format!(
+            "Operation failed ({original_error}); failed to re-stage book directory: {error}"
+        )));
+    }
+    Ok(())
+}
+
+fn remove_dir_if_real(path: &Path) -> AppResult<()> {
+    match fs::symlink_metadata(path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(AppError::storage_io(format!(
+            "Failed to inspect expired trash entry: {error}"
+        ))),
+        Ok(metadata) if metadata.file_type().is_dir() => fs::remove_dir_all(path).map_err(|error| {
+            AppError::storage_io(format!("Failed to remove expired trash entry: {error}"))
+        }),
+        Ok(_) => Err(AppError::storage_corrupt(format!(
+            "Expired trash entry is not a real directory: {}",
+            path.display()
+        ))),
+    }
+}
+
+/// Drop trash entries older than `TRASH_TTL_SECS`. Runs at startup: the
+/// deletion itself is what makes a book recoverable, so the retention sweep
+/// is deliberately the only thing that ever hard-deletes a trashed book.
+fn purge_expired_trash(root: &Path) -> AppResult<()> {
+    let trash_root = root.join("books").join(".trash");
+    let now = Utc::now();
+    for stem in trash_stems(&trash_root)? {
+        let Some(paths) = trash_entry_paths(&trash_root, &stem) else {
+            continue;
+        };
+        let deleted_at = match fs::read(&paths.descriptor) {
+            Ok(bytes) => serde_json::from_slice::<TrashDescriptor>(&bytes)
+                .ok()
+                .and_then(|descriptor| {
+                    chrono::DateTime::parse_from_rfc3339(&descriptor.deleted_at).ok()
+                })
+                .map(|parsed| parsed.with_timezone(&Utc)),
+            Err(_) => None,
+        };
+        let reference = deleted_at.or_else(|| {
+            path_modified_rfc3339(&paths.book)
+                .and_then(|value| chrono::DateTime::parse_from_rfc3339(&value).ok())
+                .map(|parsed| parsed.with_timezone(&Utc))
+        });
+        let Some(reference) = reference else {
+            continue;
+        };
+        if now.signed_duration_since(reference).num_seconds() < TRASH_TTL_SECS {
+            continue;
+        }
+        // Retention never blocks startup on a single unreadable entry: a
+        // leftover file that cannot be swept is a nuisance, not a failure to
+        // open the Library.
+        if let Err(error) = remove_dir_if_real(&paths.book) {
+            eprintln!("[library] Expired trash entry could not be removed: {error}");
+            continue;
+        }
+        if let Err(error) = remove_dir_if_real(&paths.sessions) {
+            eprintln!("[library] Expired trash entry could not be removed: {error}");
+            continue;
+        }
+        if let Err(error) = fs::remove_file(&paths.descriptor) {
+            if error.kind() != std::io::ErrorKind::NotFound {
+                eprintln!("[library] Expired trash descriptor could not be removed: {error}");
+            }
+        }
+    }
+    sync_parent_directory(&trash_root, "library trash")
+}
+
 fn recoverable_atomic_write(path: &Path, bytes: &[u8], label: &str) -> AppResult<()> {
     let previous = match fs::read(path) {
         Ok(previous) => Some(previous),
@@ -2794,6 +3550,17 @@ pub async fn update_book_metadata(
 }
 
 #[tauri::command]
+pub async fn update_book_curation(
+    store: tauri::State<'_, LibraryStore>,
+    book_id: String,
+    reading_status: Option<String>,
+    starred: Option<bool>,
+) -> AppResult<BookRecord> {
+    let store = store.inner().clone();
+    run_blocking(move || store.update_book_curation(&book_id, reading_status, starred)).await
+}
+
+#[tauri::command]
 pub async fn list_books(store: tauri::State<'_, LibraryStore>) -> AppResult<Vec<BookRecord>> {
     let store = store.inner().clone();
     run_blocking(move || store.list_books()).await
@@ -2852,6 +3619,50 @@ pub async fn delete_book(
         crate::sync::record_book_tombstone(&root, &book_id)
     })
     .await
+}
+
+#[tauri::command]
+pub async fn list_trashed_books(
+    store: tauri::State<'_, LibraryStore>,
+) -> AppResult<Vec<TrashEntry>> {
+    let store = store.inner().clone();
+    run_blocking(move || store.list_trashed_books()).await
+}
+
+#[tauri::command]
+pub async fn restore_trashed_book(
+    app: tauri::AppHandle,
+    store: tauri::State<'_, LibraryStore>,
+    entry_id: String,
+) -> AppResult<BookRecord> {
+    let store = store.inner().clone();
+    let root = crate::sync::sync_root(&app)?;
+    run_blocking(move || {
+        let record = store.restore_trashed_book(&entry_id)?;
+        // Revoke the Tombstone the original deletion recorded: a restored
+        // book must not be deleted again by its own tombstone on the next
+        // Sync (the merge engine treats the newer book as a revival too).
+        crate::sync::remove_book_tombstone(&root, &record.id)?;
+        Ok(record)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn purge_trashed_book(
+    store: tauri::State<'_, LibraryStore>,
+    entry_id: String,
+) -> AppResult<()> {
+    let store = store.inner().clone();
+    run_blocking(move || store.purge_trashed_book(&entry_id)).await
+}
+
+#[tauri::command]
+pub async fn purge_all_trashed_books(
+    store: tauri::State<'_, LibraryStore>,
+) -> AppResult<()> {
+    let store = store.inner().clone();
+    run_blocking(move || store.purge_all_trashed_books()).await
 }
 
 #[tauri::command]
@@ -2935,6 +3746,55 @@ mod tests {
             .save_book_metadata(
                 &result.book_id,
                 "Version One".to_string(),
+                "Author One".to_string(),
+                String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
+                Some(vec![1, 2, 3]),
+                staged_import_id(&result),
+            )
+            .expect("metadata");
+        result.book_id
+    }
+
+    fn seed_sessions(root: &Path, book_id: &str, file: &str) {
+        let dir = root.join("sessions").join(book_id);
+        fs::create_dir_all(&dir).expect("sessions directory");
+        fs::write(dir.join(file), b"session").expect("session file");
+    }
+
+    fn trash_root_of(root: &Path) -> PathBuf {
+        root.join("books").join(".trash")
+    }
+
+    fn descriptor_names(root: &Path) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(trash_root_of(root))
+            .expect("trash")
+            .filter_map(|entry| entry.ok())
+            .filter_map(|entry| entry.file_name().into_string().ok())
+            .filter(|name| name.ends_with(TRASH_DESCRIPTOR_SUFFIX))
+            .collect();
+        names.sort();
+        names
+    }
+
+    /// Import with explicit content so several books can coexist in one test:
+    /// `import_test_book` uses a fixed payload, which `import_bytes` reports as
+    /// a Duplicate on the second call.
+    fn import_book_with_name(
+        store: &LibraryStore,
+        source: &Path,
+        bytes: &[u8],
+        title: &str,
+    ) -> String {
+        let result = store
+            .import_bytes(source, "book.epub".to_string(), bytes.to_vec())
+            .expect("import");
+        store
+            .save_book_metadata(
+                &result.book_id,
+                title.to_string(),
                 "Author One".to_string(),
                 String::new(),
                 String::new(),
@@ -4621,6 +5481,366 @@ mod tests {
     }
 
     #[test]
+    fn deleting_a_book_stages_book_and_sessions_and_restore_brings_them_back_whole() {
+        let (directory, store) = test_store();
+        let root = directory.path().to_path_buf();
+        let id = import_test_book(&store, Path::new("/source/trash-roundtrip.epub"));
+        seed_sessions(&root, &id, "chat.jsonl");
+        let before = store
+            .read_library()
+            .expect("library")
+            .books
+            .into_iter()
+            .find(|book| book.id == id)
+            .expect("record");
+
+        store.delete_book(&id).expect("delete");
+
+        assert!(!root.join("books").join(&id).exists());
+        assert!(!root.join("sessions").join(&id).exists());
+        let entries = store.list_trashed_books().expect("list");
+        assert_eq!(entries.len(), 1);
+        let entry = &entries[0];
+        assert_eq!(entry.book_id.as_deref(), Some(id.as_str()));
+        assert_eq!(entry.title, "Version One");
+        assert_eq!(entry.author, "Author One");
+        assert_eq!(entry.origin, TrashOrigin::Local);
+        assert!(entry.restorable);
+        assert!(entry.has_sessions);
+        assert!(entry.size_bytes > 0);
+        assert!(entry.deleted_at.is_some());
+
+        let restored = store.restore_trashed_book(&entry.entry_id).expect("restore");
+
+        // A Restore is an edit: the record comes back with a fresh revision
+        // timestamp so the next Sync treats it as a revival rather than a
+        // deletion. Everything else is identical to what was deleted.
+        assert!(restored.updated_at.is_some());
+        assert_eq!(BookRecord { updated_at: None, ..restored.clone() }, before);
+        assert!(root.join("books").join(&id).join("book.epub").is_file());
+        assert!(root.join("sessions").join(&id).join("chat.jsonl").is_file());
+        assert!(store.list_trashed_books().expect("list").is_empty());
+        assert_eq!(store.list_books().expect("books").len(), 1);
+    }
+
+    #[test]
+    fn editing_metadata_bumps_the_record_revision_timestamp() {
+        let (_directory, store) = test_store();
+        let id = import_test_book(&store, Path::new("/source/revision.epub"));
+        // Importing alone gives the record no revision of its own.
+        assert!(store.read_library().expect("library").books[0]
+            .updated_at
+            .is_none());
+
+        let updated = store
+            .update_book_metadata(
+                &id,
+                "Renamed".to_string(),
+                "Author One".to_string(),
+                String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
+                None,
+            )
+            .expect("update");
+
+        let revision = updated.updated_at.expect("revision timestamp");
+        assert!(!revision.is_empty());
+        // It survives a round trip through library.json.
+        let reloaded = store.read_library().expect("library");
+        assert_eq!(reloaded.books[0].updated_at.as_deref(), Some(revision.as_str()));
+    }
+
+    #[test]
+    fn curation_updates_only_the_fields_it_is_given() {
+        let (_directory, store) = test_store();
+        let id = import_test_book(&store, Path::new("/source/curation.epub"));
+
+        let starred = store
+            .update_book_curation(&id, None, Some(true))
+            .expect("star");
+        assert_eq!(starred.starred, Some(true));
+        assert_eq!(starred.reading_status, None);
+        assert!(starred.updated_at.is_some());
+
+        let status = store
+            .update_book_curation(&id, Some("reading".to_string()), None)
+            .expect("status");
+        // A status-only write must not clear the star.
+        assert_eq!(status.starred, Some(true));
+        assert_eq!(status.reading_status.as_deref(), Some("reading"));
+
+        let cleared = store
+            .update_book_curation(&id, Some(String::new()), None)
+            .expect("clear");
+        assert_eq!(cleared.reading_status, None);
+        assert_eq!(cleared.starred, Some(true));
+
+        let error = store
+            .update_book_curation(&id, Some("skimmed".to_string()), None)
+            .expect_err("invalid status");
+        assert_eq!(error.code, AppErrorCode::InvalidInput);
+    }
+
+    #[test]
+    fn restore_refuses_an_id_that_is_occupied_again() {
+        let (directory, store) = test_store();
+        let root = directory.path().to_path_buf();
+        let source = Path::new("/source/trash-occupied.epub");
+        let id = import_book_with_name(&store, source, b"occupied-one", "Occupied");
+        store.delete_book(&id).expect("delete");
+        let entry_id = store.list_trashed_books().expect("list")[0].entry_id.clone();
+
+        // The same source derives the same book id, so the id is occupied
+        // again while the trash entry lingers.
+        let reimported = import_book_with_name(&store, source, b"occupied-two", "Occupied Again");
+        assert_eq!(reimported, id);
+
+        let error = store
+            .restore_trashed_book(&entry_id)
+            .expect_err("occupied id must refuse");
+        assert_eq!(error.code, AppErrorCode::InvalidInput);
+        // "Fails without touching anything": the entry and the live book are intact.
+        assert_eq!(store.list_trashed_books().expect("list").len(), 1);
+        assert!(trash_root_of(&root)
+            .join(format!("{entry_id}{TRASH_DESCRIPTOR_SUFFIX}"))
+            .is_file());
+        assert!(root.join("books").join(&id).join("book.epub").is_file());
+    }
+
+    #[test]
+    fn a_sync_deletion_is_listed_but_not_restorable() {
+        let (_directory, store) = test_store();
+        let id = import_test_book(&store, Path::new("/source/trash-sync-origin.epub"));
+
+        store.delete_book_for_sync(&id).expect("sync delete");
+
+        let entries = store.list_trashed_books().expect("list");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].origin, TrashOrigin::Sync);
+        assert!(!entries[0].restorable);
+        let error = store
+            .restore_trashed_book(&entries[0].entry_id)
+            .expect_err("sync deletions cannot be restored");
+        assert_eq!(error.code, AppErrorCode::InvalidInput);
+    }
+
+    #[test]
+    fn purge_removes_every_payload_of_a_trash_entry() {
+        let (directory, store) = test_store();
+        let root = directory.path().to_path_buf();
+        let id = import_test_book(&store, Path::new("/source/trash-purge.epub"));
+        seed_sessions(&root, &id, "chat.jsonl");
+        store.delete_book(&id).expect("delete");
+        let entry_id = store.list_trashed_books().expect("list")[0].entry_id.clone();
+
+        store.purge_trashed_book(&entry_id).expect("purge");
+
+        assert!(store.list_trashed_books().expect("list").is_empty());
+        assert!(!trash_root_of(&root).join(&entry_id).exists());
+        assert!(!trash_root_of(&root)
+            .join(format!("{entry_id}{TRASH_SESSIONS_SUFFIX}"))
+            .exists());
+        assert!(!trash_root_of(&root)
+            .join(format!("{entry_id}{TRASH_DESCRIPTOR_SUFFIX}"))
+            .exists());
+    }
+
+    #[test]
+    fn purge_all_empties_the_trash() {
+        let (directory, store) = test_store();
+        let root = directory.path().to_path_buf();
+        for (source, bytes) in [
+            ("/source/purge-a.epub", b"purge-a".as_slice()),
+            ("/source/purge-b.epub", b"purge-b".as_slice()),
+        ] {
+            let id = import_book_with_name(&store, Path::new(source), bytes, "Purge");
+            store.delete_book(&id).expect("delete");
+        }
+        assert_eq!(store.list_trashed_books().expect("list").len(), 2);
+
+        store.purge_all_trashed_books().expect("purge all");
+
+        assert!(store.list_trashed_books().expect("list").is_empty());
+        assert_eq!(fs::read_dir(trash_root_of(&root)).expect("trash").count(), 0);
+    }
+
+    #[test]
+    fn crash_recovery_ignores_descriptored_entries() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let root = directory.path().to_path_buf();
+        let store = LibraryStore::initialize(root.clone()).expect("store init");
+        let remnant_id = import_book_with_name(
+            &store,
+            Path::new("/source/remnant.epub"),
+            b"remnant-epub",
+            "Remnant",
+        );
+        let deleted_id = import_book_with_name(
+            &store,
+            Path::new("/source/deleted.epub"),
+            b"deleted-epub",
+            "Deleted",
+        );
+
+        // A real deletion: the descriptor hands it to the Trash UI instead.
+        store.delete_book(&deleted_id).expect("delete");
+        // A genuine crash remnant: the record is still in library.json and the
+        // directory sits in the trash with no descriptor. Staged last, because
+        // any Library read validates that every record's files are present.
+        let remnant = trash_root_of(&root).join(format!("{remnant_id}-deadbeef"));
+        fs::rename(root.join("books").join(&remnant_id), &remnant).expect("stage remnant");
+        drop(store);
+
+        let recovered = LibraryStore::initialize(root.clone()).expect("reinit");
+
+        assert!(root
+            .join("books")
+            .join(&remnant_id)
+            .join("book.epub")
+            .is_file());
+        assert!(!root.join("books").join(&deleted_id).exists());
+        let entries = recovered.list_trashed_books().expect("list");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].book_id.as_deref(), Some(deleted_id.as_str()));
+    }
+
+    #[test]
+    fn crash_recovery_never_treats_a_staged_sessions_directory_as_a_book() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let root = directory.path().to_path_buf();
+        let store = LibraryStore::initialize(root.clone()).expect("store init");
+        let id = import_test_book(&store, Path::new("/source/sessions-remnant.epub"));
+        fs::remove_dir_all(root.join("books").join(&id)).expect("remove book directory");
+        seed_sessions(&root, &id, "chat.jsonl");
+        let staged_sessions = trash_root_of(&root)
+            .join(format!("{id}-deadbeef{TRASH_SESSIONS_SUFFIX}"));
+        fs::rename(root.join("sessions").join(&id), &staged_sessions).expect("stage sessions");
+        drop(store);
+
+        let error = match LibraryStore::initialize(root.clone()) {
+            Ok(_) => panic!("missing book files must not initialize silently"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error.code, AppErrorCode::StorageIo);
+        // The important part: the Sessions directory was not renamed into place.
+        assert!(!root.join("books").join(&id).exists());
+        assert!(staged_sessions.is_dir());
+    }
+
+    #[test]
+    fn retention_sweeper_removes_only_expired_entries() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let root = directory.path().to_path_buf();
+        let store = LibraryStore::initialize(root.clone()).expect("store init");
+        let fresh_id = import_book_with_name(
+            &store,
+            Path::new("/source/fresh.epub"),
+            b"fresh-epub",
+            "Fresh",
+        );
+        let stale_id = import_book_with_name(
+            &store,
+            Path::new("/source/stale.epub"),
+            b"stale-epub",
+            "Stale",
+        );
+        store.delete_book(&fresh_id).expect("delete fresh");
+        store.delete_book(&stale_id).expect("delete stale");
+        drop(store);
+
+        // Age the stale descriptor past the retention window.
+        let stale_name = descriptor_names(&root)
+            .into_iter()
+            .find(|name| name.starts_with(&stale_id))
+            .expect("stale descriptor");
+        let stale_descriptor = trash_root_of(&root).join(&stale_name);
+        let mut descriptor: TrashDescriptor =
+            serde_json::from_slice(&fs::read(&stale_descriptor).expect("read")).expect("parse");
+        descriptor.deleted_at = (Utc::now() - chrono::Duration::days(31)).to_rfc3339();
+        fs::write(
+            &stale_descriptor,
+            serde_json::to_vec(&descriptor).expect("encode"),
+        )
+        .expect("write");
+
+        let recovered = LibraryStore::initialize(root.clone()).expect("reinit");
+
+        let entries = recovered.list_trashed_books().expect("list");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].book_id.as_deref(), Some(fresh_id.as_str()));
+        let stale_stem = stale_name.trim_end_matches(TRASH_DESCRIPTOR_SUFFIX);
+        assert!(!trash_root_of(&root).join(stale_stem).exists());
+        assert!(!stale_descriptor.exists());
+    }
+
+    #[test]
+    fn restoring_a_png_cover_book_keeps_its_cover_referenced() {
+        let (directory, store) = test_store();
+        let root = directory.path().to_path_buf();
+        let id = import_test_book(&store, Path::new("/source/png-cover.epub"));
+        // The store's contract accepts cover.png; emulate a legacy record.
+        let book_dir = root.join("books").join(&id);
+        fs::remove_file(book_dir.join("cover.jpg")).expect("remove jpg cover");
+        fs::write(book_dir.join("cover.png"), [1, 2, 3]).expect("write png cover");
+        {
+            let mut library = store.read_library().expect("library");
+            let record = library
+                .books
+                .iter_mut()
+                .find(|book| book.id == id)
+                .expect("record");
+            record.cover_path = book_dir.join("cover.png").to_string_lossy().into_owned();
+            store.write_library(&library).expect("write library");
+        }
+
+        store.delete_book(&id).expect("delete");
+        let entries = store.list_trashed_books().expect("list");
+        assert!(
+            entries[0]
+                .cover_path
+                .as_deref()
+                .is_some_and(|path| path.ends_with("cover.png")),
+            "the Trash listing should find the PNG cover, got {:?}",
+            entries[0].cover_path
+        );
+
+        let restored = store
+            .restore_trashed_book(&entries[0].entry_id)
+            .expect("restore");
+        assert!(restored.cover_path.ends_with("cover.png"));
+        assert!(book_dir.join("cover.png").is_file());
+    }
+
+    #[test]
+    fn one_unreadable_descriptor_does_not_hide_the_rest_of_the_trash() {
+        let (directory, store) = test_store();
+        let root = directory.path().to_path_buf();
+        let good = import_test_book(&store, Path::new("/source/good-trash.epub"));
+        let broken = import_book_with_name(
+            &store,
+            Path::new("/source/broken-trash.epub"),
+            b"broken-trash",
+            "Broken",
+        );
+        store.delete_book(&good).expect("delete good");
+        store.delete_book(&broken).expect("delete broken");
+
+        let broken_descriptor = descriptor_names(&root)
+            .into_iter()
+            .find(|name| name.starts_with(&broken))
+            .expect("broken descriptor");
+        fs::write(trash_root_of(&root).join(&broken_descriptor), b"{not json")
+            .expect("corrupt descriptor");
+
+        let entries = store.list_trashed_books().expect("list");
+        assert_eq!(entries.len(), 1, "the readable entry must still be listed");
+        assert_eq!(entries[0].book_id.as_deref(), Some(good.as_str()));
+    }
+
+    #[test]
     fn validation_rejects_invalid_last_opened_at_and_content_hash() {
         let (directory, store) = test_store();
         import_test_book(&store, Path::new("/source/field-validation.epub"));
@@ -5393,6 +6613,9 @@ mod cached_flag_tests {
             last_layout: None,
             content_version: None,
             cached: true,
+            updated_at: None,
+            reading_status: None,
+            starred: None,
         };
         let json = serde_json::to_string(&real).expect("serialize");
         assert!(!json.contains("cached"));

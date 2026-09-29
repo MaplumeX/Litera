@@ -35,6 +35,12 @@ pub struct SyncedBookData {
     pub file_revision: Option<String>,
     #[serde(rename = "coverRevision", default)]
     pub cover_revision: Option<String>,
+    /// Last edit to the record itself (metadata, curation, Restore). The TS
+    /// merge engine orders metadata by this and treats a book newer than its
+    /// Tombstone as a revival. Empty on manifests from older versions, which
+    /// fall back to position/annotation activity.
+    #[serde(rename = "bookUpdatedAt", default)]
+    pub book_updated_at: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -50,6 +56,15 @@ pub struct SyncBookMetadata {
     pub language: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub series: Option<String>,
+    /// Reader-assigned curation, synced like the rest of the metadata.
+    #[serde(
+        rename = "readingStatus",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub reading_status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub starred: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -213,6 +228,22 @@ pub fn record_book_tombstone(root: &Path, book_id: &str) -> AppResult<()> {
     )
 }
 
+/// Revoke a locally recorded book Tombstone. Used by Restore: a book that
+/// comes back must not be deleted again by the Tombstone its own deletion
+/// wrote.
+pub fn remove_book_tombstone(root: &Path, book_id: &str) -> AppResult<()> {
+    validate_sync_id(book_id)?;
+    let mut state = read_sync_state(root)?;
+    let before = state.tombstones.len();
+    state
+        .tombstones
+        .retain(|tombstone| !(tombstone.kind == "book" && tombstone.book_id == book_id));
+    if state.tombstones.len() == before {
+        return Ok(());
+    }
+    write_sync_state(root, &state)
+}
+
 /// Record an annotations save: bump the book's annotationsUpdatedAt and
 /// remember removed ids as Tombstones.
 pub fn note_annotations_saved(root: &Path, book_id: &str, removed_ids: &[String]) -> AppResult<()> {
@@ -303,6 +334,8 @@ pub fn export_local_manifest(
             publisher: book.publisher.clone(),
             language: book.language.clone(),
             series: book.series.clone(),
+            reading_status: book.reading_status.clone(),
+            starred: book.starred,
         };
         let position = match (&book.last_fraction, &book.last_cfi) {
             (Some(fraction), Some(cfi)) => Some(SyncPositionData {
@@ -334,6 +367,11 @@ pub fn export_local_manifest(
                     .unwrap_or_default(),
                 file_revision: revisions.and_then(|entry| entry.file_revision.clone()),
                 cover_revision: revisions.and_then(|entry| entry.cover_revision.clone()),
+                // Only an explicit edit timestamp. Filling this in with the
+                // reading position would make the TS merge skip its activity
+                // fallback and silently change metadata ordering for books
+                // that predate the field.
+                book_updated_at: book.updated_at.clone().unwrap_or_default(),
             },
         );
     }
@@ -385,6 +423,11 @@ pub fn apply_merged_manifest(
             record.publisher = synced.metadata.publisher.clone();
             record.language = synced.metadata.language.clone();
             record.series = synced.metadata.series.clone();
+            record.reading_status = synced.metadata.reading_status.clone();
+            record.starred = synced.metadata.starred;
+            if !synced.book_updated_at.is_empty() {
+                record.updated_at = Some(synced.book_updated_at.clone());
+            }
             // Only take the merged position when the book has not moved on
             // locally since the pass started. last_opened_at is the explicit
             // recorded timestamp the export used as the position's updatedAt;
@@ -536,6 +579,8 @@ mod tests {
                 publisher: None,
                 language: None,
                 series: None,
+                reading_status: None,
+                starred: None,
             },
             position: Some(SyncPositionData {
                 updated_at: "2026-01-01T00:00:00Z".to_string(),
@@ -547,6 +592,7 @@ mod tests {
             annotations_updated_at: String::new(),
             file_revision: None,
             cover_revision: None,
+            book_updated_at: String::new(),
         }
     }
 
@@ -645,6 +691,8 @@ mod tests {
                             publisher: None,
                             language: None,
                             series: None,
+                            reading_status: None,
+                            starred: None,
                         },
                         position: Some(SyncPositionData {
                             updated_at: "2026-01-01T00:00:00Z".to_string(),
@@ -656,6 +704,7 @@ mod tests {
                         annotations_updated_at: String::new(),
                         file_revision: None,
                         cover_revision: None,
+                        book_updated_at: String::new(),
                     },
                 ),
                 (
@@ -1328,6 +1377,160 @@ mod tombstone_tests {
     }
 
     #[test]
+    fn removing_a_book_tombstone_revokes_only_that_book() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        record_book_tombstone(dir.path(), "book-1").expect("record");
+        record_book_tombstone(dir.path(), "book-2").expect("record");
+        note_annotations_saved(dir.path(), "book-1", &["h-1".to_string()]).expect("note");
+
+        remove_book_tombstone(dir.path(), "book-1").expect("remove");
+
+        let state = read_sync_state(dir.path()).expect("state");
+        assert!(!state
+            .tombstones
+            .iter()
+            .any(|tombstone| tombstone.kind == "book" && tombstone.book_id == "book-1"));
+        // Other books and this book's annotation tombstones are untouched.
+        assert!(state
+            .tombstones
+            .iter()
+            .any(|tombstone| tombstone.kind == "book" && tombstone.book_id == "book-2"));
+        assert!(state
+            .tombstones
+            .iter()
+            .any(|tombstone| tombstone.kind == "annotation"
+                && tombstone.book_id == "book-1"));
+
+        // Idempotent: revoking an absent tombstone is a no-op.
+        remove_book_tombstone(dir.path(), "book-1").expect("no-op");
+    }
+
+    #[test]
+    fn exporting_a_manifest_carries_the_book_revision_timestamp() {
+        let (dir, store) = temp_store();
+        let result = store
+            .import_bytes(
+                Path::new("/source/export-revision.epub"),
+                "book.epub".to_string(),
+                b"export-revision".to_vec(),
+            )
+            .expect("import");
+        let sync_state = read_sync_state(dir.path()).expect("state");
+
+        // No local edit yet: the field is empty so the TS merge falls back to
+        // reading activity exactly as it did before the field existed.
+        let manifest = export_local_manifest(&store, &sync_state).expect("export");
+        assert!(manifest.books[&result.book_id].book_updated_at.is_empty());
+
+        store
+            .update_book_metadata(
+                &result.book_id,
+                "Edited".to_string(),
+                String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
+                None,
+            )
+            .expect("update");
+
+        let manifest = export_local_manifest(&store, &sync_state).expect("export");
+        assert!(!manifest.books[&result.book_id].book_updated_at.is_empty());
+    }
+
+    #[test]
+    fn applying_a_merged_manifest_adopts_the_book_revision_timestamp() {
+        let (dir, store) = temp_store();
+        let result = store
+            .import_bytes(
+                Path::new("/source/apply-revision.epub"),
+                "book.epub".to_string(),
+                b"apply-revision".to_vec(),
+            )
+            .expect("import");
+        let revision = "2026-05-05T00:00:00+00:00".to_string();
+        let merged = SyncManifestData {
+            schema_version: 1,
+            books: [(
+                result.book_id.clone(),
+                SyncedBookData {
+                    metadata: SyncBookMetadata {
+                        title: "Merged Title".to_string(),
+                        author: String::new(),
+                        description: None,
+                        publisher: None,
+                        language: None,
+                        series: None,
+                        reading_status: None,
+                        starred: None,
+                    },
+                    position: None,
+                    annotations: AnnotationsFile::empty(),
+                    annotations_updated_at: String::new(),
+                    file_revision: None,
+                    cover_revision: None,
+                    book_updated_at: revision.clone(),
+                },
+            )]
+            .into_iter()
+            .collect(),
+            tombstones: Vec::new(),
+            preferences: None,
+            provider: None,
+        };
+
+        apply_merged_manifest(&store, &merged, &SyncManifestData::default()).expect("apply");
+
+        let library = store.read_library_public().expect("library");
+        let record = library
+            .books
+            .iter()
+            .find(|book| book.id == result.book_id)
+            .expect("record");
+        assert_eq!(record.updated_at.as_deref(), Some(revision.as_str()));
+        drop(dir);
+    }
+
+    #[test]
+    fn curation_round_trips_through_export_and_apply() {
+        let (dir, store) = temp_store();
+        let result = store
+            .import_bytes(
+                Path::new("/source/curation-sync.epub"),
+                "book.epub".to_string(),
+                b"curation-sync".to_vec(),
+            )
+            .expect("import");
+        store
+            .update_book_curation(&result.book_id, Some("finished".to_string()), Some(true))
+            .expect("curate");
+
+        let sync_state = read_sync_state(dir.path()).expect("state");
+        let manifest = export_local_manifest(&store, &sync_state).expect("export");
+        let metadata = &manifest.books[&result.book_id].metadata;
+        assert_eq!(metadata.reading_status.as_deref(), Some("finished"));
+        assert_eq!(metadata.starred, Some(true));
+
+        // A merged manifest from another device overwrites both fields.
+        let mut merged = manifest.clone();
+        let entry = merged.books.get_mut(&result.book_id).expect("book");
+        entry.metadata.reading_status = Some("reading".to_string());
+        entry.metadata.starred = Some(false);
+        apply_merged_manifest(&store, &merged, &SyncManifestData::default()).expect("apply");
+
+        let library = store.read_library_public().expect("library");
+        let record = library
+            .books
+            .iter()
+            .find(|book| book.id == result.book_id)
+            .expect("record");
+        assert_eq!(record.reading_status.as_deref(), Some("reading"));
+        assert_eq!(record.starred, Some(false));
+        drop(dir);
+    }
+
+    #[test]
     fn saving_annotations_records_tombstones_and_a_timestamp() {
         let dir = tempfile::tempdir().expect("temp dir");
 
@@ -1385,6 +1588,7 @@ mod tombstone_tests {
         let staged: Vec<_> = std::fs::read_dir(&trash)
             .expect("trash listing")
             .flatten()
+            .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
             .map(|entry| entry.path())
             .collect();
         assert_eq!(staged.len(), 1);
@@ -1469,6 +1673,8 @@ mod tombstone_tests {
                         publisher: None,
                         language: None,
                         series: None,
+                        reading_status: None,
+                        starred: None,
                     },
                     position: None,
                     annotations: AnnotationsFile {
@@ -1479,6 +1685,7 @@ mod tombstone_tests {
                     annotations_updated_at: "2026-01-02T00:00:00Z".to_string(),
                     file_revision: None,
                     cover_revision: None,
+                    book_updated_at: String::new(),
                 },
             )]
             .into_iter()
@@ -1536,6 +1743,8 @@ mod tombstone_tests {
                         publisher: None,
                         language: None,
                         series: None,
+                        reading_status: None,
+                        starred: None,
                     },
                     position: None,
                     annotations: AnnotationsFile {
@@ -1546,6 +1755,7 @@ mod tombstone_tests {
                     annotations_updated_at: "2026-01-02T00:00:00Z".to_string(),
                     file_revision: None,
                     cover_revision: None,
+                    book_updated_at: String::new(),
                 },
             )]
             .into_iter()
@@ -1566,12 +1776,15 @@ mod tombstone_tests {
                         publisher: None,
                         language: None,
                         series: None,
+                        reading_status: None,
+                        starred: None,
                     },
                     position: None,
                     annotations: base_annotations,
                     annotations_updated_at: String::new(),
                     file_revision: None,
                     cover_revision: None,
+                    book_updated_at: String::new(),
                 },
             )]
             .into_iter()
