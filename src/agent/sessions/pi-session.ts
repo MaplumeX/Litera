@@ -116,6 +116,13 @@ export function decodePiSession(value: unknown): DecodedPiSession {
   };
 }
 
+/**
+ * Full durable leaf-to-root path: the session's active history, unfiltered.
+ *
+ * This is the display/session truth and must never apply compaction rewiring,
+ * or compacting context would silently hide past conversation from the user.
+ * The model-facing projection is `contextBranch`.
+ */
 export function activeBranch(session: DecodedPiSession): PiSessionEntry[] {
   const byId = new Map(session.entries.map((entry) => [entry.id, entry]));
   // A null leafId means "before the first entry" (fresh session, or a rewind to
@@ -130,6 +137,19 @@ export function activeBranch(session: DecodedPiSession): PiSessionEntry[] {
     current = current.parentId ? byId.get(current.parentId) : undefined;
   }
   path.reverse();
+  return path;
+}
+
+/**
+ * Model-context projection of the active branch: the entries the LLM sees.
+ *
+ * Applies the branch's latest compaction, replacing everything before its
+ * `firstKeptEntryId` with the compaction summary entry. Use this only for
+ * model-facing concerns (context messages, snapshot/model-change bookkeeping,
+ * compaction cut points); UI and session-level logic use `activeBranch`.
+ */
+export function contextBranch(session: DecodedPiSession): PiSessionEntry[] {
+  const path = activeBranch(session);
   let latestCompaction: PiSessionEntry | undefined;
   for (let index = path.length - 1; index >= 0; index -= 1) {
     if (path[index].type === "compaction") { latestCompaction = path[index]; break; }
@@ -142,7 +162,7 @@ export function activeBranch(session: DecodedPiSession): PiSessionEntry[] {
 }
 
 export function piContextMessages(session: DecodedPiSession): PiAgentMessage[] {
-  return activeBranch(session).flatMap((entry): PiAgentMessage[] => {
+  return contextBranch(session).flatMap((entry): PiAgentMessage[] => {
     if (entry.type === "message" && object(entry.message)) return [entry.message as PiAgentMessage];
     if (entry.type === "custom_message") {
       return [{
@@ -216,13 +236,20 @@ function messageRole(entry: PiSessionEntry | undefined): string | null {
  * exactly one anchor entry per visible UI bubble. User entries anchor their
  * own bubble; only the first entry of a consecutive assistant run (agent
  * loop iterations, with toolResult entries in between) anchors the merged
- * bubble; toolResult and non-message entries never anchor. Both exported
- * functions must stay in lockstep — the UI edit index is resolved against
- * these anchors.
+ * bubble; a compaction entry anchors its own transcript divider; toolResult
+ * and other non-message entries never anchor. Both exported functions must
+ * stay in lockstep — the UI edit index is resolved against these anchors.
  */
 function visibleMessageAnchors(session: DecodedPiSession): PiSessionEntry[] {
   const anchors: PiSessionEntry[] = [];
   for (const entry of activeBranch(session)) {
+    // A compaction entry anchors its own transcript divider, but only when it
+    // actually yields one — `visibleMessages` skips summary-less compactions,
+    // and the two functions must stay index-aligned.
+    if (entry.type === "compaction") {
+      if (typeof entry.summary === "string") anchors.push(entry);
+      continue;
+    }
     const role = messageRole(entry);
     if (role !== "user" && role !== "assistant") continue;
     if (role === "assistant" && messageRole(anchors[anchors.length - 1]) === "assistant") continue;
@@ -235,6 +262,8 @@ function visibleMessageAnchors(session: DecodedPiSession): PiSessionEntry[] {
  * Entries corresponding one-to-one (same length, same order) with
  * `visibleMessages(session)`: the entry that anchors each visible bubble.
  * The runtime edit flow resolves UI bubble indices against these anchors.
+ * Compaction entries anchor their transcript divider and have no `.message`,
+ * so the edit flow's role check rejects them.
  */
 export function visibleMessageEntries(session: DecodedPiSession): PiSessionEntry[] {
   return visibleMessageAnchors(session);
@@ -245,13 +274,20 @@ export function visibleMessages(session: DecodedPiSession): UiAgentMessage[] {
   const toolOwners = new Map<string, { messageIndex: number; blockIndex: number }>();
   const anchorIds = new Set(visibleMessageAnchors(session).map((anchor) => anchor.id));
   for (const entry of activeBranch(session)) {
+    // A compaction entry renders as a transcript divider at its position on
+    // the durable branch; the full history around it stays visible.
+    if (entry.type === "compaction" && typeof entry.summary === "string") {
+      output.push({ role: "notice", summary: entry.summary, tokensBefore: typeof entry.tokensBefore === "number" ? entry.tokensBefore : 0 });
+      continue;
+    }
     if (entry.type !== "message") continue;
     const message = object(entry.message);
     if (!message) continue;
     if (message.role === "toolResult" && typeof message.toolCallId === "string") {
       const owner = toolOwners.get(message.toolCallId);
       if (owner) {
-        const block = output[owner.messageIndex]?.blocks?.[owner.blockIndex];
+        const ownerMessage = output[owner.messageIndex];
+        const block = ownerMessage?.role === "assistant" ? ownerMessage.blocks?.[owner.blockIndex] : undefined;
         if (block?.type === "toolCall") {
           block.toolCall = {
             ...block.toolCall,
@@ -377,8 +413,7 @@ function branchPreview(content: unknown): string {
  * fork; only groups with more than one member are forks. Keys of the returned
  * Map are each branch's own first user-message entry id (anchorId); every
  * member of a fork maps to the same AnchorBranchInfo (activeIndex points at
- * the branch the current leaf is on, resolved via the true leaf→root path so
- * compaction projection cannot hide the active member).
+ * the branch the current leaf is on, resolved against the full active branch).
  */
 export function branchNavigation(session: DecodedPiSession): Map<string, AnchorBranchInfo> {
   const byId = new Map(session.entries.map((entry) => [entry.id, entry]));
@@ -398,12 +433,7 @@ export function branchNavigation(session: DecodedPiSession): Map<string, AnchorB
     group.push(entry);
     groups.set(previousUserId, group);
   }
-  const activeIds = new Set<string>();
-  let node = session.leafId ? byId.get(session.leafId) : undefined;
-  while (node) {
-    activeIds.add(node.id);
-    node = node.parentId ? byId.get(node.parentId) : undefined;
-  }
+  const activeIds = new Set(activeBranch(session).map((entry) => entry.id));
   const navigation = new Map<string, AnchorBranchInfo>();
   for (const group of groups.values()) {
     if (group.length < 2) continue;

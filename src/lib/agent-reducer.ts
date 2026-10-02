@@ -6,6 +6,7 @@ import type {
   AgentStatus,
   AnchorBranchInfo,
   AssistantBlock,
+  AssistantChatMessage,
 } from "@/types/agent";
 import { t } from "@/lib/i18n";
 
@@ -99,15 +100,15 @@ function appendDelta(
 }
 
 function withBlocks(
-  message: AgentMessage,
+  message: AssistantChatMessage,
   blocks: AssistantBlock[],
-): AgentMessage {
+): AssistantChatMessage {
   return { ...message, blocks, content: textContent(blocks) };
 }
 
 function updateLastAssistant(
   messages: AgentMessage[],
-  update: (message: AgentMessage) => AgentMessage,
+  update: (message: AssistantChatMessage) => AssistantChatMessage,
 ): AgentMessage[] {
   const last = messages[messages.length - 1];
   if (last?.role === "assistant") {
@@ -144,7 +145,7 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
         : base;
     case "prompt_started":
       return matchesBook(base, event.bookId)
-        ? { ...base, status: "prompting", sessionId: event.sessionId, promptId: event.promptId, error: null }
+        ? { ...base, status: "prompting", sessionId: event.sessionId, promptId: event.promptId, error: null, compaction: null }
         : base;
     case "text_delta":
       if (!matchesPrompt(base, event)) return base;
@@ -214,7 +215,9 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
     case "prompt_aborted":
       if (!matchesPrompt(base, event)) return base;
       {
-        const next = { ...base, status: "bookReady" as const, promptId: null };
+        // The notice item in the projection now carries the durable
+        // "compacted here" marker, so the transient chip is cleared.
+        const next = { ...base, status: "bookReady" as const, promptId: null, compaction: null };
         // Streaming deltas already maintained messages; the runtime's full
         // projection replaces them (equal content) and refreshes navigation.
         if (event.messages !== undefined) next.messages = event.messages;
@@ -309,6 +312,7 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
         ...base,
         status: matchesActivePrompt ? "bookReady" : event.scope === "book" ? "error" : base.status,
         promptId: matchesActivePrompt ? null : base.promptId,
+        compaction: matchesActivePrompt ? null : base.compaction,
         error: {
           scope: event.scope,
           message: event.message,

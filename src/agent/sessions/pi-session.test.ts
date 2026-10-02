@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activeBranch, branchLeafId, branchNavigation, convertPiContextToLlm, decodePiSession, piContextMessages, sessionConfig, sessionSummary, visibleMessageEntries, visibleMessages } from "./pi-session";
+import { activeBranch, branchLeafId, branchNavigation, contextBranch, convertPiContextToLlm, decodePiSession, piContextMessages, sessionConfig, sessionSummary, visibleMessageEntries, visibleMessages } from "./pi-session";
 
 const timestamp = "2026-08-14T00:00:00Z";
 const ts = (n: number) => new Date(Date.parse(timestamp) + n * 1000).toISOString();
@@ -105,7 +105,7 @@ describe("branchNavigation", () => {
     expect(turnTwo.activeIndex).toBe(-1);
   });
 
-  it("resolves the active index through the true leaf path when compaction rewires activeBranch", () => {
+  it("resolves the active index against the full branch when a compaction is present", () => {
     const session = makeSession([
       entry("u1", null, "user", "q1"),
       entry("a1", "u1", "assistant", "a1"),
@@ -115,7 +115,8 @@ describe("branchNavigation", () => {
       fork("u2b", "cmp", "edited q2", 10),
     ], "u2b");
     const nav = branchNavigation(session);
-    expect(activeBranch(session).map((item) => item.id)).toEqual(["cmp", "a1", "u2b"]);
+    expect(activeBranch(session).map((item) => item.id)).toEqual(["u1", "a1", "cmp", "u2b"]);
+    expect(contextBranch(session).map((item) => item.id)).toEqual(["cmp", "a1", "u2b"]);
     const info = nav.get("u2")!;
     expect(info.options.map((option) => option.anchorId)).toEqual(["u2", "u2b"]);
     expect(info.activeIndex).toBe(1);
@@ -199,6 +200,15 @@ describe("sessionConfig", () => {
   it("returns null when the session has no session_config entry", () => {
     expect(sessionConfig(makeSession([entry("a", null, "user", "hi")], "a"))).toBeNull();
   });
+  it("keeps a session_config that predates a compaction visible", () => {
+    const session = makeSession([
+      configEntry("c1", null, { systemPrompt: "keep me" }),
+      entry("b", "c1", "user", "two"),
+      { type: "compaction", id: "cmp", parentId: "b", timestamp, summary: "sum", firstKeptEntryId: "b" },
+      entry("d", "cmp", "user", "three"),
+    ], "d");
+    expect(sessionConfig(session)).toEqual({ systemPrompt: "keep me" });
+  });
 });
 
 describe("sessionSummary", () => {
@@ -253,6 +263,17 @@ describe("visibleMessageEntries", () => {
     expect(anchors).toHaveLength(visible.length);
     expect(anchors.map((anchor) => (anchor.message as { role: string }).role)).toEqual(visible.map((message) => message.role));
   });
+  it("stays index-aligned when a compaction entry has no summary", () => {
+    const session = makeSession([
+      entry("u1", null, "user", "q"),
+      { type: "compaction", id: "c", parentId: "u1", timestamp, firstKeptEntryId: "u1" },
+      entry("u2", "c", "user", "q2"),
+    ], "u2");
+    const anchors = visibleMessageEntries(session);
+    const visible = visibleMessages(session);
+    expect(anchors.map((anchor) => anchor.id)).toEqual(["u1", "u2"]);
+    expect(anchors).toHaveLength(visible.length);
+  });
   it("returns an empty anchor list for a rewound-to-root session", () => {
     const session = makeSession([entry("u1", null, "user", "q"), entry("a1", "u1", "assistant", "a")], "a1");
     expect(activeBranch({ ...session, leafId: null })).toEqual([]);
@@ -267,12 +288,20 @@ describe("Pi session decoder", () => {
     expect(activeBranch(session).map((item) => item.id)).toEqual(["c"]);
     expect(visibleMessages(session)).toEqual([{ role: "user", content: "edited" }]);
   });
-  it("uses the latest compaction boundary", () => {
+  it("uses the latest compaction boundary for the model context but keeps the full branch for display", () => {
     const session = makeSession([entry("a", null, "user", "one"), entry("b", "a", "assistant", "two"), { type: "compaction", id: "c", parentId: "b", timestamp, summary: "sum", firstKeptEntryId: "b" }, entry("d", "c", "user", "three")], "d");
-    expect(activeBranch(session).map((item) => item.id)).toEqual(["c", "b", "d"]);
+    expect(activeBranch(session).map((item) => item.id)).toEqual(["a", "b", "c", "d"]);
+    expect(contextBranch(session).map((item) => item.id)).toEqual(["c", "b", "d"]);
     const context = piContextMessages(session);
     expect((context[0] as unknown as { role: string }).role).toBe("compactionSummary");
     expect(convertPiContextToLlm(context)[0]).toMatchObject({ role: "user", content: [{ text: expect.stringContaining("sum") }] });
+  });
+  it("keeps full history visible around a compaction and anchors a notice at its position", () => {
+    const session = makeSession([entry("a", null, "user", "one"), entry("b", "a", "assistant", "two"), { type: "compaction", id: "c", parentId: "b", timestamp, summary: "sum", firstKeptEntryId: "a" }, entry("d", "c", "user", "three")], "d");
+    const visible = visibleMessages(session);
+    expect(visible.map((message) => message.role)).toEqual(["user", "assistant", "notice", "user"]);
+    expect(visible[2]).toEqual({ role: "notice", summary: "sum", tokensBefore: 0 });
+    expect(visibleMessageEntries(session).map((item) => item.id)).toEqual(["a", "b", "c", "d"]);
   });
   it("copies toolResult isError onto the visible tool call", () => {
     const session = makeSession([

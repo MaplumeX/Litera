@@ -51,15 +51,37 @@ export type AssistantBlock =
   | { type: "text"; text: string }
   | { type: "toolCall"; toolCall: AgentToolCall };
 
-export interface AgentMessage {
-  role: "user" | "assistant";
+export interface UserMessage {
+  role: "user";
   content: string;
   selection?: string;
   chapterHref?: string;
+}
+
+export interface AssistantChatMessage {
+  role: "assistant";
+  content: string;
   blocks?: AssistantBlock[];
   /** Terminal state of the persisted assistant message (UI only cares about non-normal endings). */
   stopReason?: "aborted" | "error";
 }
+
+/**
+ * Inline transcript marker for a context compaction. Rendered where the
+ * compaction entry sits on the durable branch, carrying the summary the model
+ * now sees in place of the compacted messages.
+ */
+export interface CompactionNotice {
+  role: "notice";
+  summary: string;
+  tokensBefore: number;
+}
+
+/**
+ * One visible item in the transcript, index-aligned with `branchAnchors`.
+ * `notice` items are transcript markers, not chat turns.
+ */
+export type AgentMessage = UserMessage | AssistantChatMessage | CompactionNotice;
 
 type EventEnvelope = {
   version: number;

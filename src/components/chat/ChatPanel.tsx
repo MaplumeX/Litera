@@ -25,6 +25,7 @@ import { SessionConfigDialog, type SessionConfigTarget } from "./SessionConfigDi
 import { SessionList } from "./SessionList";
 import { TypingIndicator } from "./TypingIndicator";
 import { CompactionChip } from "./CompactionChip";
+import { CompactionNotice } from "./CompactionNotice";
 import { ChatOutlineRail, userMessagePreview } from "./ChatOutlineRail";
 import { useT } from "@/lib/i18n";
 
@@ -98,7 +99,13 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     const isStreaming = submitting || state.status === "prompting";
     const bookReady = state.status === "bookReady" || state.status === "prompting";
     const error = invokeError ?? state.error?.message ?? null;
-    const lastMessage = state.messages[state.messages.length - 1];
+    // Notices are transcript markers, not chat turns: the regenerate/streaming
+    // affordances key off the last real chat message.
+    let lastChatIndex = -1;
+    for (let i = state.messages.length - 1; i >= 0; i -= 1) {
+      if (state.messages[i].role !== "notice") { lastChatIndex = i; break; }
+    }
+    const lastChatMessage = lastChatIndex >= 0 ? state.messages[lastChatIndex] : undefined;
     const userMessageTocItems = state.messages.flatMap((message, index) =>
       message.role === "user"
         ? [{ messageIndex: index, preview: userMessagePreview(message.content) }]
@@ -324,6 +331,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       }
       if (lastIndex < 0 || isStreaming || !bookId) return;
       const original = state.messages[lastIndex];
+      if (!original || original.role !== "user") return;
       setEditingIndex(null);
       setEditDraft("");
       setInvokeError(null);
@@ -586,16 +594,17 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
               {message.role === "assistant" && (
                 <AssistantMessage
                   message={message}
-                  streaming={isStreaming && index === state.messages.length - 1}
+                  streaming={isStreaming && index === lastChatIndex}
                   canRegenerate={
-                    !isStreaming && bookReady && hasUserMessage && index === state.messages.length - 1
+                    !isStreaming && bookReady && hasUserMessage && index === lastChatIndex
                   }
                   onRegenerate={handleRegenerate}
                 />
               )}
+              {message.role === "notice" && <CompactionNotice notice={message} />}
             </div>
           ))}
-          {isStreaming && (!lastMessage || lastMessage.role === "user") && (
+          {isStreaming && (!lastChatMessage || lastChatMessage.role === "user") && (
             <div className="flex gap-2">
               <BotAvatar />
               <TypingIndicator />
@@ -610,7 +619,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
           {state.compaction && (
             <CompactionChip status={state.compaction.status} />
           )}
-          {(!lastMessage || lastMessage.role === "user") &&
+          {(!lastChatMessage || lastChatMessage.role === "user") &&
             !isStreaming &&
             bookReady &&
             hasUserMessage && (

@@ -590,3 +590,37 @@ describe("ChatPanel compaction chip", () => {
     expect(view.queryByText("上下文已压缩")).toBeNull();
   });
 });
+
+describe("ChatPanel compaction notice", () => {
+  it("renders the durable notice while keeping the compacted-away history visible", () => {
+    bridgeState = readyState({
+      compaction: null,
+      messages: [
+        { role: "user", content: "第一问" },
+        { role: "assistant", content: "第一答" },
+        { role: "notice", summary: "## Goal\n保留要点", tokensBefore: 1234 },
+        { role: "user", content: "第二问" },
+      ],
+    });
+    const view = render(<ChatPanel currentChapterHref="OEBPS/ch1.xhtml" bookId="book-1" />);
+    const notice = view.getByTestId("compaction-notice");
+    expect(within(notice).getByText("上下文已压缩")).toBeTruthy();
+    // The pre-compaction turns are still in the transcript.
+    expect(view.getByText("第一问")).toBeTruthy();
+    expect(view.getByText("第一答")).toBeTruthy();
+    expect(view.queryByTestId("compaction-notice-summary")).toBeNull();
+  });
+
+  it("expands to show the summary the model sees", () => {
+    bridgeState = readyState({
+      compaction: null,
+      messages: [
+        { role: "user", content: "第一问" },
+        { role: "notice", summary: "## Goal\n保留要点", tokensBefore: 1234 },
+      ],
+    });
+    const view = render(<ChatPanel currentChapterHref="OEBPS/ch1.xhtml" bookId="book-1" />);
+    fireEvent.click(within(view.getByTestId("compaction-notice")).getByRole("button"));
+    expect(view.getByTestId("compaction-notice-summary").textContent).toContain("保留要点");
+  });
+});

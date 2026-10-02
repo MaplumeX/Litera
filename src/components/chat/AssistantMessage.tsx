@@ -5,7 +5,7 @@ import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
 import { Bot, Brain, ChevronRight, RefreshCw } from "lucide-react";
-import type { AgentMessage, AssistantBlock } from "@/types/agent";
+import type { AssistantBlock, AssistantChatMessage } from "@/types/agent";
 import { ToolCallCard } from "./ToolCallCard";
 import { CopyButton } from "./CopyButton";
 import { TypingIndicator } from "./TypingIndicator";
@@ -155,13 +155,13 @@ const TextBlock = memo(function TextBlock({
   );
 });
 
-function messageBlocks(message: AgentMessage): AssistantBlock[] {
+function messageBlocks(message: AssistantChatMessage): AssistantBlock[] {
   if (message.blocks) return message.blocks;
   return message.content ? [{ type: "text", text: message.content }] : [];
 }
 
 interface AssistantMessageProps {
-  message: AgentMessage;
+  message: AssistantChatMessage;
   streaming?: boolean;
   /** Whether the caller allows regeneration at all (e.g. not while streaming). */
   canRegenerate?: boolean;

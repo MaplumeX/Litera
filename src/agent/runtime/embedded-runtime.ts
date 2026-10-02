@@ -8,7 +8,7 @@ import { createGuardedNativeFetch } from "@/agent/transport/native-fetch";
 import { validateMindmapParams } from "@/agent/runtime/mindmap";
 import { resolveRuntimeModel } from "@/agent/runtime/model-resolution";
 import { classifyPromptError } from "@/agent/runtime/prompt-error";
-import { activeBranch, branchLeafId, branchNavigation, convertPiContextToLlm, newEntry, piContextMessages, sessionConfig, sessionNavigation, visibleMessageEntries, visibleMessages, type DecodedPiSession, type PiSessionEntry } from "@/agent/sessions/pi-session";
+import { activeBranch, branchLeafId, branchNavigation, contextBranch, convertPiContextToLlm, newEntry, piContextMessages, sessionConfig, sessionNavigation, visibleMessageEntries, visibleMessages, type DecodedPiSession, type PiSessionEntry } from "@/agent/sessions/pi-session";
 import { tauriSessionPort, type SessionPort } from "@/agent/sessions/session-port";
 import { invokeErrorMessage } from "@/lib/app-error";
 import type { AgentEvent, AgentMessage as UiMessage } from "@/types/agent";
@@ -136,7 +136,7 @@ export class LiteraAgentRuntime {
     try{
       if(!this.session){const created=await this.sessions.create(promptBookId);if(this.bookId!==promptBookId)throw new Error("Book context changed");this.session=created;this.agent=null;this.emit({type:"session_created",bookId:promptBookId,sessionId:created.header.id,requestId});} session=this.session!;
       const persistedLeaf=session.leafId;
-      if(editIndex!==undefined){const target=visibleMessageEntries(session)[editIndex];if(!target||((target.message as {role?:unknown}).role!=="user"))throw new Error(EDIT_TARGET_ERROR);session.leafId=target.parentId;this.agent=null;this.emit({type:"session_rewound",bookId:promptBookId,sessionId:session.header.id,promptId,requestId,messages:visibleMessages({...session,leafId:session.leafId})});}
+      if(editIndex!==undefined){const target=visibleMessageEntries(session)[editIndex];if(!target||((target.message as {role?:unknown}|undefined)?.role!=="user"))throw new Error(EDIT_TARGET_ERROR);session.leafId=target.parentId;this.agent=null;this.emit({type:"session_rewound",bookId:promptBookId,sessionId:session.header.id,promptId,requestId,messages:visibleMessages({...session,leafId:session.leafId})});}
       const isFirstTurn=!activeBranch(session).some((entry)=>entry.type==="message"&&((entry.message as {role?:unknown})?.role==="user"));
       const configAtStart=this.configRevision; const config=await this.loadConfig();if(this.bookId!==promptBookId)throw new Error("Book context changed");
       const metadata=await this.book.metadata(); const toc=await this.book.toc();
@@ -149,10 +149,10 @@ export class LiteraAgentRuntime {
       if(configAtStart!==this.configRevision||this.bookId!==promptBookId)throw new Error("Agent context changed");
       const before=agent.state.messages.length;
       const pendingEntries:PiSessionEntry[]=[];let pendingParent=session.leafId;
-      const lastModel=[...activeBranch(session)].reverse().find((entry)=>entry.type==="model_change");
+      const lastModel=[...contextBranch(session)].reverse().find((entry)=>entry.type==="model_change");
       if(lastModel?.provider!==config.provider||lastModel?.modelId!==config.model){const change=newEntry("model_change",pendingParent,{provider:config.provider,modelId:config.model});pendingEntries.push(change);pendingParent=change.id;}
       const promptMessages:PiMessage[]=[];
-      const hasSnapshot=activeBranch(session).some((entry)=>entry.type==="custom_message"&&entry.customType==="bookSnapshot");
+      const hasSnapshot=contextBranch(session).some((entry)=>entry.type==="custom_message"&&entry.customType==="bookSnapshot");
       if(!hasSnapshot){const snapshotEntry=newEntry("custom_message",pendingParent,{customType:"bookSnapshot",content:snapshot,display:false});pendingEntries.push(snapshotEntry);pendingParent=snapshotEntry.id;promptMessages.push({role:"custom",customType:"bookSnapshot",content:snapshot,display:false,timestamp:Date.now()} as PiMessage);}
       if(readingContext){const contextEntry=newEntry("custom_message",pendingParent,{customType:"readingContext",content:readingContext,display:false});pendingEntries.push(contextEntry);pendingParent=contextEntry.id;promptMessages.push({role:"custom",customType:"readingContext",content:readingContext,display:false,timestamp:Date.now()} as PiMessage);}
       const user:PiMessage={role:"user",content:text,timestamp:Date.now()};const userEntry=newEntry("message",pendingParent,{message:user,...(context.selection?{selection:context.selection}:{}),...(context.chapterHref?{chapterHref:context.chapterHref}:{})});
@@ -233,7 +233,7 @@ export class LiteraAgentRuntime {
       if(contextWindow<=0)return false;
       const messages=agent.state.messages;
       const lastUsage=findLastValidUsage(messages);
-      const branch=activeBranch(session);
+      const branch=contextBranch(session);
       let latestCompactionTimestamp=0;
       for(let index=branch.length-1;index>=0;index-=1){if(branch[index].type==="compaction"){latestCompactionTimestamp=Date.parse(branch[index].timestamp)||0;break;}}
       // Debounce: a usage older than the latest compaction would falsely retrigger

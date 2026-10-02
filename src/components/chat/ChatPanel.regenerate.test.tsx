@@ -92,6 +92,33 @@ describe("ChatPanel regenerate", () => {
     );
   });
 
+  it("anchors on the last user message even when a compaction notice trails the reply", async () => {
+    bridgeState = readyState({
+      messages: [
+        { role: "user", content: "第一问" },
+        { role: "assistant", content: "第一答" },
+        { role: "notice", summary: "sum", tokensBefore: 10 },
+      ],
+    });
+    const view = renderWorkspace();
+    fireEvent.click(view.getByRole("button", { name: "重新生成" }));
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(editPrompt).toHaveBeenCalledWith(
+      0,
+      "第一问",
+      { selection: undefined, chapterHref: undefined },
+      {
+        role: "user",
+        content: "第一问",
+        selection: undefined,
+        chapterHref: undefined,
+      },
+    );
+  });
+
   it("anchors on the last user message even when the assistant reply is missing", async () => {
     bridgeState = readyState({
       messages: [

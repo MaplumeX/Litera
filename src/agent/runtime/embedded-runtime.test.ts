@@ -5,6 +5,7 @@ import type { BookContentPort } from "@/agent/book/book-content";
 import type { SessionPort } from "@/agent/sessions/session-port";
 import type { DecodedPiSession, PiSessionEntry } from "@/agent/sessions/pi-session";
 import type { AnnotationsFile } from "@/types/library";
+import type { AgentEvent, AgentMessage } from "@/types/agent";
 
 const now="2026-08-14T00:00:00Z";
 function session():DecodedPiSession{return{header:{type:"session",version:3,id:"session-1",timestamp:now,cwd:""},entries:[],leafId:null};}
@@ -69,7 +70,7 @@ describe("LiteraAgentRuntime",()=>{
   });
 
   it("compacts after an overflow, persists the compaction entry, and rebuilds context",async()=>{
-    const current=session();const batches:PiSessionEntry[][]=[];
+    const current=session();const batches:PiSessionEntry[][]=[];const projections:AgentMessage[][]=[];
     // Pre-seed a long history (each message ~5000 tokens) so the cut point has
     // enough content to summarize once compaction triggers.
     const long="a".repeat(20_000);
@@ -92,6 +93,7 @@ describe("LiteraAgentRuntime",()=>{
     ]);
     const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret",thinkingLevel:"off"};
     const runtime=new LiteraAgentRuntime({sessions,book,loadConfig:async()=>config,loadStream:async()=>faux.streamSimple});
+    runtime.subscribe((event:AgentEvent)=>{if(event.type==="prompt_end"&&event.messages)projections.push(event.messages);});
     await runtime.openBook("book",new ArrayBuffer(1));
     await runtime.switchSession("session-1");
     await runtime.prompt("second question",{});
@@ -102,6 +104,12 @@ describe("LiteraAgentRuntime",()=>{
     expect(typeof compactions[0].firstKeptEntryId).toBe("string");
     expect(typeof compactions[0].tokensBefore).toBe("number");
     expect(current.entries.some((entry)=>entry.type==="compaction")).toBe(true);
+    // The UI projection keeps the full history and marks the compaction with a
+    // notice, unlike the model context which drops the compacted-away turns.
+    const projection=projections[projections.length-1];
+    expect(projection.filter((message)=>message.role==="notice")).toHaveLength(1);
+    expect(projection[0]).toMatchObject({role:"user"});
+    expect((projection[0] as {content:string}).content).toHaveLength(20_000);
   });
 
   it("emits compaction_started and compaction_completed on a successful compaction",async()=>{
