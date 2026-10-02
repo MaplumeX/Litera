@@ -288,6 +288,8 @@ export const en: { [K in MessageKey]: string } = {
   "chat.clearPrompt": "Clear",
   "chat.compacting": "Compacting context…",
   "chat.compacted": "Context compacted",
+  "chat.compactionShowSummary": "Show summary",
+  "chat.compactionHideSummary": "Hide summary",
   "chat.modelLabel": "Model",
   "chat.modelNotConfigured": "Set up model",
   "chat.switchModelFailed": "Failed to switch model: {message}",

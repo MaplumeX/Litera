@@ -28,6 +28,10 @@ _Avoid_: Notes (too narrow — notes are one kind of annotation), marks
 One assistant conversation about a book. A book has many sessions; a session can branch.
 _Avoid_: Chat, conversation (too generic)
 
+**Compaction**:
+A Session event that replaces older messages in the model's context with a summary entry. The full transcript stays visible to the user; only the model-facing projection is truncated. The transcript marks the point with a compaction notice (a collapsible divider showing the summary).
+_Avoid_: Summarization, truncation, context limit
+
 **Trash**:
 The local-only recovery window holding a deleted Book's directory, its Sessions, and a descriptor carrying the deleted record, kept for 30 days. Never synced. A Book deleted by another device's Tombstone lands here too, but cannot be restored — the next Sync would delete it again. The English UI calls it "Recently deleted"; the Simplified Chinese UI calls it 回收站.
 _Avoid_: Deleted items, archive

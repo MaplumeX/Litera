@@ -1,10 +1,10 @@
 import type { KeyboardEvent, ReactNode } from "react";
 import { Check, Pencil, Quote, X } from "lucide-react";
-import type { AgentMessage } from "@/types/agent";
+import type { UserMessage } from "@/types/agent";
 import { useT } from "@/lib/i18n";
 
 interface MessageBubbleProps {
-  message: AgentMessage;
+  message: UserMessage;
   editing: boolean;
   draft: string;
   onDraftChange: (value: string) => void;

@@ -286,6 +286,8 @@ export const zhCN = {
   "chat.clearPrompt": "清空",
   "chat.compacting": "正在压缩上下文…",
   "chat.compacted": "上下文已压缩",
+  "chat.compactionShowSummary": "查看摘要",
+  "chat.compactionHideSummary": "收起摘要",
   "chat.modelLabel": "模型",
   "chat.modelNotConfigured": "配置模型",
   "chat.switchModelFailed": "切换模型失败：{message}",
