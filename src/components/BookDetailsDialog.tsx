@@ -117,6 +117,9 @@ export function BookDetailsDialog({
         series,
       };
       if (coverBytes) args.coverBytes = coverBytes;
+      // Curation (reading status, star) is not edited here: it lives on the
+      // shelf card's status menu, and `update_book_metadata` replaces every
+      // text field, so folding it in would risk clearing the star.
       const updated = await invoke<BookRecord>("update_book_metadata", args);
       notifySyncActivity();
       onSaved(updated, Boolean(coverBytes));

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
-import type { BookRecord } from "@/types/library";
+import type { BookRecord, TrashEntry } from "@/types/library";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -16,9 +16,11 @@ import {
   titlebarClassName,
   useTitlebarWindowDrag,
 } from "@/components/WindowControls";
-import { LayoutGrid, List, Plus, Settings } from "lucide-react";
+import { ArrowDownWideNarrow, ArrowUpNarrowWide, LayoutGrid, List, Plus, Settings, Trash2 } from "lucide-react";
 import { BookCard, BookListRow } from "@/components/BookCard";
 import { BookDetailsDialog } from "@/components/BookDetailsDialog";
+import { TrashDialog } from "@/components/TrashDialog";
+import type { BookStatusChoice } from "@/components/BookStatusMenu";
 import {
   BookImportConfirmDialog,
   BookImportNotices,
@@ -29,15 +31,24 @@ import { useBookImport } from "@/lib/use-book-import";
 import { useT, type MessageKey } from "@/lib/i18n";
 import {
   filterBooks,
+  filterByStatus,
+  isLibraryStatusFilter,
+  naturalOrderFor,
   sortBooks,
   takeRecent,
   type LibrarySortKey,
+  type LibrarySortOrder,
+  type LibraryStatusFilter,
 } from "@/lib/library-shelf";
 import {
   loadLibrarySort,
+  loadLibrarySortOrder,
+  loadLibraryStatusFilter,
   loadLibraryView,
   parseLibrarySort,
   saveLibrarySort,
+  saveLibrarySortOrder,
+  saveLibraryStatusFilter,
   saveLibraryView,
   type LibraryViewMode,
 } from "@/lib/library-shelf-prefs";
@@ -60,6 +71,14 @@ const SORT_OPTIONS: { value: LibrarySortKey; labelKey: MessageKey }[] = [
   { value: "progress", labelKey: "library.sort.progress" },
 ];
 
+const STATUS_OPTIONS: { value: LibraryStatusFilter; labelKey: MessageKey }[] = [
+  { value: "all", labelKey: "library.status.all" },
+  { value: "unread", labelKey: "library.status.unread" },
+  { value: "reading", labelKey: "library.status.reading" },
+  { value: "finished", labelKey: "library.status.finished" },
+  { value: "starred", labelKey: "library.status.starred" },
+];
+
 export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }: LibraryViewProps) {
   const { t } = useT();
   const titlebarDrag = useTitlebarWindowDrag();
@@ -69,8 +88,16 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [sort, setSort] = useState<LibrarySortKey>(loadLibrarySort);
+  const [order, setOrder] = useState<LibrarySortOrder>(() =>
+    loadLibrarySortOrder(loadLibrarySort()),
+  );
   const [view, setView] = useState<LibraryViewMode>(loadLibraryView);
+  const [statusFilter, setStatusFilter] = useState<LibraryStatusFilter>(
+    loadLibraryStatusFilter,
+  );
   const [detailsBook, setDetailsBook] = useState<BookRecord | null>(null);
+  const [trashOpen, setTrashOpen] = useState(false);
+  const [trashEntries, setTrashEntries] = useState<TrashEntry[]>([]);
   const [coverRev, setCoverRev] = useState<Record<string, number>>({});
   const {
     notices,
@@ -106,17 +133,32 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
     void refreshBooks();
   }, [refreshBooks]);
 
+  const refreshTrash = useCallback(async () => {
+    try {
+      setTrashEntries(await invoke<TrashEntry[]>("list_trashed_books"));
+    } catch (err) {
+      // The Trash is a recovery affordance, not a core path: a failure here
+      // must not take the shelf down with it.
+      console.error("list_trashed_books error:", err);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshTrash();
+  }, [refreshTrash]);
+
   // A sync pass may have rendered new placeholders, promoted downloads, or
   // propagated deletions: re-read the shelf without waiting for a remount.
   useEffect(() => {
     const onSyncApplied = () => {
       void refreshBooks();
+      void refreshTrash();
     };
     window.addEventListener("litera:sync-applied", onSyncApplied);
     return () => {
       window.removeEventListener("litera:sync-applied", onSyncApplied);
     };
-  }, [refreshBooks]);
+  }, [refreshBooks, refreshTrash]);
 
   // Synced books whose EPUB has not downloaded yet: fetch their cover on
   // demand the first time the shelf renders them, so a new device's shelf
@@ -220,6 +262,7 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
       }
     }
     await refreshBooks();
+    await refreshTrash();
     if (selectMode) exitSelectMode();
     if (failures.length > 0) {
       pushNotice({
@@ -227,7 +270,7 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
         message: t("library.deleteFailed", { titles: failures.join(t("common.listJoin")) }),
       });
     }
-  }, [askConfirm, exitSelectMode, pushNotice, refreshBooks, selectMode, t]);
+  }, [askConfirm, exitSelectMode, pushNotice, refreshBooks, refreshTrash, selectMode, t]);
 
   const handleDelete = useCallback(
     (bookId: string) => {
@@ -249,14 +292,80 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
 
   const handleSortChange = useCallback((value: string) => {
     const next = parseLibrarySort(value);
+    // Picking a key starts it in that key's natural direction instead of
+    // carrying over the previous key's direction.
+    const nextOrder = naturalOrderFor(next);
     setSort(next);
+    setOrder(nextOrder);
     saveLibrarySort(next);
+    saveLibrarySortOrder(nextOrder);
   }, []);
+
+  const handleOrderToggle = useCallback(() => {
+    const next: LibrarySortOrder = order === "asc" ? "desc" : "asc";
+    setOrder(next);
+    saveLibrarySortOrder(next);
+  }, [order]);
 
   const handleViewChange = useCallback((next: LibraryViewMode) => {
     setView(next);
     saveLibraryView(next);
   }, []);
+
+  const handleStatusFilterChange = useCallback((value: string) => {
+    if (!isLibraryStatusFilter(value)) return;
+    setStatusFilter(value);
+    saveLibraryStatusFilter(value);
+  }, []);
+
+  const handleToggleStar = useCallback(
+    async (target: BookRecord) => {
+      try {
+        // Curation has its own command so starring never rewrites the
+        // metadata fields the details dialog owns.
+        const updated = await invoke<BookRecord>("update_book_curation", {
+          bookId: target.id,
+          readingStatus: null,
+          starred: target.starred !== true,
+        });
+        setBooks((current) =>
+          current.map((item) => (item.id === updated.id ? updated : item)),
+        );
+        notifySyncActivity();
+      } catch (err) {
+        console.error("update_book_curation error:", err);
+        pushNotice({
+          kind: "error",
+          message: t("library.curationFailed", { message: invokeErrorMessage(err) }),
+        });
+      }
+    },
+    [pushNotice, t],
+  );
+
+  const handleChangeStatus = useCallback(
+    async (target: BookRecord, status: BookStatusChoice) => {
+      try {
+        const updated = await invoke<BookRecord>("update_book_curation", {
+          bookId: target.id,
+          // An empty string clears the status; null would mean "leave alone".
+          readingStatus: status === "unset" ? "" : status,
+          starred: null,
+        });
+        setBooks((current) =>
+          current.map((item) => (item.id === updated.id ? updated : item)),
+        );
+        notifySyncActivity();
+      } catch (err) {
+        console.error("update_book_curation error:", err);
+        pushNotice({
+          kind: "error",
+          message: t("library.curationFailed", { message: invokeErrorMessage(err) }),
+        });
+      }
+    },
+    [pushNotice, t],
+  );
 
   const handleDetailsSaved = useCallback((record: BookRecord, coverChanged: boolean) => {
     setBooks((current) =>
@@ -267,14 +376,92 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
     }
   }, []);
 
+  const handleRestoreEntry = useCallback(
+    async (entry: TrashEntry) => {
+      try {
+        await invoke("restore_trashed_book", { entryId: entry.entryId });
+        // Restoring revokes the Book Tombstone, so the revival reaches Sync.
+        notifySyncActivity();
+        await refreshBooks();
+        await refreshTrash();
+      } catch (err) {
+        console.error("restore_trashed_book error:", err);
+        pushNotice({
+          kind: "error",
+          message: t("library.trashRestoreFailed", {
+            title: entry.title || t("library.trashUnnamed"),
+            message: invokeErrorMessage(err),
+          }),
+        });
+      }
+    },
+    [pushNotice, refreshBooks, refreshTrash, t],
+  );
+
+  const handlePurgeEntry = useCallback(
+    async (entry: TrashEntry) => {
+      const confirmed = await askConfirm({
+        title: t("library.trashPurgeTitle", { title: entry.title }),
+        description: t("library.trashPurgeDesc"),
+        confirmLabel: t("library.trashPurge"),
+        destructive: true,
+      });
+      if (!confirmed) return;
+      try {
+        await invoke("purge_trashed_book", { entryId: entry.entryId });
+        await refreshTrash();
+      } catch (err) {
+        console.error("purge_trashed_book error:", err);
+        pushNotice({
+          kind: "error",
+          message: t("library.trashPurgeFailed", {
+            title: entry.title || t("library.trashUnnamed"),
+            message: invokeErrorMessage(err),
+          }),
+        });
+      }
+    },
+    [askConfirm, pushNotice, refreshTrash, t],
+  );
+
+  const handlePurgeAll = useCallback(async () => {
+    if (trashEntries.length === 0) return;
+    const confirmed = await askConfirm({
+      title: t("library.trashPurgeAllTitle", { count: trashEntries.length }),
+      description: t("library.trashPurgeDesc"),
+      confirmLabel: t("library.trashPurgeAll"),
+      destructive: true,
+    });
+    if (!confirmed) return;
+    try {
+      await invoke("purge_all_trashed_books");
+      await refreshTrash();
+    } catch (err) {
+      console.error("purge_all_trashed_books error:", err);
+      pushNotice({
+        kind: "error",
+        message: t("library.trashPurgeAllFailed", {
+          message: invokeErrorMessage(err),
+        }),
+      });
+    }
+  }, [askConfirm, pushNotice, refreshTrash, t, trashEntries.length]);
+
   const searching = search.trim().length > 0;
   const recents = useMemo(
-    () => (searching ? [] : takeRecent(books)),
-    [books, searching],
+    // Continue reading narrows with the status filter like the main grid: a
+    // reader looking at "unread" should not be shown finished books up top.
+    () => (searching ? [] : takeRecent(filterByStatus(books, statusFilter))),
+    [books, searching, statusFilter],
   );
   const visible = useMemo(
-    () => sortBooks(filterBooks(books, search), sort),
-    [books, search, sort],
+    () =>
+      sortBooks(
+        filterByStatus(filterBooks(books, search), statusFilter),
+        sort,
+        order,
+      ),
+    [books, order, search, sort, statusFilter],
   );
   const selectedBooks = books.filter((book) => selectedIds.has(book.id));
   const busy = importing || openingBookId !== null;
@@ -283,6 +470,9 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
     onOpen: onOpenBook,
     onDelete: handleDelete,
     onDetails: setDetailsBook,
+    onToggleStar: (target: BookRecord) => void handleToggleStar(target),
+    onChangeStatus: (target: BookRecord, status: BookStatusChoice) =>
+      void handleChangeStatus(target, status),
     deleteDisabled: busy,
     selectMode,
     onToggleSelect: handleToggleSelect,
@@ -314,6 +504,25 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
           />
           {books.length > 0 && (
             <>
+              <Select
+                value={statusFilter}
+                onValueChange={handleStatusFilterChange}
+              >
+                <SelectTrigger
+                  size="sm"
+                  className="h-8 w-[7.5rem]"
+                  aria-label={t("library.statusFilter")}
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {STATUS_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {t(option.labelKey)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               <Select value={sort} onValueChange={handleSortChange}>
                 <SelectTrigger
                   size="sm"
@@ -330,6 +539,21 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
                   ))}
                 </SelectContent>
               </Select>
+              <Button
+                type="button"
+                size="icon-sm"
+                variant="ghost"
+                aria-label={
+                  order === "asc"
+                    ? t("library.sortAscending")
+                    : t("library.sortDescending")
+                }
+                aria-pressed={order === "desc"}
+                data-sort-order={order}
+                onClick={handleOrderToggle}
+              >
+                {order === "asc" ? <ArrowUpNarrowWide /> : <ArrowDownWideNarrow />}
+              </Button>
               <div className="flex items-center">
                 <Button
                   type="button"
@@ -403,6 +627,18 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
               >
                 <Settings />
               </Button>
+              {trashEntries.length > 0 && (
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  aria-label={t("library.trash")}
+                  data-trash-count={trashEntries.length}
+                  onClick={() => setTrashOpen(true)}
+                  disabled={busy}
+                >
+                  <Trash2 />
+                </Button>
+              )}
             </>
           )}
         </div>
@@ -503,6 +739,15 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
           if (!open) setDetailsBook(null);
         }}
         onSaved={handleDetailsSaved}
+      />
+
+      <TrashDialog
+        open={trashOpen}
+        onOpenChange={setTrashOpen}
+        entries={trashEntries}
+        onRestore={(entry) => void handleRestoreEntry(entry)}
+        onPurge={(entry) => void handlePurgeEntry(entry)}
+        onPurgeAll={() => void handlePurgeAll()}
       />
 
       <BookImportConfirmDialog

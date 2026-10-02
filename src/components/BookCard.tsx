@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { Check, CloudOff, X } from "lucide-react";
+import { Check, CloudOff, Star, X } from "lucide-react";
 import type { BookRecord } from "@/types/library";
+import { BookStatusMenu, type BookStatusChoice } from "@/components/BookStatusMenu";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
 import {
@@ -19,6 +20,8 @@ interface BookCardProps {
   onOpen: (bookId: string) => void | Promise<void>;
   onDelete: (bookId: string) => void;
   onDetails: (book: BookRecord) => void;
+  onToggleStar?: (book: BookRecord) => void;
+  onChangeStatus?: (book: BookRecord, status: BookStatusChoice) => void;
   opening?: boolean;
   deleteDisabled?: boolean;
   selectMode?: boolean;
@@ -72,6 +75,8 @@ export function BookCard({
   onOpen,
   onDelete,
   onDetails,
+  onToggleStar,
+  onChangeStatus,
   opening = false,
   deleteDisabled = false,
   selectMode = false,
@@ -85,6 +90,7 @@ export function BookCard({
   const { t } = useT();
   const pct = progressPercent(book.lastFraction);
   const uncached = book.cached === false;
+  const starred = book.starred === true;
   const actions = {
     onOpen: () => {
       void onOpen(book.id);
@@ -180,13 +186,39 @@ export function BookCard({
       )}
 
       <div className="px-1">
-        <p className="line-clamp-2 text-sm font-medium leading-tight">
-          {book.title}
-        </p>
+        <div className="flex items-start gap-1">
+          <p className="line-clamp-2 min-w-0 flex-1 text-sm font-medium leading-tight">
+            {book.title}
+          </p>
+          {!selectMode && onToggleStar && (
+            <button
+              type="button"
+              className={cn(
+                "shrink-0 rounded-sm p-0.5 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring motion-reduce:transition-none",
+                starred && "text-foreground",
+              )}
+              aria-label={t(starred ? "library.unstar" : "library.star")}
+              aria-pressed={starred}
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleStar(book);
+              }}
+            >
+              <Star className={cn("size-3.5", starred && "fill-current")} />
+            </button>
+          )}
+        </div>
         {book.author && (
           <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">
             {book.author}
           </p>
+        )}
+        {!selectMode && onChangeStatus && (
+          <BookStatusMenu
+            book={book}
+            onChange={(choice) => onChangeStatus(book, choice)}
+            className="mt-1"
+          />
         )}
       </div>
     </div>
@@ -201,6 +233,8 @@ interface BookListRowProps {
   onOpen: (bookId: string) => void | Promise<void>;
   onDelete: (bookId: string) => void;
   onDetails: (book: BookRecord) => void;
+  onToggleStar?: (book: BookRecord) => void;
+  onChangeStatus?: (book: BookRecord, status: BookStatusChoice) => void;
   opening?: boolean;
   deleteDisabled?: boolean;
   selectMode?: boolean;
@@ -215,6 +249,8 @@ export function BookListRow({
   onOpen,
   onDelete,
   onDetails,
+  onToggleStar,
+  onChangeStatus,
   opening = false,
   selectMode = false,
   selected = false,
@@ -225,6 +261,7 @@ export function BookListRow({
   const { t, locale } = useT();
   const pct = progressPercent(book.lastFraction);
   const uncached = book.cached === false;
+  const starred = book.starred === true;
   const actions = {
     onOpen: () => {
       void onOpen(book.id);
@@ -280,6 +317,14 @@ export function BookListRow({
             </span>
           ) : null}
         </span>
+        {/* Always rendered so rows keep their columns aligned when a book has
+            no series. */}
+        <span
+          className="hidden w-32 shrink-0 truncate text-right text-xs text-muted-foreground md:block"
+          title={book.series || undefined}
+        >
+          {book.series}
+        </span>
         <span className="w-12 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
           {pct == null ? t("library.noProgress") : `${pct}%`}
         </span>
@@ -298,6 +343,26 @@ export function BookListRow({
             : t("library.neverOpened")}
         </span>
       </button>
+      {!selectMode && onChangeStatus && (
+        <BookStatusMenu
+          book={book}
+          onChange={(choice) => onChangeStatus(book, choice)}
+        />
+      )}
+      {!selectMode && onToggleStar && (
+        <button
+          type="button"
+          className={cn(
+            "shrink-0 rounded-sm p-1 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+            starred && "text-foreground",
+          )}
+          aria-label={t(starred ? "library.unstar" : "library.star")}
+          aria-pressed={starred}
+          onClick={() => onToggleStar(book)}
+        >
+          <Star className={cn("size-3.5", starred && "fill-current")} />
+        </button>
+      )}
       {!selectMode && <BookActionDropdown {...actions} />}
     </div>
   );

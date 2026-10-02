@@ -37,6 +37,12 @@ export interface SyncedBook {
   annotationsUpdatedAt: string;
   fileRevision: string | null;
   coverRevision: string | null;
+  /**
+   * Last edit to the record itself (metadata, curation, Restore). Absent on
+   * manifests written by older versions, which fall back to position and
+   * annotation activity — exactly what the old merge used.
+   */
+  bookUpdatedAt?: string;
 }
 
 export type TombstoneKind = "book" | "annotation";
@@ -107,6 +113,18 @@ function bookActivityTimestamp(book: SyncedBook): string {
 }
 
 /**
+ * The revision a book's metadata is ordered by, and the one compared against
+ * an active book Tombstone to decide whether the book is a revival. Prefers
+ * the explicit `bookUpdatedAt`; a manifest from before that field existed
+ * falls back to reading activity so its behaviour is unchanged.
+ */
+function bookRevision(book: SyncedBook): string {
+  return book.bookUpdatedAt && book.bookUpdatedAt.length > 0
+    ? book.bookUpdatedAt
+    : bookActivityTimestamp(book);
+}
+
+/**
  * Newest position wins; ties break by the greater device id so both
  * merging orders pick the same winner.
  */
@@ -137,10 +155,21 @@ function activeTombstoneKey(
   return { bookId: tombstone.bookId, annotationId: tombstone.annotationId };
 }
 
-function isBookTombstoned(tombstones: Tombstone[], bookId: string, now: string): boolean {
-  return tombstones.some(
+/**
+ * The active book Tombstone naming this book, if any. A book newer than its
+ * Tombstone is a revival rather than a deletion, so callers compare
+ * `bookRevision(book)` against the returned tombstone's `deletedAt`.
+ */
+function activeBookTombstone(
+  tombstones: Tombstone[],
+  bookId: string,
+  now: string,
+): Tombstone | undefined {
+  return tombstones.find(
     (tombstone) =>
-      tombstone.kind === "book" && tombstone.bookId === bookId && isTombstoneActive(tombstone, now),
+      tombstone.kind === "book" &&
+      tombstone.bookId === bookId &&
+      isTombstoneActive(tombstone, now),
   );
 }
 
@@ -210,10 +239,18 @@ function mergeBooks(
   tombstones: Tombstone[],
   now: string,
 ): SyncedBook {
-  const localNewer = bookActivityTimestamp(local) >= bookActivityTimestamp(remote);
+  // Metadata edits are ordered by the book's own revision, not by reading
+  // activity: a metadata change that no page turn accompanies must still win.
+  const localRevision = bookRevision(local);
+  const remoteRevision = bookRevision(remote);
+  const localNewer = localRevision >= remoteRevision;
   const [newerMetadata, olderMetadata] = localNewer
     ? [local.metadata, remote.metadata]
     : [remote.metadata, local.metadata];
+  // Only an explicit timestamp is carried forward, so a manifest from an
+  // older version keeps falling back to activity on the next merge instead of
+  // freezing that activity as an edit time.
+  const mergedBookUpdatedAt = maxTime(local.bookUpdatedAt ?? "", remote.bookUpdatedAt ?? "");
   return {
     metadata: { ...olderMetadata, ...newerMetadata },
     position: mergePosition(local.position, remote.position),
@@ -227,6 +264,7 @@ function mergeBooks(
     annotationsUpdatedAt: maxTime(local.annotationsUpdatedAt, remote.annotationsUpdatedAt),
     fileRevision: localNewer ? local.fileRevision ?? remote.fileRevision : remote.fileRevision ?? local.fileRevision,
     coverRevision: localNewer ? local.coverRevision ?? remote.coverRevision : remote.coverRevision ?? local.coverRevision,
+    bookUpdatedAt: mergedBookUpdatedAt === "" ? undefined : mergedBookUpdatedAt,
   };
 }
 
@@ -264,6 +302,11 @@ function mergeEnvelope<T>(
 /**
  * Merge two Manifests into the converged state both devices should adopt.
  * The merge is commutative: mergeManifests(a, b) equals mergeManifests(b, a).
+ *
+ * A book an active Tombstone names is dropped — unless the book's own
+ * revision is newer than the Tombstone, in which case the book is a revival
+ * and the Tombstone is discarded (Restore on one device must not be undone by
+ * the other device's stale deletion).
  */
 export function mergeManifests(
   a: SyncManifest,
@@ -274,21 +317,31 @@ export function mergeManifests(
 
   const bookIds = new Set([...Object.keys(a.books ?? {}), ...Object.keys(b.books ?? {})]);
   const books: Record<string, SyncedBook> = {};
+  const revivedBookIds = new Set<string>();
   for (const bookId of bookIds) {
-    if (isBookTombstoned(tombstones, bookId, now)) continue;
     const local = a.books?.[bookId];
     const remote = b.books?.[bookId];
-    if (local && remote) {
-      books[bookId] = mergeBooks(bookId, local, remote, tombstones, now);
-    } else {
-      books[bookId] = (local ?? remote)!;
+    const book = local && remote
+      ? mergeBooks(bookId, local, remote, tombstones, now)
+      : (local ?? remote)!;
+    const tombstone = activeBookTombstone(tombstones, bookId, now);
+    if (tombstone) {
+      if (bookRevision(book) > tombstone.deletedAt) {
+        revivedBookIds.add(bookId);
+      } else {
+        continue;
+      }
     }
+    books[bookId] = book;
   }
 
   return {
     schemaVersion: Math.max(a.schemaVersion ?? 1, b.schemaVersion ?? 1),
     books,
-    tombstones,
+    tombstones: tombstones.filter(
+      (tombstone) =>
+        !(tombstone.kind === "book" && revivedBookIds.has(tombstone.bookId)),
+    ),
     preferences: mergeEnvelope(a.preferences ?? null, b.preferences ?? null),
     provider: mergeEnvelope(a.provider ?? null, b.provider ?? null),
   };

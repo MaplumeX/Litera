@@ -2,19 +2,30 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   DEFAULT_LIBRARY_SORT,
+  DEFAULT_LIBRARY_STATUS_FILTER,
   DEFAULT_LIBRARY_VIEW,
   LIBRARY_SORT_KEY,
+  LIBRARY_SORT_ORDER_KEY,
+  LIBRARY_STATUS_FILTER_KEY,
   LIBRARY_VIEW_KEY,
   loadLibrarySort,
+  loadLibrarySortOrder,
+  loadLibraryStatusFilter,
   loadLibraryView,
   parseLibrarySort,
+  parseLibrarySortOrder,
+  parseLibraryStatusFilter,
   parseLibraryView,
   saveLibrarySort,
+  saveLibrarySortOrder,
+  saveLibraryStatusFilter,
   saveLibraryView,
 } from "./library-shelf-prefs";
 
 afterEach(() => {
   localStorage.removeItem(LIBRARY_SORT_KEY);
+  localStorage.removeItem(LIBRARY_SORT_ORDER_KEY);
+  localStorage.removeItem(LIBRARY_STATUS_FILTER_KEY);
   localStorage.removeItem(LIBRARY_VIEW_KEY);
 });
 
@@ -51,5 +62,46 @@ describe("load / save library shelf prefs", () => {
     localStorage.setItem(LIBRARY_VIEW_KEY, "masonry");
     expect(loadLibrarySort()).toBe(DEFAULT_LIBRARY_SORT);
     expect(loadLibraryView()).toBe(DEFAULT_LIBRARY_VIEW);
+  });
+});
+
+describe("library sort order prefs", () => {
+  it("falls back to the sort key's natural direction", () => {
+    expect(parseLibrarySortOrder(undefined, "title")).toBe("asc");
+    expect(parseLibrarySortOrder(null, "recent")).toBe("desc");
+    expect(parseLibrarySortOrder("sideways", "progress")).toBe("desc");
+    expect(parseLibrarySortOrder("asc", "recent")).toBe("asc");
+    expect(parseLibrarySortOrder("desc", "title")).toBe("desc");
+  });
+
+  it("round-trips a saved direction", () => {
+    saveLibrarySortOrder("asc");
+    expect(localStorage.getItem(LIBRARY_SORT_ORDER_KEY)).toBe("asc");
+    expect(loadLibrarySortOrder("recent")).toBe("asc");
+  });
+
+  it("ignores an invalid stored direction", () => {
+    localStorage.setItem(LIBRARY_SORT_ORDER_KEY, "masonry");
+    expect(loadLibrarySortOrder("title")).toBe("asc");
+    expect(loadLibrarySortOrder("imported")).toBe("desc");
+  });
+});
+
+describe("library status filter prefs", () => {
+  it("falls back to all for missing or unknown values", () => {
+    expect(parseLibraryStatusFilter(undefined)).toBe(DEFAULT_LIBRARY_STATUS_FILTER);
+    expect(parseLibraryStatusFilter("favourite")).toBe(DEFAULT_LIBRARY_STATUS_FILTER);
+    expect(parseLibraryStatusFilter("starred")).toBe("starred");
+  });
+
+  it("round-trips a saved filter", () => {
+    saveLibraryStatusFilter("reading");
+    expect(localStorage.getItem(LIBRARY_STATUS_FILTER_KEY)).toBe("reading");
+    expect(loadLibraryStatusFilter()).toBe("reading");
+  });
+
+  it("ignores an invalid stored filter", () => {
+    localStorage.setItem(LIBRARY_STATUS_FILTER_KEY, "masonry");
+    expect(loadLibraryStatusFilter()).toBe(DEFAULT_LIBRARY_STATUS_FILTER);
   });
 });

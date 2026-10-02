@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { BookRecord, ImportBookResult } from "@/types/library";
+import type { BookRecord, ImportBookResult, TrashEntry } from "@/types/library";
 
 const invokeMock = vi.fn();
 const dragDrop: {
@@ -55,7 +55,12 @@ vi.mock("@/lib/book-utils", () => ({
 import { LibraryView } from "@/components/LibraryView";
 import { setLocale } from "@/lib/i18n";
 import { formatLibraryTimestamp } from "@/lib/library-shelf";
-import { LIBRARY_SORT_KEY, LIBRARY_VIEW_KEY } from "@/lib/library-shelf-prefs";
+import {
+  LIBRARY_SORT_KEY,
+  LIBRARY_SORT_ORDER_KEY,
+  LIBRARY_STATUS_FILTER_KEY,
+  LIBRARY_VIEW_KEY,
+} from "@/lib/library-shelf-prefs";
 
 const book: BookRecord = {
   id: "book-1",
@@ -74,11 +79,16 @@ function setupInvoke(handlers: Record<string, (args?: unknown) => unknown> = {})
     if (cmd === "list_books") {
       return Promise.resolve([book]);
     }
+    if (cmd === "list_trashed_books") {
+      return Promise.resolve([]);
+    }
     return Promise.resolve(undefined);
   });
 }
 
 beforeEach(() => {
+  // A test that switches the locale must not leak it into the next one.
+  setLocale("zh-CN");
   invokeMock.mockReset();
   dragDrop.handler = undefined;
   windowApi.minimize.mockClear();
@@ -87,6 +97,8 @@ beforeEach(() => {
   windowApi.close.mockClear();
   windowApi.destroy.mockClear();
   localStorage.removeItem(LIBRARY_SORT_KEY);
+  localStorage.removeItem(LIBRARY_SORT_ORDER_KEY);
+  localStorage.removeItem(LIBRARY_STATUS_FILTER_KEY);
   localStorage.removeItem(LIBRARY_VIEW_KEY);
   setupInvoke();
 });
@@ -147,7 +159,7 @@ describe("LibraryView", () => {
     getByRole("button", { name: "导入" }).click();
 
     expect(await findByText("覆盖「Stored Title」？")).toBeTruthy();
-    expect(await findByText("将用新文件替换这本书。阅读进度、设置和对话会保留。")).toBeTruthy();
+    expect(await findByText("将用新文件替换这本书。阅读进度、设置和会话会保留。")).toBeTruthy();
     getByRole("button", { name: "取消" }).click();
 
     await waitFor(() => {
@@ -260,7 +272,7 @@ describe("LibraryView", () => {
 
     getByRole("button", { name: "删除" }).click();
     expect(await findByText("删除 2 本书？")).toBeTruthy();
-    expect(await findByText("将删除这些书的 AI 对话，此操作无法撤销。")).toBeTruthy();
+    expect(await findByText("这些书及其会话会移入回收站，30 天内可恢复。")).toBeTruthy();
 
     within(getByRole("alertdialog")).getByRole("button", { name: "取消" }).click();
     await waitFor(() => {
@@ -339,7 +351,7 @@ describe("LibraryView", () => {
     getByTitle("删除").click();
 
     expect(await findByText("删除「Stored Title」？")).toBeTruthy();
-    expect(await findByText("将删除该书的 AI 对话，此操作无法撤销。")).toBeTruthy();
+    expect(await findByText("该书及其会话会移入回收站，30 天内可恢复。")).toBeTruthy();
     getByRole("button", { name: "删除" }).click();
 
     await waitFor(() => {
@@ -365,7 +377,7 @@ describe("LibraryView", () => {
     expect(title.className).not.toContain("font-semibold");
     expect(header!.hasAttribute("data-titlebar-drag")).toBe(false);
     expect(header!.querySelectorAll("[data-titlebar-drag]")).toHaveLength(2);
-    expect(getByPlaceholderText("搜索书名或作者…").hasAttribute("data-titlebar-drag")).toBe(false);
+    expect(getByPlaceholderText("搜索书名、作者、系列…").hasAttribute("data-titlebar-drag")).toBe(false);
     for (const name of ["导入", "选择", "设置", "最小化", "最大化", "关闭窗口"]) {
       expect(getByRole("button", { name }).hasAttribute("data-titlebar-drag")).toBe(false);
     }
@@ -422,7 +434,7 @@ describe("LibraryView", () => {
     within(recents as HTMLElement).getByTitle("Stored Title").click();
     expect(onOpenBook).toHaveBeenCalledWith("book-1");
 
-    fireEvent.change(getByPlaceholderText("搜索书名或作者…"), {
+    fireEvent.change(getByPlaceholderText("搜索书名、作者、系列…"), {
       target: { value: "Stored" },
     });
     expect(queryByText("继续阅读")).toBeNull();
@@ -485,6 +497,92 @@ describe("LibraryView", () => {
     ]);
   });
 
+  it("reverses the main list when the sort direction toggles", async () => {
+    const alpha: BookRecord = {
+      ...book,
+      id: "a",
+      title: "Alpha",
+      lastOpenedAt: "2026-01-01T00:00:00+00:00",
+    };
+    const zeta: BookRecord = {
+      ...book,
+      id: "z",
+      title: "Zeta",
+      lastOpenedAt: "2026-06-01T00:00:00+00:00",
+    };
+    setupInvoke({ list_books: () => [zeta, alpha] });
+    const { findByText, getByRole } = render(
+      <LibraryView onOpenBook={() => {}} onOpenSettings={() => {}} />,
+    );
+    const heading = await findByText("继续阅读");
+    const main = (heading.closest("section") as HTMLElement)
+      .nextElementSibling as HTMLElement;
+    // "Recently opened" starts newest-first.
+    expect(within(main).getAllByTitle(/^(Alpha|Zeta)$/).map((el) => el.title)).toEqual([
+      "Zeta",
+      "Alpha",
+    ]);
+
+    getByRole("button", { name: "降序排列" }).click();
+    await waitFor(() => {
+      expect(localStorage.getItem(LIBRARY_SORT_ORDER_KEY)).toBe("asc");
+      expect(within(main).getAllByTitle(/^(Alpha|Zeta)$/).map((el) => el.title)).toEqual([
+        "Alpha",
+        "Zeta",
+      ]);
+    });
+
+    getByRole("button", { name: "升序排列" }).click();
+    await waitFor(() => {
+      expect(localStorage.getItem(LIBRARY_SORT_ORDER_KEY)).toBe("desc");
+      expect(within(main).getAllByTitle(/^(Alpha|Zeta)$/).map((el) => el.title)).toEqual([
+        "Zeta",
+        "Alpha",
+      ]);
+    });
+  });
+
+  it("resets the direction to the new key's natural order when the sort key changes", async () => {
+    const alpha: BookRecord = {
+      ...book,
+      id: "a",
+      title: "Alpha",
+      lastOpenedAt: "2026-06-01T00:00:00+00:00",
+    };
+    const zeta: BookRecord = {
+      ...book,
+      id: "z",
+      title: "Zeta",
+      lastOpenedAt: "2026-01-01T00:00:00+00:00",
+    };
+    setupInvoke({ list_books: () => [zeta, alpha] });
+    const { findByText, getByRole } = render(
+      <LibraryView onOpenBook={() => {}} onOpenSettings={() => {}} />,
+    );
+    const heading = await findByText("继续阅读");
+    const main = (heading.closest("section") as HTMLElement)
+      .nextElementSibling as HTMLElement;
+
+    // Flip "recent" to ascending (oldest opened first), then switch to Title.
+    getByRole("button", { name: "降序排列" }).click();
+    await waitFor(() => {
+      expect(within(main).getAllByTitle(/^(Alpha|Zeta)$/).map((el) => el.title)).toEqual([
+        "Zeta",
+        "Alpha",
+      ]);
+    });
+    getByRole("combobox", { name: "排序" }).click();
+    (await waitFor(() => getByRole("option", { name: "书名" }))).click();
+    await waitFor(() => {
+      // Title's natural direction is ascending, not the carried-over "asc".
+      expect(localStorage.getItem(LIBRARY_SORT_ORDER_KEY)).toBe("asc");
+      expect(within(main).getAllByTitle(/^(Alpha|Zeta)$/).map((el) => el.title)).toEqual([
+        "Alpha",
+        "Zeta",
+      ]);
+    });
+  });
+
   it("switches to list view and persists the choice", async () => {
     const opened: BookRecord = {
       ...book,
@@ -502,6 +600,16 @@ describe("LibraryView", () => {
       await findByText(formatLibraryTimestamp(opened.lastOpenedAt!, "zh-CN")),
     ).toBeTruthy();
     expect(getByRole("button", { name: "更多操作" })).toBeTruthy();
+  });
+
+  it("shows the series column in list view", async () => {
+    setupInvoke({ list_books: () => [{ ...book, series: "Saga · 1" }] });
+    const { findAllByText, findByText, getByRole } = render(
+      <LibraryView onOpenBook={() => {}} onOpenSettings={() => {}} />,
+    );
+    await findAllByText("Stored Title");
+    getByRole("button", { name: "列表视图" }).click();
+    expect(await findByText("Saga · 1")).toBeTruthy();
   });
 
   it("saves details without coverBytes when no new cover is chosen", async () => {
@@ -757,6 +865,233 @@ describe("LibraryView — synced covers on demand", () => {
 
     await waitFor(() => {
       expect(invokeMock.mock.calls.some(([cmd]) => cmd === "sync_ensure_cover")).toBe(false);
+    });
+  });
+});
+
+describe("LibraryView — trash", () => {
+  const trashedBook: TrashEntry = {
+    entryId: "book-1-abc123",
+    bookId: "book-1",
+    title: "Deleted Book",
+    author: "Author",
+    coverPath: "",
+    deletedAt: "2026-01-01T00:00:00+00:00",
+    origin: "local",
+    sizeBytes: 2048,
+    hasSessions: true,
+    restorable: true,
+  };
+
+  it("hides the entry point when the trash is empty", async () => {
+    const { findByText, queryByRole } = render(
+      <LibraryView onOpenBook={() => {}} onOpenSettings={() => {}} />,
+    );
+
+    await findByText("Stored Title");
+
+    expect(queryByRole("button", { name: "最近删除" })).toBeNull();
+  });
+
+  it("lists a trashed book and restores it", async () => {
+    setupInvoke({ list_trashed_books: () => [trashedBook] });
+    const { findByRole, findByText, getByRole } = render(
+      <LibraryView onOpenBook={() => {}} onOpenSettings={() => {}} />,
+    );
+
+    fireEvent.click(await findByRole("button", { name: "最近删除" }));
+    expect(await findByText("Deleted Book")).toBeTruthy();
+    expect(await findByText(/含会话/)).toBeTruthy();
+
+    fireEvent.click(getByRole("button", { name: "恢复" }));
+    await waitFor(() => {
+      expect(
+        invokeMock.mock.calls.some(
+          ([cmd, args]) =>
+            cmd === "restore_trashed_book" &&
+            (args as { entryId?: string }).entryId === trashedBook.entryId,
+        ),
+      ).toBe(true);
+    });
+  });
+
+  it("lists a sync-origin entry without offering Restore", async () => {
+    setupInvoke({
+      list_trashed_books: () => [
+        { ...trashedBook, origin: "sync" as const, restorable: false },
+      ],
+    });
+    const { findByRole, findByText, queryByRole } = render(
+      <LibraryView onOpenBook={() => {}} onOpenSettings={() => {}} />,
+    );
+
+    fireEvent.click(await findByRole("button", { name: "最近删除" }));
+    expect(await findByText("Deleted Book")).toBeTruthy();
+    expect(await findByText("在另一台设备上删除，无法在这里恢复")).toBeTruthy();
+    expect(queryByRole("button", { name: "恢复" })).toBeNull();
+  });
+
+  it("confirms before permanently deleting a trash entry", async () => {
+    setupInvoke({ list_trashed_books: () => [trashedBook] });
+    const { findByRole, findByText, getAllByRole } = render(
+      <LibraryView onOpenBook={() => {}} onOpenSettings={() => {}} />,
+    );
+
+    fireEvent.click(await findByRole("button", { name: "最近删除" }));
+    expect(await findByText("Deleted Book")).toBeTruthy();
+
+    fireEvent.click(getAllByRole("button", { name: "永久删除" })[0]);
+    expect(await findByText("永久删除「Deleted Book」？")).toBeTruthy();
+    expect(
+      invokeMock.mock.calls.some(([cmd]) => cmd === "purge_trashed_book"),
+    ).toBe(false);
+
+    const confirmButtons = getAllByRole("button", { name: "永久删除" });
+    fireEvent.click(confirmButtons[confirmButtons.length - 1]);
+    await waitFor(() => {
+      expect(
+        invokeMock.mock.calls.some(([cmd]) => cmd === "purge_trashed_book"),
+      ).toBe(true);
+    });
+  });
+});
+
+describe("LibraryView — curation", () => {
+  it("stars a book from its card without opening it", async () => {
+    setupInvoke({
+      update_book_curation: () => ({ ...book, starred: true }),
+    });
+    const { findAllByText, getAllByRole } = render(
+      <LibraryView onOpenBook={() => {}} onOpenSettings={() => {}} />,
+    );
+    await findAllByText("Stored Title");
+
+    fireEvent.click(getAllByRole("button", { name: "加星标" })[0]);
+
+    await waitFor(() => {
+      expect(
+        invokeMock.mock.calls.some(
+          ([cmd, args]) =>
+            cmd === "update_book_curation" &&
+            (args as { bookId?: string }).bookId === "book-1" &&
+            (args as { starred?: boolean }).starred === true,
+        ),
+      ).toBe(true);
+    });
+  });
+
+  it("narrows the shelf by reading status", async () => {
+    const reading: BookRecord = {
+      ...book,
+      id: "reading",
+      title: "Reading Book",
+      readingStatus: "reading",
+    };
+    const finished: BookRecord = {
+      ...book,
+      id: "finished",
+      title: "Finished Book",
+      readingStatus: "finished",
+    };
+    setupInvoke({ list_books: () => [reading, finished] });
+    const { findByText, getByRole, queryByText } = render(
+      <LibraryView onOpenBook={() => {}} onOpenSettings={() => {}} />,
+    );
+    await findByText("Reading Book");
+
+    getByRole("combobox", { name: "筛选" }).click();
+    (await waitFor(() => getByRole("option", { name: "已读" }))).click();
+
+    await waitFor(() => {
+      expect(queryByText("Reading Book")).toBeNull();
+    });
+    expect(queryByText("Finished Book")).toBeTruthy();
+  });
+
+  it("applies the status filter to Continue reading too", async () => {
+    const openedReading: BookRecord = {
+      ...book,
+      id: "opened-reading",
+      title: "Opened Reading",
+      readingStatus: "reading",
+      lastOpenedAt: "2026-06-01T00:00:00+00:00",
+    };
+    const openedFinished: BookRecord = {
+      ...book,
+      id: "opened-finished",
+      title: "Opened Finished",
+      readingStatus: "finished",
+      lastOpenedAt: "2026-05-01T00:00:00+00:00",
+    };
+    setupInvoke({ list_books: () => [openedReading, openedFinished] });
+    const { findByText, getByRole, getByText } = render(
+      <LibraryView onOpenBook={() => {}} onOpenSettings={() => {}} />,
+    );
+    const recentsSection = (await findByText("继续阅读")).closest(
+      "section",
+    ) as HTMLElement;
+    expect(
+      within(recentsSection).getAllByTitle(/^Opened/).map((el) => el.title),
+    ).toEqual(["Opened Reading", "Opened Finished"]);
+
+    getByRole("combobox", { name: "筛选" }).click();
+    (await waitFor(() => getByRole("option", { name: "已读" }))).click();
+
+    await waitFor(() => {
+      const section = getByText("继续阅读").closest("section") as HTMLElement;
+      expect(
+        within(section).getAllByTitle(/^Opened/).map((el) => el.title),
+      ).toEqual(["Opened Finished"]);
+    });
+  });
+
+  it("sets a reading status from the card's status menu", async () => {
+    setupInvoke({
+      update_book_curation: () => ({ ...book, readingStatus: "finished" }),
+    });
+    const { findAllByText, getAllByRole, findByRole } = render(
+      <LibraryView onOpenBook={() => {}} onOpenSettings={() => {}} />,
+    );
+    await findAllByText("Stored Title");
+
+    // A book with no status still offers the control (that is the only entry
+    // point to setting one).
+    fireEvent.pointerDown(getAllByRole("button", { name: "阅读状态: 未设置" })[0]);
+    (await findByRole("menuitem", { name: "已读" })).click();
+
+    await waitFor(() => {
+      expect(
+        invokeMock.mock.calls.some(
+          ([cmd, args]) =>
+            cmd === "update_book_curation" &&
+            (args as { readingStatus?: string }).readingStatus === "finished" &&
+            (args as { starred?: unknown }).starred === null,
+        ),
+      ).toBe(true);
+    });
+  });
+
+  it("clears a reading status back to unset", async () => {
+    setupInvoke({
+      list_books: () => [{ ...book, readingStatus: "reading" }],
+      update_book_curation: () => ({ ...book }),
+    });
+    const { findAllByText, getAllByRole, findByRole } = render(
+      <LibraryView onOpenBook={() => {}} onOpenSettings={() => {}} />,
+    );
+    await findAllByText("Stored Title");
+
+    fireEvent.pointerDown(getAllByRole("button", { name: "阅读状态: 在读" })[0]);
+    (await findByRole("menuitem", { name: "未设置" })).click();
+
+    await waitFor(() => {
+      expect(
+        invokeMock.mock.calls.some(
+          ([cmd, args]) =>
+            cmd === "update_book_curation" &&
+            (args as { readingStatus?: string }).readingStatus === "",
+        ),
+      ).toBe(true);
     });
   });
 });
