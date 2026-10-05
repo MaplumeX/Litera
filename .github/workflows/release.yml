@@ -65,6 +65,9 @@ jobs:
         id: version
         run: node scripts/bump-version.mjs --check
 
+      - name: Check Tauri npm/cargo pairing
+        run: node scripts/check-tauri-pairing.mjs
+
       - name: Build Windows thumbnail DLL
         if: matrix.platform == 'windows-latest'
         working-directory: src-tauri/windows-thumbnail
