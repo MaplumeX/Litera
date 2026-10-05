@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { Agent, type AgentEvent as PiEvent, type AgentMessage as PiMessage, type AgentTool, type StreamFn } from "@earendil-works/pi-agent-core";
-import { clampThinkingLevel, isContextOverflow, retryAssistantCall, type AssistantMessage, type Context, type ModelThinkingLevel } from "@earendil-works/pi-ai";
+import { clampThinkingLevel, isContextOverflow, normalizeContext, retryAssistantCall, type AssistantMessage, type ModelThinkingLevel } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { BookWorkerClient, chapterAside, formatBookSnapshot, type BookContentPort } from "@/agent/book/book-content";
 import { DEFAULT_COMPACTION_SETTINGS, estimateContextTokens, findLastValidUsage, generateSummary, prepareCompaction, shouldCompact } from "@/agent/compaction/compaction";
@@ -199,7 +199,7 @@ export class LiteraAgentRuntime {
       const startedAt=new Date().toISOString();
       const model=agent.state.model;
       const apiKey=await agent.getApiKey?.(model.provider);
-      const context:Context={systemPrompt:"You generate concise chat session titles. Output only the title.",messages:[{role:"user",content:[{type:"text",text:`${TITLE_PROMPT}\n\n<conversation>\n[User]: ${userText}\n[Assistant]: ${assistantText.slice(0,2000)}\n</conversation>`}],timestamp:Date.now()}]};
+      const context=normalizeContext({systemPrompt:"You generate concise chat session titles. Output only the title.",messages:[{role:"user",content:[{type:"text",text:`${TITLE_PROMPT}\n\n<conversation>\n[User]: ${userText}\n[Assistant]: ${assistantText.slice(0,2000)}\n</conversation>`}],timestamp:Date.now()}]});
       const stream=await agent.streamFunction(model,context,{apiKey:apiKey??"",maxTokens:64,cacheRetention:"none",sessionId:crypto.randomUUID()});
       const response=await stream.result();
       if(response.stopReason==="error")throw new Error(response.errorMessage||"Title request failed");

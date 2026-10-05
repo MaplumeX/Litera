@@ -1,5 +1,5 @@
 import type { AgentMessage, StreamFn } from "@earendil-works/pi-agent-core";
-import type { Api, Context, Model, SimpleStreamOptions } from "@earendil-works/pi-ai";
+import { normalizeContext, type Api, type Model, type SimpleStreamOptions } from "@earendil-works/pi-ai";
 import type { PiSessionEntry } from "@/agent/sessions/pi-session";
 
 export interface CompactionSettings {
@@ -414,10 +414,10 @@ export async function generateSummary(
   let promptText = `<conversation>\n${conversationText}\n</conversation>\n\n`;
   if (previousSummary) promptText += `<previous-summary>\n${previousSummary}\n</previous-summary>\n\n`;
   promptText += basePrompt;
-  const context: Context = {
+  const context = normalizeContext({
     systemPrompt: SUMMARIZATION_SYSTEM_PROMPT,
     messages: [{ role: "user", content: [{ type: "text", text: promptText }], timestamp: Date.now() }],
-  };
+  });
   const options: SimpleStreamOptions = {
     maxTokens,
     signal,

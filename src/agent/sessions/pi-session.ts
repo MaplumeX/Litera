@@ -197,7 +197,9 @@ export function piContextMessages(session: DecodedPiSession): PiAgentMessage[] {
 export function convertPiContextToLlm(messages: PiAgentMessage[]): Message[] {
   return messages.flatMap((message): Message[] => {
     const custom = message as unknown as Record<string, unknown>;
-    if (message.role === "user" || message.role === "assistant" || message.role === "toolResult") {
+    // `system` carries the prompt and tool declarations since pi-ai 0.87, so it
+    // must pass through: dropping it removes both from the model request.
+    if (message.role === "system" || message.role === "user" || message.role === "assistant" || message.role === "toolResult") {
       return [message];
     }
     const timestamp = typeof custom.timestamp === "number" ? custom.timestamp : Date.now();
