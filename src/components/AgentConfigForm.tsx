@@ -51,18 +51,6 @@ function sameModels(a: string[], b: string[]): boolean {
   return a.length === b.length && a.every((id, index) => id === b[index]);
 }
 
-function mergeModelIds(existing: string[], incoming: string[]): string[] {
-  const seen = new Set(existing);
-  const out = [...existing];
-  for (const raw of incoming) {
-    const id = raw.trim();
-    if (!id || seen.has(id)) continue;
-    seen.add(id);
-    out.push(id);
-  }
-  return out;
-}
-
 function isLocalBaseUrl(url: string) {
   return /localhost|127\.0\.0\.1/.test(url);
 }
@@ -215,7 +203,6 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
     draftKey: string;
     providerId?: string;
     hasSavedKey: boolean;
-    currentModels: string[];
     currentModel: string;
     setModels: (next: string[]) => void;
     setCurrent: (next: string) => void;
@@ -230,10 +217,9 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
         opts.draftKey.trim(),
         opts.providerId,
       );
-      const merged = mergeModelIds(opts.currentModels, ids);
-      opts.setModels(merged);
-      if (!merged.includes(opts.currentModel)) {
-        opts.setCurrent(merged[0] ?? "");
+      opts.setModels(ids);
+      if (!ids.includes(opts.currentModel)) {
+        opts.setCurrent(ids[0] ?? "");
       }
     } catch (err) {
       setRefreshError(invokeErrorMessage(err) || t("agent.refreshFailed"));
@@ -380,7 +366,6 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
                     baseUrl: newBaseUrl,
                     draftKey: newApiKey,
                     hasSavedKey: false,
-                    currentModels: newModels,
                     currentModel: newModel,
                     setModels: setNewModels,
                     setCurrent: setNewModel,
@@ -473,7 +458,6 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
                         draftKey: apiKey,
                         providerId: selectedCustom.id,
                         hasSavedKey: selectedCustom.hasApiKey,
-                        currentModels: customModels,
                         currentModel: model,
                         setModels: setCustomModels,
                         setCurrent: setModel,
