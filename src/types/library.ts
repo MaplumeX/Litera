@@ -24,11 +24,11 @@ export interface ReaderLayout {
 }
 
 /**
- * Reader-assigned reading status. Absent on a Book means it has not been
- * curated; `unread` is an explicit choice, not a default. Never derived from
- * reading progress.
+ * Where a Book stands for the reader. Every Book has one: import sets
+ * `unread`, the first page turn of an open moves `unread` / `paused` to
+ * `reading`, and `finished` is set only with the reader's confirmation.
  */
-export type ReadingStatus = "unread" | "reading" | "finished";
+export type ReadingStatus = "unread" | "reading" | "paused" | "finished";
 
 /** A book record stored in library.json. */
 export interface BookRecord {
@@ -52,8 +52,9 @@ export interface BookRecord {
    * ordering and Tombstone revival.
    */
   updatedAt?: string;
-  /** Reader-assigned curation; absent means not curated. */
-  readingStatus?: ReadingStatus;
+  readingStatus: ReadingStatus;
+  /** Last status write; absent on a status backfilled from progress. */
+  statusUpdatedAt?: string;
   starred?: boolean;
   contentHash?: string;
   lastReaderMode?: "reader" | "agent";
@@ -84,6 +85,7 @@ export interface BookOpenContext {
   settings?: ReadingSettings;
   lastReaderMode?: "reader" | "agent";
   lastLayout?: ReaderLayout;
+  readingStatus: ReadingStatus;
 }
 
 /**

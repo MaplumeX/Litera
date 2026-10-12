@@ -4,6 +4,13 @@ import type { AppLocale } from "@/lib/i18n";
 export const MAX_COVER_BYTES = 20 * 1024 * 1024;
 export const RECENT_LIMIT = 4;
 
+/**
+ * Progress at or past this counts as "at the end": the reader offers "Mark as
+ * finished" there. Mirrors `FINISH_FRACTION` in `library.rs`, which uses it to
+ * backfill statuses.
+ */
+export const FINISH_FRACTION = 0.98;
+
 export type LibrarySortKey =
   | "recent"
   | "title"
@@ -137,6 +144,7 @@ export type LibraryStatusFilter =
   | "all"
   | "unread"
   | "reading"
+  | "paused"
   | "finished"
   | "starred";
 
@@ -144,6 +152,7 @@ const STATUS_FILTERS: readonly LibraryStatusFilter[] = [
   "all",
   "unread",
   "reading",
+  "paused",
   "finished",
   "starred",
 ];
@@ -182,26 +191,28 @@ export function countByStatus(
     all: books.length,
     unread: 0,
     reading: 0,
+    paused: 0,
     finished: 0,
     starred: 0,
   };
   for (const book of books) {
-    if (book.readingStatus) counts[book.readingStatus] += 1;
+    counts[book.readingStatus] += 1;
     if (book.starred === true) counts.starred += 1;
   }
   return counts;
 }
 
 /**
- * The Continue reading strip: most recently opened first. A finished Book has
- * nothing left to continue, so it is left out even if opened recently.
+ * The Continue reading strip: the Books being read, most recently opened
+ * first. It shows exactly what the Reading tab holds, so a paused or finished
+ * Book stays out even if opened recently.
  */
 export function takeRecent(
   books: readonly BookRecord[],
   limit = RECENT_LIMIT,
 ): BookRecord[] {
   return books
-    .filter((book) => Boolean(book.lastOpenedAt) && book.readingStatus !== "finished")
+    .filter((book) => Boolean(book.lastOpenedAt) && book.readingStatus === "reading")
     .sort((left, right) =>
       (right.lastOpenedAt ?? "").localeCompare(left.lastOpenedAt ?? ""),
     )

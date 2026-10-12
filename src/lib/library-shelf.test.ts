@@ -18,6 +18,7 @@ const base: BookRecord = {
   coverPath: "",
   filePath: "/tmp/book.epub",
   importedAt: "2026-01-01T00:00:00+00:00",
+  readingStatus: "unread",
 };
 
 function book(overrides: Partial<BookRecord> & Pick<BookRecord, "id">): BookRecord {
@@ -227,14 +228,17 @@ describe("sortBooks", () => {
 });
 
 describe("takeRecent", () => {
+  const reading = (id: string, lastOpenedAt?: string) =>
+    book({ id, readingStatus: "reading", lastOpenedAt });
+
   it("returns at most 4 books that have lastOpenedAt, newest first", () => {
     const books = [
-      book({ id: "a", lastOpenedAt: "2026-01-01T00:00:00+00:00" }),
-      book({ id: "never" }),
-      book({ id: "b", lastOpenedAt: "2026-05-01T00:00:00+00:00" }),
-      book({ id: "c", lastOpenedAt: "2026-03-01T00:00:00+00:00" }),
-      book({ id: "d", lastOpenedAt: "2026-04-01T00:00:00+00:00" }),
-      book({ id: "e", lastOpenedAt: "2026-02-01T00:00:00+00:00" }),
+      reading("a", "2026-01-01T00:00:00+00:00"),
+      reading("never"),
+      reading("b", "2026-05-01T00:00:00+00:00"),
+      reading("c", "2026-03-01T00:00:00+00:00"),
+      reading("d", "2026-04-01T00:00:00+00:00"),
+      reading("e", "2026-02-01T00:00:00+00:00"),
     ];
     expect(takeRecent(books).map((item) => item.id)).toEqual(["b", "d", "c", "e"]);
   });
@@ -243,13 +247,14 @@ describe("takeRecent", () => {
     expect(takeRecent([book({ id: "a" }), book({ id: "b" })])).toEqual([]);
   });
 
-  it("leaves out finished books", () => {
+  it("lists only books being read", () => {
     const books = [
       book({ id: "done", readingStatus: "finished", lastOpenedAt: "2026-05-01T00:00:00+00:00" }),
-      book({ id: "open", readingStatus: "reading", lastOpenedAt: "2026-04-01T00:00:00+00:00" }),
-      book({ id: "plain", lastOpenedAt: "2026-03-01T00:00:00+00:00" }),
+      reading("open", "2026-04-01T00:00:00+00:00"),
+      book({ id: "held", readingStatus: "paused", lastOpenedAt: "2026-03-01T00:00:00+00:00" }),
+      book({ id: "peeked", readingStatus: "unread", lastOpenedAt: "2026-02-01T00:00:00+00:00" }),
     ];
-    expect(takeRecent(books).map((item) => item.id)).toEqual(["open", "plain"]);
+    expect(takeRecent(books).map((item) => item.id)).toEqual(["open"]);
   });
 });
 
@@ -332,12 +337,14 @@ describe("countByStatus", () => {
       book({ id: "a", readingStatus: "reading", starred: true }),
       book({ id: "b", readingStatus: "reading" }),
       book({ id: "c", readingStatus: "finished", starred: true }),
-      book({ id: "d" }),
+      book({ id: "d", readingStatus: "paused" }),
+      book({ id: "e" }),
     ]);
     expect(counts).toEqual({
-      all: 4,
-      unread: 0,
+      all: 5,
+      unread: 1,
       reading: 2,
+      paused: 1,
       finished: 1,
       starred: 2,
     });
@@ -347,10 +354,10 @@ describe("countByStatus", () => {
     const books = [
       book({ id: "a", readingStatus: "unread" }),
       book({ id: "b", readingStatus: "reading", starred: true }),
-      book({ id: "c", starred: false }),
+      book({ id: "c", readingStatus: "paused", starred: false }),
     ];
     const counts = countByStatus(books);
-    for (const filter of ["all", "unread", "reading", "finished", "starred"] as const) {
+    for (const filter of ["all", "unread", "reading", "paused", "finished", "starred"] as const) {
       expect(counts[filter]).toBe(filterByStatus(books, filter).length);
     }
   });
@@ -361,7 +368,7 @@ describe("filterByStatus", () => {
     book({ id: "reading", readingStatus: "reading" }),
     book({ id: "finished", readingStatus: "finished" }),
     book({ id: "unread", readingStatus: "unread" }),
-    book({ id: "uncategorized" }),
+    book({ id: "paused", readingStatus: "paused" }),
     book({ id: "starred-unread", readingStatus: "unread", starred: true }),
     book({ id: "starred-reading", readingStatus: "reading", starred: true }),
   ];
@@ -371,21 +378,16 @@ describe("filterByStatus", () => {
       "reading",
       "finished",
       "unread",
-      "uncategorized",
+      "paused",
       "starred-unread",
       "starred-reading",
     ]);
   });
 
-  it("never treats an absent status as unread", () => {
-    expect(filterByStatus(books, "unread").map((item) => item.id)).toEqual([
-      "unread",
-      "starred-unread",
-    ]);
-  });
-
   it.each([
+    ["unread" as const, ["unread", "starred-unread"]],
     ["reading" as const, ["reading", "starred-reading"]],
+    ["paused" as const, ["paused"]],
     ["finished" as const, ["finished"]],
   ])("narrows to %s", (filter, expected) => {
     expect(filterByStatus(books, filter).map((item) => item.id)).toEqual(expected);

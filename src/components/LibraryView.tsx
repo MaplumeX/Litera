@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
-import type { BookRecord, TrashEntry } from "@/types/library";
+import type { BookRecord, ReadingStatus, TrashEntry } from "@/types/library";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -13,7 +13,6 @@ import { Plus, Settings, X } from "lucide-react";
 import { BookCard, BookListRow, BookResumeTile } from "@/components/BookCard";
 import { BookDetailsDialog } from "@/components/BookDetailsDialog";
 import { TrashDialog } from "@/components/TrashDialog";
-import type { BookStatusChoice } from "@/components/BookStatusMenu";
 import {
   LibrarySelectionBar,
   LibraryShelfToolbar,
@@ -84,11 +83,6 @@ function isTextEntry(target: EventTarget | null): boolean {
 interface CurationChange {
   readingStatus: string | null;
   starred: boolean | null;
-}
-
-function readingStatusArg(choice: BookStatusChoice): string {
-  // An empty string clears the status; null would mean "leave alone".
-  return choice === "unset" ? "" : choice;
 }
 
 export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }: LibraryViewProps) {
@@ -386,8 +380,8 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
   );
 
   const handleChangeStatus = useCallback(
-    (target: BookRecord, status: BookStatusChoice) =>
-      updateCuration([target], { readingStatus: readingStatusArg(status), starred: null }),
+    (target: BookRecord, status: ReadingStatus) =>
+      updateCuration([target], { readingStatus: status, starred: null }),
     [updateCuration],
   );
 
@@ -517,9 +511,9 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
       starred: !allSelectedStarred,
     });
 
-  const handleBatchStatus = (choice: BookStatusChoice) =>
+  const handleBatchStatus = (status: ReadingStatus) =>
     void updateCuration(selectedBooks, {
-      readingStatus: readingStatusArg(choice),
+      readingStatus: status,
       starred: null,
     });
 
@@ -550,7 +544,7 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
     onDelete: handleDelete,
     onDetails: setDetailsBook,
     onToggleStar: (target: BookRecord) => void handleToggleStar(target),
-    onChangeStatus: (target: BookRecord, status: BookStatusChoice) =>
+    onChangeStatus: (target: BookRecord, status: ReadingStatus) =>
       void handleChangeStatus(target, status),
     deleteDisabled: busy,
     selectMode,

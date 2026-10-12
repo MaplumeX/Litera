@@ -13,8 +13,8 @@ A single imported EPUB, together with its metadata, reading state, curation, and
 _Avoid_: File, document
 
 **Reading status**:
-The reader's explicit placement of a Book — unread, reading, or finished. Absent is distinct from unread (absent means the reader has not curated the Book) and is never derived from reading progress.
-_Avoid_: State, progress, finished flag
+Where a Book stands for the reader — unread, reading, paused (on hold), or finished. Every Book has one: import sets unread, the first page turn of an open moves unread or paused to reading, and finished is set only with the reader's confirmation. The reader can override it at any time. Stored, not computed from progress on each read.
+_Avoid_: State, progress, finished flag, unset
 
 **Starred**:
 The reader's shortlist flag on a Book, independent of its Reading status. Absent means not starred.

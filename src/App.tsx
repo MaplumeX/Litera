@@ -108,6 +108,8 @@ import {
   unionKeys,
 } from "@/lib/toc-items";
 import { useReaderTts } from "@/lib/use-reader-tts";
+import { useReadingStatus } from "@/lib/use-reading-status";
+import { FinishBookPrompt } from "@/components/FinishBookPrompt";
 
 interface FileData {
   bytes: Uint8Array<ArrayBuffer>;
@@ -262,6 +264,8 @@ function App() {
     console.error("Failed to persist reading state:", error);
     setPersistenceError(invokeErrorMessage(error));
   }, []);
+
+  const readingStatus = useReadingStatus({ onError: reportPersistenceError });
 
   // Persist reading position (debounced). One invoke for fraction + CFI.
   const persistPosition = useDebouncedCallback(
@@ -490,6 +494,7 @@ function App() {
       // Build a partial BookRecord for passing lastFraction / lastCfi / settings to ReaderView.
       // The full record is fetched from list_books; this context stays lightweight.
       lastKnownFractionRef.current = context.lastFraction;
+      readingStatus.begin(context.bookId, context.readingStatus);
       setProgress({
         index: 0,
         fraction: context.lastFraction ?? 0,
@@ -511,6 +516,7 @@ function App() {
           ? context.lastReaderMode
           : undefined,
         lastLayout: isReaderLayout(context.lastLayout) ? context.lastLayout : undefined,
+        readingStatus: context.readingStatus,
       });
       setReaderMode(resolveReaderMode(context.lastReaderMode));
       const layout = resolveReaderLayout(context.lastLayout);
@@ -539,7 +545,7 @@ function App() {
     } finally {
       if (request.isLatest()) setOpeningBookId(null);
     }
-  }, [flushReadingState, reportPersistenceError, t]);
+  }, [flushReadingState, readingStatus.begin, reportPersistenceError, t]);
 
   useOpenPaths({
     importPaths: (paths) => bookImport.importFromPaths(paths, { suppressDuplicateNotice: true }),
@@ -561,6 +567,7 @@ function App() {
     }
     tts.stop();
     embeddedAgentRuntime.closeBook();
+    readingStatus.end();
     setView("library");
     setFileData(null);
     setCurrentBook(null);
@@ -577,18 +584,19 @@ function App() {
     setSessionRailOpen(true);
     setBookCollapsed(false);
     annotationsWritableRef.current = false;
-  }, [flushReadingState, tts.stop]);
+  }, [flushReadingState, readingStatus.end, tts.stop]);
 
   const handleRelocate = useCallback(
     (index: number, fraction: number, label?: string, chapterHref?: string, cfi?: string) => {
       lastKnownFractionRef.current = fraction;
       setProgress({ index, fraction, label, chapterHref });
+      readingStatus.onRelocate(fraction);
       // Persist reading position. Do not write lastCfi / lastFraction into currentBook.
       if (fileData?.bookId) {
         persistPosition.schedule(fileData.bookId, fraction, cfi);
       }
     },
-    [fileData?.bookId, persistPosition],
+    [fileData?.bookId, persistPosition, readingStatus.onRelocate],
   );
 
   const handleSelectionCapture = useCallback((capture: SelectionCapture) => {
@@ -1156,6 +1164,12 @@ function App() {
                 onTtsToggle={tts.toggle}
                 onUserRelocate={tts.onUserRelocate}
                 stylesCss={generateStylesCss({ ...styleState, theme: resolvedTheme })}
+              />
+            )}
+            {readingStatus.finishPromptOpen && (
+              <FinishBookPrompt
+                onMarkFinished={() => void readingStatus.markFinished()}
+                onDismiss={readingStatus.dismissFinishPrompt}
               />
             )}
             {tocVisible && (
