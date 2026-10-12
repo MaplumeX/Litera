@@ -224,9 +224,17 @@ describe("AgentConfigForm", () => {
     expect(hook.deleteCustomProvider).toHaveBeenCalledWith("custom-abc12345");
   });
 
-  it("merges refreshed remote model ids into the custom draft list", async () => {
+  it("refreshes the custom draft list and keeps a selection still returned upstream", async () => {
     hook.listRemoteModels.mockResolvedValueOnce(["qwen-2.5", "llama-3.1"]);
-    const view = renderForm(customSnapshot);
+    const view = renderForm({
+      ...customSnapshot,
+      customProviders: [
+        {
+          ...customSnapshot.customProviders[0],
+          models: ["llama-3.1", "retired-model"],
+        },
+      ],
+    });
 
     await act(async () => {
       view.getByRole("button", { name: "刷新模型" }).click();
@@ -240,12 +248,106 @@ describe("AgentConfigForm", () => {
     expect(hook.save).not.toHaveBeenCalled();
     expect(hook.switchProvider).not.toHaveBeenCalled();
     expect(hook.updateCustomProvider).not.toHaveBeenCalled();
+    expect(view.getByRole("combobox", { name: "Model" }).textContent).toBe("llama-3.1");
 
     await openModelCombobox(view);
     expect(view.getByRole("option", { name: "llama-3.1" })).toBeTruthy();
     expect(view.getByRole("option", { name: "qwen-2.5" })).toBeTruthy();
+    expect(view.queryByRole("option", { name: "retired-model" })).toBeNull();
     expect(view.queryByRole("button", { name: "移除模型" })).toBeNull();
     expect(view.queryByRole("button", { name: "添加模型" })).toBeNull();
+  });
+
+  it("removes stale models and saves the replacement selection only on apply", async () => {
+    hook.listRemoteModels.mockResolvedValueOnce(["qwen-2.5", "qwen-3"]);
+    const view = renderForm(customSnapshot);
+
+    await act(async () => {
+      view.getByRole("button", { name: "刷新模型" }).click();
+    });
+
+    expect(view.getByRole("combobox", { name: "Model" }).textContent).toBe("qwen-2.5");
+    expect(hook.updateCustomProvider).not.toHaveBeenCalled();
+    expect(hook.switchProvider).not.toHaveBeenCalled();
+    await openModelCombobox(view);
+    expect(view.queryByRole("option", { name: "llama-3.1" })).toBeNull();
+    expect(view.getByRole("option", { name: "qwen-3" })).toBeTruthy();
+    act(() => {
+      view.getByRole("option", { name: "qwen-2.5" }).click();
+    });
+
+    await act(async () => {
+      view.getByRole("button", { name: "保存并应用" }).click();
+    });
+
+    expect(hook.updateCustomProvider).toHaveBeenCalledWith(
+      "custom-abc12345",
+      "Ollama",
+      "http://localhost:11434/v1",
+      "",
+      ["qwen-2.5", "qwen-3"],
+    );
+    expect(hook.switchProvider).toHaveBeenCalledWith("custom-abc12345", "qwen-2.5");
+  });
+
+  it.each(["Failed to fetch models", "no models returned"])(
+    "keeps the existing models and selection when refresh fails: %s",
+    async (message) => {
+      hook.listRemoteModels.mockRejectedValueOnce({ code: "InvalidInput", message });
+      const view = renderForm(customSnapshot);
+
+      await act(async () => {
+        view.getByRole("button", { name: "刷新模型" }).click();
+      });
+
+      expect(view.getByText(message)).toBeTruthy();
+      expect(view.getByRole("combobox", { name: "Model" }).textContent).toBe("llama-3.1");
+      await openModelCombobox(view);
+      expect(view.getByRole("option", { name: "llama-3.1" })).toBeTruthy();
+      act(() => {
+        view.getByRole("option", { name: "llama-3.1" }).click();
+      });
+
+      await act(async () => {
+        view.getByRole("button", { name: "保存并应用" }).click();
+      });
+
+      expect(hook.updateCustomProvider).not.toHaveBeenCalled();
+      expect(hook.switchProvider).toHaveBeenCalledWith("custom-abc12345", "llama-3.1");
+    },
+  );
+
+  it("replaces the model draft when refreshing a new custom provider", async () => {
+    const view = renderForm(builtinSnapshot);
+    act(() => {
+      view.getByRole("button", { name: "添加自定义提供商" }).click();
+    });
+    fireEvent.change(view.getByPlaceholderText("如：本地 Ollama"), {
+      target: { value: "Ollama" },
+    });
+    fireEvent.change(view.getByPlaceholderText("如：http://localhost:11434/v1"), {
+      target: { value: "http://localhost:11434/v1" },
+    });
+    fireEvent.change(view.getByPlaceholderText("本地服务填任意占位值"), {
+      target: { value: "sk-local" },
+    });
+    await typeNewModelId(view, "retired-model");
+
+    await act(async () => {
+      view.getByRole("button", { name: "刷新模型" }).click();
+    });
+
+    expect(view.getByRole("combobox", { name: "Model" }).textContent).toBe("qwen-2.5");
+    expect(hook.addCustomProvider).not.toHaveBeenCalled();
+    await act(async () => {
+      view.getByRole("button", { name: "添加" }).click();
+    });
+    expect(hook.addCustomProvider).toHaveBeenCalledWith(
+      "Ollama",
+      "http://localhost:11434/v1",
+      "sk-local",
+      ["qwen-2.5"],
+    );
   });
 
   it("appends a typed model id to the custom draft catalog", async () => {
