@@ -1,24 +1,43 @@
-import { memo, useEffect, useMemo, useRef, useState } from "react";
-import ReactMarkdown, { type Components } from "react-markdown";
+import { isValidElement, memo, useMemo, type ReactNode } from "react";
+import ReactMarkdown, { defaultUrlTransform, type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
-import { Bot, Brain, ChevronRight, RefreshCw } from "lucide-react";
+import { Bot, RefreshCw } from "lucide-react";
 import type { AssistantBlock, AssistantChatMessage } from "@/types/agent";
 import { ToolCallCard } from "./ToolCallCard";
+import { AnswerProcess } from "./AnswerProcess";
+import { Citation, CitationSettledContext } from "./Citation";
 import { CopyButton } from "./CopyButton";
 import { TypingIndicator } from "./TypingIndicator";
 import { useT } from "@/lib/i18n";
-import { cn } from "@/lib/utils";
+import { summarizeSources } from "@/lib/source-summary";
+import { layoutAnswer, liveActivity } from "@/lib/answer-process";
+import { citationChapterIndex, isCitationHref, stripCitations } from "@/lib/citations";
+
+function nodeText(node: ReactNode): string {
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(nodeText).join("");
+  if (isValidElement<{ children?: ReactNode }>(node)) return nodeText(node.props.children);
+  return "";
+}
 
 const markdownComponents: Components = {
-  a: ({ href, children }) => (
-    <a href={href} target="_blank" rel="noreferrer">
-      {children}
-    </a>
-  ),
+  a: ({ href, children }) =>
+    isCitationHref(href) ? (
+      <Citation chapterIndex={citationChapterIndex(href)} quote={nodeText(children)}>
+        {children}
+      </Citation>
+    ) : (
+      <a href={href} target="_blank" rel="noreferrer">
+        {children}
+      </a>
+    ),
 };
+
+// Keep `cite:` links for Citations; everything else gets the default sanitizing.
+const urlTransform = (url: string) => (isCitationHref(url) ? url : defaultUrlTransform(url));
 
 export function BotAvatar() {
   return (
@@ -30,54 +49,6 @@ export function BotAvatar() {
     </div>
   );
 }
-
-const ThinkingBlock = memo(function ThinkingBlock({ thinking, active }: { thinking: string; active: boolean }) {
-  const { t } = useT();
-  const [expanded, setExpanded] = useState(active);
-  const bodyRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!active) setExpanded(false);
-  }, [active]);
-  // 流式期间思考文本增长时贴底：滚动条是隐藏的，若不跟随滚动，
-  // 新推理会滚出可视区，看起来像思考卡住了。
-  useEffect(() => {
-    const body = bodyRef.current;
-    if (active && body) body.scrollTop = body.scrollHeight;
-  }, [active, thinking, expanded]);
-  return (
-    <div className="-ml-1 rounded px-1 transition-colors hover:bg-muted/40">
-      <button
-        type="button"
-        onClick={() => setExpanded((value) => !value)}
-        className="flex w-full items-center gap-1.5 py-0.5 text-left"
-        aria-expanded={expanded}
-      >
-        <ChevronRight
-          className={cn(
-            "h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform",
-            expanded && "rotate-90",
-          )}
-        />
-        <Brain
-          className={cn(
-            "h-3.5 w-3.5 shrink-0 text-muted-foreground",
-            active && "animate-pulse motion-reduce:animate-none",
-          )}
-          aria-hidden="true"
-        />
-        <span className="text-xs italic text-muted-foreground/70">{t("chat.thinking")}</span>
-      </button>
-      {expanded && (
-        <div
-          ref={bodyRef}
-          className="chat-thinking-body max-h-60 overflow-y-auto whitespace-pre-wrap pb-1 text-xs text-muted-foreground/70"
-        >
-          {thinking}
-        </div>
-      )}
-    </div>
-  );
-});
 
 /**
  * LaTeX 定界符预处理：
@@ -110,6 +81,7 @@ const MarkdownBody = memo(function MarkdownBody({ text }: { text: string }) {
       remarkPlugins={[remarkGfm, remarkMath]}
       rehypePlugins={[rehypeKatex]}
       components={markdownComponents}
+      urlTransform={urlTransform}
     >
       {text}
     </ReactMarkdown>
@@ -133,13 +105,15 @@ const TextBlock = memo(function TextBlock({
   return (
     <div>
       <div className="prose prose-sm max-w-none overflow-x-auto dark:prose-invert">
-        <MarkdownBody text={normalized} />
+        <CitationSettledContext.Provider value={!streaming}>
+          <MarkdownBody text={normalized} />
+        </CitationSettledContext.Provider>
         {streaming && (
           <span className="ml-0.5 inline-block h-4 w-2 animate-pulse bg-primary/70 motion-reduce:animate-none" />
         )}
       </div>
       <div className="flex h-6 items-center gap-1">
-        <CopyButton text={text} />
+        <CopyButton text={stripCitations(text)} />
         {onRegenerate && (
           <button
             type="button"
@@ -177,25 +151,24 @@ export const AssistantMessage = memo(function AssistantMessage({
 }: AssistantMessageProps) {
   const { t } = useT();
   const blocks = messageBlocks(message);
-  const textBlocks = blocks.filter((block): block is Extract<AssistantBlock, { type: "text" }> => block.type === "text");
-  const lastTextIndex = textBlocks.length > 0
-    ? blocks.lastIndexOf(textBlocks[textBlocks.length - 1])
-    : -1;
+  const { process, answer } = useMemo(() => layoutAnswer(blocks), [blocks]);
+  const sources = useMemo(() => summarizeSources(blocks), [blocks]);
+  const activity = liveActivity(blocks, streaming);
+  const lastBlock = blocks[blocks.length - 1];
+  const liveThinking = activity?.kind === "thinking" && lastBlock?.type === "thinking" ? lastBlock.text : undefined;
+  const lastTextIndex = answer.reduce((last, entry) => (entry.block.type === "text" ? entry.index : last), -1);
   return (
     <div className="flex gap-2">
       <BotAvatar />
       <div className="min-w-0 max-w-[90%] space-y-1">
-        {streaming && <TypingIndicator />}
-        {blocks.map((block, index) => {
-          if (block.type === "thinking") {
-            return block.text ? (
-              <ThinkingBlock key={index} thinking={block.text} active={streaming} />
-            ) : null;
-          }
-          if (block.type === "toolCall") {
-            return <ToolCallCard key={block.toolCall.toolCallId} call={block.toolCall} />;
-          }
-          return (
+        {streaming && blocks.length === 0 && <TypingIndicator />}
+        {(process.length > 0 || activity) && (
+          <AnswerProcess steps={process} sources={sources} activity={activity} liveThinking={liveThinking} />
+        )}
+        {answer.map(({ index, block }) =>
+          block.type === "toolCall" ? (
+            <ToolCallCard key={block.toolCall.toolCallId} call={block.toolCall} />
+          ) : block.type === "text" ? (
             <TextBlock
               key={index}
               text={block.text}
@@ -204,8 +177,8 @@ export const AssistantMessage = memo(function AssistantMessage({
                 canRegenerate && !streaming && index === lastTextIndex ? onRegenerate : undefined
               }
             />
-          );
-        })}
+          ) : null,
+        )}
         {!streaming && canRegenerate && lastTextIndex === -1 && onRegenerate && (
           <div className="flex h-6 items-center gap-1">
             <button

@@ -15,6 +15,7 @@ import {
   shouldIgnoreSpaceTarget,
   type WheelPagingState,
 } from "@/lib/reader-paging";
+import { quoteSearchQueries } from "@/lib/citations";
 import { sectionIndexAt } from "@/lib/reader-progress";
 import { TTS_HIGHLIGHT_COLOR, TTS_OVERLAY_KEY } from "@/lib/reader-tts";
 import { clampSnap, footnotePopupCss, TYPOGRAPHY_RANGES } from "@/lib/reader-styles";
@@ -72,6 +73,8 @@ export interface ReaderViewHandle {
   getSectionFractions: () => number[];
   previewLabelAt: (fraction: number) => string | undefined;
   goToCfi: (cfi: string) => Promise<boolean>;
+  /** Go to a quoted sentence in the chapter at `href` and outline it; falls back to the chapter start. */
+  goToQuote: (href: string, quote: string) => Promise<boolean>;
   setStyles: (css: string) => void;
   setColumnCount: (count: number) => void;
   getToc: () => TocItem[];
@@ -920,6 +923,33 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         return false;
       }
     }, []);
+    const goToQuote = useCallback(async (href: string, quote: string) => {
+      const view = viewRef.current as unknown as {
+        book?: { resolveHref?: (href: string) => { index: number } | null };
+        search?: (opts: { query: string; index: number }) => AsyncGenerator<unknown>;
+        goTo?: (target: string) => Promise<unknown>;
+      } | null;
+      if (!view) return false;
+      try {
+        const index = view.book?.resolveHref?.(href)?.index;
+        if (index != null && view.search) {
+          for (const query of quoteSearchQueries(quote)) {
+            // The first hit is enough; foliate keeps its search outline as the highlight.
+            for await (const result of view.search({ query, index })) {
+              const cfi = (result as { cfi?: unknown } | null)?.cfi;
+              if (typeof cfi === "string") {
+                await view.goTo?.(cfi);
+                return true;
+              }
+            }
+          }
+        }
+        await view.goTo?.(href);
+      } catch (err: unknown) {
+        console.error("goToQuote error:", err);
+      }
+      return false;
+    }, []);
     const setStyles = useCallback((css: string) => {
       const view = viewRef.current as unknown as { renderer?: { setStyles?: (c: string) => void } };
       view?.renderer?.setStyles?.(css);
@@ -1023,6 +1053,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         getSectionFractions,
         previewLabelAt,
         goToCfi,
+        goToQuote,
         setStyles,
         setColumnCount,
         getToc,
@@ -1046,6 +1077,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         getSectionFractions,
         previewLabelAt,
         goToCfi,
+        goToQuote,
         setStyles,
         setColumnCount,
         getToc,

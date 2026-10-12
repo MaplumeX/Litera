@@ -1,6 +1,7 @@
 /// <reference lib="webworker" />
 import {
   bookToc,
+  locateQuote,
   parseEpub,
   readChapter,
   searchBook,
@@ -32,6 +33,8 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => {
       result = readChapter(book, Number(args[0]), Number(args[1] ?? 0));
     } else if (method === "search") {
       result = searchBook(book, args[0] as string[]);
+    } else if (method === "locateQuote") {
+      result = locateQuote(book, Number(args[0]), String(args[1] ?? ""));
     } else {
       throw new Error("Unknown book worker method");
     }

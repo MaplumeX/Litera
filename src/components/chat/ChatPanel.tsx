@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -13,12 +14,14 @@ import { useAgentBridge } from "@/lib/use-agent-bridge";
 import { useAgentConfig } from "@/lib/use-agent-config";
 import { invokeErrorMessage } from "@/lib/app-error";
 import { embeddedAgentRuntime } from "@/agent/runtime/embedded-runtime";
+import type { QuoteLocation } from "@/agent/book/book-content";
 import { isCustomProviderId } from "@/types/agent-config";
 import { AgentConfigDialog } from "@/components/AgentConfigDialog";
 import { MessageBubble } from "./MessageBubble";
 import { BranchSwitcher } from "./BranchSwitcher";
 import { AssistantMessage, BotAvatar } from "./AssistantMessage";
 import { ChatInput } from "./ChatInput";
+import { CitationContext, type CitationActions } from "./Citation";
 import { ModelSwitcher } from "./ModelSwitcher";
 import { EmptyState } from "./EmptyState";
 import { SessionConfigDialog, type SessionConfigTarget } from "./SessionConfigDialog";
@@ -35,6 +38,11 @@ export interface ChatPanelHandle {
 
 interface ChatPanelProps {
   currentChapterHref?: string;
+  /** Agent mode: the chapter picked from the TOC as the discussion scope. */
+  chapterScope?: { label: string } | null;
+  onClearChapterScope?: () => void;
+  /** Reveal a Citation's passage in the Book pane. */
+  onOpenQuote?: (location: QuoteLocation, quote: string) => void;
   bookId: string;
   variant?: "docked" | "workspace";
   sessionRailOpen?: boolean;
@@ -45,6 +53,9 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
   function ChatPanel(
     {
       currentChapterHref,
+      chapterScope,
+      onClearChapterScope,
+      onOpenQuote,
       bookId,
       variant = "docked",
       sessionRailOpen,
@@ -65,7 +76,27 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       switchSession,
       updateSessionConfig,
       switchBranchAtAnchor,
+      locateQuote,
     } = bridge;
+    // Citation checks are cached per open Book: re-renders and repeated
+    // quotes in a Session never hit the book worker twice.
+    const citationActions = useMemo<CitationActions>(() => {
+      if (!locateQuote) return { openInBook: onOpenQuote };
+      const cache = new Map<string, Promise<QuoteLocation>>();
+      return {
+        locate: (chapterIndex, quote) => {
+          const key = `${bookId}\u0000${chapterIndex}\u0000${quote}`;
+          let pending = cache.get(key);
+          if (!pending) {
+            pending = locateQuote(chapterIndex, quote);
+            cache.set(key, pending);
+            pending.catch(() => cache.delete(key));
+          }
+          return pending;
+        },
+        openInBook: onOpenQuote,
+      };
+    }, [bookId, locateQuote, onOpenQuote]);
     const [input, setInput] = useState("");
     const [pendingSelection, setPendingSelection] = useState<{
       text: string;
@@ -464,229 +495,233 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     );
 
     return (
-      <div data-testid="chat-panel" className="relative flex h-full min-h-0 bg-card">
-        {isWorkspace && (
-          <div
-            hidden={!railOpen}
-            className={
-              railOpen
-                ? "h-full min-h-0 shrink-0 overflow-hidden border-r"
-                : "h-full w-0 overflow-hidden"
-            }
-          >
-            {sessionList}
-          </div>
-        )}
-        <div className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col">
-        <div
-          data-testid="chat-panel-header"
-          className={
-            isWorkspace
-              ? "flex items-center justify-between border-b px-3 py-2"
-              : "flex items-center justify-between px-3 py-2"
-          }
-        >
-          <div className="flex items-center gap-2">
-            <Button
-              size="icon-xs"
-              variant={isWorkspace && railOpen ? "secondary" : "ghost"}
-              onClick={() => {
-                if (isWorkspace) setRailOpen(!railOpen);
-                else setShowSessionList((value) => !value);
-              }}
-              disabled={!bookId}
-              aria-label={t("chat.sessions")}
-            >
-              <MessagesSquare />
-            </Button>
-            <h2 className={isWorkspace ? "text-sm font-semibold" : "text-sm font-medium"}>
-              {t("chat.title")}
-            </h2>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-[10px] text-muted-foreground">
-              {bookReady ? t("chat.ready") : t("chat.waitingBook")}
-            </span>
-            <Button
-              size="icon-xs"
-              variant="ghost"
-              onClick={() => setShowConfig(true)}
-              aria-label={t("chat.settings")}
-            >
-              <Settings />
-            </Button>
-          </div>
-        </div>
-
-        {!isWorkspace && showSessionList && sessionList}
-
-        <div className="relative min-h-0 flex-1">
-          <div
-            ref={scrollContainerRef}
-            onScroll={handleScroll}
-            onScrollEnd={finishMessageTocJump}
-            data-testid="chat-message-scroll"
-            className={
-              "chat-message-scroll h-full space-y-4 overflow-y-auto " +
-              (showOutlineRail ? "py-3 pr-3 pl-12" : "p-3")
-            }
-          >
-          {configSnapshot && !configSnapshot.configured && (
-            <div className="flex items-start gap-2 rounded border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-400">
-              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-              <div className="flex-1">
-                {t("chat.unconfigured")}
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="ml-2 h-6 text-xs"
-                  onClick={() => setShowConfig(true)}
-                >
-                  {t("chat.openSettings")}
-                </Button>
-              </div>
-            </div>
-          )}
-          {state.messages.length === 0 && !error && (
-            <EmptyState
-              hasSelection={pendingSelection != null}
-              bookReady={bookReady}
-              onSuggestion={handleSuggestion}
-            />
-          )}
-          {state.messages.map((message, index) => (
+      <CitationContext.Provider value={citationActions}>
+        <div data-testid="chat-panel" className="relative flex h-full min-h-0 bg-card">
+          {isWorkspace && (
             <div
-              key={index}
-              ref={(element) => {
-                if (message.role !== "user") return;
-                if (element) userMessageRefs.current.set(index, element);
-                else userMessageRefs.current.delete(index);
-              }}
-              className={message.role === "user" ? "scroll-mt-3" : undefined}
-              data-user-message-index={message.role === "user" ? index : undefined}
+              hidden={!railOpen}
+              className={
+                railOpen
+                  ? "h-full min-h-0 shrink-0 overflow-hidden border-r"
+                  : "h-full w-0 overflow-hidden"
+              }
             >
-              {message.role === "user" && (
-                <MessageBubble
-                  message={message}
-                  editing={editingIndex === index}
-                  draft={editingIndex === index ? editDraft : message.content}
-                  onDraftChange={setEditDraft}
-                  onStartEdit={() => handleStartEdit(index)}
-                  onSave={() => void handleSaveEdit()}
-                  onCancel={handleCancelEdit}
-                  editDisabled={isStreaming}
-                  branchSwitcher={(() => {
-                    const anchorId = state.branchAnchors[index];
-                    const info = anchorId !== undefined ? state.branchNavigation[anchorId] : undefined;
-                    if (!info || info.options.length <= 1 || info.activeIndex < 0) return undefined;
-                    return (
-                      <BranchSwitcher
-                        current={info.activeIndex + 1}
-                        total={info.options.length}
-                        disabled={isStreaming}
-                        onPrev={() => void handleSwitchBranch(info.options[info.activeIndex - 1].anchorId, -1)}
-                        onNext={() => void handleSwitchBranch(info.options[info.activeIndex + 1].anchorId, 1)}
-                      />
-                    );
-                  })()}
-                />
-              )}
-              {message.role === "assistant" && (
-                <AssistantMessage
-                  message={message}
-                  streaming={isStreaming && index === lastChatIndex}
-                  canRegenerate={
-                    !isStreaming && bookReady && hasUserMessage && index === lastChatIndex
-                  }
-                  onRegenerate={handleRegenerate}
-                />
-              )}
-              {message.role === "notice" && <CompactionNotice notice={message} />}
-            </div>
-          ))}
-          {isStreaming && (!lastChatMessage || lastChatMessage.role === "user") && (
-            <div className="flex gap-2">
-              <BotAvatar />
-              <TypingIndicator />
+              {sessionList}
             </div>
           )}
-          {error && (
-            <div className="flex items-center gap-2 rounded border border-destructive/50 bg-destructive/10 px-2 py-1 text-xs text-destructive">
-              <AlertCircle className="h-3.5 w-3.5 shrink-0" />
-              <span>{error}</span>
+          <div className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col">
+          <div
+            data-testid="chat-panel-header"
+            className={
+              isWorkspace
+                ? "flex items-center justify-between border-b px-3 py-2"
+                : "flex items-center justify-between px-3 py-2"
+            }
+          >
+            <div className="flex items-center gap-2">
+              <Button
+                size="icon-xs"
+                variant={isWorkspace && railOpen ? "secondary" : "ghost"}
+                onClick={() => {
+                  if (isWorkspace) setRailOpen(!railOpen);
+                  else setShowSessionList((value) => !value);
+                }}
+                disabled={!bookId}
+                aria-label={t("chat.sessions")}
+              >
+                <MessagesSquare />
+              </Button>
+              <h2 className={isWorkspace ? "text-sm font-semibold" : "text-sm font-medium"}>
+                {t("chat.title")}
+              </h2>
             </div>
-          )}
-          {state.compaction && (
-            <CompactionChip status={state.compaction.status} />
-          )}
-          {(!lastChatMessage || lastChatMessage.role === "user") &&
-            !isStreaming &&
-            bookReady &&
-            hasUserMessage && (
-              <div className="flex justify-center">
-                <button
-                  type="button"
-                  onClick={() => void handleRegenerate()}
-                  className="text-xs text-muted-foreground/50 transition-colors hover:text-muted-foreground"
-                  aria-label={t("chat.regenerate")}
-                >
-                  <RefreshCw className="h-3.5 w-3.5" />
-                </button>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-muted-foreground">
+                {bookReady ? t("chat.ready") : t("chat.waitingBook")}
+              </span>
+              <Button
+                size="icon-xs"
+                variant="ghost"
+                onClick={() => setShowConfig(true)}
+                aria-label={t("chat.settings")}
+              >
+                <Settings />
+              </Button>
+            </div>
+          </div>
+
+          {!isWorkspace && showSessionList && sessionList}
+
+          <div className="relative min-h-0 flex-1">
+            <div
+              ref={scrollContainerRef}
+              onScroll={handleScroll}
+              onScrollEnd={finishMessageTocJump}
+              data-testid="chat-message-scroll"
+              className={
+                "chat-message-scroll h-full space-y-4 overflow-y-auto " +
+                (showOutlineRail ? "py-3 pr-3 pl-12" : "p-3")
+              }
+            >
+            {configSnapshot && !configSnapshot.configured && (
+              <div className="flex items-start gap-2 rounded border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-400">
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                <div className="flex-1">
+                  {t("chat.unconfigured")}
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="ml-2 h-6 text-xs"
+                    onClick={() => setShowConfig(true)}
+                  >
+                    {t("chat.openSettings")}
+                  </Button>
+                </div>
               </div>
             )}
-          <div ref={messagesEndRef} />
+            {state.messages.length === 0 && !error && (
+              <EmptyState
+                hasSelection={pendingSelection != null}
+                bookReady={bookReady}
+                onSuggestion={handleSuggestion}
+              />
+            )}
+            {state.messages.map((message, index) => (
+              <div
+                key={index}
+                ref={(element) => {
+                  if (message.role !== "user") return;
+                  if (element) userMessageRefs.current.set(index, element);
+                  else userMessageRefs.current.delete(index);
+                }}
+                className={message.role === "user" ? "scroll-mt-3" : undefined}
+                data-user-message-index={message.role === "user" ? index : undefined}
+              >
+                {message.role === "user" && (
+                  <MessageBubble
+                    message={message}
+                    editing={editingIndex === index}
+                    draft={editingIndex === index ? editDraft : message.content}
+                    onDraftChange={setEditDraft}
+                    onStartEdit={() => handleStartEdit(index)}
+                    onSave={() => void handleSaveEdit()}
+                    onCancel={handleCancelEdit}
+                    editDisabled={isStreaming}
+                    branchSwitcher={(() => {
+                      const anchorId = state.branchAnchors[index];
+                      const info = anchorId !== undefined ? state.branchNavigation[anchorId] : undefined;
+                      if (!info || info.options.length <= 1 || info.activeIndex < 0) return undefined;
+                      return (
+                        <BranchSwitcher
+                          current={info.activeIndex + 1}
+                          total={info.options.length}
+                          disabled={isStreaming}
+                          onPrev={() => void handleSwitchBranch(info.options[info.activeIndex - 1].anchorId, -1)}
+                          onNext={() => void handleSwitchBranch(info.options[info.activeIndex + 1].anchorId, 1)}
+                        />
+                      );
+                    })()}
+                  />
+                )}
+                {message.role === "assistant" && (
+                  <AssistantMessage
+                    message={message}
+                    streaming={isStreaming && index === lastChatIndex}
+                    canRegenerate={
+                      !isStreaming && bookReady && hasUserMessage && index === lastChatIndex
+                    }
+                    onRegenerate={handleRegenerate}
+                  />
+                )}
+                {message.role === "notice" && <CompactionNotice notice={message} />}
+              </div>
+            ))}
+            {isStreaming && (!lastChatMessage || lastChatMessage.role === "user") && (
+              <div className="flex gap-2">
+                <BotAvatar />
+                <TypingIndicator />
+              </div>
+            )}
+            {error && (
+              <div className="flex items-center gap-2 rounded border border-destructive/50 bg-destructive/10 px-2 py-1 text-xs text-destructive">
+                <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                <span>{error}</span>
+              </div>
+            )}
+            {state.compaction && (
+              <CompactionChip status={state.compaction.status} />
+            )}
+            {(!lastChatMessage || lastChatMessage.role === "user") &&
+              !isStreaming &&
+              bookReady &&
+              hasUserMessage && (
+                <div className="flex justify-center">
+                  <button
+                    type="button"
+                    onClick={() => void handleRegenerate()}
+                    className="text-xs text-muted-foreground/50 transition-colors hover:text-muted-foreground"
+                    aria-label={t("chat.regenerate")}
+                  >
+                    <RefreshCw className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              )}
+            <div ref={messagesEndRef} />
+            </div>
+            {showOutlineRail && (
+              <ChatOutlineRail
+                key={`${bookId}:${state.sessionId ?? ""}`}
+                items={userMessageTocItems}
+                activeMessageIndex={activeUserMessageIndex}
+                onGoTo={handleMessageTocGoTo}
+              />
+            )}
           </div>
-          {showOutlineRail && (
-            <ChatOutlineRail
-              key={`${bookId}:${state.sessionId ?? ""}`}
-              items={userMessageTocItems}
-              activeMessageIndex={activeUserMessageIndex}
-              onGoTo={handleMessageTocGoTo}
-            />
-          )}
-        </div>
 
-        <ChatInput
-          value={input}
-          onChange={setInput}
-          onSend={() => void handleSend()}
-          onAbort={() => void handleAbort()}
-          isStreaming={isStreaming}
-          bookReady={bookReady}
-          pendingSelection={pendingSelection}
-          onClearSelection={() => setPendingSelection(null)}
-          textareaRef={inputRef}
-          thinkingLevel={thinkingLevel}
-          onThinkingLevelChange={(level) => void handleThinkingLevelChange(level)}
-          leadingControls={
-            <ModelSwitcher
-              provider={configSnapshot?.provider ?? null}
-              model={configSnapshot?.model ?? null}
-              configured={configSnapshot?.configured ?? false}
-              customModels={
-                configSnapshot && configSnapshot.provider && isCustomProviderId(configSnapshot.provider)
-                  ? (configSnapshot.customProviders.find(
-                      (entry) => entry.id === configSnapshot.provider,
-                    )?.models ?? [])
-                  : []
-              }
-              isStreaming={isStreaming}
-              onModelSelect={(model) => void handleModelSelect(model)}
-              onOpenConfig={() => setShowConfig(true)}
-            />
-          }
-        />
-        <AgentConfigDialog open={showConfig} onClose={() => setShowConfig(false)} />
-        <SessionConfigDialog
-          key={configSession?.id ?? "none"}
-          open={configSession !== null}
-          session={configSession}
-          isStreaming={isStreaming}
-          onClose={() => setConfigSession(null)}
-          onSave={(p) => void handleSaveSessionConfig(p)}
-        />
+          <ChatInput
+            value={input}
+            onChange={setInput}
+            onSend={() => void handleSend()}
+            onAbort={() => void handleAbort()}
+            isStreaming={isStreaming}
+            bookReady={bookReady}
+            pendingSelection={pendingSelection}
+            onClearSelection={() => setPendingSelection(null)}
+            chapterScope={chapterScope}
+            onClearChapterScope={onClearChapterScope}
+            textareaRef={inputRef}
+            thinkingLevel={thinkingLevel}
+            onThinkingLevelChange={(level) => void handleThinkingLevelChange(level)}
+            leadingControls={
+              <ModelSwitcher
+                provider={configSnapshot?.provider ?? null}
+                model={configSnapshot?.model ?? null}
+                configured={configSnapshot?.configured ?? false}
+                customModels={
+                  configSnapshot && configSnapshot.provider && isCustomProviderId(configSnapshot.provider)
+                    ? (configSnapshot.customProviders.find(
+                        (entry) => entry.id === configSnapshot.provider,
+                      )?.models ?? [])
+                    : []
+                }
+                isStreaming={isStreaming}
+                onModelSelect={(model) => void handleModelSelect(model)}
+                onOpenConfig={() => setShowConfig(true)}
+              />
+            }
+          />
+          <AgentConfigDialog open={showConfig} onClose={() => setShowConfig(false)} />
+          <SessionConfigDialog
+            key={configSession?.id ?? "none"}
+            open={configSession !== null}
+            session={configSession}
+            isStreaming={isStreaming}
+            onClose={() => setConfigSession(null)}
+            onSave={(p) => void handleSaveSessionConfig(p)}
+          />
+          </div>
         </div>
-      </div>
+      </CitationContext.Provider>
     );
   },
 );

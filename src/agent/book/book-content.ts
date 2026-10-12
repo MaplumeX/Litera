@@ -1,15 +1,32 @@
 export const CHAPTER_PART_CHARS = 12_000;
 export interface BookMetadata { title: string; author: string; language: string; totalChapters: number }
-export interface BookTocEntry { index: number; label: string; ancestors: string[]; depth: number; hrefs: string[]; chars: number }
+/** `parts`: how many read_chapter windows the chapter splits into. */
+export interface BookTocEntry { index: number; label: string; ancestors: string[]; depth: number; hrefs: string[]; chars: number; parts: number }
 export interface SearchHit { chapterIndex: number; chapterTitle?: string; part: number; match: "exact" | "partial"; snippet: string }
+/**
+ * Where a quoted passage sits in the Book. `verified`: found in the cited
+ * chapter; `relocated`: found in another chapter (`chapterIndex` is the real
+ * one); `unverified`: not found anywhere. `passage` is the plain-text
+ * paragraph containing the match, `[matchStart, matchEnd)` the quote within it.
+ */
+export interface QuoteLocation {
+  status: "verified" | "relocated" | "unverified";
+  chapterIndex: number;
+  chapterTitle?: string;
+  href?: string;
+  passage?: string;
+  matchStart?: number;
+  matchEnd?: number;
+}
 export const BOOK_SNAPSHOT_MAX_TOC_ENTRIES = 200;
 export const BOOK_SNAPSHOT_MAX_TOC_CHARS = 4_000;
 export interface BookContentPort {
   open(bookId: string, bytes: ArrayBuffer): Promise<void>;
   metadata(): Promise<BookMetadata>;
   toc(): Promise<BookTocEntry[]>;
-  readChapter(chapterIndex: number, part?: number): Promise<{ chapterIndex: number; chapterNumber: number; part: number; totalParts: number; text: string }>;
+  readChapter(chapterIndex: number, part?: number): Promise<{ chapterIndex: number; chapterNumber: number; chapterTitle?: string; part: number; totalParts: number; text: string }>;
   search(queries: string[]): Promise<SearchHit[]>;
+  locateQuote(chapterIndex: number, quote: string): Promise<QuoteLocation>;
   close(): void;
 }
 
@@ -50,7 +67,8 @@ export function formatBookSnapshot(metadata: BookMetadata, toc: readonly BookToc
   let chars = 0;
   for (const entry of toc) {
     if (lines.length >= BOOK_SNAPSHOT_MAX_TOC_ENTRIES) break;
-    const line = `${"  ".repeat(entry.depth)}${entry.index + 1} [index ${entry.index}]: ${entry.label}`;
+    const parts = entry.parts > 1 ? ` (${entry.parts} parts)` : "";
+    const line = `${"  ".repeat(entry.depth)}${entry.index + 1} [index ${entry.index}]: ${entry.label}${parts}`;
     const next = chars === 0 ? line.length : chars + 1 + line.length;
     if (next > BOOK_SNAPSHOT_MAX_TOC_CHARS) break;
     lines.push(line);
@@ -70,7 +88,7 @@ export function formatBookSnapshot(metadata: BookMetadata, toc: readonly BookToc
   return parts.join("\n");
 }
 
-type Request = { id: string; method: "open" | "metadata" | "toc" | "readChapter" | "search"; args: unknown[] };
+type Request = { id: string; method: "open" | "metadata" | "toc" | "readChapter" | "search" | "locateQuote"; args: unknown[] };
 type Response = { id: string; result?: unknown; error?: string };
 
 export class BookWorkerClient implements BookContentPort {
@@ -123,6 +141,7 @@ export class BookWorkerClient implements BookContentPort {
   toc(): Promise<BookTocEntry[]> { return this.call("toc", []); }
   readChapter(chapterIndex: number, part = 0) { return this.call<Awaited<ReturnType<BookContentPort["readChapter"]>>>("readChapter", [chapterIndex, part]); }
   search(queries: string[]): Promise<SearchHit[]> { return this.call("search", [queries]); }
+  locateQuote(chapterIndex: number, quote: string): Promise<QuoteLocation> { return this.call("locateQuote", [chapterIndex, quote]); }
   close(): void { this.generation += 1; this.worker?.terminate(); this.worker = null; this.failAll("电子书上下文已切换"); }
   private failAll(message: string) { for (const pending of this.pending.values()) pending.reject(new Error(message)); this.pending.clear(); }
 }
