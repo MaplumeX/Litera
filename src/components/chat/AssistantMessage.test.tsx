@@ -53,7 +53,7 @@ describe("AssistantMessage", () => {
     expect(getByText("list item")).toBeTruthy();
   });
 
-  it("renders a collapsed thinking block only when thinking is present", () => {
+  it("renders a collapsed thinking row only when thinking is present", () => {
     const { queryByText } = render(
       <AssistantMessage message={{ role: "assistant", content: "answer" }} />,
     );
@@ -72,13 +72,14 @@ describe("AssistantMessage", () => {
     expect(second.getByRole("button", { name: "思考过程" }).getAttribute("aria-expanded")).toBe("true");
   });
 
-  it("auto-expands thinking while streaming and collapses after streaming ends", () => {
+  it("shows the live thinking under a status line while streaming and hides it afterwards", () => {
     const first = render(
       <AssistantMessage
         message={{ role: "assistant", content: "", blocks: [{ type: "thinking", text: "推理中" }] }}
         streaming
       />,
     );
+    expect(first.getByText("正在思考…")).toBeTruthy();
     expect(first.getByText("推理中")).toBeTruthy();
 
     first.rerender(
@@ -87,10 +88,11 @@ describe("AssistantMessage", () => {
         streaming={false}
       />,
     );
+    expect(first.queryByText("正在思考…")).toBeNull();
     expect(first.queryByText("推理中")).toBeNull();
   });
 
-  it("hides the thinking block's own scrollbar and follows the stream tail while streaming", () => {
+  it("follows the tail of the live thinking while streaming", () => {
     const { container, rerender } = render(
       <AssistantMessage
         message={{ role: "assistant", content: "", blocks: [{ type: "thinking", text: "第一段" }] }}
@@ -100,10 +102,8 @@ describe("AssistantMessage", () => {
     const body = container.querySelector(".chat-thinking-body") as HTMLDivElement;
     expect(body).toBeTruthy();
 
-    // 滚动条隐藏靠 CSS（jsdom 不算样式）；行为层面验证的是：内容增长时容器贴底。
     let scrolledTo = -1;
     Object.defineProperty(body, "scrollHeight", { value: 300, configurable: true });
-    Object.defineProperty(body, "clientHeight", { value: 240, configurable: true });
     Object.defineProperty(body, "scrollTop", {
       get: () => scrolledTo,
       set: (value: number) => {
@@ -121,7 +121,24 @@ describe("AssistantMessage", () => {
     expect(scrolledTo).toBe(300);
   });
 
-  it("renders blocks in array order with thinking before an earlier tool card", () => {
+  it("names the running book lookup in the status line", () => {
+    const { getByText } = render(
+      <AssistantMessage
+        message={{
+          role: "assistant",
+          content: "",
+          blocks: [
+            { type: "thinking", text: "先想" },
+            { type: "toolCall", toolCall: { toolCallId: "t1", tool: "read_chapter", params: { chapterIndex: 4 }, done: false } },
+          ],
+        }}
+        streaming
+      />,
+    );
+    expect(getByText("正在阅读 章节 #5…")).toBeTruthy();
+  });
+
+  it("puts thinking and book lookups in one process row above the answer", () => {
     const { container } = render(
       <AssistantMessage
         message={{
@@ -136,44 +153,130 @@ describe("AssistantMessage", () => {
       />,
     );
     const children = Array.from(container.querySelectorAll(".space-y-1 > *"));
-    expect(children).toHaveLength(3);
-    expect(children[0].textContent).toContain("思考过程");
-    expect(children[1].getAttribute("data-testid")).toBe("source-summary");
-    expect(children[2].textContent).toContain("结论");
+    expect(children).toHaveLength(2);
+    expect(children[0].getAttribute("data-testid")).toBe("answer-process");
+    expect(children[1].textContent).toContain("结论");
   });
 
-  it("folds book tool calls into one source summary where the first one sits", () => {
-    const read = (part: number) =>
-      JSON.stringify({ chapterIndex: 2, chapterNumber: 3, chapterTitle: "第三章 归来", part, totalParts: 3, text: "..." });
-    const { container, getByTestId, getByText, queryByText, getByRole } = render(
+  const read = (part: number) =>
+    JSON.stringify({ chapterIndex: 2, chapterNumber: 3, chapterTitle: "第三章 归来", part, totalParts: 3, text: `# 第三章\n\n他回到故乡时已是深秋，第 ${part + 1} 段。` });
+  const researched = {
+    role: "assistant" as const,
+    content: "前言结论",
+    blocks: [
+      { type: "text" as const, text: "我先读一下第三章" },
+      { type: "toolCall" as const, toolCall: { toolCallId: "t1", tool: "read_chapter", params: { chapterIndex: 2 }, done: true, result: read(0) } },
+      { type: "toolCall" as const, toolCall: { toolCallId: "t2", tool: "read_chapter", params: { chapterIndex: 2, part: 1 }, done: true, result: read(1) } },
+      {
+        type: "toolCall" as const,
+        toolCall: {
+          toolCallId: "t3",
+          tool: "search_in_book",
+          params: { queries: ["归来"] },
+          done: true,
+          result: JSON.stringify([{ chapterIndex: 5, chapterTitle: "第六章", part: 0, match: "exact", snippet: "…多年以后，他终于归来，故乡已面目全非…" }]),
+        },
+      },
+      { type: "toolCall" as const, toolCall: { toolCallId: "t4", tool: "get_toc", params: {}, done: true, result: "[]" } },
+      { type: "text" as const, text: "结论" },
+    ],
+  };
+
+  it("summarises the sources in the collapsed row and folds narration into the process", () => {
+    const { container, getByText, getByRole, queryByText, getAllByRole } = render(<AssistantMessage message={researched} />);
+    const children = Array.from(container.querySelectorAll(".space-y-1 > *"));
+    expect(children).toHaveLength(2);
+    expect(getByText("第三章 归来（读了 2/3 段）")).toBeTruthy();
+    expect(getByText("搜索 1 次，命中 1 处")).toBeTruthy();
+    expect(getByRole("img", { name: "部分章节未读完，回答可能不完整" })).toBeTruthy();
+    expect(queryByText("我先读一下第三章")).toBeNull();
+    expect(getAllByRole("button", { name: "复制" })).toHaveLength(1);
+  });
+
+  it("keeps the source line short when an answer reads many chapters", () => {
+    const section = (chapterIndex: number, part: number, totalParts: number) => ({
+      type: "toolCall" as const,
+      toolCall: {
+        toolCallId: `s${chapterIndex}-${part}`,
+        tool: "read_chapter",
+        params: { chapterIndex, part },
+        done: true,
+        result: JSON.stringify({ chapterIndex, chapterNumber: chapterIndex + 1, chapterTitle: `3.${chapterIndex} 小节`, part, totalParts, text: "正文" }),
+      },
+    });
+    const { getByText, queryByText, getByRole } = render(
       <AssistantMessage
         message={{
           role: "assistant",
-          content: "前言结论",
+          content: "总结",
+          blocks: [section(1, 0, 1), section(2, 0, 2), section(3, 0, 1), section(4, 0, 3), { type: "text", text: "总结" }],
+        }}
+      />,
+    );
+    expect(getByText("3.1 小节 等 4 个章节")).toBeTruthy();
+    expect(getByText("2 个章节未读完")).toBeTruthy();
+    expect(queryByText("3.3 小节")).toBeNull();
+    expect(getByRole("img", { name: "部分章节未读完，回答可能不完整" })).toBeTruthy();
+  });
+
+  it("expands into a timeline in reader terms with raw data behind a toggle", () => {
+    const { getByTestId, getByText, queryByText, getAllByRole, getAllByText } = render(<AssistantMessage message={researched} />);
+    fireEvent.click(getByTestId("answer-process").querySelector("button")!);
+    expect(getByText("我先读一下第三章")).toBeTruthy();
+    expect(getByText("阅读 第三章 归来")).toBeTruthy();
+    expect(getByText("第 1、2 段，共 3 段")).toBeTruthy();
+    expect(getByText("搜索 「归来」")).toBeTruthy();
+    expect(getByText("1 处命中")).toBeTruthy();
+    expect(getByText("查看目录")).toBeTruthy();
+    expect(queryByText("read_chapter")).toBeNull();
+    expect(queryByText("chapterIndex")).toBeNull();
+
+    // The merged read step holds both calls' raw data.
+    fireEvent.click(getAllByRole("button", { name: "原始数据" })[0]);
+    expect(getAllByText("chapterIndex")).toHaveLength(2);
+  });
+
+  it("opens a search hit in the Book through the Citation check", async () => {
+    const location: QuoteLocation = { status: "verified", chapterIndex: 5, href: "c6.xhtml", passage: "x" };
+    const locate = vi.fn(async () => location);
+    const openInBook = vi.fn();
+    const { getByTestId, getByText, getAllByRole } = render(
+      <CitationContext.Provider value={{ locate, openInBook }}>
+        <AssistantMessage message={researched} />
+      </CitationContext.Provider>,
+    );
+    fireEvent.click(getByTestId("answer-process").querySelector("button")!);
+    fireEvent.click(getByText("搜索 「归来」"));
+    expect(getByText("第六章")).toBeTruthy();
+    const buttons = getAllByRole("button", { name: "在书中打开" });
+    await act(async () => {
+      fireEvent.click(buttons[buttons.length - 1]);
+    });
+    expect(locate).toHaveBeenCalledWith(5, "多年以后，他终于归来，故乡已面目全非");
+    expect(openInBook).toHaveBeenCalledWith(location, "多年以后，他终于归来，故乡已面目全非");
+  });
+
+  it("marks failed lookups with their error", () => {
+    const { getByTestId, getByText } = render(
+      <AssistantMessage
+        message={{
+          role: "assistant",
+          content: "",
           blocks: [
-            { type: "text", text: "前言" },
-            { type: "toolCall", toolCall: { toolCallId: "t1", tool: "read_chapter", params: { chapterIndex: 2 }, done: true, result: read(0) } },
-            { type: "toolCall", toolCall: { toolCallId: "t2", tool: "search_in_book", params: { queries: ["归来"] }, done: true, result: JSON.stringify([{}, {}]) } },
-            { type: "toolCall", toolCall: { toolCallId: "t3", tool: "read_chapter", params: { chapterIndex: 2, part: 1 }, done: true, result: read(1) } },
-            { type: "text", text: "结论" },
+            { type: "toolCall", toolCall: { toolCallId: "t1", tool: "read_chapter", params: { chapterIndex: 9 }, done: true, isError: true, result: "Chapter index is out of range" } },
+            { type: "text", text: "抱歉" },
           ],
         }}
       />,
     );
-    const children = Array.from(container.querySelectorAll(".space-y-1 > *"));
-    expect(children).toHaveLength(3);
-    expect(children[1]).toBe(getByTestId("source-summary"));
-    expect(getByText("第三章 归来（读了 2/3 段）")).toBeTruthy();
-    expect(getByText("搜索 1 次，命中 2 处")).toBeTruthy();
-    expect(getByRole("img", { name: "部分章节未读完，回答可能不完整" })).toBeTruthy();
-    expect(queryByText("read_chapter")).toBeNull();
-
-    fireEvent.click(getByTestId("source-summary").querySelector("button")!);
-    expect(container.querySelectorAll('[data-testid="source-summary"] [aria-expanded]').length).toBe(4);
-    expect(getByText("search_in_book")).toBeTruthy();
+    expect(getByText("1 次调用失败")).toBeTruthy();
+    fireEvent.click(getByTestId("answer-process").querySelector("button")!);
+    expect(getByText("调用失败")).toBeTruthy();
+    fireEvent.click(getByText("阅读 章节 #10"));
+    expect(getByText("Chapter index is out of range")).toBeTruthy();
   });
 
-  it("shows a fully read chapter without a partial warning and keeps mind maps separate", () => {
+  it("shows a fully read chapter without a partial warning and keeps mind maps in the answer", () => {
     const { getByText, queryByRole } = render(
       <AssistantMessage
         message={{
@@ -200,11 +303,11 @@ describe("AssistantMessage", () => {
     expect(getByText("draw_mindmap")).toBeTruthy();
   });
 
-  it("renders no source summary for answers without book tools", () => {
+  it("renders no process row for answers without thinking or book tools", () => {
     const { queryByTestId } = render(
       <AssistantMessage message={{ role: "assistant", content: "直接回答" }} />,
     );
-    expect(queryByTestId("source-summary")).toBeNull();
+    expect(queryByTestId("answer-process")).toBeNull();
   });
 
   it("falls back to rendering content as a single text block when blocks is missing", () => {

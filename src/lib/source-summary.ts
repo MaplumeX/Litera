@@ -44,18 +44,22 @@ export function isSourceToolCall(call: AgentToolCall): boolean {
  * (`{ content: [{ type: "text", text }] }`) and as plain text once the
  * Session is reloaded from disk.
  */
-function resultPayload(result: unknown): unknown {
-  let text: string | undefined;
-  if (typeof result === "string") {
-    text = result;
-  } else if (result && typeof result === "object" && Array.isArray((result as { content?: unknown }).content)) {
-    text = ((result as { content: unknown[] }).content)
+export function toolResultText(result: unknown): string | undefined {
+  if (typeof result === "string") return result;
+  if (result && typeof result === "object" && Array.isArray((result as { content?: unknown }).content)) {
+    return ((result as { content: unknown[] }).content)
       .map((part) => {
         const block = part as { type?: unknown; text?: unknown } | null;
         return block?.type === "text" && typeof block.text === "string" ? block.text : "";
       })
       .join("");
   }
+  return undefined;
+}
+
+/** The JSON a Book tool returned, or undefined when the result is not JSON. */
+export function resultPayload(result: unknown): unknown {
+  const text = toolResultText(result);
   if (text === undefined) return undefined;
   try {
     return JSON.parse(text);
