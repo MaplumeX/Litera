@@ -170,12 +170,38 @@ export function filterByStatus(
   return books.filter((book) => book.readingStatus === filter);
 }
 
+/**
+ * How many books each status filter would show, over the books given. The
+ * shelf passes the current search result, so the counts act as facets: while
+ * searching they say which filter has hits.
+ */
+export function countByStatus(
+  books: readonly BookRecord[],
+): Record<LibraryStatusFilter, number> {
+  const counts: Record<LibraryStatusFilter, number> = {
+    all: books.length,
+    unread: 0,
+    reading: 0,
+    finished: 0,
+    starred: 0,
+  };
+  for (const book of books) {
+    if (book.readingStatus) counts[book.readingStatus] += 1;
+    if (book.starred === true) counts.starred += 1;
+  }
+  return counts;
+}
+
+/**
+ * The Continue reading strip: most recently opened first. A finished Book has
+ * nothing left to continue, so it is left out even if opened recently.
+ */
 export function takeRecent(
   books: readonly BookRecord[],
   limit = RECENT_LIMIT,
 ): BookRecord[] {
   return books
-    .filter((book) => Boolean(book.lastOpenedAt))
+    .filter((book) => Boolean(book.lastOpenedAt) && book.readingStatus !== "finished")
     .sort((left, right) =>
       (right.lastOpenedAt ?? "").localeCompare(left.lastOpenedAt ?? ""),
     )

@@ -5,22 +5,20 @@ import type { BookRecord, TrashEntry } from "@/types/library";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
   WindowControls,
   titlebarClassName,
   useTitlebarWindowDrag,
 } from "@/components/WindowControls";
-import { ArrowDownWideNarrow, ArrowUpNarrowWide, LayoutGrid, List, Plus, Settings, Trash2 } from "lucide-react";
-import { BookCard, BookListRow } from "@/components/BookCard";
+import { Plus, Settings, X } from "lucide-react";
+import { BookCard, BookListRow, BookResumeTile } from "@/components/BookCard";
 import { BookDetailsDialog } from "@/components/BookDetailsDialog";
 import { TrashDialog } from "@/components/TrashDialog";
 import type { BookStatusChoice } from "@/components/BookStatusMenu";
+import {
+  LibrarySelectionBar,
+  LibraryShelfToolbar,
+  STATUS_OPTIONS,
+} from "@/components/LibraryShelfToolbar";
 import {
   BookImportConfirmDialog,
   BookImportNotices,
@@ -28,8 +26,9 @@ import {
 import { invokeErrorMessage } from "@/lib/app-error";
 import { notifySyncActivity } from "@/lib/sync-activity";
 import { useBookImport } from "@/lib/use-book-import";
-import { useT, type MessageKey } from "@/lib/i18n";
+import { useT } from "@/lib/i18n";
 import {
+  countByStatus,
   filterBooks,
   filterByStatus,
   isLibraryStatusFilter,
@@ -63,27 +62,44 @@ function isEpubPath(path: string): boolean {
   return path.toLowerCase().endsWith(".epub");
 }
 
-const SORT_OPTIONS: { value: LibrarySortKey; labelKey: MessageKey }[] = [
-  { value: "recent", labelKey: "library.sort.recent" },
-  { value: "title", labelKey: "library.sort.title" },
-  { value: "author", labelKey: "library.sort.author" },
-  { value: "imported", labelKey: "library.sort.imported" },
-  { value: "progress", labelKey: "library.sort.progress" },
-];
+/** Escape and select-all belong to an open dialog or menu, not the shelf. */
+function overlayOpen(): boolean {
+  return (
+    document.querySelector(
+      '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]',
+    ) !== null
+  );
+}
 
-const STATUS_OPTIONS: { value: LibraryStatusFilter; labelKey: MessageKey }[] = [
-  { value: "all", labelKey: "library.status.all" },
-  { value: "unread", labelKey: "library.status.unread" },
-  { value: "reading", labelKey: "library.status.reading" },
-  { value: "finished", labelKey: "library.status.finished" },
-  { value: "starred", labelKey: "library.status.starred" },
-];
+function isTextEntry(target: EventTarget | null): boolean {
+  return (
+    target instanceof HTMLElement &&
+    (target.tagName === "INPUT" ||
+      target.tagName === "TEXTAREA" ||
+      target.isContentEditable)
+  );
+}
+
+/** `update_book_curation` arguments: null leaves a field alone. */
+interface CurationChange {
+  readingStatus: string | null;
+  starred: boolean | null;
+}
+
+function readingStatusArg(choice: BookStatusChoice): string {
+  // An empty string clears the status; null would mean "leave alone".
+  return choice === "unset" ? "" : choice;
+}
 
 export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }: LibraryViewProps) {
   const { t } = useT();
   const titlebarDrag = useTitlebarWindowDrag();
   const [books, setBooks] = useState<BookRecord[]>([]);
+  // Until the first list_books settles, an empty `books` means "not read yet",
+  // not "empty library": rendering the empty state then would flash it.
+  const [loaded, setLoaded] = useState(false);
   const [search, setSearch] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -126,6 +142,8 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
     } catch (err) {
       console.error("list_books error:", err);
       setLoadError(invokeErrorMessage(err));
+    } finally {
+      setLoaded(true);
     }
   }, []);
 
@@ -318,53 +336,59 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
     saveLibraryStatusFilter(value);
   }, []);
 
-  const handleToggleStar = useCallback(
-    async (target: BookRecord) => {
-      try {
-        // Curation has its own command so starring never rewrites the
-        // metadata fields the details dialog owns.
-        const updated = await invoke<BookRecord>("update_book_curation", {
-          bookId: target.id,
-          readingStatus: null,
-          starred: target.starred !== true,
-        });
-        setBooks((current) =>
-          current.map((item) => (item.id === updated.id ? updated : item)),
-        );
-        notifySyncActivity();
-      } catch (err) {
-        console.error("update_book_curation error:", err);
-        pushNotice({
-          kind: "error",
-          message: t("library.curationFailed", { message: invokeErrorMessage(err) }),
-        });
+  const handleClearFilters = useCallback(() => {
+    setSearch("");
+    setStatusFilter("all");
+    saveLibraryStatusFilter("all");
+  }, []);
+
+  // Curation has its own command so starring or marking never rewrites the
+  // metadata fields the details dialog owns. One path serves a single card
+  // and a batch from the selection bar.
+  const updateCuration = useCallback(
+    async (targets: readonly BookRecord[], change: CurationChange) => {
+      const updated = new Map<string, BookRecord>();
+      const failures: { title: string; message: string }[] = [];
+      for (const target of targets) {
+        try {
+          const record = await invoke<BookRecord>("update_book_curation", {
+            bookId: target.id,
+            ...change,
+          });
+          updated.set(record.id, record);
+        } catch (err) {
+          console.error("update_book_curation error:", err);
+          failures.push({ title: target.title, message: invokeErrorMessage(err) });
+        }
       }
+      if (updated.size > 0) {
+        setBooks((current) => current.map((item) => updated.get(item.id) ?? item));
+        notifySyncActivity();
+      }
+      if (failures.length === 0) return;
+      pushNotice({
+        kind: "error",
+        message:
+          targets.length === 1
+            ? t("library.curationFailed", { message: failures[0].message })
+            : t("library.batchCurationFailed", {
+                titles: failures.map((failure) => failure.title).join(t("common.listJoin")),
+              }),
+      });
     },
     [pushNotice, t],
   );
 
+  const handleToggleStar = useCallback(
+    (target: BookRecord) =>
+      updateCuration([target], { readingStatus: null, starred: target.starred !== true }),
+    [updateCuration],
+  );
+
   const handleChangeStatus = useCallback(
-    async (target: BookRecord, status: BookStatusChoice) => {
-      try {
-        const updated = await invoke<BookRecord>("update_book_curation", {
-          bookId: target.id,
-          // An empty string clears the status; null would mean "leave alone".
-          readingStatus: status === "unset" ? "" : status,
-          starred: null,
-        });
-        setBooks((current) =>
-          current.map((item) => (item.id === updated.id ? updated : item)),
-        );
-        notifySyncActivity();
-      } catch (err) {
-        console.error("update_book_curation error:", err);
-        pushNotice({
-          kind: "error",
-          message: t("library.curationFailed", { message: invokeErrorMessage(err) }),
-        });
-      }
-    },
-    [pushNotice, t],
+    (target: BookRecord, status: BookStatusChoice) =>
+      updateCuration([target], { readingStatus: readingStatusArg(status), starred: null }),
+    [updateCuration],
   );
 
   const handleDetailsSaved = useCallback((record: BookRecord, coverChanged: boolean) => {
@@ -448,23 +472,78 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
   }, [askConfirm, pushNotice, refreshTrash, t, trashEntries.length]);
 
   const searching = search.trim().length > 0;
+  // Continue reading only shows when it adds something: not while searching
+  // or selecting, and not when the shelf is already newest-opened first, where
+  // its tiles would just repeat the shelf's first row.
+  const showRecents =
+    !searching && !selectMode && !(sort === "recent" && order === "desc");
   const recents = useMemo(
     // Continue reading narrows with the status filter like the main grid: a
-    // reader looking at "unread" should not be shown finished books up top.
-    () => (searching ? [] : takeRecent(filterByStatus(books, statusFilter))),
-    [books, searching, statusFilter],
+    // reader looking at "unread" should not be shown other books up top.
+    () => (showRecents ? takeRecent(filterByStatus(books, statusFilter)) : []),
+    [books, showRecents, statusFilter],
   );
+  const searched = useMemo(() => filterBooks(books, search), [books, search]);
+  const statusCounts = useMemo(() => countByStatus(searched), [searched]);
   const visible = useMemo(
-    () =>
-      sortBooks(
-        filterByStatus(filterBooks(books, search), statusFilter),
-        sort,
-        order,
-      ),
-    [books, order, search, sort, statusFilter],
+    () => sortBooks(filterByStatus(searched, statusFilter), sort, order),
+    [order, searched, sort, statusFilter],
+  );
+  // The list view's "not downloaded" column is all-or-nothing across the
+  // visible rows so the columns after it stay aligned.
+  const cacheColumn = visible.some((book) => book.cached === false);
+  const statusFilterOption = STATUS_OPTIONS.find(
+    (option) => option.value === statusFilter,
   );
   const selectedBooks = books.filter((book) => selectedIds.has(book.id));
+  const allVisibleSelected = visible.every((book) => selectedIds.has(book.id));
+  const allSelectedStarred =
+    selectedBooks.length > 0 && selectedBooks.every((book) => book.starred === true);
   const busy = importing || openingBookId !== null;
+
+  const handleEnterSelect = useCallback((bookId?: string) => {
+    setSelectMode(true);
+    setSelectedIds(new Set(bookId ? [bookId] : []));
+  }, []);
+
+  const handleSelectAll = useCallback(() => {
+    setSelectedIds(new Set(visible.map((book) => book.id)));
+  }, [visible]);
+
+  // Batch curation keeps the selection so several marks can follow in a row.
+  const handleBatchStar = () =>
+    void updateCuration(selectedBooks, {
+      readingStatus: null,
+      starred: !allSelectedStarred,
+    });
+
+  const handleBatchStatus = (choice: BookStatusChoice) =>
+    void updateCuration(selectedBooks, {
+      readingStatus: readingStatusArg(choice),
+      starred: null,
+    });
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const mod = event.metaKey || event.ctrlKey;
+      if (mod && event.key.toLowerCase() === "f") {
+        event.preventDefault();
+        searchRef.current?.focus();
+        searchRef.current?.select();
+        return;
+      }
+      if (!selectMode || overlayOpen() || isTextEntry(event.target)) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        exitSelectMode();
+      } else if (mod && event.key.toLowerCase() === "a") {
+        event.preventDefault();
+        handleSelectAll();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [exitSelectMode, handleSelectAll, selectMode]);
 
   const bookProps = {
     onOpen: onOpenBook,
@@ -476,6 +555,7 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
     deleteDisabled: busy,
     selectMode,
     onToggleSelect: handleToggleSelect,
+    onEnterSelect: handleEnterSelect,
     openDisabled: importing,
   };
 
@@ -495,155 +575,85 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
           {...titlebarDrag}
         />
         <div className="flex items-center gap-2">
-          <Input
-            type="text"
-            placeholder={t("library.searchPlaceholder")}
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="h-8 w-56"
-          />
-          {books.length > 0 && (
-            <>
-              <Select
-                value={statusFilter}
-                onValueChange={handleStatusFilterChange}
-              >
-                <SelectTrigger
-                  size="sm"
-                  className="h-8 w-[7.5rem]"
-                  aria-label={t("library.statusFilter")}
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {STATUS_OPTIONS.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {t(option.labelKey)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Select value={sort} onValueChange={handleSortChange}>
-                <SelectTrigger
-                  size="sm"
-                  className="h-8 w-[8.75rem]"
-                  aria-label={t("library.sort")}
-                >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {SORT_OPTIONS.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {t(option.labelKey)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Button
-                type="button"
-                size="icon-sm"
-                variant="ghost"
-                aria-label={
-                  order === "asc"
-                    ? t("library.sortAscending")
-                    : t("library.sortDescending")
+          <div className="relative">
+            <Input
+              ref={searchRef}
+              type="text"
+              placeholder={t("library.searchPlaceholder")}
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape" && e.currentTarget.value) {
+                  e.preventDefault();
+                  setSearch("");
                 }
-                aria-pressed={order === "desc"}
-                data-sort-order={order}
-                onClick={handleOrderToggle}
+              }}
+              className="h-8 w-44 pr-7 lg:w-64"
+            />
+            {search && (
+              <button
+                type="button"
+                className="absolute right-1.5 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                aria-label={t("library.clearSearch")}
+                onClick={() => {
+                  setSearch("");
+                  searchRef.current?.focus();
+                }}
               >
-                {order === "asc" ? <ArrowUpNarrowWide /> : <ArrowDownWideNarrow />}
-              </Button>
-              <div className="flex items-center">
-                <Button
-                  type="button"
-                  size="icon-sm"
-                  variant={view === "grid" ? "secondary" : "ghost"}
-                  aria-label={t("library.viewGrid")}
-                  aria-pressed={view === "grid"}
-                  onClick={() => handleViewChange("grid")}
-                >
-                  <LayoutGrid />
-                </Button>
-                <Button
-                  type="button"
-                  size="icon-sm"
-                  variant={view === "list" ? "secondary" : "ghost"}
-                  aria-label={t("library.viewList")}
-                  aria-pressed={view === "list"}
-                  onClick={() => handleViewChange("list")}
-                >
-                  <List />
-                </Button>
-              </div>
-            </>
-          )}
-          {selectMode ? (
-            <>
-              <span className="text-sm text-muted-foreground tabular-nums">
-                {t("library.selectedCount", { count: selectedIds.size })}
-              </span>
-              <Button
-                size="sm"
-                variant="destructive"
-                disabled={selectedIds.size === 0 || busy}
-                onClick={() => void requestDelete(selectedBooks)}
-              >
-                {t("common.delete")}
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={exitSelectMode}
-              >
-                {t("common.cancel")}
-              </Button>
-            </>
-          ) : (
-            <>
-              <Button
-                size="sm"
-                onClick={() => void handleImport()}
-                disabled={busy}
-              >
-                <Plus className="size-4" />
-                <span>{importing ? t("library.importing") : t("library.import")}</span>
-              </Button>
-              {books.length > 0 && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => setSelectMode(true)}
-                  disabled={busy}
-                >
-                  {t("library.select")}
-                </Button>
-              )}
-              <Button
-                size="icon-sm"
-                variant="ghost"
-                onClick={onOpenSettings}
-                aria-label={t("library.settings")}
-              >
-                <Settings />
-              </Button>
-              {trashEntries.length > 0 && (
-                <Button
-                  size="icon-sm"
-                  variant="ghost"
-                  aria-label={t("library.trash")}
-                  data-trash-count={trashEntries.length}
-                  onClick={() => setTrashOpen(true)}
-                  disabled={busy}
-                >
-                  <Trash2 />
-                </Button>
-              )}
-            </>
-          )}
+                <X className="size-3.5" />
+              </button>
+            )}
+          </div>
+          <Button
+            size="sm"
+            onClick={() => void handleImport()}
+            disabled={busy}
+          >
+            <Plus className="size-4" />
+            <span>{importing ? t("library.importing") : t("library.import")}</span>
+          </Button>
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            onClick={onOpenSettings}
+            aria-label={t("library.settings")}
+          >
+            <Settings />
+          </Button>
         </div>
         <WindowControls />
       </header>
+
+      {books.length > 0 &&
+        (selectMode ? (
+          <LibrarySelectionBar
+            selectedCount={selectedIds.size}
+            allSelected={allVisibleSelected}
+            onSelectAll={handleSelectAll}
+            allStarred={allSelectedStarred}
+            onToggleStar={handleBatchStar}
+            onMarkAs={handleBatchStatus}
+            onDelete={() => void requestDelete(selectedBooks)}
+            onCancel={exitSelectMode}
+            busy={busy}
+          />
+        ) : (
+          <LibraryShelfToolbar
+            statusFilter={statusFilter}
+            counts={statusCounts}
+            onStatusFilterChange={handleStatusFilterChange}
+            sort={sort}
+            onSortChange={handleSortChange}
+            order={order}
+            onOrderToggle={handleOrderToggle}
+            view={view}
+            onViewChange={handleViewChange}
+            onEnterSelect={() => handleEnterSelect()}
+            trashCount={trashEntries.length}
+            onOpenTrash={() => setTrashOpen(true)}
+            busy={busy}
+          />
+        ))}
 
       {loadError && (
         <div role="alert" className="border-b border-destructive/40 bg-destructive/10 px-4 py-2 text-sm text-destructive">
@@ -659,7 +669,7 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
       />
 
       <div className="flex-1 overflow-y-auto p-4">
-        {books.length === 0 ? (
+        {!loaded || (books.length === 0 && loadError) ? null : books.length === 0 ? (
           <div className="flex h-full items-center justify-center">
             <div className="text-center space-y-3">
               <p className="text-muted-foreground">{t("library.empty")}</p>
@@ -674,25 +684,35 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
             </div>
           </div>
         ) : visible.length === 0 ? (
+          // The status filter is persisted, so a reopened app can land on a
+          // narrowed shelf: name the filter and offer a way out.
           <div className="flex h-full items-center justify-center">
-            <p className="text-muted-foreground">{t("library.noMatches")}</p>
+            <div className="text-center space-y-3">
+              <p className="text-muted-foreground">
+                {statusFilterOption && statusFilter !== "all"
+                  ? t("library.noMatchesInFilter", {
+                      filter: t(statusFilterOption.labelKey),
+                    })
+                  : t("library.noMatches")}
+              </p>
+              <Button size="sm" variant="outline" onClick={handleClearFilters}>
+                {t("library.clearFilters")}
+              </Button>
+            </div>
           </div>
         ) : (
           <div className="space-y-6">
             {recents.length > 0 && (
-              <section className="border-b pb-6">
-                <h2 className="mb-3 text-sm font-medium">
+              <section>
+                <h2 className="mb-2 text-sm font-medium">
                   {t("library.continueReading")}
                 </h2>
-                <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-6">
+                <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3">
                   {recents.map((book) => (
-                    <BookCard
+                    <BookResumeTile
                       key={`recent-${book.id}`}
                       book={book}
                       opening={openingBookId === book.id}
-                      selected={selectedIds.has(book.id)}
-                      showMenu={false}
-                      showDelete={false}
                       coverRev={coverRev[book.id]}
                       {...bookProps}
                     />
@@ -701,7 +721,7 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
               </section>
             )}
             {view === "list" ? (
-              <div className="flex flex-col gap-2">
+              <div data-shelf="main" className="flex flex-col gap-2">
                 {visible.map((book) => (
                   <BookListRow
                     key={book.id}
@@ -709,12 +729,13 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
                     opening={openingBookId === book.id}
                     selected={selectedIds.has(book.id)}
                     coverRev={coverRev[book.id]}
+                    cacheColumn={cacheColumn}
                     {...bookProps}
                   />
                 ))}
               </div>
             ) : (
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-6">
+              <div data-shelf="main" className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-6">
                 {visible.map((book) => (
                   <BookCard
                     key={book.id}

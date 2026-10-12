@@ -12,9 +12,14 @@ import { useT, type MessageKey } from "@/lib/i18n";
 /** A status choice in the menu, or "unset" for a book that has none. */
 export type BookStatusChoice = ReadingStatus | "unset";
 
-const CHOICES: BookStatusChoice[] = ["unset", "unread", "reading", "finished"];
+export const STATUS_CHOICES: readonly BookStatusChoice[] = [
+  "unset",
+  "unread",
+  "reading",
+  "finished",
+];
 
-const STATUS_LABEL_KEYS: Record<BookStatusChoice, MessageKey> = {
+export const STATUS_LABEL_KEYS: Record<BookStatusChoice, MessageKey> = {
   unset: "library.status.unset",
   unread: "library.status.unread",
   reading: "library.status.reading",
@@ -24,11 +29,12 @@ const STATUS_LABEL_KEYS: Record<BookStatusChoice, MessageKey> = {
 /**
  * The reading-status control: a label that opens a menu of the four choices.
  *
- * A book with no status still gets a dimmed placeholder trigger, because this
- * is the only place a status can be set — an invisible entry point would leave
- * un-curated books with no way in. It owns no IPC: the host supplies
- * `onChange`, so the card and the list row share one implementation and the
- * menu can be tested without the shelf.
+ * A book with no status gets a dimmed placeholder trigger that only shows on
+ * hover, focus, or while its menu is open: the book's action menu also sets
+ * the status, so the placeholder need not sit on every card of an uncurated
+ * shelf. The host must carry Tailwind's `group` class. It owns no IPC: the
+ * host supplies `onChange`, so the card and the list row share one
+ * implementation and the menu can be tested without the shelf.
  */
 export function BookStatusMenu({
   book,
@@ -54,7 +60,7 @@ export function BookStatusMenu({
           className={cn(
             "inline-flex max-w-full items-center gap-0.5 rounded-sm px-1 py-px text-[10px] transition-colors motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
             unset
-              ? "border border-dashed border-muted-foreground/30 text-muted-foreground/50 hover:border-muted-foreground/60 hover:text-muted-foreground"
+              ? "border border-dashed border-muted-foreground/30 text-muted-foreground/50 opacity-0 hover:border-muted-foreground/60 hover:text-muted-foreground group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100"
               : "bg-muted text-muted-foreground hover:bg-muted/70 hover:text-foreground",
             className,
           )}
@@ -66,7 +72,7 @@ export function BookStatusMenu({
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start">
-        {CHOICES.map((choice) => (
+        {STATUS_CHOICES.map((choice) => (
           <DropdownMenuItem key={choice} onSelect={() => onChange(choice)}>
             <Check
               className={cn("size-4", choice === current ? "opacity-100" : "opacity-0")}
