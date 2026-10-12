@@ -164,7 +164,7 @@ export function BookDetailsDialog({
           <div className="grid gap-2">
             <Label>{t("library.fieldCover")}</Label>
             <div className="flex items-center gap-3">
-              <div className="flex h-24 w-16 shrink-0 items-center justify-center overflow-hidden rounded-md border bg-muted">
+              <div className="flex h-24 w-16 shrink-0 items-center justify-center overflow-hidden rounded-cover bg-muted shadow-cover">
                 {coverSrc ? (
                   <img
                     src={coverSrc}

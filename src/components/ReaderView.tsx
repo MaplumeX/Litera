@@ -24,6 +24,7 @@ import {
   highlightColorHex,
   isHighlightOverlayKey,
   resolveHighlightColor,
+  setLastUsedHighlightColor,
 } from "@/lib/annotations";
 import { SelectionToolbar } from "@/components/SelectionToolbar";
 import { HighlightEditor } from "@/components/HighlightEditor";
@@ -872,12 +873,14 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       clearIframeSelection();
     }, [selectionPos, onSelectionCapture, clearIframeSelection]);
 
-    const handleHighlightSelection = useCallback(() => {
+    const handleHighlightSelection = useCallback((color: HighlightColor) => {
       const view = viewRef.current as unknown as FoliateAnnotator | null;
       if (!view) return;
       const selection = readIframeSelection(view);
       if (!selection) return;
-      paintHighlight(view, selection.cfi, highlightColorHex(getLastUsedHighlightColor()));
+      // createHighlight stamps the last-used color, so set it before handing off.
+      setLastUsedHighlightColor(color);
+      paintHighlight(view, selection.cfi, highlightColorHex(color));
       onHighlight?.(selection);
       clearIframeSelection();
     }, [onHighlight, clearIframeSelection]);
@@ -1103,6 +1106,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
           <SelectionToolbar
             x={selectionPos.x}
             y={selectionPos.y}
+            lastColor={getLastUsedHighlightColor()}
             onHighlight={handleHighlightSelection}
             onAskAgent={handleAskAgent}
           />

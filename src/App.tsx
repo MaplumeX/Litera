@@ -990,13 +990,13 @@ function App() {
     <>
       <button
         type="button"
-        className="absolute inset-0 z-20 bg-background/50"
+        className="reader-scrim-in absolute inset-0 z-20 bg-foreground/5 backdrop-blur-[2px]"
         aria-label={t("reader.closeToc")}
         onClick={() => setTocVisible(false)}
       />
       <div
         ref={tocDrawerRef}
-        className="absolute inset-y-0 left-0 z-30 overflow-hidden border-r bg-background"
+        className="reader-drawer-in absolute inset-y-0 left-0 z-30 overflow-hidden bg-background shadow-float"
         style={{ width: tocWidth }}
       >
         <TocSidebar
@@ -1256,11 +1256,11 @@ function App() {
               <>
                 <button
                   type="button"
-                  className="absolute inset-0 z-20 bg-background/50"
+                  className="reader-scrim-in absolute inset-0 z-20 bg-foreground/5 backdrop-blur-[2px]"
                   aria-label={t("reader.closeAnnotations")}
                   onClick={() => setAnnotationsVisible(false)}
                 />
-                <div className="absolute inset-y-0 left-0 z-30 w-56 overflow-hidden border-r bg-background">
+                <div className="reader-drawer-in absolute inset-y-0 left-0 z-30 w-56 overflow-hidden bg-background shadow-float">
                   <AnnotationsSidebar
                     bookmarks={annotations.bookmarks}
                     highlights={annotations.highlights}
@@ -1277,7 +1277,7 @@ function App() {
           {tts.error ? (
             <div
               role="alert"
-              className="border-t px-3 py-1.5 text-xs text-destructive"
+              className="mx-2 mb-1 rounded-lg bg-destructive/10 px-3 py-1.5 text-xs text-destructive"
             >
               {tts.error}
             </div>
@@ -1312,32 +1312,43 @@ function App() {
           hidden={chatHidden}
           className={
             !chatHidden && readerMode === "reader"
-              ? "relative h-full min-h-0 min-w-0 overflow-hidden border-l"
+              ? "relative h-full min-h-0 min-w-0 overflow-hidden py-2 pr-2 pl-1"
               : "relative h-full min-h-0 min-w-0 overflow-hidden"
           }
           style={{ gridArea: "chat" }}
         >
           {readerMode === "agent" && tocDrawer}
-          <ChatPanel
-            ref={chatRef}
-            currentChapterHref={
-              readerMode === "agent" ? chapterScope?.href ?? progress.chapterHref : progress.chapterHref
+          {/* Docked beside the book, the assistant floats as a card; as the
+              Agent-mode workspace it fills its cell edge to edge. */}
+          <div
+            data-testid="reader-chat-card"
+            className={
+              readerMode === "reader"
+                ? "h-full overflow-hidden rounded-xl border bg-card shadow-soft"
+                : "h-full"
             }
-            chapterScope={readerMode === "agent" ? chapterScope : null}
-            onClearChapterScope={() => setChapterScope(null)}
-            onOpenQuote={handleOpenQuote}
-            bookId={fileData?.bookId ?? ""}
-            variant={readerMode === "agent" ? "workspace" : "docked"}
-            sessionRailOpen={sessionRailOpen}
-            onSessionRailOpenChange={(open) => {
-              setSessionRailOpen(open);
-              schedulePersistLayout({
-                chatCollapsed,
-                bookCollapsed,
-                sessionRailOpen: open,
-              });
-            }}
-          />
+          >
+            <ChatPanel
+              ref={chatRef}
+              currentChapterHref={
+                readerMode === "agent" ? chapterScope?.href ?? progress.chapterHref : progress.chapterHref
+              }
+              chapterScope={readerMode === "agent" ? chapterScope : null}
+              onClearChapterScope={() => setChapterScope(null)}
+              onOpenQuote={handleOpenQuote}
+              bookId={fileData?.bookId ?? ""}
+              variant={readerMode === "agent" ? "workspace" : "docked"}
+              sessionRailOpen={sessionRailOpen}
+              onSessionRailOpenChange={(open) => {
+                setSessionRailOpen(open);
+                schedulePersistLayout({
+                  chatCollapsed,
+                  bookCollapsed,
+                  sessionRailOpen: open,
+                });
+              }}
+            />
+          </div>
         </div>
         {!sideCollapsed && (
           <div
