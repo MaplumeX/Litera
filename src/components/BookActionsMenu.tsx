@@ -23,9 +23,8 @@ import {
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
 import {
-  STATUS_CHOICES,
+  READING_STATUSES,
   STATUS_LABEL_KEYS,
-  type BookStatusChoice,
 } from "@/components/BookStatusMenu";
 import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -38,7 +37,7 @@ export interface BookActionHandlers {
   /** Curation and selection entries render only when the host supplies them. */
   readingStatus?: ReadingStatus;
   starred?: boolean;
-  onChangeStatus?: (choice: BookStatusChoice) => void;
+  onChangeStatus?: (status: ReadingStatus) => void;
   onToggleStar?: () => void;
   onSelect?: () => void;
 }
@@ -90,7 +89,6 @@ function BookActionItems({
   onSelect,
 }: BookActionHandlers & { parts: MenuParts }) {
   const { t } = useT();
-  const current: BookStatusChoice = readingStatus ?? "unset";
   return (
     <>
       <Item onSelect={onOpen}>{t("library.open")}</Item>
@@ -98,12 +96,12 @@ function BookActionItems({
         <Sub>
           <SubTrigger>{t("library.fieldReadingStatus")}</SubTrigger>
           <SubContent>
-            {STATUS_CHOICES.map((choice) => (
-              <Item key={choice} onSelect={() => onChangeStatus(choice)}>
+            {READING_STATUSES.map((status) => (
+              <Item key={status} onSelect={() => onChangeStatus(status)}>
                 <Check
-                  className={cn("size-4", choice === current ? "opacity-100" : "opacity-0")}
+                  className={cn("size-4", status === readingStatus ? "opacity-100" : "opacity-0")}
                 />
-                {t(STATUS_LABEL_KEYS[choice])}
+                {t(STATUS_LABEL_KEYS[status])}
               </Item>
             ))}
           </SubContent>

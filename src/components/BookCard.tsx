@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { Check, CloudOff, Star } from "lucide-react";
-import type { BookRecord } from "@/types/library";
-import { BookStatusMenu, type BookStatusChoice } from "@/components/BookStatusMenu";
+import type { BookRecord, ReadingStatus } from "@/types/library";
+import { BookStatusMenu } from "@/components/BookStatusMenu";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
 import {
@@ -22,7 +22,7 @@ interface BookCardProps {
   onDelete: (bookId: string) => void;
   onDetails: (book: BookRecord) => void;
   onToggleStar?: (book: BookRecord) => void;
-  onChangeStatus?: (book: BookRecord, status: BookStatusChoice) => void;
+  onChangeStatus?: (book: BookRecord, status: ReadingStatus) => void;
   opening?: boolean;
   deleteDisabled?: boolean;
   selectMode?: boolean;
@@ -86,7 +86,7 @@ function bookActions(
     onDelete: (bookId: string) => void;
     deleteDisabled: boolean;
     onToggleStar?: (book: BookRecord) => void;
-    onChangeStatus?: (book: BookRecord, status: BookStatusChoice) => void;
+    onChangeStatus?: (book: BookRecord, status: ReadingStatus) => void;
     onEnterSelect?: (bookId: string) => void;
   },
 ): BookActionHandlers {
@@ -258,7 +258,7 @@ interface BookListRowProps {
   onDelete: (bookId: string) => void;
   onDetails: (book: BookRecord) => void;
   onToggleStar?: (book: BookRecord) => void;
-  onChangeStatus?: (book: BookRecord, status: BookStatusChoice) => void;
+  onChangeStatus?: (book: BookRecord, status: ReadingStatus) => void;
   opening?: boolean;
   deleteDisabled?: boolean;
   selectMode?: boolean;

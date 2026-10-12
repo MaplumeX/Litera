@@ -130,6 +130,7 @@ pub fn run() {
             library::save_book_metadata,
             library::update_book_metadata,
             library::update_book_curation,
+            library::mark_book_started,
             library::list_books,
             library::get_book_open_context,
             library::read_book_bytes,

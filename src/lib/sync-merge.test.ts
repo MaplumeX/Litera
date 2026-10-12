@@ -531,8 +531,8 @@ describe("mergeManifests — book revision and Tombstone revival", () => {
 
     const merged = mergeManifests(local, remote, NOW);
 
-    // The newer revision's curation wins wholesale, per the documented
-    // single-timestamp rule for metadata.
+    // The star follows the newer revision; neither status is timestamped, so
+    // the further-along one wins.
     expect(merged.books["book-1"].metadata.readingStatus).toBe("reading");
     expect(merged.books["book-1"].metadata.starred).toBe(true);
   });
@@ -578,5 +578,75 @@ describe("mergeManifests — book revision and Tombstone revival", () => {
 
     expect(forward).toEqual(backward);
     expect(forward.books["book-1"].metadata.readingStatus).toBe("reading");
+  });
+});
+
+describe("reading status merge", () => {
+  function bookWith(
+    metadata: Partial<SyncedBook["metadata"]>,
+    bookUpdatedAt?: string,
+  ): SyncManifest {
+    const manifest = baseRemote();
+    manifest.books["book-1"] = syncedBook({
+      metadata: { title: "Title", author: "Author", ...metadata },
+      bookUpdatedAt,
+    });
+    return manifest;
+  }
+
+  function mergeBothWays(local: SyncManifest, remote: SyncManifest) {
+    const forward = mergeManifests(local, remote, NOW);
+    const backward = mergeManifests(remote, local, NOW);
+    expect(forward).toEqual(backward);
+    return forward.books["book-1"].metadata;
+  }
+
+  it("takes the newer status when both are timestamped", () => {
+    const newer = iso(0);
+    const metadata = mergeBothWays(
+      bookWith({ readingStatus: "finished", statusUpdatedAt: iso(DAY_MS) }),
+      bookWith({ readingStatus: "paused", statusUpdatedAt: newer }),
+    );
+    expect(metadata.readingStatus).toBe("paused");
+    expect(metadata.statusUpdatedAt).toBe(newer);
+  });
+
+  it("prefers a timestamped status over a backfilled one", () => {
+    const metadata = mergeBothWays(
+      bookWith({ readingStatus: "finished" }, iso(0)),
+      bookWith({ readingStatus: "unread", statusUpdatedAt: iso(5 * DAY_MS) }),
+    );
+    expect(metadata.readingStatus).toBe("unread");
+  });
+
+  it("converges two backfills on the further-along status", () => {
+    const metadata = mergeBothWays(
+      bookWith({ readingStatus: "unread" }, iso(0)),
+      bookWith({ readingStatus: "reading" }, iso(DAY_MS)),
+    );
+    expect(metadata.readingStatus).toBe("reading");
+    expect(metadata).not.toHaveProperty("statusUpdatedAt");
+  });
+
+  it("keeps the side that has a status when the other has none", () => {
+    const metadata = mergeBothWays(
+      bookWith({}, iso(0)),
+      bookWith({ readingStatus: "paused", statusUpdatedAt: iso(DAY_MS) }, iso(DAY_MS)),
+    );
+    expect(metadata.readingStatus).toBe("paused");
+  });
+
+  it("keeps a status change on one device and a title edit on the other", () => {
+    const local = bookWith(
+      { title: "Renamed", readingStatus: "unread", statusUpdatedAt: iso(5 * DAY_MS) },
+      iso(0),
+    );
+    const remote = bookWith(
+      { readingStatus: "finished", statusUpdatedAt: iso(DAY_MS) },
+      iso(5 * DAY_MS),
+    );
+    const metadata = mergeBothWays(local, remote);
+    expect(metadata.title).toBe("Renamed");
+    expect(metadata.readingStatus).toBe("finished");
   });
 });

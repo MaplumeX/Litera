@@ -22,11 +22,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  STATUS_CHOICES,
-  STATUS_LABEL_KEYS,
-  type BookStatusChoice,
-} from "@/components/BookStatusMenu";
+import { READING_STATUSES, STATUS_LABEL_KEYS } from "@/components/BookStatusMenu";
 import { useT, type MessageKey } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import type {
@@ -35,6 +31,7 @@ import type {
   LibraryStatusFilter,
 } from "@/lib/library-shelf";
 import type { LibraryViewMode } from "@/lib/library-shelf-prefs";
+import type { ReadingStatus } from "@/types/library";
 
 const SORT_OPTIONS: { value: LibrarySortKey; labelKey: MessageKey }[] = [
   { value: "recent", labelKey: "library.sort.recent" },
@@ -48,6 +45,7 @@ export const STATUS_OPTIONS: { value: LibraryStatusFilter; labelKey: MessageKey 
   { value: "all", labelKey: "library.status.all" },
   { value: "unread", labelKey: "library.status.unread" },
   { value: "reading", labelKey: "library.status.reading" },
+  { value: "paused", labelKey: "library.status.paused" },
   { value: "finished", labelKey: "library.status.finished" },
   { value: "starred", labelKey: "library.status.starred" },
 ];
@@ -238,7 +236,7 @@ interface LibrarySelectionBarProps {
   /** Every selected book is starred, so the star action unstars instead. */
   allStarred: boolean;
   onToggleStar: () => void;
-  onMarkAs: (choice: BookStatusChoice) => void;
+  onMarkAs: (status: ReadingStatus) => void;
   onDelete: () => void;
   onCancel: () => void;
   busy: boolean;
@@ -275,9 +273,9 @@ export function LibrarySelectionBar({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start">
-          {STATUS_CHOICES.map((choice) => (
-            <DropdownMenuItem key={choice} onSelect={() => onMarkAs(choice)}>
-              {t(STATUS_LABEL_KEYS[choice])}
+          {READING_STATUSES.map((status) => (
+            <DropdownMenuItem key={status} onSelect={() => onMarkAs(status)}>
+              {t(STATUS_LABEL_KEYS[status])}
             </DropdownMenuItem>
           ))}
         </DropdownMenuContent>

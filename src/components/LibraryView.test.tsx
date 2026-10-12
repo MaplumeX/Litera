@@ -69,6 +69,7 @@ const book: BookRecord = {
   coverPath: "",
   filePath: "/tmp/book.epub",
   importedAt: "2026-01-01T00:00:00+00:00",
+  readingStatus: "unread",
 };
 
 /** The main shelf grid or list, as opposed to the Continue reading strip. */
@@ -422,6 +423,7 @@ describe("LibraryView", () => {
     localStorage.setItem(LIBRARY_SORT_KEY, "title");
     const opened: BookRecord = {
       ...book,
+      readingStatus: "reading",
       lastOpenedAt: "2026-04-01T00:00:00+00:00",
       lastFraction: 0.42,
     };
@@ -447,6 +449,7 @@ describe("LibraryView", () => {
   it("hides continue reading when the shelf is already newest-opened first", async () => {
     const opened: BookRecord = {
       ...book,
+      readingStatus: "reading",
       lastOpenedAt: "2026-04-01T00:00:00+00:00",
     };
     setupInvoke({ list_books: () => [opened] });
@@ -464,7 +467,9 @@ describe("LibraryView", () => {
   it("hides continue reading in select mode", async () => {
     localStorage.setItem(LIBRARY_SORT_KEY, "title");
     setupInvoke({
-      list_books: () => [{ ...book, lastOpenedAt: "2026-04-01T00:00:00+00:00" }],
+      list_books: () => [
+        { ...book, readingStatus: "reading", lastOpenedAt: "2026-04-01T00:00:00+00:00" },
+      ],
     });
     const { findByText, getByRole, queryByText } = render(
       <LibraryView onOpenBook={() => {}} onOpenSettings={() => {}} />,
@@ -478,6 +483,7 @@ describe("LibraryView", () => {
   it("keeps a right-click menu on continue reading cards", async () => {
     const opened: BookRecord = {
       ...book,
+      readingStatus: "reading",
       lastOpenedAt: "2026-04-01T00:00:00+00:00",
     };
     localStorage.setItem(LIBRARY_SORT_KEY, "title");
@@ -498,12 +504,14 @@ describe("LibraryView", () => {
       ...book,
       id: "a",
       title: "Alpha",
+      readingStatus: "reading",
       lastOpenedAt: "2026-01-01T00:00:00+00:00",
     };
     const zeta: BookRecord = {
       ...book,
       id: "z",
       title: "Zeta",
+      readingStatus: "reading",
       lastOpenedAt: "2026-06-01T00:00:00+00:00",
     };
     localStorage.setItem(LIBRARY_SORT_KEY, "imported");
@@ -538,12 +546,14 @@ describe("LibraryView", () => {
       ...book,
       id: "a",
       title: "Alpha",
+      readingStatus: "reading",
       lastOpenedAt: "2026-01-01T00:00:00+00:00",
     };
     const zeta: BookRecord = {
       ...book,
       id: "z",
       title: "Zeta",
+      readingStatus: "reading",
       lastOpenedAt: "2026-06-01T00:00:00+00:00",
     };
     setupInvoke({ list_books: () => [zeta, alpha] });
@@ -1131,7 +1141,7 @@ describe("LibraryView — curation", () => {
     expect(search.value).toBe("");
   });
 
-  it("applies the status filter to Continue reading too, and never lists finished books", async () => {
+  it("lists only books being read in Continue reading, narrowed by the status filter", async () => {
     localStorage.setItem(LIBRARY_SORT_KEY, "title");
     const openedReading: BookRecord = {
       ...book,
@@ -1155,7 +1165,7 @@ describe("LibraryView — curation", () => {
       lastOpenedAt: "2026-07-01T00:00:00+00:00",
     };
     setupInvoke({ list_books: () => [openedReading, openedUnread, openedFinished] });
-    const { findByText, getByRole, getByText } = render(
+    const { findByText, getByRole, queryByText } = render(
       <LibraryView onOpenBook={() => {}} onOpenSettings={() => {}} />,
     );
     const recentsSection = (await findByText("继续阅读")).closest(
@@ -1163,65 +1173,68 @@ describe("LibraryView — curation", () => {
     ) as HTMLElement;
     expect(
       within(recentsSection).getAllByTitle(/^Opened/).map((el) => el.title),
-    ).toEqual(["Opened Reading", "Opened Unread"]);
+    ).toEqual(["Opened Reading"]);
 
-    getByRole("button", { name: /^在读/ }).click();
+    getByRole("button", { name: /^未读/ }).click();
 
     await waitFor(() => {
-      const section = getByText("继续阅读").closest("section") as HTMLElement;
-      expect(
-        within(section).getAllByTitle(/^Opened/).map((el) => el.title),
-      ).toEqual(["Opened Reading"]);
+      expect(queryByText("继续阅读")).toBeNull();
     });
   });
 
   it("sets a reading status from the card's status menu", async () => {
     setupInvoke({
-      update_book_curation: () => ({ ...book, readingStatus: "finished" }),
+      update_book_curation: () => ({ ...book, readingStatus: "paused" }),
     });
     const { findAllByText, getAllByRole, findByRole } = render(
       <LibraryView onOpenBook={() => {}} onOpenSettings={() => {}} />,
     );
     await findAllByText("Stored Title");
 
-    // A book with no status still offers the control (that is the only entry
-    // point to setting one).
-    fireEvent.pointerDown(getAllByRole("button", { name: "阅读状态: 未设置" })[0]);
-    (await findByRole("menuitem", { name: "已读" })).click();
+    fireEvent.pointerDown(getAllByRole("button", { name: "阅读状态: 未读" })[0]);
+    (await findByRole("menuitem", { name: "搁置" })).click();
 
     await waitFor(() => {
       expect(
         invokeMock.mock.calls.some(
           ([cmd, args]) =>
             cmd === "update_book_curation" &&
-            (args as { readingStatus?: string }).readingStatus === "finished" &&
+            (args as { readingStatus?: string }).readingStatus === "paused" &&
             (args as { starred?: unknown }).starred === null,
         ),
       ).toBe(true);
     });
   });
 
-  it("clears a reading status back to unset", async () => {
-    setupInvoke({
-      list_books: () => [{ ...book, readingStatus: "reading" }],
-      update_book_curation: () => ({ ...book }),
-    });
-    const { findAllByText, getAllByRole, findByRole } = render(
+  it("offers the four statuses and no way to unset one", async () => {
+    setupInvoke({ list_books: () => [{ ...book, readingStatus: "reading" }] });
+    const { findAllByText, getAllByRole, findAllByRole } = render(
       <LibraryView onOpenBook={() => {}} onOpenSettings={() => {}} />,
     );
     await findAllByText("Stored Title");
 
     fireEvent.pointerDown(getAllByRole("button", { name: "阅读状态: 在读" })[0]);
-    (await findByRole("menuitem", { name: "未设置" })).click();
+    const items = await findAllByRole("menuitem");
+    expect(items.map((item) => item.textContent)).toEqual(["未读", "在读", "搁置", "已读"]);
+  });
 
+  it("shows an On hold tab with its count", async () => {
+    setupInvoke({
+      list_books: () => [
+        { ...book, readingStatus: "paused" },
+        { ...book, id: "book-2", title: "Other", readingStatus: "reading" },
+      ],
+    });
+    const { findAllByText, getByRole, queryByText } = render(
+      <LibraryView onOpenBook={() => {}} onOpenSettings={() => {}} />,
+    );
+    await findAllByText("Stored Title");
+
+    const tab = getByRole("button", { name: /^搁置/ });
+    expect(tab.textContent).toContain("1");
+    tab.click();
     await waitFor(() => {
-      expect(
-        invokeMock.mock.calls.some(
-          ([cmd, args]) =>
-            cmd === "update_book_curation" &&
-            (args as { readingStatus?: string }).readingStatus === "",
-        ),
-      ).toBe(true);
+      expect(queryByText("Other")).toBeNull();
     });
   });
 });

@@ -19,6 +19,13 @@ export type DeviceId = string;
 export interface BookMetadataSync {
   title: string;
   author: string;
+  /**
+   * The Book's Reading status. Ordered by its own `statusUpdatedAt`, not by
+   * `bookUpdatedAt` like the rest of the metadata — see `mergeStatus`.
+   */
+  readingStatus?: string;
+  /** Absent on a status backfilled from progress. */
+  statusUpdatedAt?: string;
   [key: string]: unknown;
 }
 
@@ -232,6 +239,54 @@ function mergeAnnotations(
   };
 }
 
+/** How far along a status is; ranks the untimestamped (backfilled) case. */
+const STATUS_RANK: Record<string, number> = {
+  unread: 0,
+  reading: 1,
+  paused: 1,
+  finished: 2,
+};
+
+/**
+ * Pick the Reading status, independently of the metadata ordering, so a
+ * status change on one device and a title edit on another both survive:
+ *
+ * 1. Both timestamped: the newer status wins.
+ * 2. One timestamped: it wins — a reader's choice (or an automatic
+ *    transition) beats a backfill.
+ * 3. Neither: the further-along status wins, so two devices that backfilled
+ *    from different local progress converge. Ties fall back to the
+ *    metadata-newer side.
+ *
+ * Every rule ends in a value comparison, so both merge orders agree.
+ */
+function mergeStatus(
+  local: BookMetadataSync,
+  remote: BookMetadataSync,
+  localRevision: string,
+  remoteRevision: string,
+): Pick<BookMetadataSync, "readingStatus" | "statusUpdatedAt"> {
+  const pick = (side: BookMetadataSync) => ({
+    readingStatus: side.readingStatus,
+    statusUpdatedAt: side.statusUpdatedAt,
+  });
+  if (!local.readingStatus) return pick(remote);
+  if (!remote.readingStatus) return pick(local);
+  const localTime = local.statusUpdatedAt ?? "";
+  const remoteTime = remote.statusUpdatedAt ?? "";
+  if (localTime !== remoteTime) {
+    // Covers rules 1 and 2: an absent timestamp sorts before any real one.
+    return pick(localTime > remoteTime ? local : remote);
+  }
+  const localRank = STATUS_RANK[local.readingStatus] ?? 0;
+  const remoteRank = STATUS_RANK[remote.readingStatus] ?? 0;
+  if (localRank !== remoteRank) return pick(localRank > remoteRank ? local : remote);
+  if (localRevision !== remoteRevision) {
+    return pick(localRevision > remoteRevision ? local : remote);
+  }
+  return pick(local.readingStatus >= remote.readingStatus ? local : remote);
+}
+
 function mergeBooks(
   bookId: string,
   local: SyncedBook,
@@ -251,8 +306,16 @@ function mergeBooks(
   // older version keeps falling back to activity on the next merge instead of
   // freezing that activity as an edit time.
   const mergedBookUpdatedAt = maxTime(local.bookUpdatedAt ?? "", remote.bookUpdatedAt ?? "");
+  const metadata: BookMetadataSync = {
+    ...olderMetadata,
+    ...newerMetadata,
+    ...mergeStatus(local.metadata, remote.metadata, localRevision, remoteRevision),
+  };
+  // Keep absent fields absent rather than present-and-undefined.
+  if (metadata.readingStatus === undefined) delete metadata.readingStatus;
+  if (metadata.statusUpdatedAt === undefined) delete metadata.statusUpdatedAt;
   return {
-    metadata: { ...olderMetadata, ...newerMetadata },
+    metadata,
     position: mergePosition(local.position, remote.position),
     annotations: mergeAnnotations(
       local.annotations,

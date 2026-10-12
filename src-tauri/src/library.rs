@@ -41,9 +41,13 @@ const MAX_FONT_FAMILY_CHARS: usize = 128;
 const VALID_THEMES: [&str; 3] = ["light", "dark", "sepia"];
 const VALID_PAGE_MARGINS: [&str; 3] = ["narrow", "normal", "wide"];
 const VALID_TEXT_ALIGNS: [&str; 2] = ["start", "justify"];
-/// Reader-assigned reading statuses. Absent is distinct from `unread`, which is
-/// an explicit choice.
-const VALID_READING_STATUSES: [&str; 3] = ["unread", "reading", "finished"];
+/// Every Book carries one of these. Records written before statuses were
+/// always present are backfilled on load (see `backfilled_reading_status`).
+const VALID_READING_STATUSES: [&str; 4] = ["unread", "reading", "paused", "finished"];
+/// Progress at or past this counts as "at the end": the backfill marks such a
+/// Book finished, and the reader offers "Mark as finished" there. Mirrored by
+/// `FINISH_FRACTION` in `src/lib/library-shelf.ts`.
+const FINISH_FRACTION: f64 = 0.98;
 static OPERATION_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Deleted books and their Sessions stay recoverable in the local trash for
@@ -288,15 +292,23 @@ pub struct BookRecord {
         skip_serializing_if = "Option::is_none"
     )]
     pub updated_at: Option<String>,
-    /// Reader-assigned curation. Absent means the reader has not curated the
-    /// book; `unread` is an explicit choice rather than a default. Never
-    /// derived from `last_fraction`.
+    /// The Book's Reading status. Optional only so files from before it was
+    /// always present still parse; `read_library` fills it in on load.
     #[serde(
         rename = "readingStatus",
         default,
         skip_serializing_if = "Option::is_none"
     )]
     pub reading_status: Option<String>,
+    /// Last status write (manual or automatic). Status orders on this in the
+    /// sync merge instead of `updated_at`, so a status change and a metadata
+    /// edit on different devices both survive. Absent on a backfilled status.
+    #[serde(
+        rename = "statusUpdatedAt",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub status_updated_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub starred: Option<bool>,
 }
@@ -337,6 +349,8 @@ pub struct BookOpenContext {
     pub last_reader_mode: Option<String>,
     #[serde(rename = "lastLayout", skip_serializing_if = "Option::is_none")]
     pub last_layout: Option<ReaderLayout>,
+    #[serde(rename = "readingStatus")]
+    pub reading_status: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -490,6 +504,10 @@ struct BookPlaceholder {
     last_fraction: Option<f64>,
     #[serde(rename = "lastCfi", default, skip_serializing_if = "Option::is_none")]
     last_cfi: Option<String>,
+    #[serde(rename = "readingStatus", default, skip_serializing_if = "Option::is_none")]
+    reading_status: Option<String>,
+    #[serde(rename = "statusUpdatedAt", default, skip_serializing_if = "Option::is_none")]
+    status_updated_at: Option<String>,
 }
 
 impl BookPlaceholder {
@@ -524,7 +542,10 @@ impl BookPlaceholder {
             content_version: None,
             cached: false,
             updated_at: None,
-            reading_status: None,
+            reading_status: Some(self.reading_status.clone().unwrap_or_else(|| {
+                backfilled_reading_status(self.last_fraction).to_string()
+            })),
+            status_updated_at: self.status_updated_at.clone(),
             starred: None,
         })
     }
@@ -621,6 +642,7 @@ impl LibraryStore {
     /// A synced book whose EPUB has not been downloaded to this device yet.
     /// Placeholders live as per-book sidecar files (library.json records
     /// always have real files); the sync layer merges them into list output.
+    #[allow(clippy::too_many_arguments)]
     pub fn save_placeholder(
         &self,
         book_id: &str,
@@ -628,6 +650,8 @@ impl LibraryStore {
         author: &str,
         last_fraction: Option<f64>,
         last_cfi: Option<String>,
+        reading_status: Option<String>,
+        status_updated_at: Option<String>,
     ) -> AppResult<()> {
         validate_book_id(book_id)?;
         let _guard = self.transaction()?;
@@ -637,6 +661,8 @@ impl LibraryStore {
             author: author.to_string(),
             last_fraction,
             last_cfi,
+            reading_status,
+            status_updated_at,
         };
         let dir = self.book_dir(book_id)?;
         std::fs::create_dir_all(&dir).map_err(|error| {
@@ -756,7 +782,8 @@ impl LibraryStore {
             cached: true,
             // A freshly downloaded EPUB has no local edit of its own yet.
             updated_at: None,
-            reading_status: None,
+            reading_status: placeholder.as_ref().and_then(|p| p.reading_status.clone()),
+            status_updated_at: placeholder.as_ref().and_then(|p| p.status_updated_at.clone()),
             starred: None,
         };
         library.books.push(record);
@@ -827,7 +854,17 @@ impl LibraryStore {
         require_real_directory(&self.books_root(), "books")?;
         require_real_directory(&self.trash_root(), "library trash")?;
         require_real_directory(&self.sessions_root(), "sessions")?;
-        read_library_file(&self.root, &self.library_path())
+        let mut data = read_library_file(&self.root, &self.library_path())?;
+        // Records from before every Book had a status get one from their
+        // progress. Every write goes through here, so the first write after
+        // an upgrade persists the backfill; until then it recomputes the same
+        // values from unchanged progress.
+        for book in data.books.iter_mut() {
+            if book.reading_status.is_none() {
+                book.reading_status = Some(backfilled_reading_status(book.last_fraction).to_string());
+            }
+        }
+        Ok(data)
     }
 
     fn write_library(&self, data: &LibraryData) -> AppResult<()> {
@@ -953,7 +990,8 @@ impl LibraryStore {
                 last_layout: None,
                 cached: true,
                 updated_at: None,
-                reading_status: None,
+                reading_status: Some("unread".to_string()),
+                status_updated_at: None,
                 starred: None,
             });
             if let Err(error) = self.write_library(&library) {
@@ -1200,9 +1238,9 @@ impl LibraryStore {
         Ok(updated)
     }
 
-    /// Set or clear the reader's curation for a book. `None` leaves a field
-    /// alone (so a status-only write cannot clear a star), while an empty
-    /// `reading_status` clears the status.
+    /// Set the reader's curation for a book. `None` leaves a field alone, so a
+    /// status-only write cannot clear a star. A status write bumps
+    /// `status_updated_at`; a star write bumps `updated_at`.
     pub fn update_book_curation(
         &self,
         book_id: &str,
@@ -1211,9 +1249,9 @@ impl LibraryStore {
     ) -> AppResult<BookRecord> {
         validate_book_id(book_id)?;
         if let Some(status) = &reading_status {
-            if !status.is_empty() && !VALID_READING_STATUSES.contains(&status.as_str()) {
+            if !VALID_READING_STATUSES.contains(&status.as_str()) {
                 return Err(AppError::invalid_input(format!(
-                    "readingStatus must be empty or one of {}",
+                    "readingStatus must be one of {}",
                     VALID_READING_STATUSES.join(", ")
                 )));
             }
@@ -1228,16 +1266,42 @@ impl LibraryStore {
             .ok_or_else(|| AppError::book_not_found(book_id))?;
         {
             let record = &mut library.books[record_index];
+            let now = Utc::now().to_rfc3339();
             if let Some(status) = reading_status {
-                record.reading_status = if status.is_empty() { None } else { Some(status) };
+                record.reading_status = Some(status);
+                record.status_updated_at = Some(now.clone());
             }
             if starred.is_some() {
                 record.starred = starred;
+                // A star is a record edit: it orders against other devices' edits.
+                record.updated_at = Some(now);
             }
-            // Curation is an edit: it must order against other devices' edits.
-            record.updated_at = Some(Utc::now().to_rfc3339());
         }
         let updated = library.books[record_index].clone();
+        self.write_library(&library)?;
+        Ok(updated)
+    }
+
+    /// The reader started (or resumed) reading: an `unread` or `paused` Book
+    /// becomes `reading`. A no-op for `reading` and `finished`, so re-opening
+    /// a finished Book to look something up leaves it alone. Decided here
+    /// rather than in the frontend so it reads the stored status, not a copy
+    /// that may be stale.
+    pub fn mark_book_started(&self, book_id: &str) -> AppResult<BookRecord> {
+        validate_book_id(book_id)?;
+        let _guard = self.transaction()?;
+        let mut library = self.read_library()?;
+        let record = library
+            .books
+            .iter_mut()
+            .find(|book| book.id == book_id)
+            .ok_or_else(|| AppError::book_not_found(book_id))?;
+        if !matches!(record.reading_status.as_deref(), Some("unread") | Some("paused")) {
+            return Ok(record.clone());
+        }
+        record.reading_status = Some("reading".to_string());
+        record.status_updated_at = Some(Utc::now().to_rfc3339());
+        let updated = record.clone();
         self.write_library(&library)?;
         Ok(updated)
     }
@@ -1296,6 +1360,10 @@ impl LibraryStore {
             settings: record.settings.clone(),
             last_reader_mode: record.last_reader_mode.clone(),
             last_layout: record.last_layout.clone(),
+            reading_status: record
+                .reading_status
+                .clone()
+                .unwrap_or_else(|| backfilled_reading_status(record.last_fraction).to_string()),
         })
     }
 
@@ -2403,6 +2471,16 @@ fn restore_staged_book(staged: &Path, book_dir: &Path, original_error: &AppError
                 "Operation failed ({original_error}); failed to sync restored book directory: {rollback_error}"
             ))
         })
+}
+
+/// The status a Book without one gets from its progress: not started is
+/// `unread`, at the end is `finished`, anything between is `reading`.
+fn backfilled_reading_status(last_fraction: Option<f64>) -> &'static str {
+    match last_fraction {
+        Some(fraction) if fraction >= FINISH_FRACTION => "finished",
+        Some(fraction) if fraction > 0.0 => "reading",
+        _ => "unread",
+    }
 }
 
 fn write_new_library(root: &Path) -> AppResult<()> {
@@ -3558,6 +3636,15 @@ pub async fn update_book_curation(
 ) -> AppResult<BookRecord> {
     let store = store.inner().clone();
     run_blocking(move || store.update_book_curation(&book_id, reading_status, starred)).await
+}
+
+#[tauri::command]
+pub async fn mark_book_started(
+    store: tauri::State<'_, LibraryStore>,
+    book_id: String,
+) -> AppResult<BookRecord> {
+    let store = store.inner().clone();
+    run_blocking(move || store.mark_book_started(&book_id)).await
 }
 
 #[tauri::command]
@@ -5561,26 +5648,98 @@ mod tests {
             .update_book_curation(&id, None, Some(true))
             .expect("star");
         assert_eq!(starred.starred, Some(true));
-        assert_eq!(starred.reading_status, None);
+        assert_eq!(starred.reading_status.as_deref(), Some("unread"));
         assert!(starred.updated_at.is_some());
+        assert!(starred.status_updated_at.is_none());
 
         let status = store
-            .update_book_curation(&id, Some("reading".to_string()), None)
+            .update_book_curation(&id, Some("paused".to_string()), None)
             .expect("status");
         // A status-only write must not clear the star.
         assert_eq!(status.starred, Some(true));
-        assert_eq!(status.reading_status.as_deref(), Some("reading"));
+        assert_eq!(status.reading_status.as_deref(), Some("paused"));
+        // It orders on its own timestamp and leaves the record's alone.
+        assert!(status.status_updated_at.is_some());
+        assert_eq!(status.updated_at, starred.updated_at);
 
-        let cleared = store
-            .update_book_curation(&id, Some(String::new()), None)
-            .expect("clear");
-        assert_eq!(cleared.reading_status, None);
-        assert_eq!(cleared.starred, Some(true));
+        for invalid in ["", "skimmed"] {
+            let error = store
+                .update_book_curation(&id, Some(invalid.to_string()), None)
+                .expect_err("invalid status");
+            assert_eq!(error.code, AppErrorCode::InvalidInput);
+        }
+    }
 
-        let error = store
-            .update_book_curation(&id, Some("skimmed".to_string()), None)
-            .expect_err("invalid status");
-        assert_eq!(error.code, AppErrorCode::InvalidInput);
+    #[test]
+    fn imported_books_start_unread() {
+        let (_directory, store) = test_store();
+        let id = import_test_book(&store, Path::new("/source/fresh.epub"));
+        let book = store
+            .list_books()
+            .expect("list")
+            .into_iter()
+            .find(|book| book.id == id)
+            .expect("book");
+        assert_eq!(book.reading_status.as_deref(), Some("unread"));
+        assert!(book.status_updated_at.is_none());
+        assert_eq!(
+            store.get_book_open_context(&id).expect("context").reading_status,
+            "unread"
+        );
+    }
+
+    #[test]
+    fn books_without_a_status_are_backfilled_from_progress() {
+        assert_eq!(backfilled_reading_status(None), "unread");
+        assert_eq!(backfilled_reading_status(Some(0.0)), "unread");
+        assert_eq!(backfilled_reading_status(Some(0.01)), "reading");
+        assert_eq!(backfilled_reading_status(Some(0.979)), "reading");
+        assert_eq!(backfilled_reading_status(Some(FINISH_FRACTION)), "finished");
+        assert_eq!(backfilled_reading_status(Some(1.0)), "finished");
+
+        let (_directory, store) = test_store();
+        let id = import_test_book(&store, Path::new("/source/legacy.epub"));
+        store
+            .update_reading_state(&id, Some(0.5), None, None, None, None)
+            .expect("progress");
+        // Simulate a library.json written before every Book had a status.
+        let mut raw: serde_json::Value =
+            serde_json::from_slice(&fs::read(store.library_path()).expect("read")).expect("json");
+        raw["books"][0]
+            .as_object_mut()
+            .expect("record")
+            .remove("readingStatus");
+        fs::write(store.library_path(), serde_json::to_vec(&raw).expect("encode")).expect("write");
+
+        let book = &store.list_books().expect("list")[0];
+        assert_eq!(book.reading_status.as_deref(), Some("reading"));
+        assert!(book.status_updated_at.is_none());
+    }
+
+    #[test]
+    fn starting_a_book_moves_only_unread_and_paused_to_reading() {
+        let (_directory, store) = test_store();
+        let id = import_test_book(&store, Path::new("/source/start.epub"));
+
+        for (from, to) in [
+            ("unread", "reading"),
+            ("paused", "reading"),
+            ("reading", "reading"),
+            ("finished", "finished"),
+        ] {
+            let before = store
+                .update_book_curation(&id, Some(from.to_string()), None)
+                .expect("set");
+            let after = store.mark_book_started(&id).expect("start");
+            assert_eq!(after.reading_status.as_deref(), Some(to), "from {from}");
+            if from == to {
+                assert_eq!(after.status_updated_at, before.status_updated_at, "from {from}");
+            }
+            assert_eq!(after.updated_at, before.updated_at, "from {from}");
+        }
+
+        let error = store.mark_book_started("missing").expect_err("unknown book");
+        assert_eq!(error.code, AppErrorCode::BookNotFound);
     }
 
     #[test]
@@ -6615,6 +6774,7 @@ mod cached_flag_tests {
             cached: true,
             updated_at: None,
             reading_status: None,
+            status_updated_at: None,
             starred: None,
         };
         let json = serde_json::to_string(&real).expect("serialize");

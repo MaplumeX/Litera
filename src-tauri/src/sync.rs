@@ -56,13 +56,22 @@ pub struct SyncBookMetadata {
     pub language: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub series: Option<String>,
-    /// Reader-assigned curation, synced like the rest of the metadata.
+    /// The Book's Reading status. Unlike the rest of the metadata it orders
+    /// on its own `statusUpdatedAt`, which travels beside it so the pair stays
+    /// together through merges by older versions.
     #[serde(
         rename = "readingStatus",
         default,
         skip_serializing_if = "Option::is_none"
     )]
     pub reading_status: Option<String>,
+    /// Absent on a backfilled status, which any timestamped status beats.
+    #[serde(
+        rename = "statusUpdatedAt",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub status_updated_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub starred: Option<bool>,
 }
@@ -335,6 +344,7 @@ pub fn export_local_manifest(
             language: book.language.clone(),
             series: book.series.clone(),
             reading_status: book.reading_status.clone(),
+            status_updated_at: book.status_updated_at.clone(),
             starred: book.starred,
         };
         let position = match (&book.last_fraction, &book.last_cfi) {
@@ -423,7 +433,12 @@ pub fn apply_merged_manifest(
             record.publisher = synced.metadata.publisher.clone();
             record.language = synced.metadata.language.clone();
             record.series = synced.metadata.series.clone();
-            record.reading_status = synced.metadata.reading_status.clone();
+            // A Manifest from an older version may carry no status; the
+            // local one (backfilled on load if need be) then stands.
+            if synced.metadata.reading_status.is_some() {
+                record.reading_status = synced.metadata.reading_status.clone();
+                record.status_updated_at = synced.metadata.status_updated_at.clone();
+            }
             record.starred = synced.metadata.starred;
             if !synced.book_updated_at.is_empty() {
                 record.updated_at = Some(synced.book_updated_at.clone());
@@ -459,6 +474,8 @@ pub fn apply_merged_manifest(
                 &synced.metadata.author,
                 synced.position.as_ref().map(|p| p.fraction),
                 synced.position.as_ref().map(|p| p.cfi.clone()),
+                synced.metadata.reading_status.clone(),
+                synced.metadata.status_updated_at.clone(),
             )?;
         }
     }
@@ -512,6 +529,8 @@ mod placeholder_tests {
                 "Author",
                 Some(0.25),
                 Some("epubcfi(/4)".to_string()),
+                None,
+                None,
             )
             .expect("save placeholder");
 
@@ -520,6 +539,9 @@ mod placeholder_tests {
         assert_eq!(placeholders[0].id, "remotebook1");
         assert_eq!(placeholders[0].title, "Remote Book");
         assert_eq!(placeholders[0].last_fraction, Some(0.25));
+        // No synced status: backfilled from progress, without a timestamp.
+        assert_eq!(placeholders[0].reading_status.as_deref(), Some("reading"));
+        assert!(placeholders[0].status_updated_at.is_none());
         // Uncached state is observable via the missing epub file.
         assert!(!Path::new(&placeholders[0].file_path).exists());
     }
@@ -533,6 +555,8 @@ mod placeholder_tests {
                 "remotebook1",
                 "Remote Book",
                 "Author",
+                None,
+                None,
                 None,
                 None,
             )
@@ -570,7 +594,7 @@ mod tests {
         (directory, store)
     }
 
-    fn synced_book(title: &str, fraction: f64, cfi: &str) -> SyncedBookData {
+    pub(super) fn synced_book(title: &str, fraction: f64, cfi: &str) -> SyncedBookData {
         SyncedBookData {
             metadata: SyncBookMetadata {
                 title: title.to_string(),
@@ -579,8 +603,7 @@ mod tests {
                 publisher: None,
                 language: None,
                 series: None,
-                reading_status: None,
-                starred: None,
+                reading_status: None,                status_updated_at: None,                starred: None,
             },
             position: Some(SyncPositionData {
                 updated_at: "2026-01-01T00:00:00Z".to_string(),
@@ -691,8 +714,7 @@ mod tests {
                             publisher: None,
                             language: None,
                             series: None,
-                            reading_status: None,
-                            starred: None,
+                            reading_status: None,                            status_updated_at: None,                            starred: None,
                         },
                         position: Some(SyncPositionData {
                             updated_at: "2026-01-01T00:00:00Z".to_string(),
@@ -1462,8 +1484,7 @@ mod tombstone_tests {
                         publisher: None,
                         language: None,
                         series: None,
-                        reading_status: None,
-                        starred: None,
+                        reading_status: None,                        status_updated_at: None,                        starred: None,
                     },
                     position: None,
                     annotations: AnnotationsFile::empty(),
@@ -1512,10 +1533,13 @@ mod tombstone_tests {
         assert_eq!(metadata.reading_status.as_deref(), Some("finished"));
         assert_eq!(metadata.starred, Some(true));
 
+        assert!(metadata.status_updated_at.is_some());
+
         // A merged manifest from another device overwrites both fields.
         let mut merged = manifest.clone();
         let entry = merged.books.get_mut(&result.book_id).expect("book");
         entry.metadata.reading_status = Some("reading".to_string());
+        entry.metadata.status_updated_at = Some("2030-01-01T00:00:00Z".to_string());
         entry.metadata.starred = Some(false);
         apply_merged_manifest(&store, &merged, &SyncManifestData::default()).expect("apply");
 
@@ -1526,7 +1550,68 @@ mod tombstone_tests {
             .find(|book| book.id == result.book_id)
             .expect("record");
         assert_eq!(record.reading_status.as_deref(), Some("reading"));
+        assert_eq!(record.status_updated_at.as_deref(), Some("2030-01-01T00:00:00Z"));
         assert_eq!(record.starred, Some(false));
+        drop(dir);
+    }
+
+    #[test]
+    fn a_manifest_without_a_status_keeps_the_local_one() {
+        let (dir, store) = temp_store();
+        let result = store
+            .import_bytes(
+                Path::new("/source/statusless.epub"),
+                "book.epub".to_string(),
+                b"statusless".to_vec(),
+            )
+            .expect("import");
+        store
+            .update_book_curation(&result.book_id, Some("paused".to_string()), None)
+            .expect("curate");
+
+        let sync_state = read_sync_state(dir.path()).expect("state");
+        let mut merged = export_local_manifest(&store, &sync_state).expect("export");
+        // An older version's Manifest entry has no status at all.
+        let entry = merged.books.get_mut(&result.book_id).expect("book");
+        entry.metadata.reading_status = None;
+        entry.metadata.status_updated_at = None;
+        apply_merged_manifest(&store, &merged, &SyncManifestData::default()).expect("apply");
+
+        let library = store.read_library_public().expect("library");
+        assert_eq!(library.books[0].reading_status.as_deref(), Some("paused"));
+        assert!(library.books[0].status_updated_at.is_some());
+        drop(dir);
+    }
+
+    #[test]
+    fn placeholders_carry_the_synced_status_into_the_downloaded_book() {
+        let (dir, store) = temp_store();
+        let mut synced = super::tests::synced_book("Remote Book", 0.5, "epubcfi(/5)");
+        synced.metadata.reading_status = Some("paused".to_string());
+        synced.metadata.status_updated_at = Some("2026-02-01T00:00:00Z".to_string());
+        let merged = SyncManifestData {
+            schema_version: 1,
+            books: [("remotebook1".to_string(), synced)].into_iter().collect(),
+            tombstones: Vec::new(),
+            preferences: None,
+            provider: None,
+        };
+        apply_merged_manifest(&store, &merged, &SyncManifestData::default()).expect("apply");
+
+        let placeholder = &store.list_placeholders().expect("placeholders")[0];
+        assert_eq!(placeholder.reading_status.as_deref(), Some("paused"));
+
+        store
+            .install_synced_book("remotebook1", b"remote-epub".to_vec())
+            .expect("install");
+        let library = store.read_library_public().expect("library");
+        let record = library
+            .books
+            .iter()
+            .find(|book| book.id == "remotebook1")
+            .expect("record");
+        assert_eq!(record.reading_status.as_deref(), Some("paused"));
+        assert_eq!(record.status_updated_at.as_deref(), Some("2026-02-01T00:00:00Z"));
         drop(dir);
     }
 
@@ -1628,7 +1713,7 @@ mod tombstone_tests {
     fn apply_removes_a_tombstoned_placeholder() {
         let (_dir, store) = temp_store();
         store
-            .save_placeholder("remotebook1", "Remote Book", "Author", None, None)
+            .save_placeholder("remotebook1", "Remote Book", "Author", None, None, None, None)
             .expect("placeholder");
 
         let merged = SyncManifestData {
@@ -1673,8 +1758,7 @@ mod tombstone_tests {
                         publisher: None,
                         language: None,
                         series: None,
-                        reading_status: None,
-                        starred: None,
+                        reading_status: None,                        status_updated_at: None,                        starred: None,
                     },
                     position: None,
                     annotations: AnnotationsFile {
@@ -1743,8 +1827,7 @@ mod tombstone_tests {
                         publisher: None,
                         language: None,
                         series: None,
-                        reading_status: None,
-                        starred: None,
+                        reading_status: None,                        status_updated_at: None,                        starred: None,
                     },
                     position: None,
                     annotations: AnnotationsFile {
@@ -1776,8 +1859,7 @@ mod tombstone_tests {
                         publisher: None,
                         language: None,
                         series: None,
-                        reading_status: None,
-                        starred: None,
+                        reading_status: None,                        status_updated_at: None,                        starred: None,
                     },
                     position: None,
                     annotations: base_annotations,
@@ -2320,7 +2402,7 @@ mod file_sync_tests {
     fn list_books_renders_placeholders_as_uncached_and_promotes_on_install() {
         let (_dir, store) = temp_store();
         store
-            .save_placeholder("remotebook1", "Remote Book", "Author", Some(0.25), None)
+            .save_placeholder("remotebook1", "Remote Book", "Author", Some(0.25), None, None, None)
             .expect("placeholder");
 
         let books = store.list_books().expect("list");
