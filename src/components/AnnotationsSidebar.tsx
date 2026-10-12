@@ -60,7 +60,7 @@ export function AnnotationsSidebar({
               <div key={bookmark.id} className="flex items-start gap-0.5 px-1">
                 <button
                   type="button"
-                  className="min-w-0 flex-1 truncate rounded px-2 py-1 text-left text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                  className="min-w-0 flex-1 truncate rounded-md px-2 py-1 text-left text-sm text-muted-foreground transition-colors duration-150 hover:bg-accent/70 motion-reduce:transition-none hover:text-accent-foreground"
                   title={bookmarkLabel(bookmark)}
                   onClick={() => onJumpBookmark(bookmark)}
                 >
@@ -92,7 +92,7 @@ export function AnnotationsSidebar({
               <div key={highlight.id} className="flex items-start gap-0.5 px-1">
                 <button
                   type="button"
-                  className="min-w-0 flex-1 rounded px-2 py-1 text-left text-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                  className="min-w-0 flex-1 rounded-md px-2 py-1 text-left text-sm text-muted-foreground transition-colors duration-150 hover:bg-accent/70 motion-reduce:transition-none hover:text-accent-foreground"
                   title={highlight.excerpt}
                   onClick={() => onJumpHighlight(highlight)}
                 >

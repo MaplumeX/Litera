@@ -76,9 +76,9 @@ export function TrashDialog({
             {entries.map((entry) => (
               <li
                 key={entry.entryId}
-                className="flex items-center gap-3 rounded-md border p-2"
+                className="flex items-center gap-3 rounded-lg border p-2"
               >
-                <span className="h-14 w-10 shrink-0 overflow-hidden rounded-sm border bg-muted">
+                <span className="h-14 w-10 shrink-0 overflow-hidden rounded-cover bg-muted shadow-cover">
                   <TrashCover entry={entry} />
                 </span>
                 <span className="min-w-0 flex-1">

@@ -146,7 +146,7 @@ export function FootnotePopup({
         data-testid="footnote-popup"
         role="dialog"
         aria-label={t("reader.footnoteDialog")}
-        className="fixed z-50 w-[26rem] max-w-[calc(100vw-1rem)] overflow-hidden rounded-md border bg-popover text-popover-foreground"
+        className="fixed z-50 w-[26rem] max-w-[calc(100vw-1rem)] overflow-hidden rounded-lg border bg-popover text-popover-foreground shadow-float"
         style={{
           left: pos?.left ?? x ?? 0,
           top: pos ? pos.top : (y ?? 0) + POPUP_GAP,

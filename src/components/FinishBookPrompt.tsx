@@ -17,7 +17,7 @@ export function FinishBookPrompt({
   return (
     <div
       role="status"
-      className="absolute bottom-4 left-1/2 z-10 flex -translate-x-1/2 items-center gap-2 rounded-lg border bg-background/95 py-1.5 pr-1.5 pl-3 text-sm shadow-md"
+      className="absolute bottom-4 left-1/2 z-10 flex -translate-x-1/2 items-center gap-2 rounded-lg border bg-background/95 py-1.5 pr-1.5 pl-3 text-sm shadow-float"
     >
       <span>{t("reader.finishPrompt")}</span>
       <Button size="sm" onClick={onMarkFinished}>

@@ -58,7 +58,7 @@ export function ReaderProgressBar({
   return (
     <div
       data-testid="reader-progress-bar"
-      className="flex h-9 shrink-0 items-center gap-1 border-t px-2"
+      className="flex h-11 shrink-0 items-center gap-1 px-2 pb-2"
     >
       <Button
         type="button"
@@ -75,7 +75,8 @@ export function ReaderProgressBar({
       </span>
       <div
         ref={trackRef}
-        className="relative flex h-9 min-w-0 flex-1 cursor-pointer touch-none select-none items-center"
+        className="group/progress relative flex h-9 min-w-0 flex-1 cursor-pointer touch-none select-none items-center"
+        data-dragging={draftFraction != null || undefined}
         aria-label={t("reader.progress")}
         onPointerDown={(e) => {
           if (e.button !== 0) return;
@@ -113,13 +114,14 @@ export function ReaderProgressBar({
         {previewText && (
           <div
             data-testid="reader-progress-preview"
-            className="pointer-events-none absolute top-0.5 z-10 -translate-x-1/2 whitespace-nowrap rounded bg-popover px-1.5 py-0.5 text-[10px] text-popover-foreground"
+            className="pointer-events-none absolute bottom-full z-10 mb-1 -translate-x-1/2 whitespace-nowrap rounded-md border bg-popover px-2 py-1 text-[11px] font-medium text-popover-foreground tabular-nums shadow-float"
             style={{ left: `${Math.round((previewFrac ?? visualFraction) * 100)}%` }}
           >
             {previewText}
           </div>
         )}
-        <div className="relative h-0.5 w-full rounded-full bg-muted">
+        {/* Rail thickens on hover / drag so the seek target is easier to hit. */}
+        <div className="relative h-1 w-full overflow-hidden rounded-full bg-foreground/10 transition-[height] duration-150 group-hover/progress:h-1.5 group-data-[dragging]/progress:h-1.5 motion-reduce:transition-none">
           <div
             className={cn(
               "h-full rounded-full bg-primary",
@@ -128,22 +130,23 @@ export function ReaderProgressBar({
             )}
             style={{ width: `${visualPct}%` }}
           />
+          {/* Chapter boundaries cut the rail into segments. */}
           {ticks.map((tick, i) => (
             <div
               key={`${tick}-${i}`}
               data-testid="reader-progress-tick"
-              className="pointer-events-none absolute top-1/2 h-1.5 w-px -translate-x-1/2 -translate-y-1/2 bg-muted-foreground/50"
+              className="pointer-events-none absolute inset-y-0 w-0.5 -translate-x-1/2 bg-background"
               style={{ left: `${tick * 100}%` }}
             />
           ))}
-          <div
-            className={cn(
-              "pointer-events-none absolute top-1/2 size-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary",
-              draftFraction != null && "scale-125",
-            )}
-            style={{ left: `${visualPct}%` }}
-          />
         </div>
+        <div
+          className={cn(
+            "pointer-events-none absolute top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 scale-75 rounded-full border-2 border-primary bg-background opacity-0 shadow-soft transition-[opacity,scale] duration-150 group-hover/progress:scale-100 group-hover/progress:opacity-100 motion-reduce:transition-none",
+            draftFraction != null && "scale-110 opacity-100",
+          )}
+          style={{ left: `${visualPct}%` }}
+        />
       </div>
       <span className="w-10 shrink-0 text-right text-xs text-muted-foreground tabular-nums">
         {visualPct}%

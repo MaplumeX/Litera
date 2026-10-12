@@ -41,7 +41,7 @@ export function ReaderTtsBar({
   return (
     <div
       data-testid="reader-tts-bar"
-      className="flex h-9 shrink-0 items-center gap-2 border-t px-2"
+      className="mx-2 flex h-9 shrink-0 items-center gap-2 rounded-lg bg-muted/70 px-2"
     >
       <Button
         type="button"

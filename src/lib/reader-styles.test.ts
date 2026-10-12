@@ -449,12 +449,12 @@ describe("footnotePopupCss", () => {
   it("wins over generateStylesCss text-indent and dark background when appended", () => {
     const combined = `${generateStylesCss(DARK_STYLES)}\n${footnotePopupCss()}`;
     expect(combined).toContain("text-indent: 2em !important");
-    expect(combined).toContain("background: #1a1a1a !important");
+    expect(combined).toContain("background: #1a1816 !important");
     expect(combined.lastIndexOf("text-indent: 0 !important")).toBeGreaterThan(
       combined.lastIndexOf("text-indent: 2em !important"),
     );
     expect(combined.lastIndexOf("background: transparent !important")).toBeGreaterThan(
-      combined.lastIndexOf("background: #1a1a1a !important"),
+      combined.lastIndexOf("background: #1a1816 !important"),
     );
   });
 });

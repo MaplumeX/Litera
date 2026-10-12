@@ -58,7 +58,7 @@ export function HighlightEditor({
     <div
       className={cn(
         "fixed z-50 w-64 -translate-x-1/2 -translate-y-full",
-        "rounded-md border bg-popover p-2 text-popover-foreground",
+        "rounded-lg border bg-popover p-2 text-popover-foreground shadow-float",
       )}
       style={{ left: `${x}px`, top: `${y - 8}px` }}
       role="group"

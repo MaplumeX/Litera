@@ -288,7 +288,7 @@ describe("reader / agent mode", () => {
     expect(screen.getByRole("button", { name: "新建会话" })).toBeTruthy();
   });
 
-  it("paints a hairline on the visible right-hand cell only", async () => {
+  it("floats the docked chat as a card and hairlines the Agent-mode book cell", async () => {
     const screen = await openReader();
     const bookCell = screen.getByTestId("reader-book-cell");
     const chatCell = screen.getByTestId("reader-chat-cell");
@@ -298,13 +298,15 @@ describe("reader / agent mode", () => {
 
     fireEvent.click(screen.getByLabelText("显示对话"));
     expect(chatCell.hidden).toBe(false);
-    expect(chatCell.className).toContain("border-l");
+    expect(chatCell.className).not.toContain("border-l");
+    expect(screen.getByTestId("reader-chat-card").className).toContain("rounded-xl");
     expect(bookCell.className).not.toContain("border-l");
 
     fireEvent.click(screen.getByLabelText("切换到 Agent 模式"));
     expect(bookCell.hidden).toBe(false);
     expect(bookCell.className).toContain("border-l");
     expect(chatCell.className).not.toContain("border-l");
+    expect(screen.getByTestId("reader-chat-card").className).not.toContain("rounded-xl");
 
     fireEvent.click(screen.getByLabelText("隐藏书籍"));
     expect(bookCell.hidden).toBe(true);

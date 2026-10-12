@@ -141,8 +141,8 @@ export function BookCard({
       <button
         type="button"
         className={cn(
-          "relative aspect-[2/3] w-full overflow-hidden rounded-md border bg-muted transition-[border-color,transform,opacity] duration-200 hover:border-foreground/25 active:scale-[0.98] motion-reduce:transition-none motion-reduce:active:scale-100",
-          selectMode && selected && "ring-1 ring-primary",
+          "relative aspect-[2/3] w-full overflow-hidden rounded-cover bg-muted shadow-cover transition-[box-shadow,transform,opacity] duration-200 hover:shadow-cover-hover active:scale-[0.98] motion-reduce:transition-none motion-reduce:active:scale-100",
+          selectMode && selected && "ring-2 ring-primary ring-offset-2 ring-offset-background",
         )}
         onClick={() => {
           if (selectMode) {
@@ -306,7 +306,7 @@ export function BookListRow({
   const row = (
     <div
       className={cn(
-        "group flex items-center gap-3 rounded-md border px-2 py-2 transition-colors hover:bg-muted/40",
+        "group flex items-center gap-3 rounded-lg px-2 py-2 transition-colors hover:bg-muted/70",
         selectMode && selected && "ring-1 ring-primary",
       )}
     >
@@ -335,7 +335,7 @@ export function BookListRow({
             <Check className="size-3" />
           </span>
         )}
-        <span className="h-14 w-10 shrink-0 overflow-hidden rounded-sm border bg-muted">
+        <span className="h-14 w-10 shrink-0 overflow-hidden rounded-cover bg-muted shadow-cover">
           <BookCoverImage book={book} coverRev={coverRev} small />
         </span>
         <span className="min-w-0 flex-1">
@@ -441,13 +441,13 @@ export function BookResumeTile({
       <button
         type="button"
         title={book.title}
-        className="flex min-w-0 items-center gap-3 rounded-md border p-2 text-left transition-colors hover:bg-muted/40 disabled:opacity-60 motion-reduce:transition-none"
+        className="flex min-w-0 items-center gap-3 rounded-lg bg-card p-2.5 text-left shadow-soft transition-colors hover:bg-muted/70 disabled:opacity-60 motion-reduce:transition-none"
         onClick={() => {
           void onOpen(book.id);
         }}
         disabled={opening || openDisabled}
       >
-        <span className="h-14 w-10 shrink-0 overflow-hidden rounded-sm border bg-muted">
+        <span className="h-14 w-10 shrink-0 overflow-hidden rounded-cover bg-muted shadow-cover">
           <BookCoverImage book={book} coverRev={coverRev} small />
         </span>
         <span className="min-w-0 flex-1">

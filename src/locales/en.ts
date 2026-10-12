@@ -33,6 +33,7 @@ export const en: { [K in MessageKey]: string } = {
   "reader.annotations": "Annotations",
   "reader.closeAnnotations": "Close annotations",
   "reader.highlight": "Highlight",
+  "reader.highlightIn": "Highlight in {color}",
   "reader.askAgent": "Ask agent",
   "reader.closeFootnote": "Close footnote",
   "reader.footnoteDialog": "Footnote",

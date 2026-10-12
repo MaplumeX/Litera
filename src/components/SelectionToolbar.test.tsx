@@ -10,17 +10,30 @@ afterEach(() => {
 });
 
 describe("SelectionToolbar", () => {
-  it("offers highlight then ask-agent", () => {
+  it("offers one-click color highlights then ask-agent", () => {
     const onHighlight = vi.fn();
     const onAskAgent = vi.fn();
-    const { getByText, getAllByRole } = render(
-      <SelectionToolbar x={10} y={20} onHighlight={onHighlight} onAskAgent={onAskAgent} />,
+    const { getByLabelText, getByText, getAllByRole } = render(
+      <SelectionToolbar
+        x={10}
+        y={20}
+        lastColor="yellow"
+        onHighlight={onHighlight}
+        onAskAgent={onAskAgent}
+      />,
     );
     const buttons = getAllByRole("button");
-    expect(buttons.map((button) => button.textContent)).toEqual(["高亮", "问 agent"]);
-    fireEvent.click(getByText("高亮"));
+    expect(buttons.map((button) => button.getAttribute("aria-label") ?? button.textContent)).toEqual([
+      "用黄色高亮",
+      "用绿色高亮",
+      "用蓝色高亮",
+      "用粉色高亮",
+      "用橙色高亮",
+      "问 agent",
+    ]);
+    fireEvent.click(getByLabelText("用蓝色高亮"));
     fireEvent.click(getByText("问 agent"));
-    expect(onHighlight).toHaveBeenCalledOnce();
+    expect(onHighlight).toHaveBeenCalledWith("blue");
     expect(onAskAgent).toHaveBeenCalledOnce();
   });
 });

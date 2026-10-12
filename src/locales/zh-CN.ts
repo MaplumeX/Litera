@@ -31,6 +31,7 @@ export const zhCN = {
   "reader.annotations": "标注",
   "reader.closeAnnotations": "关闭标注",
   "reader.highlight": "高亮",
+  "reader.highlightIn": "用{color}高亮",
   "reader.askAgent": "问 agent",
   "reader.closeFootnote": "关闭脚注",
   "reader.footnoteDialog": "脚注",

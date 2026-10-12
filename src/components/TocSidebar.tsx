@@ -57,10 +57,10 @@ function TocNode({
       <div
         ref={rowRef}
         className={cn(
-          "flex w-full items-center rounded px-2 py-1.5 text-sm",
+          "relative flex w-full items-center rounded-md px-2 py-1.5 text-sm transition-colors duration-150 motion-reduce:transition-none",
           isCurrent
-            ? "bg-accent font-medium text-accent-foreground"
-            : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+            ? "bg-accent font-medium text-accent-foreground before:absolute before:inset-y-1.5 before:left-0 before:w-0.5 before:rounded-full before:bg-primary"
+            : "text-muted-foreground hover:bg-accent/70 hover:text-accent-foreground",
         )}
         style={{ paddingLeft: `${(path.length - 1) * 12 + 12}px` }}
       >
@@ -147,7 +147,7 @@ export function TocSidebar({
           </Button>
         </div>
       </div>
-      <div ref={listRef} className="flex-1 overflow-y-auto py-2">
+      <div ref={listRef} className="flex-1 overflow-y-auto px-1.5 py-2">
         {toc.length === 0 ? (
           <div className="px-4 py-2 text-xs text-muted-foreground">{t("toc.empty")}</div>
         ) : (
