@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { createFauxCore, fauxAssistantMessage } from "@earendil-works/pi-ai";
-import { LiteraAgentRuntime, type RuntimeConfig } from "./embedded-runtime";
+import { createFauxCore, fauxAssistantMessage, getCurrentSystemPrompt } from "@earendil-works/pi-ai";
+import { LiteraAgentRuntime, SYSTEM_PROMPT, type RuntimeConfig } from "./embedded-runtime";
 import type { BookContentPort } from "@/agent/book/book-content";
 import type { SessionPort } from "@/agent/sessions/session-port";
 import type { DecodedPiSession, PiSessionEntry } from "@/agent/sessions/pi-session";
@@ -46,16 +46,21 @@ interface Harness {
   events: AgentEvent[];
   appends: Array<{ expected: string | null; entries: PiSessionEntry[] }>;
   current: DecodedPiSession;
+  systemPrompts: Array<string | undefined>;
+  setLeaves: string[];
   unsubscribe: () => void;
 }
 
-async function harness(session: DecodedPiSession, responses: string[]): Promise<Harness> {
+async function harness(session: DecodedPiSession, responses: string[], options: { loadConfig?: (config: RuntimeConfig) => Promise<RuntimeConfig> } = {}): Promise<Harness> {
   const events: AgentEvent[] = [];
+  const systemPrompts: Array<string | undefined> = [];
+  const setLeaves: string[] = [];
   const appends: Array<{ expected: string | null; entries: PiSessionEntry[] }> = [];
   const sessions: SessionPort = {
     create: async () => session,
     list: async () => [],
     load: async () => session,
+    setLeaf: async (_book, _session, leafId) => { setLeaves.push(leafId); return { ...session, leafId }; },
     delete: async () => {},
     append: async (_book, _session, expected, entries) => { appends.push({ expected, entries }); return entries.at(-1)?.id ?? null; },
   };
@@ -70,11 +75,19 @@ async function harness(session: DecodedPiSession, responses: string[]): Promise<
   const faux = createFauxCore({ tokensPerSecond: 10_000 });
   faux.setResponses(responses.map((text) => fauxAssistantMessage(text)));
   const config: RuntimeConfig = { provider: "custom-a", model: "model-a", api: faux.api, baseUrl: "https://example.test/v1", apiKey: "secret", thinkingLevel: "off" };
-  const runtime = new LiteraAgentRuntime({ sessions, book, loadConfig: async () => config, loadStream: async () => faux.streamSimple });
+  const runtime = new LiteraAgentRuntime({
+    sessions,
+    book,
+    loadConfig: options.loadConfig ? () => options.loadConfig!(config) : async () => config,
+    loadStream: async () => (requestModel, context, streamOptions) => {
+      systemPrompts.push(getCurrentSystemPrompt(context.messages));
+      return faux.streamSimple(requestModel, context, streamOptions);
+    },
+  });
   const unsubscribe = runtime.subscribe((event) => events.push(event));
   await runtime.openBook("book", new ArrayBuffer(1));
   await runtime.switchSession("session-1");
-  return { runtime, events, appends, current: session, unsubscribe };
+  return { runtime, events, appends, current: session, systemPrompts, setLeaves, unsubscribe };
 }
 
 describe("LiteraAgentRuntime edit flow", () => {
@@ -144,6 +157,82 @@ describe("LiteraAgentRuntime edit flow", () => {
     const current = toolTurnSession();
     const { runtime, unsubscribe } = await harness(current, []);
     await expect(runtime.prompt("out of range", {}, "prompt-4", undefined, 99)).rejects.toThrow("Edited message is not a visible user message");
+    unsubscribe();
+  });
+  it("drops the edited turn's reading context instead of carrying it onto the new branch", async () => {
+    const current = toolTurnSession();
+    // The second turn was sent with a selection: its readingContext entry sits
+    // between the previous assistant (a2) and the user message.
+    current.entries.splice(4, 0, { type: "custom_message", id: "ctx2", parentId: "a2", timestamp: now, customType: "readingContext", content: "Selected text: stale", display: false });
+    current.entries[5].parentId = "ctx2";
+    const { runtime, appends, unsubscribe } = await harness(current, ["new answer"]);
+
+    await runtime.prompt("edited second question", {}, "prompt-ctx", undefined, 2);
+
+    expect(appends[0].entries[0].parentId).toBe("a2");
+    expect(appends[0].entries.some((entry) => entry.customType === "readingContext")).toBe(false);
+    unsubscribe();
+  });
+
+  it("carries the session system prompt onto a branch forked before its config entry", async () => {
+    const current = toolTurnSession();
+    // The prompt was configured after the first turn, so editing the first
+    // question forks above the config entry.
+    current.entries.splice(4, 0, { type: "session_config", id: "cfg1", parentId: "a2", timestamp: now, systemPrompt: "翻译为古文" });
+    current.entries[5].parentId = "cfg1";
+    const { runtime, appends, systemPrompts, unsubscribe } = await harness(current, ["new answer", "title"]);
+
+    await runtime.prompt("edited first question", {}, "prompt-cfg", undefined, 0);
+
+    expect(systemPrompts[0]).toBe(`${SYSTEM_PROMPT}\n\n翻译为古文`);
+    expect(appends[0].entries[0]).toMatchObject({ type: "session_config", parentId: null, systemPrompt: "翻译为古文" });
+    unsubscribe();
+  });
+
+  it("does not overwrite a manual title when the first question is edited", async () => {
+    const current = toolTurnSession();
+    current.entries.push({ type: "session_info", id: "info1", parentId: "a3", timestamp: now, name: "我的标题" });
+    current.leafId = "info1";
+    const { runtime, events, appends, unsubscribe } = await harness(current, ["new answer", "Generated"]);
+
+    await runtime.prompt("edited first question", {}, "prompt-title", undefined, 0);
+    // Give a (wrongly) scheduled title request time to land.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    expect(appends.flatMap((append) => append.entries).some((entry) => entry.type === "session_info")).toBe(false);
+    expect(events.some((event) => event.type === "session_renamed")).toBe(false);
+    unsubscribe();
+  });
+
+  it("regenerates an auto-generated title when the first question is edited", async () => {
+    const current = toolTurnSession();
+    current.entries.push({ type: "session_info", id: "info1", parentId: "a3", timestamp: now, name: "旧标题", auto: true });
+    current.leafId = "info1";
+    const { runtime, events, unsubscribe } = await harness(current, ["new answer", "Generated"]);
+
+    await runtime.prompt("edited first question", {}, "prompt-auto", undefined, 0);
+    await vi.waitFor(() => expect(events.some((event) => event.type === "session_renamed")).toBe(true));
+
+    expect(current.entries.at(-1)).toMatchObject({ type: "session_info", name: "Generated", auto: true });
+    unsubscribe();
+  });
+
+  it("restores the original branch when an edit fails before anything is persisted", async () => {
+    const current = toolTurnSession();
+    let calls = 0;
+    const { runtime, events, appends, unsubscribe } = await harness(current, ["answer"], {
+      loadConfig: async (config) => { calls += 1; if (calls === 1) throw new Error("config unavailable"); return config; },
+    });
+
+    await expect(runtime.prompt("edited second question", {}, "prompt-fail", undefined, 2)).rejects.toThrow();
+
+    // The UI gets the untouched transcript back before the error.
+    const restored = events.find((event) => event.type === "branch_switched");
+    expect(restored?.type === "branch_switched" && restored.messages).toHaveLength(4);
+    expect(appends).toHaveLength(0);
+    // The next ordinary prompt continues from the original leaf.
+    await runtime.prompt("follow-up", {}, "prompt-next");
+    expect(appends[0].entries[0].parentId).toBe("a3");
     unsubscribe();
   });
 });

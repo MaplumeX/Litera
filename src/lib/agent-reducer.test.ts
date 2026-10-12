@@ -23,6 +23,17 @@ describe("agentReducer", () => {
     expect(state.messages).toEqual([]);
   });
 
+  it("discards the failed attempt's streamed output when a retry is scheduled", () => {
+    let state = createAgentState("book-a");
+    state = agentReducer(state, { type: "user_message", message: { role: "user", content: "q" } });
+    state = reduce(state, { version: 1, type: "prompt_started", bookId: "book-a", sessionId: "s", promptId: "p" });
+    state = reduce(state, { version: 2, type: "text_delta", bookId: "book-a", sessionId: "s", promptId: "p", delta: "partial" });
+    state = reduce(state, { version: 3, type: "retry_scheduled", bookId: "book-a", sessionId: "s", promptId: "p", attempt: 1, maxAttempts: 3, delayMs: 500 });
+    expect(state.messages).toEqual([{ role: "user", content: "q" }]);
+    state = reduce(state, { version: 4, type: "text_delta", bookId: "book-a", sessionId: "s", promptId: "p", delta: "full" });
+    expect(state.messages.at(-1)).toMatchObject({ role: "assistant", content: "full" });
+  });
+
   it("matches concurrent tool completion by toolCallId", () => {
     let state = createAgentState("book-a");
     state = reduce(state, { version: 1, type: "prompt_started", bookId: "book-a", sessionId: "s", promptId: "p" });

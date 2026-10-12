@@ -210,7 +210,10 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
     case "compaction_failed":
       return matchesPrompt(base, event) ? { ...base, compaction: null } : base;
     case "retry_scheduled":
-      return base;
+      // The retry restarts the whole turn: drop the failed attempt's streamed
+      // bubble so the next attempt does not append onto it.
+      if (!matchesPrompt(base, event) || base.messages[base.messages.length - 1]?.role !== "assistant") return base;
+      return { ...base, messages: base.messages.slice(0, -1) };
     case "prompt_end":
     case "prompt_aborted":
       if (!matchesPrompt(base, event)) return base;

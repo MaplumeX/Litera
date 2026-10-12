@@ -8,7 +8,7 @@ import { createGuardedNativeFetch } from "@/agent/transport/native-fetch";
 import { validateMindmapParams } from "@/agent/runtime/mindmap";
 import { resolveRuntimeModel } from "@/agent/runtime/model-resolution";
 import { classifyPromptError } from "@/agent/runtime/prompt-error";
-import { activeBranch, branchLeafId, branchNavigation, contextBranch, convertPiContextToLlm, newEntry, piContextMessages, sessionConfig, sessionNavigation, visibleMessageEntries, visibleMessages, type DecodedPiSession, type PiSessionEntry } from "@/agent/sessions/pi-session";
+import { activeBranch, branchLeafId, branchNavigation, contextBranch, convertPiContextToLlm, newEntry, piContextMessages, sessionConfig, sessionNavigation, visibleMessageEntries, visibleMessages, type DecodedPiSession, type PiSessionEntry, type SessionConfig } from "@/agent/sessions/pi-session";
 import { tauriSessionPort, type SessionPort } from "@/agent/sessions/session-port";
 import { invokeErrorMessage } from "@/lib/app-error";
 import type { AgentEvent, AgentMessage as UiMessage } from "@/types/agent";
@@ -133,22 +133,35 @@ export class LiteraAgentRuntime {
     this.promptId=promptId;
     let session:DecodedPiSession|undefined;
     let unsubscribe:(()=>void)|undefined;
+    let rewoundFrom:string|null|undefined;let carriedConfig:SessionConfig|null=null;let userPersisted=false;let compactedBeforePrompt=false;
     try{
       if(!this.session){const created=await this.sessions.create(promptBookId);if(this.bookId!==promptBookId)throw new Error("Book context changed");this.session=created;this.agent=null;this.emit({type:"session_created",bookId:promptBookId,sessionId:created.header.id,requestId});} session=this.session!;
       const persistedLeaf=session.leafId;
-      if(editIndex!==undefined){const target=visibleMessageEntries(session)[editIndex];if(!target||((target.message as {role?:unknown}|undefined)?.role!=="user"))throw new Error(EDIT_TARGET_ERROR);session.leafId=target.parentId;this.agent=null;this.emit({type:"session_rewound",bookId:promptBookId,sessionId:session.header.id,promptId,requestId,messages:visibleMessages({...session,leafId:session.leafId})});}
+      if(editIndex!==undefined){
+        const target=visibleMessageEntries(session)[editIndex];if(!target||((target.message as {role?:unknown}|undefined)?.role!=="user"))throw new Error(EDIT_TARGET_ERROR);
+        const configBefore=sessionConfig(session);
+        // Rewind past the edited turn's own reading context too: it described the
+        // old question, and the new one carries its own.
+        const parent=session.entries.find((entry)=>entry.id===target.parentId);
+        rewoundFrom=persistedLeaf;session.leafId=parent?.type==="custom_message"&&parent.customType==="readingContext"?parent.parentId:target.parentId;this.agent=null;
+        // A fork above the session_config entry would silently drop the user's
+        // system prompt; carry it onto the new branch.
+        if(configBefore&&configBefore.systemPrompt!==(sessionConfig(session)?.systemPrompt??""))carriedConfig=configBefore;
+        this.emit({type:"session_rewound",bookId:promptBookId,sessionId:session.header.id,promptId,requestId,messages:visibleMessages({...session,leafId:session.leafId})});
+      }
       const isFirstTurn=!activeBranch(session).some((entry)=>entry.type==="message"&&((entry.message as {role?:unknown})?.role==="user"));
       const configAtStart=this.configRevision; const config=await this.loadConfig();if(this.bookId!==promptBookId)throw new Error("Book context changed");
       const metadata=await this.book.metadata(); const toc=await this.book.toc();
       const snapshot=formatBookSnapshot(metadata,toc);
       const readingContext=[chapterAside(toc,context.chapterHref),context.selection?`Selected text: ${context.selection}`:""].filter(Boolean).join("\n\n");
-      const agent=await this.ensureAgent(config,session,promptBookId);
+      const agent=await this.ensureAgent(config,session,promptBookId,carriedConfig??sessionConfig(session));
       if(configAtStart!==this.configRevision||this.bookId!==promptBookId)throw new Error("Agent context changed");
       this.agent=agent;
-      await this.maybeCompact(agent,session,promptBookId);
+      compactedBeforePrompt=await this.maybeCompact(agent,session,promptBookId);
       if(configAtStart!==this.configRevision||this.bookId!==promptBookId)throw new Error("Agent context changed");
       const before=agent.state.messages.length;
       const pendingEntries:PiSessionEntry[]=[];let pendingParent=session.leafId;
+      if(carriedConfig){const configEntry=newEntry("session_config",pendingParent,{systemPrompt:carriedConfig.systemPrompt});pendingEntries.push(configEntry);pendingParent=configEntry.id;}
       const lastModel=[...contextBranch(session)].reverse().find((entry)=>entry.type==="model_change");
       if(lastModel?.provider!==config.provider||lastModel?.modelId!==config.model){const change=newEntry("model_change",pendingParent,{provider:config.provider,modelId:config.model});pendingEntries.push(change);pendingParent=change.id;}
       const promptMessages:PiMessage[]=[];
@@ -157,7 +170,7 @@ export class LiteraAgentRuntime {
       if(readingContext){const contextEntry=newEntry("custom_message",pendingParent,{customType:"readingContext",content:readingContext,display:false});pendingEntries.push(contextEntry);pendingParent=contextEntry.id;promptMessages.push({role:"custom",customType:"readingContext",content:readingContext,display:false,timestamp:Date.now()} as PiMessage);}
       const user:PiMessage={role:"user",content:text,timestamp:Date.now()};const userEntry=newEntry("message",pendingParent,{message:user,...(context.selection?{selection:context.selection}:{}),...(context.chapterHref?{chapterHref:context.chapterHref}:{})});
       pendingEntries.push(userEntry);
-      const leaf=await this.sessions.append(promptBookId,session.header.id,persistedLeaf,pendingEntries);session.entries.push(...pendingEntries);session.leafId=leaf;
+      const leaf=await this.sessions.append(promptBookId,session.header.id,persistedLeaf,pendingEntries);session.entries.push(...pendingEntries);session.leafId=leaf;userPersisted=true;
       if(configAtStart!==this.configRevision||this.bookId!==promptBookId)throw new Error("Agent context changed");
       this.emit({type:"prompt_started",bookId:promptBookId,sessionId:session.header.id,promptId,requestId});
       unsubscribe=agent.subscribe((event)=>this.onPiEvent(event,promptBookId,promptId,session!.header.id));
@@ -175,17 +188,28 @@ export class LiteraAgentRuntime {
       // A backoff-sleep abort normalizes to an aborted message that never entered
       // agent state; push it so the terminal aborted assistant is still persisted.
       if(finalAssistant.stopReason==="aborted"&&agent.state.messages[agent.state.messages.length-1]!==finalAssistant)agent.state.messages.push(finalAssistant);
-      const completed=agent.state.messages.slice(before+promptMessages.length+1);const entries:PiSessionEntry[]=[];let parent=session.leafId;for(const message of completed){const persisted=message.role==="assistant"&&message.stopReason==="error"?{...message,errorMessage:"模型请求失败"}:message;const entry=newEntry("message",parent,{message:persisted});entries.push(entry);parent=entry.id;}
+      // The loop may insert a system message (tool declarations) ahead of the
+      // prompt messages; it is runtime state, never a session entry.
+      const completed=agent.state.messages.slice(before).filter((message)=>message.role!=="system").slice(promptMessages.length+1);const entries:PiSessionEntry[]=[];let parent=session.leafId;for(const message of completed){const persisted=message.role==="assistant"&&message.stopReason==="error"?{...message,errorMessage:"模型请求失败"}:message;const entry=newEntry("message",parent,{message:persisted});entries.push(entry);parent=entry.id;}
       if(entries.length){session.leafId=await this.sessions.append(promptBookId,session.header.id,session.leafId,entries);session.entries.push(...entries);}
       await this.maybeCompact(agent,session,promptBookId);
       const aborted=completed.some((message)=>message.role==="assistant"&&message.stopReason==="aborted");
       const finalMessages=visibleMessages(session);const finalNavigation=sessionNavigation(session);
       this.emit(aborted?{type:"prompt_aborted",bookId:promptBookId,sessionId:session.header.id,promptId,requestId,messages:finalMessages,...finalNavigation}:{type:"prompt_end",bookId:promptBookId,sessionId:session.header.id,promptId,messages:finalMessages,...finalNavigation});
-      if(!aborted&&isFirstTurn){const leafAtEnd=session.leafId;const assistantText=finalAssistant.content.flatMap((block)=>block.type==="text"&&typeof block.text==="string"?[block.text]:[]).join("");void this.maybeGenerateTitle(promptBookId,session.header.id,leafAtEnd,text.slice(0,2000),assistantText.slice(0,2000),agent);}
-    }catch(error){const rawMessage=error instanceof Error?error.message:String(error);const safeError=new Error(rawMessage===EDIT_TARGET_ERROR?rawMessage:classifyPromptError(error).message);this.emit({type:"error",scope:"prompt",message:safeError.message,recoverable:true,bookId:promptBookId,sessionId:session?.header.id,promptId});throw safeError;}finally{unsubscribe?.();if(this.promptId===promptId)this.promptId=null;}
+      const hasManualTitle=session.entries.some((entry)=>entry.type==="session_info"&&entry.auto!==true);
+      if(!aborted&&isFirstTurn&&!hasManualTitle){const leafAtEnd=session.leafId;const assistantText=finalAssistant.content.flatMap((block)=>block.type==="text"&&typeof block.text==="string"?[block.text]:[]).join("");void this.maybeGenerateTitle(promptBookId,session.header.id,leafAtEnd,text.slice(0,2000),assistantText.slice(0,2000),agent);}
+    }catch(error){
+      // A failed edit that persisted nothing must not leave the rewound leaf
+      // behind: the next prompt would continue a branch the user never saw.
+      if(session&&rewoundFrom!==undefined&&!userPersisted){
+        session.leafId=rewoundFrom;
+        if(compactedBeforePrompt&&rewoundFrom)await this.sessions.setLeaf(promptBookId,session.header.id,rewoundFrom).catch(()=>{});
+        if(this.bookId===promptBookId&&this.session===session){this.agent=null;this.emit({type:"branch_switched",bookId:promptBookId,sessionId:session.header.id,requestId,messages:visibleMessages(session),...sessionNavigation(session)});}
+      }
+      const rawMessage=error instanceof Error?error.message:String(error);const safeError=new Error(rawMessage===EDIT_TARGET_ERROR?rawMessage:classifyPromptError(error).message);this.emit({type:"error",scope:"prompt",message:safeError.message,recoverable:true,bookId:promptBookId,sessionId:session?.header.id,promptId});throw safeError;}finally{unsubscribe?.();if(this.promptId===promptId)this.promptId=null;}
   }
 
-  private async ensureAgent(config:RuntimeConfig,session:DecodedPiSession,bookId:string){if(this.agent)return this.agent;const resolvedModel=await resolveRuntimeModel(config);const nativeFetch=createGuardedNativeFetch({baseUrl:resolvedModel.baseUrl});const providerStream=await this.loadStream(resolvedModel.api);const stream:StreamFn=(requestModel,requestContext,options)=>providerStream(requestModel,requestContext,{...options,fetch:nativeFetch,maxRetries:3});const tools=await this.tools(bookId);const configured=sessionConfig(session);const userPrompt=configured?.systemPrompt.trim();return new Agent({initialState:{systemPrompt:userPrompt?`${SYSTEM_PROMPT}\n\n${userPrompt}`:SYSTEM_PROMPT,model:resolvedModel,thinkingLevel:clampThinkingLevel(resolvedModel,config.thinkingLevel as ModelThinkingLevel),messages:piContextMessages(session),tools},streamFn:stream,convertToLlm:convertPiContextToLlm,getApiKey:()=>config.apiKey,transport:"sse"});}
+  private async ensureAgent(config:RuntimeConfig,session:DecodedPiSession,bookId:string,configured:SessionConfig|null){if(this.agent)return this.agent;const resolvedModel=await resolveRuntimeModel(config);const nativeFetch=createGuardedNativeFetch({baseUrl:resolvedModel.baseUrl});const providerStream=await this.loadStream(resolvedModel.api);const stream:StreamFn=(requestModel,requestContext,options)=>providerStream(requestModel,requestContext,{...options,fetch:nativeFetch,maxRetries:3});const tools=await this.tools(bookId);const userPrompt=configured?.systemPrompt.trim();return new Agent({initialState:{systemPrompt:userPrompt?`${SYSTEM_PROMPT}\n\n${userPrompt}`:SYSTEM_PROMPT,model:resolvedModel,thinkingLevel:clampThinkingLevel(resolvedModel,config.thinkingLevel as ModelThinkingLevel),messages:piContextMessages(session),tools},streamFn:stream,convertToLlm:convertPiContextToLlm,getApiKey:()=>config.apiKey,transport:"sse"});}
 
   /**
    * Fire-and-forget session title generation after the first completed turn.
@@ -210,7 +234,7 @@ export class LiteraAgentRuntime {
       if(this.bookId!==bookId)return;
       if(session.entries.some((entry)=>entry.type==="session_info"&&entry.timestamp>startedAt))return;// user renamed while the title was generating
       if(session.leafId!==leafAtEnd)return;// a newer prompt/entry advanced the durable leaf
-      const entry=newEntry("session_info",session.leafId,{name:title});
+      const entry=newEntry("session_info",session.leafId,{name:title,auto:true});
       const leaf=await this.sessions.append(bookId,sessionId,session.leafId,[entry]);
       if(this.bookId!==bookId||this.session?.header.id!==sessionId)return;
       if(this.session?.leafId===session.leafId){this.session.entries.push(entry);this.session.leafId=leaf;}
@@ -251,7 +275,10 @@ export class LiteraAgentRuntime {
       const entry=newEntry("compaction",session.leafId,{summary,firstKeptEntryId:preparation.firstKeptEntryId,tokensBefore:preparation.tokensBefore});
       const leaf=await this.sessions.append(bookId,session.header.id,session.leafId,[entry]);
       session.entries.push(entry);session.leafId=leaf;
-      agent.state.messages=piContextMessages(session);
+      // Keep the leading system message: since pi-ai 0.87 it carries the system
+      // prompt and tool declarations, and piContextMessages has neither.
+      const system=agent.state.messages[0];
+      agent.state.messages=system?.role==="system"?[system,...piContextMessages(session)]:piContextMessages(session);
       this.emit({type:"compaction_completed",...base});
       return true;
     }catch{this.emit({type:"compaction_failed",...base});return false;}
