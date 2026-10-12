@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { BookRecord } from "@/types/library";
 import {
+  countByStatus,
   filterBooks,
   filterByStatus,
   isLibraryStatusFilter,
@@ -241,6 +242,15 @@ describe("takeRecent", () => {
   it("returns empty when no book has been opened", () => {
     expect(takeRecent([book({ id: "a" }), book({ id: "b" })])).toEqual([]);
   });
+
+  it("leaves out finished books", () => {
+    const books = [
+      book({ id: "done", readingStatus: "finished", lastOpenedAt: "2026-05-01T00:00:00+00:00" }),
+      book({ id: "open", readingStatus: "reading", lastOpenedAt: "2026-04-01T00:00:00+00:00" }),
+      book({ id: "plain", lastOpenedAt: "2026-03-01T00:00:00+00:00" }),
+    ];
+    expect(takeRecent(books).map((item) => item.id)).toEqual(["open", "plain"]);
+  });
 });
 
 describe("withCoverRevision", () => {
@@ -313,6 +323,36 @@ describe("filterBooks", () => {
   it("does not let two adjacent fields spell a match together", () => {
     const books = [book({ id: "1", title: "Ho", author: "bbit" })];
     expect(filterBooks(books, "hobbit")).toEqual([]);
+  });
+});
+
+describe("countByStatus", () => {
+  it("counts each status and the starred shortlist independently", () => {
+    const counts = countByStatus([
+      book({ id: "a", readingStatus: "reading", starred: true }),
+      book({ id: "b", readingStatus: "reading" }),
+      book({ id: "c", readingStatus: "finished", starred: true }),
+      book({ id: "d" }),
+    ]);
+    expect(counts).toEqual({
+      all: 4,
+      unread: 0,
+      reading: 2,
+      finished: 1,
+      starred: 2,
+    });
+  });
+
+  it("agrees with filterByStatus for every filter", () => {
+    const books = [
+      book({ id: "a", readingStatus: "unread" }),
+      book({ id: "b", readingStatus: "reading", starred: true }),
+      book({ id: "c", starred: false }),
+    ];
+    const counts = countByStatus(books);
+    for (const filter of ["all", "unread", "reading", "finished", "starred"] as const) {
+      expect(counts[filter]).toBe(filterByStatus(books, filter).length);
+    }
   });
 });
 

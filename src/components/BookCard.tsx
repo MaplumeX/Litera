@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { Check, CloudOff, Star, X } from "lucide-react";
+import { Check, CloudOff, Star } from "lucide-react";
 import type { BookRecord } from "@/types/library";
 import { BookStatusMenu, type BookStatusChoice } from "@/components/BookStatusMenu";
 import { cn } from "@/lib/utils";
@@ -13,6 +13,7 @@ import {
 import {
   BookActionContext,
   BookActionDropdown,
+  type BookActionHandlers,
 } from "@/components/BookActionsMenu";
 
 interface BookCardProps {
@@ -28,8 +29,8 @@ interface BookCardProps {
   selected?: boolean;
   onToggleSelect?: (bookId: string) => void;
   openDisabled?: boolean;
-  showMenu?: boolean;
-  showDelete?: boolean;
+  /** Enter select mode with this book already selected. */
+  onEnterSelect?: (bookId: string) => void;
   coverRev?: number;
 }
 
@@ -40,11 +41,12 @@ function coverUrl(path: string, coverRev?: number): string {
 function BookCoverImage({
   book,
   coverRev,
-  className,
+  small = false,
 }: {
   book: BookRecord;
   coverRev?: number;
-  className?: string;
+  /** Thumbnail slot: the initial-letter fallback scales down to fit. */
+  small?: boolean;
 }) {
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
   const src = book.coverPath ? coverUrl(book.coverPath, coverRev) : null;
@@ -56,18 +58,52 @@ function BookCoverImage({
       <img
         src={src}
         alt={book.title}
-        className={cn("h-full w-full object-cover", className)}
+        className="h-full w-full object-cover"
         onError={() => setFailedSrc(src)}
       />
     );
   }
   return (
     <div className="flex h-full w-full items-center justify-center bg-muted">
-      <span className="text-4xl font-medium text-muted-foreground/40">
+      <span
+        className={cn(
+          "font-medium text-muted-foreground/40",
+          small ? "text-sm" : "text-4xl",
+        )}
+      >
         {initial}
       </span>
     </div>
   );
+}
+
+/** Bind the shelf's per-book callbacks to one book for its menus. */
+function bookActions(
+  book: BookRecord,
+  handlers: {
+    onOpen: (bookId: string) => void | Promise<void>;
+    onDetails: (book: BookRecord) => void;
+    onDelete: (bookId: string) => void;
+    deleteDisabled: boolean;
+    onToggleStar?: (book: BookRecord) => void;
+    onChangeStatus?: (book: BookRecord, status: BookStatusChoice) => void;
+    onEnterSelect?: (bookId: string) => void;
+  },
+): BookActionHandlers {
+  const { onToggleStar, onChangeStatus, onEnterSelect } = handlers;
+  return {
+    onOpen: () => {
+      void handlers.onOpen(book.id);
+    },
+    onDetails: () => handlers.onDetails(book),
+    onDelete: () => handlers.onDelete(book.id),
+    deleteDisabled: handlers.deleteDisabled,
+    readingStatus: book.readingStatus,
+    starred: book.starred === true,
+    onToggleStar: onToggleStar && (() => onToggleStar(book)),
+    onChangeStatus: onChangeStatus && ((choice) => onChangeStatus(book, choice)),
+    onSelect: onEnterSelect && (() => onEnterSelect(book.id)),
+  };
 }
 
 export function BookCard({
@@ -83,21 +119,22 @@ export function BookCard({
   selected = false,
   onToggleSelect,
   openDisabled = false,
-  showMenu = true,
-  showDelete = true,
+  onEnterSelect,
   coverRev,
 }: BookCardProps) {
   const { t } = useT();
   const pct = progressPercent(book.lastFraction);
   const uncached = book.cached === false;
   const starred = book.starred === true;
-  const actions = {
-    onOpen: () => {
-      void onOpen(book.id);
-    },
-    onDetails: () => onDetails(book),
-    onDelete: () => onDelete(book.id),
-  };
+  const actions = bookActions(book, {
+    onOpen,
+    onDetails,
+    onDelete,
+    deleteDisabled,
+    onToggleStar,
+    onChangeStatus,
+    onEnterSelect,
+  });
 
   const card = (
     <div className="group relative flex flex-col gap-2">
@@ -121,11 +158,12 @@ export function BookCard({
         <BookCoverImage book={book} coverRev={coverRev} />
         {uncached && !selectMode && (
           <span
-            className="absolute left-1.5 top-1.5 flex items-center gap-1 rounded-sm bg-background/85 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+            role="img"
+            className="absolute left-1.5 top-1.5 flex items-center rounded-sm bg-background/85 p-1 text-muted-foreground"
             title={t("library.notCached")}
+            aria-label={t("library.notCached")}
           >
             <CloudOff className="size-3" aria-hidden />
-            {t("library.notCached")}
           </span>
         )}
         {pct != null && !opening && (
@@ -160,24 +198,8 @@ export function BookCard({
         )}
       </button>
 
-      {showDelete && !selectMode && (
-        <button
-          type="button"
-          className="absolute right-1 top-1 z-10 flex h-6 w-6 items-center justify-center rounded-md border border-border/80 bg-background text-muted-foreground opacity-0 transition-opacity duration-200 hover:bg-muted hover:text-destructive group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring motion-reduce:transition-none"
-          onClick={(e) => {
-            e.stopPropagation();
-            onDelete(book.id);
-          }}
-          disabled={deleteDisabled}
-          title={t("common.delete")}
-          aria-label={t("common.delete")}
-        >
-          <X className="size-3.5" />
-        </button>
-      )}
-
-      {showMenu && !selectMode && (
-        <div className="absolute right-8 top-1 z-10 opacity-0 transition-opacity duration-200 group-hover:opacity-100 has-[:focus-visible]:opacity-100 motion-reduce:transition-none">
+      {!selectMode && (
+        <div className="absolute right-1 top-1 z-10 opacity-0 transition-opacity duration-200 group-hover:opacity-100 has-[:focus-visible]:opacity-100 has-[[data-state=open]]:opacity-100 motion-reduce:transition-none">
           <BookActionDropdown
             className="h-6 w-6 border border-border/80 bg-background"
             {...actions}
@@ -194,8 +216,10 @@ export function BookCard({
             <button
               type="button"
               className={cn(
-                "shrink-0 rounded-sm p-0.5 text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring motion-reduce:transition-none",
-                starred && "text-foreground",
+                "shrink-0 rounded-sm p-0.5 text-muted-foreground transition-[color,opacity] hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring motion-reduce:transition-none",
+                starred
+                  ? "text-foreground"
+                  : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100",
               )}
               aria-label={t(starred ? "library.unstar" : "library.star")}
               aria-pressed={starred}
@@ -241,7 +265,11 @@ interface BookListRowProps {
   selected?: boolean;
   onToggleSelect?: (bookId: string) => void;
   openDisabled?: boolean;
+  /** Enter select mode with this book already selected. */
+  onEnterSelect?: (bookId: string) => void;
   coverRev?: number;
+  /** Reserve the "not downloaded" column; the shelf sets it for every row or none. */
+  cacheColumn?: boolean;
 }
 
 export function BookListRow({
@@ -252,23 +280,28 @@ export function BookListRow({
   onToggleStar,
   onChangeStatus,
   opening = false,
+  deleteDisabled = false,
   selectMode = false,
   selected = false,
   onToggleSelect,
   openDisabled = false,
+  onEnterSelect,
   coverRev,
+  cacheColumn = book.cached === false,
 }: BookListRowProps) {
   const { t, locale } = useT();
   const pct = progressPercent(book.lastFraction);
   const uncached = book.cached === false;
   const starred = book.starred === true;
-  const actions = {
-    onOpen: () => {
-      void onOpen(book.id);
-    },
-    onDetails: () => onDetails(book),
-    onDelete: () => onDelete(book.id),
-  };
+  const actions = bookActions(book, {
+    onOpen,
+    onDetails,
+    onDelete,
+    deleteDisabled,
+    onToggleStar,
+    onChangeStatus,
+    onEnterSelect,
+  });
 
   const row = (
     <div
@@ -303,11 +336,7 @@ export function BookListRow({
           </span>
         )}
         <span className="h-14 w-10 shrink-0 overflow-hidden rounded-sm border bg-muted">
-          <BookCoverImage
-            book={book}
-            coverRev={coverRev}
-            className="text-sm"
-          />
+          <BookCoverImage book={book} coverRev={coverRev} small />
         </span>
         <span className="min-w-0 flex-1">
           <span className="block truncate text-sm font-medium">{book.title}</span>
@@ -328,13 +357,18 @@ export function BookListRow({
         <span className="w-12 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
           {pct == null ? t("library.noProgress") : `${pct}%`}
         </span>
-        {uncached && (
+        {cacheColumn && (
           <span
+            data-cache-cell
             className="flex w-20 shrink-0 items-center justify-end gap-1 text-xs text-muted-foreground"
-            title={t("library.notCached")}
+            title={uncached ? t("library.notCached") : undefined}
           >
-            <CloudOff className="size-3" aria-hidden />
-            {t("library.notCached")}
+            {uncached && (
+              <>
+                <CloudOff className="size-3" aria-hidden />
+                {t("library.notCached")}
+              </>
+            )}
           </span>
         )}
         <span className="hidden w-36 shrink-0 truncate text-right text-xs text-muted-foreground md:block">
@@ -354,7 +388,9 @@ export function BookListRow({
           type="button"
           className={cn(
             "shrink-0 rounded-sm p-1 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-            starred && "text-foreground",
+            starred
+              ? "text-foreground"
+              : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100",
           )}
           aria-label={t(starred ? "library.unstar" : "library.star")}
           aria-pressed={starred}
@@ -369,4 +405,75 @@ export function BookListRow({
 
   if (selectMode) return row;
   return <BookActionContext {...actions}>{row}</BookActionContext>;
+}
+
+/**
+ * A Continue reading tile: a thumbnail and the progress to resume from. It is
+ * never shown in select mode, so it carries no selection state.
+ */
+export function BookResumeTile({
+  book,
+  onOpen,
+  onDelete,
+  onDetails,
+  onToggleStar,
+  onChangeStatus,
+  opening = false,
+  deleteDisabled = false,
+  openDisabled = false,
+  onEnterSelect,
+  coverRev,
+}: BookCardProps) {
+  const { t } = useT();
+  const pct = progressPercent(book.lastFraction);
+  const actions = bookActions(book, {
+    onOpen,
+    onDetails,
+    onDelete,
+    deleteDisabled,
+    onToggleStar,
+    onChangeStatus,
+    onEnterSelect,
+  });
+
+  return (
+    <BookActionContext {...actions}>
+      <button
+        type="button"
+        title={book.title}
+        className="flex min-w-0 items-center gap-3 rounded-md border p-2 text-left transition-colors hover:bg-muted/40 disabled:opacity-60 motion-reduce:transition-none"
+        onClick={() => {
+          void onOpen(book.id);
+        }}
+        disabled={opening || openDisabled}
+      >
+        <span className="h-14 w-10 shrink-0 overflow-hidden rounded-sm border bg-muted">
+          <BookCoverImage book={book} coverRev={coverRev} small />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-medium">{book.title}</span>
+          {book.author && (
+            <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+              {book.author}
+            </span>
+          )}
+          <span className="mt-1.5 flex items-center gap-2">
+            <span className="h-1 flex-1 overflow-hidden rounded-full bg-foreground/10">
+              <span
+                className="block h-full bg-primary"
+                style={{ width: `${pct ?? 0}%` }}
+              />
+            </span>
+            <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
+              {opening
+                ? t("library.opening")
+                : pct == null
+                  ? t("library.noProgress")
+                  : `${pct}%`}
+            </span>
+          </span>
+        </span>
+      </button>
+    </BookActionContext>
+  );
 }

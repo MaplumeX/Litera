@@ -88,19 +88,63 @@ describe("BookCard", () => {
     expect(onOpen).not.toHaveBeenCalled();
   });
 
-  it("requests delete without using window.confirm", () => {
+  it("requests delete from the menu without using window.confirm", async () => {
     const onDelete = vi.fn();
     const confirm = vi.spyOn(window, "confirm");
-    const { getByTitle } = renderCard({ onDelete });
+    const { getByRole, queryByTitle } = renderCard({ onDelete });
 
-    const remove = getByTitle("删除");
-    expect(remove.getAttribute("aria-label")).toBe("删除");
-    expect(remove.querySelector("svg")).toBeTruthy();
-    expect(remove.textContent).not.toContain("✕");
+    // No hover ✕: Delete is reached through the menu, last and destructive.
+    expect(queryByTitle("删除")).toBeNull();
+    fireEvent.pointerDown(getByRole("button", { name: "更多操作" }));
+    const items = await waitFor(() => {
+      const found = Array.from(document.querySelectorAll('[role="menuitem"]'));
+      expect(found.length).toBeGreaterThan(0);
+      return found;
+    });
+    const remove = items[items.length - 1] as HTMLElement;
+    expect(remove.textContent).toBe("删除…");
     remove.click();
     expect(onDelete).toHaveBeenCalledWith("abc");
     expect(confirm).not.toHaveBeenCalled();
     confirm.mockRestore();
+  });
+
+  it("offers star and select in the menu when the host supports them", async () => {
+    const onToggleStar = vi.fn();
+    const onEnterSelect = vi.fn();
+    const { getByTitle, getByRole } = renderCard({
+      book: { ...book, starred: true },
+      onToggleStar,
+      onEnterSelect,
+    });
+
+    fireEvent.contextMenu(getByTitle("Test Book"));
+    (await waitFor(() => getByRole("menuitem", { name: "取消星标" }))).click();
+    expect(onToggleStar).toHaveBeenCalledWith({ ...book, starred: true });
+
+    fireEvent.contextMenu(getByTitle("Test Book"));
+    (await waitFor(() => getByRole("menuitem", { name: "选择" }))).click();
+    expect(onEnterSelect).toHaveBeenCalledWith("abc");
+  });
+
+  it("sets a reading status from the menu's submenu", async () => {
+    const onChangeStatus = vi.fn();
+    const { getByTitle, getByRole } = renderCard({ onChangeStatus });
+
+    fireEvent.contextMenu(getByTitle("Test Book"));
+    const trigger = await waitFor(() => getByRole("menuitem", { name: "阅读状态" }));
+    fireEvent.keyDown(trigger, { key: "ArrowRight" });
+    (await waitFor(() => getByRole("menuitem", { name: "在读" }))).click();
+    expect(onChangeStatus).toHaveBeenCalledWith(book, "reading");
+  });
+
+  it("leaves curation out of the menu when the host does not support it", async () => {
+    const { getByTitle, getByRole, queryByRole } = renderCard();
+    fireEvent.contextMenu(getByTitle("Test Book"));
+    await waitFor(() => getByRole("menuitem", { name: "打开" }));
+    expect(queryByRole("menuitem", { name: "阅读状态" })).toBeNull();
+    expect(queryByRole("menuitem", { name: "加星标" })).toBeNull();
+    expect(queryByRole("menuitem", { name: "选择" })).toBeNull();
   });
 
   it("shows a more-actions menu that can open details", async () => {
@@ -131,20 +175,6 @@ describe("BookCard", () => {
     expect(queryByTitle("删除")).toBeNull();
   });
 
-  it("can hide the hover delete control while keeping the context menu", async () => {
-    const onDelete = vi.fn();
-    const { getByTitle, queryByTitle, getByRole } = renderCard({
-      showDelete: false,
-      showMenu: false,
-      onDelete,
-    });
-    expect(queryByTitle("删除")).toBeNull();
-    fireEvent.contextMenu(getByTitle("Test Book"));
-    const remove = await waitFor(() => getByRole("menuitem", { name: "删除" }));
-    remove.click();
-    expect(onDelete).toHaveBeenCalledWith("abc");
-  });
-
   it("cache-busts cover urls after a replace", () => {
     const { getByAltText } = renderCard({
       book: { ...book, coverPath: "/covers/a.jpg" },
@@ -160,17 +190,18 @@ describe("BookCard — not cached state", () => {
   });
 
   it("marks a book whose file is not local as not downloaded", () => {
-    const { getByText } = renderCard({
+    const { getByRole } = renderCard({
       book: { ...book, cached: false },
     });
-    expect(getByText("Not downloaded")).toBeTruthy();
+    // Icon-only on the cover; the label carries the meaning.
+    expect(getByRole("img", { name: "Not downloaded" })).toBeTruthy();
   });
 
   it("does not mark cached books", () => {
-    const { queryByText } = renderCard({
+    const { queryByRole } = renderCard({
       book: { ...book, cached: true },
     });
-    expect(queryByText("Not downloaded")).toBeNull();
+    expect(queryByRole("img", { name: "Not downloaded" })).toBeNull();
   });
 });
 
