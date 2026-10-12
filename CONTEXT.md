@@ -52,6 +52,10 @@ _Avoid_: Index, sync database
 A visual outline rendered inside a Session's message flow, derived from a single tool call's markdown outline. Not a stored object; it lives exactly as long as the tool call entry that produced it.
 _Avoid_: Note, diagram, knowledge graph
 
+**Citation**:
+A verbatim quote from the Book inside an assistant message, marked with the chapter it came from. Checked against the Book text whenever it is shown (verified, relocated to another chapter, or unverified); the check is never stored. Paraphrase is not a Citation.
+_Avoid_: Reference, source, footnote
+
 **Tombstone**:
 A sync record marking a deletion, kept in the Manifest so deletions propagate to other devices instead of being resurrected by merges.
 _Avoid_: Deletion record, kill bit

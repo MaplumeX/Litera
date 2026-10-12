@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { QuoteLocation } from "@/agent/book/book-content";
 import { AssistantMessage, normalizeLatexDelimiters } from "./AssistantMessage";
+import { CitationContext } from "./Citation";
 
 afterEach(() => {
   cleanup();
@@ -136,8 +138,73 @@ describe("AssistantMessage", () => {
     const children = Array.from(container.querySelectorAll(".space-y-1 > *"));
     expect(children).toHaveLength(3);
     expect(children[0].textContent).toContain("思考过程");
-    expect(children[1].textContent).toContain("read_chapter");
+    expect(children[1].getAttribute("data-testid")).toBe("source-summary");
     expect(children[2].textContent).toContain("结论");
+  });
+
+  it("folds book tool calls into one source summary where the first one sits", () => {
+    const read = (part: number) =>
+      JSON.stringify({ chapterIndex: 2, chapterNumber: 3, chapterTitle: "第三章 归来", part, totalParts: 3, text: "..." });
+    const { container, getByTestId, getByText, queryByText, getByRole } = render(
+      <AssistantMessage
+        message={{
+          role: "assistant",
+          content: "前言结论",
+          blocks: [
+            { type: "text", text: "前言" },
+            { type: "toolCall", toolCall: { toolCallId: "t1", tool: "read_chapter", params: { chapterIndex: 2 }, done: true, result: read(0) } },
+            { type: "toolCall", toolCall: { toolCallId: "t2", tool: "search_in_book", params: { queries: ["归来"] }, done: true, result: JSON.stringify([{}, {}]) } },
+            { type: "toolCall", toolCall: { toolCallId: "t3", tool: "read_chapter", params: { chapterIndex: 2, part: 1 }, done: true, result: read(1) } },
+            { type: "text", text: "结论" },
+          ],
+        }}
+      />,
+    );
+    const children = Array.from(container.querySelectorAll(".space-y-1 > *"));
+    expect(children).toHaveLength(3);
+    expect(children[1]).toBe(getByTestId("source-summary"));
+    expect(getByText("第三章 归来（读了 2/3 段）")).toBeTruthy();
+    expect(getByText("搜索 1 次，命中 2 处")).toBeTruthy();
+    expect(getByRole("img", { name: "部分章节未读完，回答可能不完整" })).toBeTruthy();
+    expect(queryByText("read_chapter")).toBeNull();
+
+    fireEvent.click(getByTestId("source-summary").querySelector("button")!);
+    expect(container.querySelectorAll('[data-testid="source-summary"] [aria-expanded]').length).toBe(4);
+    expect(getByText("search_in_book")).toBeTruthy();
+  });
+
+  it("shows a fully read chapter without a partial warning and keeps mind maps separate", () => {
+    const { getByText, queryByRole } = render(
+      <AssistantMessage
+        message={{
+          role: "assistant",
+          content: "",
+          blocks: [
+            {
+              type: "toolCall",
+              toolCall: {
+                toolCallId: "t1",
+                tool: "read_chapter",
+                params: {},
+                done: true,
+                result: JSON.stringify({ chapterIndex: 0, chapterNumber: 1, chapterTitle: "序", part: 0, totalParts: 1, text: "" }),
+              },
+            },
+            { type: "toolCall", toolCall: { toolCallId: "t2", tool: "draw_mindmap", params: { title: "图", outline: "# 图" }, done: true, result: "{}" } },
+          ],
+        }}
+      />,
+    );
+    expect(getByText("序")).toBeTruthy();
+    expect(queryByRole("img", { name: "部分章节未读完，回答可能不完整" })).toBeNull();
+    expect(getByText("draw_mindmap")).toBeTruthy();
+  });
+
+  it("renders no source summary for answers without book tools", () => {
+    const { queryByTestId } = render(
+      <AssistantMessage message={{ role: "assistant", content: "直接回答" }} />,
+    );
+    expect(queryByTestId("source-summary")).toBeNull();
   });
 
   it("falls back to rendering content as a single text block when blocks is missing", () => {
@@ -241,5 +308,81 @@ describe("normalizeLatexDelimiters", () => {
   it("leaves inline code untouched and rewrites prose", () => {
     const output = normalizeLatexDelimiters("`\\(x\\)` 外 \\(x\\)");
     expect(output).toBe("`\\(x\\)` 外 $x$");
+  });
+});
+
+describe("AssistantMessage citations", () => {
+  const verified: QuoteLocation = {
+    status: "verified",
+    chapterIndex: 2,
+    chapterTitle: "第三章 归来",
+    href: "c.xhtml",
+    passage: "他说：自由不是没有约束。然后离开了。",
+    matchStart: 3,
+    matchEnd: 12,
+  };
+  const content = "作者写道[“自由不是没有约束”](cite:2)，见[官网](https://example.com)。";
+
+  function renderWith(locate: (chapterIndex: number, quote: string) => Promise<QuoteLocation>, streaming = false) {
+    const openInBook = vi.fn();
+    const screen = render(
+      <CitationContext.Provider value={{ locate, openInBook }}>
+        <AssistantMessage message={{ role: "assistant", content }} streaming={streaming} />
+      </CitationContext.Provider>,
+    );
+    return { ...screen, openInBook };
+  }
+
+  it("renders cite: links as citations and leaves other links alone", async () => {
+    const locate = vi.fn(async () => verified);
+    const { getByRole, container } = renderWith(locate);
+    const citation = getByRole("button", { name: "“自由不是没有约束”" });
+    expect(citation.tagName).toBe("BUTTON");
+    expect(container.querySelector('a[href="https://example.com"]')).toBeTruthy();
+    expect(container.querySelector('a[href^="cite:"]')).toBeNull();
+    await waitFor(() => expect(citation.getAttribute("data-citation")).toBe("verified"));
+    expect(locate).toHaveBeenCalledWith(2, "“自由不是没有约束”");
+  });
+
+  it("does not check citations while the text is streaming", () => {
+    const locate = vi.fn(async () => verified);
+    renderWith(locate, true);
+    expect(locate).not.toHaveBeenCalled();
+  });
+
+  it("opens the passage with the quote emphasised and offers Open in Book", async () => {
+    const { getByRole, findByText, openInBook } = renderWith(async () => verified);
+    const citation = getByRole("button", { name: "“自由不是没有约束”" });
+    await waitFor(() => expect(citation.getAttribute("data-citation")).toBe("verified"));
+    await act(async () => {
+      fireEvent.click(citation);
+    });
+    expect(await findByText("第三章 归来")).toBeTruthy();
+    expect(document.querySelector("mark")?.textContent).toBe("自由不是没有约束。");
+    fireEvent.click(getByRole("button", { name: "在书中打开" }));
+    expect(openInBook).toHaveBeenCalledWith(verified, "“自由不是没有约束”");
+  });
+
+  it("marks unverified citations and hides Open in Book for them", async () => {
+    const { getByRole, getByLabelText, findByText, queryByRole } = renderWith(async () => ({
+      status: "unverified",
+      chapterIndex: 2,
+    }));
+    await waitFor(() => expect(getByLabelText("未在书中找到此引文")).toBeTruthy());
+    await act(async () => {
+      fireEvent.click(getByRole("button", { name: /自由不是没有约束/ }));
+    });
+    expect(await findByText(/它可能被改写过/)).toBeTruthy();
+    expect(queryByRole("button", { name: "在书中打开" })).toBeNull();
+  });
+
+  it("explains relocated citations", async () => {
+    const { getByRole, findByText } = renderWith(async () => ({ ...verified, status: "relocated", chapterIndex: 5 }));
+    const citation = getByRole("button", { name: "“自由不是没有约束”" });
+    await waitFor(() => expect(citation.getAttribute("data-citation")).toBe("relocated"));
+    await act(async () => {
+      fireEvent.click(citation);
+    });
+    expect(await findByText(/与回答标注的章节不同/)).toBeTruthy();
   });
 });

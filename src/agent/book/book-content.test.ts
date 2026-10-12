@@ -9,6 +9,7 @@ const entry = (fields: Partial<BookTocEntry> & Pick<BookTocEntry, "index" | "lab
   depth: 0,
   hrefs: [],
   chars: 10,
+  parts: 1,
   ...fields,
 });
 
@@ -77,6 +78,13 @@ describe("book prompt projection", () => {
     expect(snapshot).toContain("1 [index 0]: 第一卷 出走");
     expect(snapshot).toContain("  2 [index 1]: 第一章 火车站");
     expect(snapshot).not.toContain("xhtml");
+  });
+
+  it("marks multi-part chapters so the model can read every part in one turn", () => {
+    const toc = [entry({ index: 0, label: "序" }), entry({ index: 1, label: "长章", parts: 3 })];
+    const snapshot = formatBookSnapshot({ title: "T", author: "A", language: "en", totalChapters: 2 }, toc);
+    expect(snapshot).toContain("1 [index 0]: 序\n");
+    expect(snapshot).toContain("2 [index 1]: 长章 (3 parts)");
   });
 
   it("truncates deep TOCs and points to get_toc", () => {

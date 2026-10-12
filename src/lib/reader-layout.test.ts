@@ -35,7 +35,7 @@ describe("resolveReaderLayout", () => {
     expect(resolveReaderLayout(undefined)).toEqual(DEFAULT_READER_LAYOUT);
     expect(resolveReaderLayout(null)).toEqual({
       chatCollapsed: true,
-      bookCollapsed: false,
+      bookCollapsed: true,
       sessionRailOpen: true,
     });
   });

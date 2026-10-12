@@ -443,7 +443,7 @@ describe("reader annotation chrome", () => {
       "目录",
       "标注",
       "切换到阅读模式",
-      "隐藏书籍",
+      "显示书籍",
       "关闭窗口",
     ];
     const headerButtons = [...header!.querySelectorAll("button")].map(

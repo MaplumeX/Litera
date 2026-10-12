@@ -11,6 +11,21 @@ const now="2026-08-14T00:00:00Z";
 function session():DecodedPiSession{return{header:{type:"session",version:3,id:"session-1",timestamp:now,cwd:""},entries:[],leafId:null};}
 
 describe("LiteraAgentRuntime",()=>{
+  it("tells the model how to write Citations",()=>{
+    expect(SYSTEM_PROMPT).toContain("[quoted text](cite:CHAPTER_INDEX)");
+  });
+
+  it("checks Citations against the open book only",async()=>{
+    const sessions:SessionPort={create:async()=>session(),list:async()=>[],load:async()=>session(),delete:async()=>{},append:async()=>null};
+    const locateQuote=vi.fn(async(chapterIndex:number)=>({status:"verified" as const,chapterIndex}));
+    const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:1}),toc:async()=>[],readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:1,text:"chapter"}),search:async()=>[],locateQuote,close:()=>{}};
+    const runtime=new LiteraAgentRuntime({sessions,book});
+    await expect(runtime.locateQuote(0,"quote")).rejects.toThrow("No book is open");
+    await runtime.openBook("book",new ArrayBuffer(1));
+    await expect(runtime.locateQuote(3,"quote")).resolves.toEqual({status:"verified",chapterIndex:3});
+    expect(locateQuote).toHaveBeenCalledWith(3,"quote");
+  });
+
   it("persists the user before network and completed assistant after settlement",async()=>{
     const current=session();const order:string[]=[];const batches:PiSessionEntry[][]=[];
     const sessions:SessionPort={create:async()=>current,list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,entries)=>{order.push(`append:${entries.map((entry)=>entry.type).join(",")}`);batches.push(entries);return entries[entries.length-1]?.id??null;}};

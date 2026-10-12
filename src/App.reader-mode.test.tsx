@@ -72,6 +72,7 @@ const readerHandle: ReaderViewHandle = {
   getSectionFractions: () => [],
   previewLabelAt: () => undefined,
   goToCfi: vi.fn(async () => true),
+  goToQuote: vi.fn(async () => true),
   setStyles: vi.fn(),
   setColumnCount: vi.fn(),
   getToc: () => [],
@@ -95,6 +96,8 @@ const readerHandle: ReaderViewHandle = {
   advanceTtsSection: vi.fn(async () => undefined),
 };
 
+let mockToc: { label: string; href: string; subitems?: unknown[] }[] = [];
+
 vi.mock("@/components/ReaderView", async () => {
   const React = await import("react");
   return {
@@ -102,10 +105,15 @@ vi.mock("@/components/ReaderView", async () => {
       props: {
         onSelectionCapture?: (capture: { text: string; chapterHref?: string }) => void;
         onTtsToggle?: () => void;
+        onBookReady?: (toc: typeof mockToc) => void;
       },
       ref: React.ForwardedRef<ReaderViewHandle>,
     ) {
       React.useImperativeHandle(ref, () => readerHandle);
+      React.useEffect(() => {
+        if (mockToc.length) props.onBookReady?.(mockToc);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+      }, []);
       React.useEffect(() => {
         const onKey = (event: KeyboardEvent) => {
           if (event.key !== " ") return;
@@ -130,6 +138,8 @@ vi.mock("@/components/ReaderView", async () => {
 });
 
 let bridgeState: AgentState;
+const promptMock = vi.fn(async () => {});
+const locateQuoteMock = vi.fn();
 
 vi.mock("@/lib/use-agent-bridge", () => ({
   useAgentBridge: () => ({
@@ -137,7 +147,8 @@ vi.mock("@/lib/use-agent-bridge", () => ({
     abort: vi.fn(),
     deleteSession: vi.fn(),
     newSession: vi.fn(),
-    prompt: vi.fn(),
+    prompt: promptMock,
+    locateQuote: locateQuoteMock,
     editPrompt: vi.fn(),
     renameSession: vi.fn(),
     switchSession: vi.fn(),
@@ -208,6 +219,10 @@ beforeEach(() => {
   vi.mocked(readerHandle.goToCfi).mockClear();
   vi.mocked(readerHandle.goToTocItem).mockClear();
   vi.mocked(readerHandle.goToFraction).mockClear();
+  promptMock.mockClear();
+  locateQuoteMock.mockReset();
+  vi.mocked(readerHandle.goToQuote).mockClear();
+  mockToc = [];
   openContext.lastReaderMode = undefined;
   openContext.lastLayout = undefined;
   openContextB.lastLayout = undefined;
@@ -281,10 +296,11 @@ describe("reader / agent mode", () => {
     expect(screen.getByLabelText("会话列表")).toBeTruthy();
     expect(screen.queryByLabelText("显示会话列表")).toBeNull();
     expect(screen.queryByLabelText("隐藏会话列表")).toBeNull();
-    expect(screen.getByLabelText("隐藏书籍")).toBeTruthy();
+    expect(screen.getByLabelText("显示书籍")).toBeTruthy();
+    expect(screen.getByTestId("reader-book-cell").hidden).toBe(true);
     expect(screen.getByTestId("reader-book-cell").contains(screen.getByTestId("reader-progress-bar"))).toBe(true);
     expect(screen.getByTestId("reader-shell").style.gridTemplateAreas).toBe('"chat book"');
-    expect(screen.getByTestId("reader-shell").style.gridTemplateColumns).toBe("1fr 38%");
+    expect(screen.getByTestId("reader-shell").style.gridTemplateColumns).toBe("1fr 0px");
     expect(screen.getByRole("button", { name: "新建会话" })).toBeTruthy();
   });
 
@@ -302,6 +318,8 @@ describe("reader / agent mode", () => {
     expect(bookCell.className).not.toContain("border-l");
 
     fireEvent.click(screen.getByLabelText("切换到 Agent 模式"));
+    expect(bookCell.hidden).toBe(true);
+    fireEvent.click(screen.getByLabelText("显示书籍"));
     expect(bookCell.hidden).toBe(false);
     expect(bookCell.className).toContain("border-l");
     expect(chatCell.className).not.toContain("border-l");
@@ -380,6 +398,8 @@ describe("reader / agent mode", () => {
     expect(screen.queryByRole("button", { name: "新建会话" })).toBeNull();
     expect(screen.getByPlaceholderText("输入问题…")).toBeTruthy();
 
+    fireEvent.click(screen.getByLabelText("显示书籍"));
+    expect(screen.getByTestId("reader-shell").style.gridTemplateColumns).toBe("1fr 38%");
     fireEvent.click(screen.getByLabelText("隐藏书籍"));
     expect(screen.getByTestId("reader-shell").style.gridTemplateColumns).toBe("1fr 0px");
     expect(screen.getByTestId("reader-view")).toBeTruthy();
@@ -389,6 +409,7 @@ describe("reader / agent mode", () => {
   it("fills chat immediately when asking the agent with the book open", async () => {
     localStorage.setItem(DEFAULT_READER_MODE_KEY, "agent");
     const screen = await openReader();
+    fireEvent.click(screen.getByLabelText("显示书籍"));
     fireEvent.click(screen.getByText("fake-ask"));
     await waitFor(() => {
       expect(screen.getByText("引用选段：“quoted”")).toBeTruthy();
@@ -398,7 +419,6 @@ describe("reader / agent mode", () => {
   it("does not fill chat when the agent-mode book is collapsed", async () => {
     localStorage.setItem(DEFAULT_READER_MODE_KEY, "agent");
     const screen = await openReader();
-    fireEvent.click(screen.getByLabelText("隐藏书籍"));
     fireEvent.click(screen.getByText("fake-ask"));
     expect(screen.queryByText("引用选段：“quoted”")).toBeNull();
   });
@@ -406,6 +426,7 @@ describe("reader / agent mode", () => {
   it("resizes the agent book pane and persists the width", async () => {
     localStorage.setItem(DEFAULT_READER_MODE_KEY, "agent");
     const screen = await openReader();
+    fireEvent.click(screen.getByLabelText("显示书籍"));
     const shell = screen.getByTestId("reader-shell");
     vi.spyOn(shell, "getBoundingClientRect").mockReturnValue({
       x: 0,
@@ -428,21 +449,116 @@ describe("reader / agent mode", () => {
     expect(localStorage.getItem(AGENT_BOOK_WIDTH_KEY)).toBe("42");
   });
 
-  it("opens TOC by expanding a collapsed agent-mode book", async () => {
+  it("opens the TOC over the session without expanding a collapsed agent-mode book", async () => {
     localStorage.setItem(DEFAULT_READER_MODE_KEY, "agent");
     const screen = await openReader();
-    fireEvent.click(screen.getByLabelText("隐藏书籍"));
     expect(screen.getByTestId("reader-shell").style.gridTemplateColumns).toBe("1fr 0px");
     fireEvent.click(screen.getByLabelText("目录"));
-    expect(screen.getByTestId("reader-shell").style.gridTemplateColumns).toBe("1fr 38%");
+    expect(screen.getByTestId("reader-shell").style.gridTemplateColumns).toBe("1fr 0px");
+    expect(screen.getByTestId("reader-book-cell").hidden).toBe(true);
+    const close = screen.getByLabelText("关闭目录");
+    expect(screen.getByTestId("reader-chat-cell").contains(close)).toBe(true);
+  });
+
+  it("keeps the TOC drawer over the book in reading mode", async () => {
+    const screen = await openReader();
+    fireEvent.click(screen.getByLabelText("目录"));
+    expect(screen.getByTestId("reader-book-cell").contains(screen.getByLabelText("关闭目录"))).toBe(true);
+  });
+
+  it("scopes agent prompts to the chapter picked from the TOC", async () => {
+    mockToc = [
+      { label: "第一章", href: "ch1.xhtml" },
+      { label: "第二章", href: "ch2.xhtml" },
+    ];
+    localStorage.setItem(DEFAULT_READER_MODE_KEY, "agent");
+    const screen = await openReader();
+    fireEvent.click(screen.getByLabelText("目录"));
+    fireEvent.click(screen.getByText("第二章"));
+
+    expect(screen.queryByLabelText("关闭目录")).toBeNull();
+    expect(screen.getByText("讨论范围：第二章")).toBeTruthy();
+    // The hidden book is not navigated.
+    expect(readerHandle.goToTocItem).not.toHaveBeenCalled();
+
+    const input = screen.getByPlaceholderText("输入问题…");
+    fireEvent.change(input, { target: { value: "讲讲这一章" } });
+    await act(async () => {
+      fireEvent.keyDown(input, { key: "Enter" });
+    });
+    expect(promptMock).toHaveBeenCalledWith(
+      "讲讲这一章",
+      expect.objectContaining({ chapterHref: "ch2.xhtml" }),
+      expect.anything(),
+    );
+
+    fireEvent.click(screen.getByLabelText("清除讨论范围"));
+    expect(screen.queryByText("讨论范围：第二章")).toBeNull();
+  });
+
+  it("also navigates a visible agent-mode book when picking a chapter", async () => {
+    mockToc = [{ label: "第一章", href: "ch1.xhtml" }];
+    localStorage.setItem(DEFAULT_READER_MODE_KEY, "agent");
+    const screen = await openReader();
+    fireEvent.click(screen.getByLabelText("显示书籍"));
+    fireEvent.click(screen.getByLabelText("目录"));
+    fireEvent.click(screen.getByText("第一章"));
+    expect(readerHandle.goToTocItem).toHaveBeenCalledWith("ch1.xhtml");
+    expect(screen.getByText("讨论范围：第一章")).toBeTruthy();
+  });
+
+  it("navigates without a scope chip when picking a chapter in reading mode", async () => {
+    mockToc = [{ label: "第一章", href: "ch1.xhtml" }];
+    const screen = await openReader();
+    fireEvent.click(screen.getByLabelText("显示对话"));
+    fireEvent.click(screen.getByLabelText("目录"));
+    fireEvent.click(screen.getByText("第一章"));
+    expect(readerHandle.goToTocItem).toHaveBeenCalledWith("ch1.xhtml");
+    expect(screen.queryByText("讨论范围：第一章")).toBeNull();
+  });
+
+  it("opens a citation in a collapsed agent-mode book at the quote", async () => {
+    mockToc = [{ label: "第三章", href: "Text/c.xhtml#s3" }];
+    locateQuoteMock.mockResolvedValue({
+      status: "verified",
+      chapterIndex: 2,
+      chapterTitle: "第三章",
+      href: "c.xhtml#s3",
+      passage: "自由不是没有约束。",
+      matchStart: 0,
+      matchEnd: 8,
+    });
+    bridgeState = {
+      ...bridgeState,
+      messages: [
+        { role: "user", content: "问" },
+        { role: "assistant", content: "作者写道[“自由不是没有约束”](cite:2)。" },
+      ],
+    };
+    localStorage.setItem(DEFAULT_READER_MODE_KEY, "agent");
+    const screen = await openReader();
+    expect(screen.getByTestId("reader-book-cell").hidden).toBe(true);
+
+    const citation = screen.getByRole("button", { name: "“自由不是没有约束”" });
+    await waitFor(() => expect(citation.getAttribute("data-citation")).toBe("verified"));
+    await act(async () => {
+      fireEvent.click(citation);
+    });
+    await act(async () => {
+      fireEvent.click(await screen.findByRole("button", { name: "在书中打开" }));
+    });
+
     expect(screen.getByTestId("reader-book-cell").hidden).toBe(false);
-    expect(screen.getByLabelText("关闭目录")).toBeTruthy();
+    await waitFor(() => {
+      expect(readerHandle.goToQuote).toHaveBeenCalledWith("Text/c.xhtml#s3", "“自由不是没有约束”");
+    });
   });
 
   it("keeps collapsed book and session rail when switching modes", async () => {
     const screen = await openReader();
     fireEvent.click(screen.getByLabelText("切换到 Agent 模式"));
     fireEvent.click(screen.getByLabelText("会话列表"));
+    fireEvent.click(screen.getByLabelText("显示书籍"));
     fireEvent.click(screen.getByLabelText("隐藏书籍"));
     fireEvent.click(screen.getByLabelText("切换到阅读模式"));
     fireEvent.click(screen.getByLabelText("切换到 Agent 模式"));
@@ -491,7 +607,8 @@ describe("reader / agent mode", () => {
     const screen = await openReader();
     expect(screen.getByLabelText("显示对话")).toBeTruthy();
     fireEvent.click(screen.getByLabelText("切换到 Agent 模式"));
-    expect(screen.getByLabelText("隐藏书籍")).toBeTruthy();
+    expect(screen.getByLabelText("显示书籍")).toBeTruthy();
+    expect(screen.getByTestId("reader-book-cell").hidden).toBe(true);
     expect(screen.getByRole("button", { name: "新建会话" })).toBeTruthy();
   });
 
@@ -506,7 +623,7 @@ describe("reader / agent mode", () => {
             bookId: "book1",
             lastLayout: {
               chatCollapsed: false,
-              bookCollapsed: false,
+              bookCollapsed: true,
               sessionRailOpen: true,
             },
           }),
@@ -660,7 +777,6 @@ describe("reader TTS chrome", () => {
   it("disables play when the agent-mode book is hidden", async () => {
     localStorage.setItem(DEFAULT_READER_MODE_KEY, "agent");
     const screen = await openReader();
-    fireEvent.click(screen.getByLabelText("隐藏书籍"));
     expect((screen.getByLabelText("朗读") as HTMLButtonElement).disabled).toBe(true);
   });
 });

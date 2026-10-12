@@ -1,5 +1,5 @@
-import { memo, useEffect, useMemo, useRef, useState } from "react";
-import ReactMarkdown, { type Components } from "react-markdown";
+import { isValidElement, memo, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import ReactMarkdown, { defaultUrlTransform, type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
@@ -7,18 +7,37 @@ import "katex/dist/katex.min.css";
 import { Bot, Brain, ChevronRight, RefreshCw } from "lucide-react";
 import type { AssistantBlock, AssistantChatMessage } from "@/types/agent";
 import { ToolCallCard } from "./ToolCallCard";
+import { SourceSummaryCard } from "./SourceSummaryCard";
+import { Citation, CitationSettledContext } from "./Citation";
 import { CopyButton } from "./CopyButton";
 import { TypingIndicator } from "./TypingIndicator";
 import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { isSourceToolCall, summarizeSources } from "@/lib/source-summary";
+import { citationChapterIndex, isCitationHref, stripCitations } from "@/lib/citations";
+
+function nodeText(node: ReactNode): string {
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(nodeText).join("");
+  if (isValidElement<{ children?: ReactNode }>(node)) return nodeText(node.props.children);
+  return "";
+}
 
 const markdownComponents: Components = {
-  a: ({ href, children }) => (
-    <a href={href} target="_blank" rel="noreferrer">
-      {children}
-    </a>
-  ),
+  a: ({ href, children }) =>
+    isCitationHref(href) ? (
+      <Citation chapterIndex={citationChapterIndex(href)} quote={nodeText(children)}>
+        {children}
+      </Citation>
+    ) : (
+      <a href={href} target="_blank" rel="noreferrer">
+        {children}
+      </a>
+    ),
 };
+
+// Keep `cite:` links for Citations; everything else gets the default sanitizing.
+const urlTransform = (url: string) => (isCitationHref(url) ? url : defaultUrlTransform(url));
 
 export function BotAvatar() {
   return (
@@ -110,6 +129,7 @@ const MarkdownBody = memo(function MarkdownBody({ text }: { text: string }) {
       remarkPlugins={[remarkGfm, remarkMath]}
       rehypePlugins={[rehypeKatex]}
       components={markdownComponents}
+      urlTransform={urlTransform}
     >
       {text}
     </ReactMarkdown>
@@ -133,13 +153,15 @@ const TextBlock = memo(function TextBlock({
   return (
     <div>
       <div className="prose prose-sm max-w-none overflow-x-auto dark:prose-invert">
-        <MarkdownBody text={normalized} />
+        <CitationSettledContext.Provider value={!streaming}>
+          <MarkdownBody text={normalized} />
+        </CitationSettledContext.Provider>
         {streaming && (
           <span className="ml-0.5 inline-block h-4 w-2 animate-pulse bg-primary/70 motion-reduce:animate-none" />
         )}
       </div>
       <div className="flex h-6 items-center gap-1">
-        <CopyButton text={text} />
+        <CopyButton text={stripCitations(text)} />
         {onRegenerate && (
           <button
             type="button"
@@ -181,6 +203,12 @@ export const AssistantMessage = memo(function AssistantMessage({
   const lastTextIndex = textBlocks.length > 0
     ? blocks.lastIndexOf(textBlocks[textBlocks.length - 1])
     : -1;
+  // Book tool calls fold into one source summary, shown where the first of
+  // them sits in the answer.
+  const sources = useMemo(() => summarizeSources(blocks), [blocks]);
+  const firstSourceIndex = blocks.findIndex(
+    (block) => block.type === "toolCall" && isSourceToolCall(block.toolCall),
+  );
   return (
     <div className="flex gap-2">
       <BotAvatar />
@@ -193,7 +221,12 @@ export const AssistantMessage = memo(function AssistantMessage({
             ) : null;
           }
           if (block.type === "toolCall") {
-            return <ToolCallCard key={block.toolCall.toolCallId} call={block.toolCall} />;
+            if (!isSourceToolCall(block.toolCall)) {
+              return <ToolCallCard key={block.toolCall.toolCallId} call={block.toolCall} />;
+            }
+            return index === firstSourceIndex && sources ? (
+              <SourceSummaryCard key="sources" summary={sources} />
+            ) : null;
           }
           return (
             <TextBlock

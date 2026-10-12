@@ -126,5 +126,10 @@ export function useAgentBridge(bookId: string) {
     }
   }, []);
 
-  return { state, prompt, editPrompt, abort, listSessions, newSession, switchSession, deleteSession, renameSession, updateSessionConfig, switchBranchAtAnchor };
+  const locateQuote = useCallback(
+    (chapterIndex: number, quote: string) => embeddedAgentRuntime.locateQuote(chapterIndex, quote),
+    [],
+  );
+
+  return { state, prompt, editPrompt, abort, listSessions, newSession, switchSession, deleteSession, renameSession, updateSessionConfig, switchBranchAtAnchor, locateQuote };
 }
