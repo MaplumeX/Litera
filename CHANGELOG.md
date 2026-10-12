@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.6] - 2026-10-12
+
 ### Added
 
 - **「搁置」阅读状态**：读到一半暂时不读的书可以标记为搁置，它会离开「在读」与「继续阅读」；书架新增「搁置」标签，菜单与批量标记中同样可选。再次翻页阅读时自动回到「在读」。
