@@ -24,12 +24,12 @@ tauri-build = { version = "2", features = [] }
 # `tauri-plugin-*` with a matching `@tauri-apps/plugin-*`) is therefore
 # minor-locked with `~` on both sides, so neither side can drift to a new minor
 # on its own. Run `node scripts/check-tauri-pairing.mjs` to verify; CI does.
-tauri = { version = "~2.11.6", features = ["protocol-asset"] }
+tauri = { version = "~2.12.1", features = ["protocol-asset"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri-plugin-dialog = "2.7.2"
-tauri-plugin-http = "~2.6.1"
-tauri-plugin-opener = "~2.5.5"
+tauri-plugin-http = "~2.8.0"
+tauri-plugin-opener = "~2.7.0"
 chrono = "0.4"
 tempfile = "3"
 uuid = { version = "1", features = ["v4"] }
