@@ -2,9 +2,11 @@ import type { ReaderLayout } from "@/types/library";
 
 export type { ReaderLayout };
 
+// Agent mode is chat-first: the book pane starts hidden. bookCollapsed only
+// applies in Agent mode, so reading mode is unaffected.
 export const DEFAULT_READER_LAYOUT: ReaderLayout = {
   chatCollapsed: true,
-  bookCollapsed: false,
+  bookCollapsed: true,
   sessionRailOpen: true,
 };
 

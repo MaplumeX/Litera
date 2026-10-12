@@ -1,7 +1,8 @@
 import { DOMParser } from "@xmldom/xmldom";
 import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 import { describe, expect, it } from "vitest";
-import { bookToc, buildOwnedChapters, chapterWindows, hrefFragment, markdownText, parseEpub, parseSpineSegments, readChapter, searchBook, stripFragment, type NavNode } from "./epub-content";
+import { CHAPTER_PART_CHARS } from "./book-content";
+import { bookToc, buildOwnedChapters, chapterWindows, hrefFragment, locateQuote, markdownText, parseEpub, parseSpineSegments, readChapter, searchBook, stripFragment, type NavNode, type ParsedBook } from "./epub-content";
 
 type FileMap = Record<string, string>;
 
@@ -255,6 +256,7 @@ describe("anchor-level ownership (AC1–AC3)", () => {
       expect(entry.depth).toBe(1);
     });
     expect(readChapter(book, 1).text).toBe("第二章 母亲的信 content ch2");
+    expect(readChapter(book, 1).chapterTitle).toBe("第一卷 出走 › 第二章 母亲的信");
     expect(toc[1].chars).toBe(readChapter(book, 1).text.length);
   });
 
@@ -696,5 +698,93 @@ describe("buildOwnedChapters unit coverage", () => {
     expect(chapters).toHaveLength(1);
     expect(chapters[0].text).toBe("unclaimed headowned");
     expect(chapters[0].hrefs).toEqual([file, "text/only.xhtml"]);
+  });
+});
+
+describe("locateQuote", () => {
+  const chapter = (label: string, markdown: string, href: string) => ({
+    label,
+    ancestors: ["第一卷"],
+    depth: 1,
+    hrefs: [href],
+    text: markdown,
+    markdown,
+  });
+  const book: ParsedBook = {
+    metadata: { title: "T", author: "A", language: "zh", totalChapters: 2 },
+    chapters: [
+      chapter("第一章", "# 第一章\n\n自由不是没有约束，而是**选择**约束。\n\n> 他说：“我们终将归来。”", "a.xhtml"),
+      chapter("第二章", "第二段开头。中间有很多很多文字。结尾在这里。\n\nThe Quick  Brown Fox.", "b.xhtml#c2"),
+    ],
+    trigramIndex: new Map(),
+  };
+
+  it("verifies a quote in the cited chapter and returns its paragraph", () => {
+    const result = locateQuote(book, 0, "“自由不是没有约束，而是选择约束。”");
+    expect(result).toMatchObject({
+      status: "verified",
+      chapterIndex: 0,
+      chapterTitle: "第一卷 › 第一章",
+      href: "a.xhtml",
+      passage: "自由不是没有约束，而是选择约束。",
+    });
+    expect(result.passage!.slice(result.matchStart, result.matchEnd)).toBe("自由不是没有约束，而是选择约束。");
+  });
+
+  it("ignores whitespace, width, case and quote style differences", () => {
+    expect(locateQuote(book, 1, "the quick brown fox").status).toBe("verified");
+    expect(locateQuote(book, 0, '我们终将归来').passage).toBe("他说：“我们终将归来。”");
+    expect(locateQuote(book, 0, "自由不是没有约束,而是选择约束").status).toBe("verified");
+  });
+
+  it("matches ellipsis-separated segments in order within one paragraph", () => {
+    const result = locateQuote(book, 1, "第二段开头……结尾在这里");
+    expect(result.status).toBe("verified");
+    expect(result.passage!.slice(result.matchStart, result.matchEnd)).toBe("第二段开头。中间有很多很多文字。结尾在这里");
+    expect(locateQuote(book, 1, "结尾在这里……第二段开头").status).toBe("unverified");
+  });
+
+  it("relocates a quote found in another chapter", () => {
+    expect(locateQuote(book, 0, "中间有很多很多文字")).toMatchObject({
+      status: "relocated",
+      chapterIndex: 1,
+      href: "b.xhtml#c2",
+    });
+  });
+
+  it("reports quotes that are not in the Book, or too short to check", () => {
+    expect(locateQuote(book, 0, "书里没有这句话")).toEqual({ status: "unverified", chapterIndex: 0 });
+    expect(locateQuote(book, 0, "“自”")).toEqual({ status: "unverified", chapterIndex: 0 });
+    expect(locateQuote(book, 99, "中间有很多很多文字").status).toBe("relocated");
+  });
+
+  it("caps long paragraphs around the match", () => {
+    const long = `${"前".repeat(800)}目标句子在此${"后".repeat(800)}`;
+    const longBook: ParsedBook = { ...book, chapters: [chapter("长", long, "c.xhtml")] };
+    const result = locateQuote(longBook, 0, "目标句子在此");
+    expect(result.passage!.length).toBeLessThanOrEqual(602);
+    expect(result.passage!.startsWith("…")).toBe(true);
+    expect(result.passage!.endsWith("…")).toBe(true);
+    expect(result.passage!.slice(result.matchStart, result.matchEnd)).toBe("目标句子在此");
+  });
+});
+
+describe("bookToc parts", () => {
+  it("reports the same part count read_chapter uses", () => {
+    const paragraph = "字".repeat(5_000);
+    const long = Array.from({ length: 6 }, () => paragraph).join("\n\n");
+    const book: ParsedBook = {
+      metadata: { title: "T", author: "A", language: "zh", totalChapters: 2 },
+      chapters: [
+        { label: "短", ancestors: [], depth: 0, hrefs: ["a.xhtml"], text: "短文", markdown: "短文" },
+        { label: "长", ancestors: [], depth: 0, hrefs: ["b.xhtml"], text: long, markdown: long },
+      ],
+      trigramIndex: new Map(),
+    };
+    const toc = bookToc(book);
+    expect(long.length).toBeGreaterThan(CHAPTER_PART_CHARS * 2);
+    expect(toc[0].parts).toBe(1);
+    expect(toc[1].parts).toBe(readChapter(book, 1).totalParts);
+    expect(toc[1].parts).toBeGreaterThan(1);
   });
 });

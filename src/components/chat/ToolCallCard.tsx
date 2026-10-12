@@ -36,7 +36,7 @@ function paramEntries(params: unknown): ParamEntry[] {
   return [];
 }
 
-function paramsSummary(params: unknown): string {
+export function paramsSummary(params: unknown): string {
   const entries = paramEntries(params);
   if (entries.length > 0) {
     return entries.map(({ key, value }) => `${key}: ${value}`).join(", ");
@@ -102,59 +102,62 @@ export function ToolCallHeader({
   );
 }
 
-export const ToolCallCard = memo(function ToolCallCard({ call }: { call: AgentToolCall }) {
+/** A tool call's parameters and result as recorded: the raw-data view. */
+export function ToolCallRaw({ call }: { call: AgentToolCall }) {
   const { t } = useT();
-  const [expanded, setExpanded] = useState(false);
-  // Mind maps render as their own card: the outline is the payload, not a
-  // parameter dump, and expanding reveals the interactive map.
-  if (call.tool === "draw_mindmap") return <MindmapCard call={call} />;
-  const summary = paramsSummary(call.params);
   const entries = paramEntries(call.params);
   const fullResult = call.result != null ? resultText(call.result) : "";
   const truncated = fullResult.length > RESULT_TRUNCATE_LIMIT;
   const shownResult = truncated ? fullResult.slice(0, RESULT_TRUNCATE_LIMIT) : fullResult;
+  return (
+    <div className="space-y-1 pb-1">
+      {entries.length > 0 && (
+        <div className="space-y-0.5 text-xs">
+          <div className="text-muted-foreground/60">{t("chat.toolParams")}</div>
+          <dl className="space-y-0.5">
+            {entries.map(({ key, value }) => (
+              <div key={key} className="flex gap-1.5">
+                <dt className="shrink-0 font-medium text-muted-foreground">{key}</dt>
+                <dd className="min-w-0 break-all text-muted-foreground/80">{value}</dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+      )}
+      {call.result != null && (
+        <div className="space-y-0.5">
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-muted-foreground/60">{t("chat.toolResult")}</span>
+            <CopyButton text={fullResult} label={t("chat.copyResult")} />
+          </div>
+          <pre className="max-h-60 overflow-y-auto whitespace-pre-wrap font-mono text-xs text-muted-foreground/80">
+            {shownResult}
+          </pre>
+          {truncated && (
+            <div className="text-xs text-muted-foreground/60">
+              {t("chat.resultTruncated", { count: fullResult.length })}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
+export const ToolCallCard = memo(function ToolCallCard({ call }: { call: AgentToolCall }) {
+  const [expanded, setExpanded] = useState(false);
+  // Mind maps render as their own card: the outline is the payload, not a
+  // parameter dump, and expanding reveals the interactive map.
+  if (call.tool === "draw_mindmap") return <MindmapCard call={call} />;
   return (
     <div className="-ml-1 rounded px-1 transition-colors hover:bg-muted/40">
       <ToolCallHeader
         call={call}
         expanded={expanded}
         onToggle={() => setExpanded((value) => !value)}
-        summary={summary}
+        summary={paramsSummary(call.params)}
       />
-      {expanded && (
-        <div className="space-y-1 pb-1">
-          {entries.length > 0 && (
-            <div className="space-y-0.5 text-xs">
-              <div className="text-muted-foreground/60">{t("chat.toolParams")}</div>
-              <dl className="space-y-0.5">
-                {entries.map(({ key, value }) => (
-                  <div key={key} className="flex gap-1.5">
-                    <dt className="shrink-0 font-medium text-muted-foreground">{key}</dt>
-                    <dd className="min-w-0 break-all text-muted-foreground/80">{value}</dd>
-                  </div>
-                ))}
-              </dl>
-            </div>
-          )}
-          {call.result != null && (
-            <div className="space-y-0.5">
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-muted-foreground/60">{t("chat.toolResult")}</span>
-                <CopyButton text={fullResult} label={t("chat.copyResult")} />
-              </div>
-              <pre className="max-h-60 overflow-y-auto whitespace-pre-wrap font-mono text-xs text-muted-foreground/80">
-                {shownResult}
-              </pre>
-              {truncated && (
-                <div className="text-xs text-muted-foreground/60">
-                  {t("chat.resultTruncated", { count: fullResult.length })}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
+      {expanded && <ToolCallRaw call={call} />}
     </div>
   );
 });

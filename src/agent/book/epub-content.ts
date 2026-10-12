@@ -5,6 +5,7 @@ import {
   hrefMatches,
   type BookMetadata,
   type BookTocEntry,
+  type QuoteLocation,
   type SearchHit,
 } from "./book-content";
 
@@ -808,6 +809,7 @@ export function bookToc(book: ParsedBook): BookTocEntry[] {
     depth: chapter.depth,
     hrefs: chapter.hrefs,
     chars: chapter.markdown.length,
+    parts: chapterParts(chapter).length,
   }));
 }
 
@@ -858,9 +860,13 @@ export function chapterWindows(markdown: string): string[] {
   return windows.length ? windows : [""];
 }
 
-export function readChapter(book: ParsedBook, chapterIndex: number, rawPart = 0) {
-  const chapter = book.chapters[chapterIndex];
-  if (!chapter) throw new Error("Chapter index is out of range");
+// The TOC reports part counts on every prompt; pack each chapter once.
+const partsCache = new WeakMap<Chapter, string[]>();
+
+/** The read_chapter windows of one chapter, cached per parsed chapter. */
+function chapterParts(chapter: Chapter): string[] {
+  const cached = partsCache.get(chapter);
+  if (cached) return cached;
   let windows: string[];
   try {
     windows = chapterWindows(chapter.markdown);
@@ -871,11 +877,21 @@ export function readChapter(book: ParsedBook, chapterIndex: number, rawPart = 0)
       (_, part) => chapter.text.slice(part * CHAPTER_PART_CHARS, (part + 1) * CHAPTER_PART_CHARS),
     );
   }
+  partsCache.set(chapter, windows);
+  return windows;
+}
+
+export function readChapter(book: ParsedBook, chapterIndex: number, rawPart = 0) {
+  const chapter = book.chapters[chapterIndex];
+  if (!chapter) throw new Error("Chapter index is out of range");
+  const windows = chapterParts(chapter);
   const totalParts = windows.length;
   const part = Math.min(Math.max(0, Math.trunc(rawPart) || 0), totalParts - 1);
+  const chapterTitle = chapterTitleOf(chapter);
   return {
     chapterIndex,
     chapterNumber: chapterIndex + 1,
+    ...(chapterTitle ? { chapterTitle } : {}),
     part,
     totalParts,
     text: windows[part],
@@ -947,4 +963,124 @@ function pushHit(
     match,
     snippet: `${start ? "…" : ""}${chapter.text.slice(start, end)}${end < chapter.text.length ? "…" : ""}`,
   });
+}
+
+const QUOTE_PASSAGE_MAX_CHARS = 600;
+const QUOTE_ELLIPSIS = /…+|\.{3,}|。{3,}/;
+const QUOTE_MARKS = /^["'“”‘’「」『』《》]+|["'“”‘’「」『』《》]+$/g;
+
+/** Plain text of one Markdown block: structural line prefixes and emphasis delimiters dropped. */
+function plainBlock(markdown: string): string {
+  return markdown
+    .split("\n")
+    .map((line) => {
+      let text = line.replace(/^(\s*)([-+]|\d{1,9}\.)\s+/, "$1");
+      text = text.replace(/^(\s*)#{1,6}\s+/, "$1");
+      while (/^(\s*)>\s?/.test(text)) text = text.replace(/^(\s*)>\s?/, "$1");
+      return text;
+    })
+    .join("\n")
+    .split("**")
+    .join("")
+    .split("~~")
+    .join("")
+    .split("*")
+    .join("");
+}
+
+/**
+ * Comparison form for quote matching: whitespace dropped, width-folded
+ * (NFKC), curly quotes straightened, case-folded. `map[i]` is the source
+ * index of normalized char `i`.
+ */
+function normalizeForQuote(text: string): { text: string; map: number[] } {
+  let out = "";
+  const map: number[] = [];
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (/\s/.test(char)) continue;
+    const folded = char
+      .normalize("NFKC")
+      .replace(/[“”„‟«»]/g, '"')
+      .replace(/[‘’‚‛]/g, "'")
+      .toLowerCase();
+    for (const piece of folded) {
+      if (/\s/.test(piece)) continue;
+      out += piece;
+      map.push(index);
+    }
+  }
+  return { text: out, map };
+}
+
+/** Normalized quote segments; an ellipsis in the quote marks an omission between segments. */
+function quoteSegments(quote: string): string[] {
+  return quote
+    .trim()
+    .replace(QUOTE_MARKS, "")
+    .split(QUOTE_ELLIPSIS)
+    .map((segment) => normalizeForQuote(segment.replace(QUOTE_MARKS, "")).text)
+    .filter(Boolean);
+}
+
+function matchInBlock(block: string, segments: readonly string[]): { start: number; end: number } | null {
+  const normalized = normalizeForQuote(block);
+  let from = 0;
+  let start = -1;
+  let end = -1;
+  for (const segment of segments) {
+    const at = normalized.text.indexOf(segment, from);
+    if (at < 0) return null;
+    if (start < 0) start = at;
+    end = at + segment.length;
+    from = end;
+  }
+  return { start: normalized.map[start], end: normalized.map[end - 1] + 1 };
+}
+
+function locateInChapter(chapter: Chapter, segments: readonly string[]): Pick<QuoteLocation, "passage" | "matchStart" | "matchEnd"> | null {
+  for (const block of chapter.markdown.split(/\n{2,}/)) {
+    const plain = plainBlock(block).trim();
+    const match = matchInBlock(plain, segments);
+    if (!match) continue;
+    if (plain.length <= QUOTE_PASSAGE_MAX_CHARS) return { passage: plain, matchStart: match.start, matchEnd: match.end };
+    const room = Math.max(0, QUOTE_PASSAGE_MAX_CHARS - (match.end - match.start));
+    const from = Math.max(0, match.start - Math.floor(room / 2));
+    const to = Math.min(plain.length, Math.max(match.end, from + QUOTE_PASSAGE_MAX_CHARS));
+    const prefix = from > 0 ? "…" : "";
+    return {
+      passage: `${prefix}${plain.slice(from, to)}${to < plain.length ? "…" : ""}`,
+      matchStart: match.start - from + prefix.length,
+      matchEnd: match.end - from + prefix.length,
+    };
+  }
+  return null;
+}
+
+/**
+ * Find a quoted passage: in the cited chapter first, then anywhere in the
+ * Book. Matching ignores whitespace, width, curly-vs-straight quotes and
+ * surrounding quote marks; an ellipsis matches any omitted text within one
+ * paragraph.
+ */
+export function locateQuote(book: ParsedBook, chapterIndex: number, quote: string): QuoteLocation {
+  const segments = quoteSegments(quote);
+  const cited = Number.isInteger(chapterIndex) && chapterIndex >= 0 ? chapterIndex : -1;
+  if (segments.join("").length < 2) return { status: "unverified", chapterIndex: cited };
+  const order = book.chapters.map((_, index) => index).filter((index) => index !== cited);
+  if (book.chapters[cited]) order.unshift(cited);
+  for (const index of order) {
+    const chapter = book.chapters[index];
+    const found = locateInChapter(chapter, segments);
+    if (!found) continue;
+    const chapterTitle = chapterTitleOf(chapter);
+    return {
+      status: index === cited ? "verified" : "relocated",
+      chapterIndex: index,
+      ...(chapterTitle ? { chapterTitle } : {}),
+      ...(chapter.hrefs[0] ? { href: chapter.hrefs[0] } : {}),
+      ...found,
+    };
+  }
+  return { status: "unverified", chapterIndex: cited };
 }

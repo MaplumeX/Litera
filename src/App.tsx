@@ -36,6 +36,7 @@ import {
 } from "@/components/ReaderView";
 import { ChatPanel, type ChatPanelHandle } from "@/components/chat/ChatPanel";
 import { embeddedAgentRuntime } from "@/agent/runtime/embedded-runtime";
+import { hrefMatches, type QuoteLocation } from "@/agent/book/book-content";
 import { LibraryView } from "@/components/LibraryView";
 import {
   BookImportConfirmDialog,
@@ -105,6 +106,7 @@ import {
   ancestorKeysForHref,
   chapterNavAt,
   collapsibleKeys,
+  flattenToc,
   unionKeys,
 } from "@/lib/toc-items";
 import { useReaderTts } from "@/lib/use-reader-tts";
@@ -185,6 +187,9 @@ function App() {
   const [chatWidth, setChatWidth] = useState(loadChatPanelWidth);
   const [agentBookWidth, setAgentBookWidth] = useState(loadAgentBookWidth);
   const [tocVisible, setTocVisible] = useState(false);
+  // Agent mode: the chapter picked from the TOC as the discussion scope. It
+  // overrides the Book pane's position as the prompt's chapter context.
+  const [chapterScope, setChapterScope] = useState<{ href: string; label: string } | null>(null);
   const [tocWidth, setTocWidth] = useState(loadTocWidth);
   const [annotationsVisible, setAnnotationsVisible] = useState(false);
   const [annotations, setAnnotations] = useState<AnnotationsFile>(emptyAnnotations);
@@ -243,6 +248,7 @@ function App() {
   const tocWidthRef = useRef(tocWidth);
   tocWidthRef.current = tocWidth;
   const pendingCaptureRef = useRef<SelectionCapture | null>(null);
+  const pendingQuoteRef = useRef<{ href: string; quote: string } | null>(null);
   const closingRef = useRef(false);
   const openBookControllerRef = useRef(createLatestSerializedTaskController());
   // Drag can fire goToFraction faster than foliate finishes; keep latest-wins.
@@ -495,6 +501,7 @@ function App() {
       // The full record is fetched from list_books; this context stays lightweight.
       lastKnownFractionRef.current = context.lastFraction;
       readingStatus.begin(context.bookId, context.readingStatus);
+      setChapterScope(null);
       setProgress({
         index: 0,
         fraction: context.lastFraction ?? 0,
@@ -572,6 +579,7 @@ function App() {
     setFileData(null);
     setCurrentBook(null);
     setProgress({ index: 0, fraction: 0 });
+    setChapterScope(null);
     setToc([]);
     setTocExpanded([]);
     setSectionTicks([]);
@@ -724,9 +732,49 @@ function App() {
   }, []);
 
   const handleTocGoTo = useCallback((href: string) => {
-    goToChapterHref(href);
+    if (readerMode === "agent") {
+      const label = flattenToc(toc).find((item) => item.href === href)?.label ?? href;
+      setChapterScope({ href, label });
+      if (!bookCollapsed) goToChapterHref(href);
+    } else {
+      goToChapterHref(href);
+    }
     setTocVisible(false);
-  }, [goToChapterHref]);
+  }, [bookCollapsed, goToChapterHref, readerMode, toc]);
+
+  // A Citation's "Open in Book": reveal a collapsed Agent-mode Book pane
+  // first, then jump once it is visible.
+  const handleOpenQuote = useCallback(
+    (location: QuoteLocation, quote: string) => {
+      const target = location.href;
+      if (!target) return;
+      const fragment = target.split("#")[1] ?? "";
+      const items = flattenToc(toc).filter((item) => hrefMatches(item.href, target));
+      const href =
+        (items.find((item) => (item.href.split("#")[1] ?? "") === fragment) ?? items[0])?.href ??
+        target;
+      if (readerMode === "agent" && bookCollapsed) {
+        pendingQuoteRef.current = { href, quote };
+        setBookCollapsed(false);
+        schedulePersistLayout({ chatCollapsed, bookCollapsed: false, sessionRailOpen });
+        return;
+      }
+      void readerRef.current?.goToQuote(href, quote);
+    },
+    [bookCollapsed, chatCollapsed, readerMode, schedulePersistLayout, sessionRailOpen, toc],
+  );
+
+  useEffect(() => {
+    if (bookCollapsed) return;
+    const pending = pendingQuoteRef.current;
+    if (!pending) return;
+    pendingQuoteRef.current = null;
+    // Let the pane lay out before foliate navigates inside it.
+    const frame = requestAnimationFrame(() => {
+      void readerRef.current?.goToQuote(pending.href, pending.quote);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [bookCollapsed]);
 
   const handleTocToggle = useCallback((key: string) => {
     setTocExpanded((current) =>
@@ -934,23 +982,54 @@ function App() {
     />
   );
 
+  // Reading mode: the TOC is a drawer over the Book. Agent mode: it opens over
+  // the Session, so picking a chapter never needs the Book pane.
+  const tocCurrentHref =
+    readerMode === "agent" ? chapterScope?.href ?? progress.chapterHref : progress.chapterHref;
+  const tocDrawer = tocVisible ? (
+    <>
+      <button
+        type="button"
+        className="reader-scrim-in absolute inset-0 z-20 bg-foreground/5 backdrop-blur-[2px]"
+        aria-label={t("reader.closeToc")}
+        onClick={() => setTocVisible(false)}
+      />
+      <div
+        ref={tocDrawerRef}
+        className="reader-drawer-in absolute inset-y-0 left-0 z-30 overflow-hidden bg-background shadow-float"
+        style={{ width: tocWidth }}
+      >
+        <TocSidebar
+          toc={toc}
+          currentHref={tocCurrentHref}
+          expanded={tocExpanded}
+          onToggle={handleTocToggle}
+          onExpandAll={handleTocExpandAll}
+          onCollapseAll={handleTocCollapseAll}
+          onGoTo={handleTocGoTo}
+        />
+      </div>
+      <div
+        className="absolute inset-y-0 z-40 w-1.5 cursor-col-resize touch-none select-none bg-transparent hover:bg-primary/30"
+        style={{ left: tocWidth - 3 }}
+        role="separator"
+        aria-orientation="vertical"
+        onPointerDown={startTocResize}
+        onPointerMove={onTocResizeMove}
+        onPointerUp={endTocResize}
+        onPointerCancel={cancelTocResize}
+      />
+    </>
+  ) : null;
+
   const tocAnnotationButtons = (
     <div className="flex items-center gap-1">
       <Button
         size="icon-sm"
         variant={tocVisible ? "secondary" : "ghost"}
         onClick={() => {
-          const next = !tocVisible;
-          setTocVisible(next);
+          setTocVisible(!tocVisible);
           setAnnotationsVisible(false);
-          if (next && bookCollapsed) {
-            setBookCollapsed(false);
-            schedulePersistLayout({
-              chatCollapsed,
-              bookCollapsed: false,
-              sessionRailOpen,
-            });
-          }
         }}
         aria-label={t("reader.toc")}
       >
@@ -1172,41 +1251,7 @@ function App() {
                 onDismiss={readingStatus.dismissFinishPrompt}
               />
             )}
-            {tocVisible && (
-              <>
-                <button
-                  type="button"
-                  className="reader-scrim-in absolute inset-0 z-20 bg-foreground/5 backdrop-blur-[2px]"
-                  aria-label={t("reader.closeToc")}
-                  onClick={() => setTocVisible(false)}
-                />
-                <div
-                  ref={tocDrawerRef}
-                  className="reader-drawer-in absolute inset-y-0 left-0 z-30 overflow-hidden bg-background shadow-float"
-                  style={{ width: tocWidth }}
-                >
-                  <TocSidebar
-                    toc={toc}
-                    currentHref={progress.chapterHref}
-                    expanded={tocExpanded}
-                    onToggle={handleTocToggle}
-                    onExpandAll={handleTocExpandAll}
-                    onCollapseAll={handleTocCollapseAll}
-                    onGoTo={handleTocGoTo}
-                  />
-                </div>
-                <div
-                  className="absolute inset-y-0 z-40 w-1.5 cursor-col-resize touch-none select-none bg-transparent hover:bg-primary/30"
-                  style={{ left: tocWidth - 3 }}
-                  role="separator"
-                  aria-orientation="vertical"
-                  onPointerDown={startTocResize}
-                  onPointerMove={onTocResizeMove}
-                  onPointerUp={endTocResize}
-                  onPointerCancel={cancelTocResize}
-                />
-              </>
-            )}
+            {readerMode === "reader" && tocDrawer}
             {annotationsVisible && (
               <>
                 <button
@@ -1267,11 +1312,12 @@ function App() {
           hidden={chatHidden}
           className={
             !chatHidden && readerMode === "reader"
-              ? "h-full min-h-0 min-w-0 overflow-hidden py-2 pr-2 pl-1"
-              : "h-full min-h-0 min-w-0 overflow-hidden"
+              ? "relative h-full min-h-0 min-w-0 overflow-hidden py-2 pr-2 pl-1"
+              : "relative h-full min-h-0 min-w-0 overflow-hidden"
           }
           style={{ gridArea: "chat" }}
         >
+          {readerMode === "agent" && tocDrawer}
           {/* Docked beside the book, the assistant floats as a card; as the
               Agent-mode workspace it fills its cell edge to edge. */}
           <div
@@ -1284,7 +1330,12 @@ function App() {
           >
             <ChatPanel
               ref={chatRef}
-              currentChapterHref={progress.chapterHref}
+              currentChapterHref={
+                readerMode === "agent" ? chapterScope?.href ?? progress.chapterHref : progress.chapterHref
+              }
+              chapterScope={readerMode === "agent" ? chapterScope : null}
+              onClearChapterScope={() => setChapterScope(null)}
+              onOpenQuote={handleOpenQuote}
               bookId={fileData?.bookId ?? ""}
               variant={readerMode === "agent" ? "workspace" : "docked"}
               sessionRailOpen={sessionRailOpen}
