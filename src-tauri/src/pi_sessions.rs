@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
@@ -245,10 +245,11 @@ impl PiSessionStore {
                 .map(str::to_string)
                 .or_else(|| first_user_text(&entries))
                 .unwrap_or_else(|| "新会话".to_string());
-            let session_config = entries
-                .iter()
-                .rev()
-                .find(|entry| entry.get("type").and_then(Value::as_str) == Some("session_config"));
+            // The runtime applies the latest session_config on the active
+            // branch only, so the summary must resolve it the same way.
+            let leaf_id = stored_leaf_id(&path, &entries)
+                .or_else(|| entries.last().and_then(entry_id).map(str::to_string));
+            let session_config = latest_on_branch(&entries, leaf_id.as_deref(), "session_config");
             let system_prompt = session_config
                 .and_then(|entry| entry.get("systemPrompt"))
                 .and_then(Value::as_str)
@@ -708,6 +709,33 @@ fn stored_leaf_id(session_path: &Path, entries: &[Value]) -> Option<String> {
         .iter()
         .any(|entry| entry_id(entry) == Some(id.as_str()))
         .then_some(id)
+}
+
+/// Newest entry of `kind` on the leaf-to-root path starting at `leaf_id`.
+fn latest_on_branch<'a>(
+    entries: &'a [Value],
+    leaf_id: Option<&str>,
+    kind: &str,
+) -> Option<&'a Value> {
+    let by_id: HashMap<&str, &Value> = entries
+        .iter()
+        .filter_map(|entry| entry_id(entry).map(|id| (id, entry)))
+        .collect();
+    let mut visited = HashSet::new();
+    let mut current = leaf_id.and_then(|id| by_id.get(id).copied());
+    while let Some(entry) = current {
+        if !visited.insert(entry_id(entry)?) {
+            return None;
+        }
+        if entry.get("type").and_then(Value::as_str) == Some(kind) {
+            return Some(entry);
+        }
+        current = entry
+            .get("parentId")
+            .and_then(Value::as_str)
+            .and_then(|parent| by_id.get(parent).copied());
+    }
+    None
 }
 
 fn write_leaf_sidecar(session_path: &Path, leaf_id: &str) -> AppResult<()> {
@@ -1310,6 +1338,29 @@ mod tests {
         let summary = &store.list("book").unwrap()[0];
         assert_eq!(summary.id, "one");
         assert_eq!(summary.system_prompt.as_deref(), Some("翻译为古文"));
+    }
+
+    #[test]
+    fn list_reads_session_config_from_the_active_branch() {
+        let (temp, store) = store();
+        let dir = temp.path().join("sessions/book");
+        fs::create_dir(&dir).unwrap();
+        let now = Utc::now().to_rfc3339();
+        // m1 -> cfg1 (forked away) and m1 -> m2 (active via the sidecar).
+        fs::write(
+            dir.join("one.jsonl"),
+            format!(
+                "{{\"type\":\"session\",\"version\":3,\"id\":\"one\",\"timestamp\":\"{now}\",\"cwd\":\"\"}}\n\
+                 {{\"type\":\"message\",\"id\":\"m1\",\"parentId\":null,\"timestamp\":\"{now}\",\"message\":{{\"role\":\"user\",\"content\":\"hi\",\"timestamp\":1}}}}\n\
+                 {{\"type\":\"session_config\",\"id\":\"cfg1\",\"parentId\":\"m1\",\"timestamp\":\"{now}\",\"systemPrompt\":\"分支\"}}\n\
+                 {{\"type\":\"message\",\"id\":\"m2\",\"parentId\":\"m1\",\"timestamp\":\"{now}\",\"message\":{{\"role\":\"user\",\"content\":\"again\",\"timestamp\":2}}}}\n"
+            ),
+        )
+        .unwrap();
+        fs::write(dir.join("one.jsonl.leaf"), "m2\n").unwrap();
+        assert_eq!(store.list("book").unwrap()[0].system_prompt, None);
+        fs::write(dir.join("one.jsonl.leaf"), "cfg1\n").unwrap();
+        assert_eq!(store.list("book").unwrap()[0].system_prompt.as_deref(), Some("分支"));
     }
 
     #[test]

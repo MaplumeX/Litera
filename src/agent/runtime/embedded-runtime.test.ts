@@ -112,6 +112,31 @@ describe("LiteraAgentRuntime",()=>{
     expect((projection[0] as {content:string}).content).toHaveLength(20_000);
   });
 
+  it("keeps the system prompt and persists the user once when compaction runs before the prompt",async()=>{
+    const current=session();const batches:PiSessionEntry[][]=[];const systemPrompts:Array<string|undefined>=[];
+    const long="a".repeat(20_000);
+    const usage=(totalTokens:number)=>({input:totalTokens,output:0,cacheRead:0,cacheWrite:0,totalTokens,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}});
+    const ids=["u1","a1","u2","a2","u3","a3"];
+    // The last assistant reports usage near the context window, so the
+    // pre-prompt compaction check fires before the new question is sent.
+    current.entries=ids.map((id,index)=>({type:"message",id,parentId:index?ids[index-1]:null,timestamp:now,message:index%2?{role:"assistant",content:[{type:"text",text:long}],usage:usage(index===5?95_000:0),stopReason:"stop",timestamp:Date.now()}:{role:"user",content:long,timestamp:index}}));
+    current.leafId="a3";
+    const sessions:SessionPort={create:async()=>current,list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,entries)=>{batches.push(entries);return entries[entries.length-1]?.id??null;}};
+    const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:1}),toc:async()=>[],readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:1,text:"chapter"}),search:async()=>[],close:()=>{}};
+    const faux=createFauxCore({tokensPerSecond:100_000});
+    faux.setResponses([fauxAssistantMessage("summary of the conversation"),fauxAssistantMessage("answer")]);
+    const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret",thinkingLevel:"off",contextWindow:100_000};
+    const runtime=new LiteraAgentRuntime({sessions,book,loadConfig:async()=>config,loadStream:async()=>((requestModel,context,options)=>{systemPrompts.push(getCurrentSystemPrompt(context.messages));return faux.streamSimple(requestModel,context,options);})});
+    await runtime.openBook("book",new ArrayBuffer(1));
+    await runtime.switchSession("session-1");
+    await runtime.prompt("fourth question",{});
+    expect(batches.flat().filter((entry)=>entry.type==="compaction")).toHaveLength(1);
+    // The prompt request after compaction still carries the Litera system prompt.
+    expect(systemPrompts.at(-1)).toBe(SYSTEM_PROMPT);
+    const users=batches.flat().filter((entry)=>entry.type==="message"&&(entry.message as {role?:string}).role==="user");
+    expect(users.map((entry)=>(entry.message as {content?:unknown}).content)).toEqual(["fourth question"]);
+  });
+
   it("emits compaction_started and compaction_completed on a successful compaction",async()=>{
     const current=session();const batches:PiSessionEntry[][]=[];const events:string[]=[];
     const long="a".repeat(20_000);
