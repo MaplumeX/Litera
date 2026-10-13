@@ -262,6 +262,8 @@ export const zhCN = {
   "chat.openSettings": "打开设置",
   "chat.newSession": "新建会话",
   "chat.newSessionTitle": "新会话",
+  "chat.sessionTimeToday": "今天 {time}",
+  "chat.sessionTimeYesterday": "昨天",
   "chat.noSessions": "暂无会话，可直接提问或新建会话。",
   "chat.rename": "重命名",
   "chat.close": "关闭",

@@ -1282,7 +1282,9 @@ function App() {
             bookHidden
               ? "min-h-0 min-w-0 flex-col overflow-hidden"
               : readerMode === "agent"
-                ? "relative flex min-h-0 min-w-0 flex-col overflow-hidden border-l"
+                ? // Mirrors the docked chat in reading mode: beside the Session
+                  // workspace, the Book floats as a card instead of a ruled pane.
+                  "relative my-2 mr-2 ml-1 flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border bg-background shadow-soft"
                 : "relative flex min-h-0 min-w-0 flex-col overflow-hidden"
           }
           style={{ gridArea: "book" }}

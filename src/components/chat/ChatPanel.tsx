@@ -9,6 +9,7 @@ import {
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { MessagesSquare, Settings, AlertCircle, RefreshCw } from "lucide-react";
 import { useAgentBridge } from "@/lib/use-agent-bridge";
 import { useAgentConfig } from "@/lib/use-agent-config";
@@ -494,13 +495,18 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 
     return (
       <CitationContext.Provider value={citationActions}>
-        <div data-testid="chat-panel" className="relative flex h-full min-h-0 bg-card">
+        {/* As the Agent-mode workspace the panel shares the window's surface;
+            docked beside the book it is a card. */}
+        <div
+          data-testid="chat-panel"
+          className={cn("relative flex h-full min-h-0", isWorkspace ? "bg-background" : "bg-card")}
+        >
           {isWorkspace && (
             <div
               hidden={!railOpen}
               className={
                 railOpen
-                  ? "h-full min-h-0 shrink-0 overflow-hidden border-r"
+                  ? "h-full min-h-0 shrink-0 overflow-hidden"
                   : "h-full w-0 overflow-hidden"
               }
             >

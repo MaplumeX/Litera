@@ -264,6 +264,8 @@ export const en: { [K in MessageKey]: string } = {
   "chat.openSettings": "Open settings",
   "chat.newSession": "New session",
   "chat.newSessionTitle": "New session",
+  "chat.sessionTimeToday": "Today {time}",
+  "chat.sessionTimeYesterday": "Yesterday",
   "chat.noSessions": "No sessions yet. Ask a question or create one.",
   "chat.rename": "Rename",
   "chat.close": "Close",

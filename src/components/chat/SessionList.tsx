@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { AgentSessionSummary } from "@/types/agent";
 import { useT } from "@/lib/i18n";
+import { formatSessionTime } from "@/lib/session-time";
 
 interface SessionListProps {
   sessions: AgentSessionSummary[];
@@ -40,7 +41,7 @@ export function SessionList({
   onDeleteSession,
   onOpenSettings,
 }: SessionListProps) {
-  const { t } = useT();
+  const { t, locale } = useT();
   const isRail = layout === "rail";
   // Marks Enter/Esc as already committed so the following blur does not save again.
   const renameCommittedRef = useRef(false);
@@ -54,7 +55,8 @@ export function SessionList({
     <div
       className={
         isRail
-          ? "flex h-full min-h-0 w-[240px] shrink-0 flex-col bg-card"
+          ? // Set apart from the conversation by tone, like the library sidebar.
+            "flex h-full min-h-0 w-[240px] shrink-0 flex-col bg-sidebar"
           : "absolute inset-x-0 top-[37px] bottom-0 z-10 flex flex-col bg-card"
       }
     >
@@ -77,8 +79,8 @@ export function SessionList({
       <div className="flex-1 space-y-1 overflow-y-auto p-2">
         <Button
           size="sm"
-          variant="outline"
-          className="w-full justify-start"
+          variant="ghost"
+          className="w-full justify-start font-normal text-muted-foreground hover:text-foreground"
           onClick={onNewSession}
           disabled={isStreaming}
         >
@@ -94,8 +96,15 @@ export function SessionList({
           <div
             key={session.id}
             className={cn(
-              "group flex items-center gap-1 rounded px-2 py-1.5 text-sm hover:bg-muted/70",
-              activeSessionId === session.id && "bg-muted",
+              "group flex items-center gap-1 rounded-md px-2 py-1.5 text-sm",
+              // The rail sits on the sidebar tone, the overlay on the card.
+              activeSessionId === session.id
+                ? isRail
+                  ? "bg-sidebar-accent"
+                  : "bg-muted"
+                : isRail
+                  ? "hover:bg-sidebar-accent/60"
+                  : "hover:bg-muted/70",
             )}
           >
             {editingSessionId === session.id ? (
@@ -132,8 +141,11 @@ export function SessionList({
                   disabled={isStreaming}
                 >
                   <div className="truncate font-medium">{session.title}</div>
-                  <div className="text-xs text-muted-foreground">
-                    {new Date(session.updatedAt).toLocaleString()}
+                  <div
+                    className="truncate text-xs text-muted-foreground"
+                    title={new Date(session.updatedAt).toLocaleString(locale)}
+                  >
+                    {formatSessionTime(session.updatedAt, locale)}
                   </div>
                 </button>
                 <button
