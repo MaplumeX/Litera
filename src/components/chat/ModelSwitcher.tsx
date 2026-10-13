@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Check, ChevronDown } from "lucide-react";
+import { Check, ChevronDown, Settings } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { listBuiltinModelIds } from "@/agent/runtime/model-resolution";
 import { isCustomProviderId } from "@/types/agent-config";
@@ -21,7 +21,8 @@ export interface ModelSwitcherProps {
  * models (built-in pi-ai catalog or a custom provider's saved models) and
  * switches via the explicit `switch_provider` path — unlike the draft-only
  * provider dropdown in AgentConfigForm, clicking an item here IS the switch
- * intent.
+ * intent. Provider setup lives in the popover footer rather than as its own
+ * toolbar button: it is rare, and it would split model from thinking level.
  */
 export function ModelSwitcher({
   provider,
@@ -63,6 +64,11 @@ export function ModelSwitcher({
   const handleSelect = (id: string) => {
     setOpen(false);
     onModelSelect(id);
+  };
+
+  const handleOpenConfig = () => {
+    setOpen(false);
+    onOpenConfig();
   };
 
   const trigger =
@@ -109,6 +115,15 @@ export function ModelSwitcher({
               </button>
             ))}
           </div>
+          <div className="-mx-1 my-1 h-px bg-border" />
+          <button
+            type="button"
+            onClick={handleOpenConfig}
+            className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+          >
+            <Settings className="h-3.5 w-3.5 shrink-0" />
+            <span className="min-w-0 truncate">{t("chat.manageModels")}</span>
+          </button>
         </PopoverContent>
       </Popover>
     ) : (

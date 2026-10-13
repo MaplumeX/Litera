@@ -9,8 +9,9 @@ import {
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
-import { MessagesSquare, Settings, AlertCircle, RefreshCw } from "lucide-react";
+import { MessagesSquare, AlertCircle, RefreshCw } from "lucide-react";
 import { useAgentBridge } from "@/lib/use-agent-bridge";
 import { useAgentConfig } from "@/lib/use-agent-config";
 import { invokeErrorMessage } from "@/lib/app-error";
@@ -458,13 +459,12 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 
     const sessionList = (
       <SessionList
-        layout={isWorkspace ? "rail" : "overlay"}
+        layout={isWorkspace ? "rail" : "popover"}
         sessions={state.sessions}
         activeSessionId={state.sessionId}
         isStreaming={isStreaming}
         editingSessionId={editingSessionId}
         editingTitle={editingTitle}
-        onClose={() => setShowSessionList(false)}
         onNewSession={() => {
           setInvokeError(null);
           if (!isWorkspace) setShowSessionList(false);
@@ -475,6 +475,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         }}
         onSwitchSession={(id) => {
           setInvokeError(null);
+          if (!isWorkspace) setShowSessionList(false);
           void switchSession(id).catch((error) => setInvokeError(String(error)));
         }}
         onStartRename={(id, title) => {
@@ -484,7 +485,10 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         onTitleChange={setEditingTitle}
         onSaveRename={(id) => void handleRenameSave(id)}
         onCancelRename={() => setEditingSessionId(null)}
-        onOpenSettings={(session) => setConfigSession(session)}
+        onOpenSettings={(session) => {
+          if (!isWorkspace) setShowSessionList(false);
+          setConfigSession(session);
+        }}
         onDeleteSession={(id) => {
           setInvokeError(null);
           void deleteSession(id).catch((error) => setInvokeError(String(error)));
@@ -514,15 +518,13 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
           )}
           <div className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col">
           {/* No header of its own: the titlebar names the book, and the session
-              and settings buttons sit in the input row. Only a notice shows
+              button and model switcher sit in the input row. Only a notice shows
               while the book is still loading. */}
           {!bookReady && (
             <p className="px-4 py-1.5 text-xs text-muted-foreground" role="status">
               {t("chat.waitingBook")}
             </p>
           )}
-
-          {!isWorkspace && showSessionList && sessionList}
 
           <div className="relative min-h-0 flex-1">
             <div
@@ -668,17 +670,32 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
               <>
               {/* In Agent mode the titlebar toggles the session rail. */}
               {!isWorkspace && (
-                <Button
-                  size="icon-xs"
-                  variant="ghost"
-                  className="text-muted-foreground"
-                  onClick={() => setShowSessionList((value) => !value)}
-                  disabled={!bookId}
-                  aria-label={t("chat.sessions")}
-                  aria-pressed={showSessionList}
-                >
-                  <MessagesSquare />
-                </Button>
+                <Popover open={showSessionList} onOpenChange={setShowSessionList} modal={false}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      size="icon-xs"
+                      variant="ghost"
+                      className="text-muted-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground"
+                      disabled={!bookId}
+                      aria-label={t("chat.sessions")}
+                    >
+                      <MessagesSquare />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent
+                    side="top"
+                    align="start"
+                    collisionPadding={8}
+                    className="w-80 max-w-(--radix-popover-content-available-width) overflow-hidden p-0"
+                    // A new session focuses the input; don't hand focus back
+                    // to the toggle over it.
+                    onCloseAutoFocus={(event) => {
+                      if (document.activeElement === inputRef.current) event.preventDefault();
+                    }}
+                  >
+                    {sessionList}
+                  </PopoverContent>
+                </Popover>
               )}
               <ModelSwitcher
                 provider={configSnapshot?.provider ?? null}
@@ -695,15 +712,6 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                 onModelSelect={(model) => void handleModelSelect(model)}
                 onOpenConfig={() => setShowConfig(true)}
               />
-              <Button
-                size="icon-xs"
-                variant="ghost"
-                className="text-muted-foreground"
-                onClick={() => setShowConfig(true)}
-                aria-label={t("chat.settings")}
-              >
-                <Settings />
-              </Button>
               </>
             }
           />
