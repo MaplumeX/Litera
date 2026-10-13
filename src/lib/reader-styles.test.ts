@@ -277,6 +277,11 @@ describe("generateStylesCss", () => {
     expect(css.startsWith('@namespace epub url(')).toBe(true);
   });
 
+  it("keeps the dark page transparent so the hosting surface shows through", () => {
+    const css = generateStylesCss({ ...DARK_STYLES });
+    expect(css).toContain("html, body { background: transparent !important; color: #cbc7bf !important; }");
+  });
+
   it("uses the dark-theme accent for noteref marks in dark theme", () => {
     const css = generateStylesCss({ ...DARK_STYLES });
     expect(css).toContain("noteref");
@@ -446,15 +451,11 @@ describe("footnotePopupCss", () => {
     expect(css).toContain("margin-block-end: 0.5em !important");
   });
 
-  it("wins over generateStylesCss text-indent and dark background when appended", () => {
+  it("wins over generateStylesCss text-indent when appended", () => {
     const combined = `${generateStylesCss(DARK_STYLES)}\n${footnotePopupCss()}`;
     expect(combined).toContain("text-indent: 2em !important");
-    expect(combined).toContain("background: #1a1816 !important");
     expect(combined.lastIndexOf("text-indent: 0 !important")).toBeGreaterThan(
       combined.lastIndexOf("text-indent: 2em !important"),
-    );
-    expect(combined.lastIndexOf("background: transparent !important")).toBeGreaterThan(
-      combined.lastIndexOf("background: #1a1816 !important"),
     );
   });
 });

@@ -323,9 +323,12 @@ a[href] > sup { font-size: 0.83em !important; vertical-align: super !important; 
 a[href]:has(> sup) { text-decoration: none !important; color: ${accent} !important; }`;
 }
 
+/** The page stays transparent in both themes so the surface hosting the Book
+ *  (the reader pane, or Agent mode's floating card) supplies its color; the
+ *  dark branch only needs `!important` to wipe out a book's own white page. */
 const THEME_CSS: Record<string, string> = {
   light: "",
-  dark: `html, body { background: #1a1816 !important; color: #cbc7bf !important; }
+  dark: `html, body { background: transparent !important; color: #cbc7bf !important; }
 a { color: #6db4ff !important; }
 img { filter: brightness(0.8) !important; }`,
 };
