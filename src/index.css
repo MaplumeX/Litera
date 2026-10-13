@@ -48,7 +48,7 @@
 }
 
 .dark {
-  /* --background 与阅读器夜间页面底色 #1a1816 一致（reader-styles.ts THEME_CSS.dark）。 */
+  /* 阅读器夜间页面透明（reader-styles.ts THEME_CSS.dark），书页底色即所在容器的 --background / --card。 */
   --background: oklch(0.21 0.005 70);
   --foreground: oklch(0.93 0.008 80);
   --card: oklch(0.235 0.006 70);
