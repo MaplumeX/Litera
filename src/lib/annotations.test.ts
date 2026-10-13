@@ -139,6 +139,15 @@ describe("annotations snapshot helpers", () => {
     expect(stamped.highlights[0]).toMatchObject({ color: "yellow", note: "keep" });
   });
 
+  it("stamps an edit time so Sync can order it, and only on a real change", () => {
+    const old = createHighlight(selection);
+    const once = appendHighlight(emptyAnnotations(), old);
+
+    const edited = updateHighlight(once, old.id, { color: "green" });
+    expect(Date.parse(edited.highlights[0].updatedAt ?? "")).not.toBeNaN();
+    expect(updateHighlight(edited, old.id, { color: "green" })).toBe(edited);
+  });
+
   it("caps notes to the backend byte limit", () => {
     const highlight = createHighlight(selection);
     const data = appendHighlight(emptyAnnotations(), highlight);

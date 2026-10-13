@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getLocale } from "./i18n";
 import { mergeManifests, type SyncManifest } from "./sync-merge";
+import { hasUnsyncedActivity, takeUnsyncedActivity } from "./sync-activity";
 
 /** Bounded retries for etag conflicts on the conditional Manifest PUT. */
 const MAX_SYNC_ATTEMPTS = 3;
@@ -29,9 +30,51 @@ function isPreconditionFailure(error: unknown): boolean {
  * on the downloaded etag, retrying the download+merge+upload loop on
  * precondition conflicts.
  */
-export async function runSyncOnce(
-  options: { uploadFiles?: boolean } = {},
-): Promise<void> {
+export function runSyncOnce(options: { uploadFiles?: boolean } = {}): Promise<void> {
+  // Passes never overlap — the scheduler, "Sync now" in Settings, and the
+  // pre-exit push all queue here. Two concurrent passes would race on the
+  // same local sync state and Manifest.
+  const run = passQueue.catch(() => {}).then(() => runPass(options));
+  passQueue = run;
+  return run;
+}
+
+let passQueue: Promise<void> = Promise.resolve();
+
+async function runPass(options: { uploadFiles?: boolean }): Promise<void> {
+  const activity = takeUnsyncedActivity();
+  try {
+    await runPassSteps(options);
+  } catch (error) {
+    activity.restore();
+    throw error;
+  }
+}
+
+/**
+ * Push local changes before the app exits, bounded by `timeoutMs` so a slow
+ * or unreachable Sync Backend never holds the window open. Skips when Sync is
+ * off or nothing changed since the last pass.
+ */
+export async function syncBeforeExit(timeoutMs: number): Promise<void> {
+  if (!hasUnsyncedActivity()) return;
+  const config = await invoke<{ enabled: boolean } | null>("get_sync_config");
+  if (!config?.enabled) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      // Book files can be large: they wait for the next launch.
+      runSyncOnce({ uploadFiles: false }),
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function runPassSteps(options: { uploadFiles?: boolean }): Promise<void> {
   if (options.uploadFiles) {
     await invoke("sync_upload_book_files");
   }

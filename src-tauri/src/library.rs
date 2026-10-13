@@ -17,6 +17,10 @@ use image::ImageEncoder;
 
 const SCHEMA_VERSION: u32 = 1;
 const ANNOTATIONS_SCHEMA_VERSION: u32 = 1;
+/// Marks a book directory as a sync placeholder (EPUB not downloaded yet).
+const PLACEHOLDER_FILE: &str = ".sync-placeholder.json";
+/// Hex digits of the content hash used as a new book's id.
+const CONTENT_ID_HEX_CHARS: usize = 32;
 const MAX_TITLE_BYTES: usize = 4 * 1024;
 const MAX_AUTHOR_BYTES: usize = 4 * 1024;
 const MAX_DESCRIPTION_BYTES: usize = 32 * 1024;
@@ -292,6 +296,22 @@ pub struct BookRecord {
         skip_serializing_if = "Option::is_none"
     )]
     pub updated_at: Option<String>,
+    /// When the reading position (fraction/CFI) last actually moved. Sync
+    /// orders positions by this; merely opening a book never bumps it, so a
+    /// stale position on one device cannot outrank real progress elsewhere.
+    /// Absent on records from before it existed, which fall back to
+    /// `last_opened_at`.
+    #[serde(
+        rename = "positionUpdatedAt",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub position_updated_at: Option<String>,
+    /// Identifies the import source (a hash of its path) so re-importing
+    /// the same file overwrites the book in place. Absent on books imported
+    /// before ids became content-derived; their id is the source key.
+    #[serde(rename = "sourceKey", default, skip_serializing_if = "Option::is_none")]
+    pub source_key: Option<String>,
     /// The Book's Reading status. Optional only so files from before it was
     /// always present still parse; `read_library` fills it in on load.
     #[serde(
@@ -362,6 +382,10 @@ pub struct BookmarkRecord {
     pub created_at: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
+    /// Last edit (label change). Sync orders copies of one annotation by
+    /// this, falling back to createdAt for never-edited ones.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
 }
 
 fn skip_none_or_empty(value: &Option<String>) -> bool {
@@ -382,6 +406,10 @@ pub struct HighlightRecord {
     pub color: Option<String>,
     #[serde(default, skip_serializing_if = "skip_none_or_empty")]
     pub note: Option<String>,
+    /// Last edit (color or note change). Sync orders copies of one
+    /// annotation by this, falling back to createdAt for never-edited ones.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -542,6 +570,8 @@ impl BookPlaceholder {
             content_version: None,
             cached: false,
             updated_at: None,
+            position_updated_at: None,
+            source_key: None,
             reading_status: Some(self.reading_status.clone().unwrap_or_else(|| {
                 backfilled_reading_status(self.last_fraction).to_string()
             })),
@@ -671,7 +701,7 @@ impl LibraryStore {
         let json = serde_json::to_vec_pretty(&placeholder).map_err(|error| {
             AppError::storage_io(format!("Failed to serialize placeholder: {error}"))
         })?;
-        recoverable_atomic_write(&dir.join(".sync-placeholder.json"), &json, "placeholder")
+        recoverable_atomic_write(&dir.join(PLACEHOLDER_FILE), &json, "placeholder")
     }
 
     /// Drop a placeholder without touching anything else. `install_synced_book`
@@ -681,7 +711,7 @@ impl LibraryStore {
     pub fn remove_placeholder(&self, book_id: &str) -> AppResult<()> {
         validate_book_id(book_id)?;
         let _guard = self.transaction()?;
-        let path = self.book_dir(book_id)?.join(".sync-placeholder.json");
+        let path = self.book_dir(book_id)?.join(PLACEHOLDER_FILE);
         match std::fs::remove_file(&path) {
             Ok(()) => Ok(()),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -707,7 +737,7 @@ impl LibraryStore {
             let entry = entry.map_err(|error| {
                 AppError::storage_io(format!("Failed to read books entry: {error}"))
             })?;
-            let path = entry.path().join(".sync-placeholder.json");
+            let path = entry.path().join(PLACEHOLDER_FILE);
             let bytes = match std::fs::read(&path) {
                 Ok(bytes) => bytes,
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
@@ -782,6 +812,8 @@ impl LibraryStore {
             cached: true,
             // A freshly downloaded EPUB has no local edit of its own yet.
             updated_at: None,
+            position_updated_at: None,
+            source_key: None,
             reading_status: placeholder.as_ref().and_then(|p| p.reading_status.clone()),
             status_updated_at: placeholder.as_ref().and_then(|p| p.status_updated_at.clone()),
             starred: None,
@@ -793,8 +825,36 @@ impl LibraryStore {
         }
         // Inline placeholder removal: remove_placeholder re-acquires the
         // transaction lock this method already holds.
-        let _ = fs::remove_file(book_dir.join(".sync-placeholder.json"));
+        let _ = fs::remove_file(book_dir.join(PLACEHOLDER_FILE));
         sync_parent_directory(&book_dir, "downloaded book directory")
+    }
+
+    /// Replace a local book's EPUB with a newer revision downloaded from the
+    /// Sync Backend (another device re-imported the book). Reading state,
+    /// annotations, and metadata stay; the new content version makes the
+    /// reader load the new file.
+    pub fn replace_synced_book_file(&self, book_id: &str, bytes: &[u8]) -> AppResult<()> {
+        validate_book_id(book_id)?;
+        if bytes.is_empty() {
+            return Err(AppError::invalid_input("Downloaded EPUB is empty"));
+        }
+        let _guard = self.transaction()?;
+        let mut library = self.read_library()?;
+        let record = library
+            .books
+            .iter_mut()
+            .find(|book| book.id == book_id)
+            .ok_or_else(|| AppError::book_not_found(book_id))?;
+        let epub_path = self.book_dir(book_id)?.join("book.epub");
+        let previous = read_optional_regular_file(&epub_path, "existing EPUB")?;
+        atomic_write(&epub_path, bytes, "downloaded EPUB")?;
+        record.content_hash = Some(sha256_hex(bytes));
+        record.content_version = Some(uuid::Uuid::new_v4().simple().to_string());
+        if let Err(error) = self.write_library(&library) {
+            restore_file(&epub_path, previous.as_deref(), "EPUB", &error)?;
+            return Err(error);
+        }
+        Ok(())
     }
 
     /// Store a downloaded cover for a book. Placeholders already present the
@@ -830,6 +890,22 @@ impl LibraryStore {
         self.book_files(book_id)
             .map(|(_, cover)| cover.is_file())
             .unwrap_or(false)
+    }
+
+    /// The id for a newly imported book: derived from its content, so the
+    /// same EPUB imported on two devices is one book to Sync. Falls back to
+    /// a random id when that id is already taken (a record whose file was
+    /// since overwritten with other content, or a stray directory).
+    fn new_book_id(&self, library: &LibraryData, content_hash: &str) -> String {
+        let candidate = content_hash[..CONTENT_ID_HEX_CHARS.min(content_hash.len())].to_string();
+        let taken = library.books.iter().any(|book| book.id == candidate);
+        let dir = self.books_root().join(&candidate);
+        let blocked = fs::symlink_metadata(&dir).is_ok() && !is_placeholder_dir(&dir);
+        if taken || blocked {
+            uuid::Uuid::new_v4().simple().to_string()
+        } else {
+            candidate
+        }
     }
 
     pub(crate) fn ensure_book_dir(&self, book_id: &str) -> AppResult<PathBuf> {
@@ -902,8 +978,7 @@ impl LibraryStore {
         display_name: String,
         bytes: Vec<u8>,
     ) -> AppResult<ImportBookResult> {
-        let book_id = book_id_for_source(source_path);
-        validate_book_id(&book_id)?;
+        let source_key = source_key_for_path(source_path);
         if bytes.is_empty() {
             return Err(AppError::invalid_input("EPUB file is empty"));
         }
@@ -930,21 +1005,32 @@ impl LibraryStore {
             });
         }
 
-        let book_dir = self.book_dir(&book_id)?;
-        let epub_path = book_dir.join("book.epub");
-        let existed = library.books.iter().any(|book| book.id == book_id);
-        let existing_title = library
+        // Re-importing the same source overwrites that book in place; any
+        // other import is a new book, identified by its content so the same
+        // EPUB gets the same id on every device.
+        let overwritten = library
             .books
             .iter()
-            .find(|book| book.id == book_id)
-            .map(|book| book.title.clone());
+            .find(|book| book.source_key.as_deref().unwrap_or(&book.id) == source_key);
+        let existed = overwritten.is_some();
+        let existing_title = overwritten.map(|book| book.title.clone());
+        let book_id = match overwritten {
+            Some(book) => book.id.clone(),
+            None => self.new_book_id(&library, &incoming_hash),
+        };
+        validate_book_id(&book_id)?;
+        let book_dir = self.book_dir(&book_id)?;
+        let epub_path = book_dir.join("book.epub");
         // This token is returned to the WebView and authorizes access to one
         // staged import. Keep it unpredictable rather than reusing the
         // timestamp-based identifiers used only for internal trash paths.
         let import_id = uuid::Uuid::new_v4().simple().to_string();
         let pending_path = self.pending_import_path(&book_id, &import_id)?;
 
-        if existed {
+        // A sync placeholder for this very content: the import promotes it,
+        // keeping the directory (and the annotations synced into it).
+        let promotes_placeholder = !existed && is_placeholder_dir(&book_dir);
+        if existed || promotes_placeholder {
             require_real_directory(&book_dir, "book directory")?;
         } else if fs::symlink_metadata(&book_dir).is_ok() {
             return Err(AppError::storage_corrupt(format!(
@@ -956,17 +1042,29 @@ impl LibraryStore {
                 AppError::storage_io(format!("Failed to create book directory: {error}"))
             })?;
         }
+        let created_dir = !existed && !promotes_placeholder;
+        let discard_new_book = |book_dir: &Path, epub_path: &Path| -> std::io::Result<()> {
+            if created_dir {
+                fs::remove_dir_all(book_dir)
+            } else {
+                let _ = fs::remove_dir_all(book_dir.join(".imports"));
+                match fs::remove_file(epub_path) {
+                    Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error),
+                    _ => Ok(()),
+                }
+            }
+        };
         ensure_real_directory(&book_dir.join(".imports"), "pending import directory")?;
         if let Err(error) = atomic_write(&pending_path, &bytes, "pending EPUB") {
             if !existed {
-                let _ = fs::remove_dir_all(&book_dir);
+                let _ = discard_new_book(&book_dir, &epub_path);
             }
             return Err(error);
         }
 
         if !existed {
             if let Err(error) = atomic_write(&epub_path, &bytes, "EPUB") {
-                let _ = fs::remove_dir_all(&book_dir);
+                let _ = discard_new_book(&book_dir, &epub_path);
                 return Err(error);
             }
             library.books.push(BookRecord {
@@ -990,18 +1088,23 @@ impl LibraryStore {
                 last_layout: None,
                 cached: true,
                 updated_at: None,
+                position_updated_at: None,
+                source_key: Some(source_key),
                 reading_status: Some("unread".to_string()),
                 status_updated_at: None,
                 starred: None,
             });
             if let Err(error) = self.write_library(&library) {
-                let rollback = fs::remove_dir_all(&book_dir);
+                let rollback = discard_new_book(&book_dir, &epub_path);
                 if let Err(rollback_error) = rollback {
                     return Err(AppError::rollback_failed(format!(
                         "Failed to persist imported book ({error}); failed to remove staged book: {rollback_error}"
                     )));
                 }
                 return Err(error);
+            }
+            if promotes_placeholder {
+                let _ = fs::remove_file(book_dir.join(PLACEHOLDER_FILE));
             }
         }
 
@@ -1120,6 +1223,10 @@ impl LibraryStore {
             };
             record.content_hash = Some(sha256_hex(&pending_bytes));
             record.content_version = Some(import_id.to_string());
+            // An import is an edit to the record: it orders this device's
+            // file and metadata ahead of older copies, and makes the book a
+            // revival against a Tombstone from before the import.
+            record.updated_at = Some(Utc::now().to_rfc3339());
         }
         let updated = library.books[record_index].clone();
 
@@ -1376,6 +1483,7 @@ impl LibraryStore {
             .iter_mut()
             .find(|book| book.id == book_id)
             .ok_or_else(|| AppError::book_not_found(book_id))?;
+        seed_position_timestamp(record);
         record.last_opened_at = Some(Utc::now().to_rfc3339());
         self.write_library(&library)
     }
@@ -1995,6 +2103,13 @@ impl LibraryStore {
             .iter_mut()
             .find(|book| book.id == book_id)
             .ok_or_else(|| AppError::book_not_found(book_id))?;
+        // The position moved when the CFI changed, or — for writes without a
+        // CFI — when the fraction did. Re-reporting the position a book was
+        // opened at is not a move and must not outrank progress elsewhere.
+        let position_moved = match &last_cfi {
+            Some(cfi) => record.last_cfi.as_deref() != Some(cfi.as_str()),
+            None => last_fraction.is_some_and(|fraction| record.last_fraction != Some(fraction)),
+        };
         if let Some(fraction) = last_fraction {
             record.last_fraction = Some(fraction);
         }
@@ -2014,10 +2129,15 @@ impl LibraryStore {
         if let Some(ref cfi) = last_cfi {
             record.last_cfi = Some(cfi.clone());
         }
-        // Position changes refresh lastOpenedAt so sync can use it as the
-        // position's explicit updatedAt (newest position wins on merge).
         if last_fraction.is_some() || last_cfi.is_some() {
-            record.last_opened_at = Some(chrono::Utc::now().to_rfc3339());
+            let now = chrono::Utc::now().to_rfc3339();
+            // Sync orders positions by positionUpdatedAt (newest wins).
+            if position_moved {
+                record.position_updated_at = Some(now.clone());
+            } else {
+                seed_position_timestamp(record);
+            }
+            record.last_opened_at = Some(now);
         }
         self.write_library(&library)
     }
@@ -2033,7 +2153,7 @@ impl LibraryStore {
         }
         // Sync placeholders are real books-in-waiting: annotations may be
         // saved for a book whose EPUB has not downloaded yet.
-        if self.book_dir(book_id)?.join(".sync-placeholder.json").is_file() {
+        if self.book_dir(book_id)?.join(PLACEHOLDER_FILE).is_file() {
             return Ok(());
         }
         Err(AppError::book_not_found(book_id))
@@ -2544,6 +2664,14 @@ fn validate_library_records(root: &Path, data: &LibraryData) -> AppResult<()> {
                 ))
             })?;
         }
+        if let Some(moved_at) = &book.position_updated_at {
+            chrono::DateTime::parse_from_rfc3339(moved_at).map_err(|error| {
+                AppError::storage_corrupt(format!(
+                    "Invalid positionUpdatedAt for book {}: {error}",
+                    book.id
+                ))
+            })?;
+        }
         if let Some(hash) = &book.content_hash {
             validate_content_hash(hash).map_err(|error| {
                 AppError::storage_corrupt(format!(
@@ -2772,6 +2900,9 @@ fn validate_annotations(data: &AnnotationsFile) -> AppResult<()> {
             ));
         }
         validate_created_at(&bookmark.created_at)?;
+        if let Some(updated_at) = &bookmark.updated_at {
+            validate_created_at(updated_at)?;
+        }
         if let Some(label) = &bookmark.label {
             validate_text("label", label, MAX_LABEL_BYTES, true)?;
         }
@@ -2792,6 +2923,9 @@ fn validate_annotations(data: &AnnotationsFile) -> AppResult<()> {
         }
         validate_text("excerpt", &highlight.excerpt, MAX_EXCERPT_BYTES, false)?;
         validate_created_at(&highlight.created_at)?;
+        if let Some(updated_at) = &highlight.updated_at {
+            validate_created_at(updated_at)?;
+        }
         if let Some(color) = &highlight.color {
             if !VALID_HIGHLIGHT_COLORS.contains(&color.as_str()) {
                 return Err(AppError::invalid_input("Unsupported highlight color"));
@@ -2898,7 +3032,26 @@ fn validate_settings(settings: &ReadingSettings) -> AppResult<()> {
     Ok(())
 }
 
-fn book_id_for_source(source_path: &Path) -> String {
+/// Records from before `position_updated_at` existed used `last_opened_at`
+/// as the position's timestamp. Freeze that value before `last_opened_at`
+/// moves on for a non-position reason, so an open does not age-advance it.
+fn seed_position_timestamp(record: &mut BookRecord) {
+    if record.position_updated_at.is_none()
+        && (record.last_fraction.is_some() || record.last_cfi.is_some())
+    {
+        record.position_updated_at = record.last_opened_at.clone();
+    }
+}
+
+/// Whether a book directory holds only a sync placeholder (no library
+/// record, no EPUB yet).
+fn is_placeholder_dir(book_dir: &Path) -> bool {
+    book_dir.join(PLACEHOLDER_FILE).is_file() && !book_dir.join("book.epub").exists()
+}
+
+/// Identifies an import source so re-importing it overwrites in place. Also
+/// the id of every book imported before ids became content-derived.
+fn source_key_for_path(source_path: &Path) -> String {
     let mut hasher = DefaultHasher::new();
     source_path.to_string_lossy().hash(&mut hasher);
     format!("{:x}", hasher.finish())
@@ -3117,7 +3270,7 @@ fn path_modified_rfc3339(path: &Path) -> Option<String> {
 /// Title and author of a staged sync placeholder, so a purge-only entry still
 /// shows something meaningful in the trash list.
 fn staged_placeholder_identity(book_path: &Path) -> Option<(String, String)> {
-    let bytes = fs::read(book_path.join(".sync-placeholder.json")).ok()?;
+    let bytes = fs::read(book_path.join(PLACEHOLDER_FILE)).ok()?;
     let placeholder: BookPlaceholder = serde_json::from_slice(&bytes).ok()?;
     Some((placeholder.title, placeholder.author))
 }
@@ -3570,6 +3723,7 @@ pub async fn read_import_bytes(
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub async fn save_book_metadata(
+    app: tauri::AppHandle,
     store: tauri::State<'_, LibraryStore>,
     book_id: String,
     title: String,
@@ -3582,8 +3736,9 @@ pub async fn save_book_metadata(
     import_id: String,
 ) -> AppResult<BookRecord> {
     let store = store.inner().clone();
+    let root = crate::sync::sync_root(&app)?;
     run_blocking(move || {
-        store.save_book_metadata(
+        let record = store.save_book_metadata(
             &book_id,
             title,
             author,
@@ -3593,7 +3748,11 @@ pub async fn save_book_metadata(
             series,
             cover_bytes,
             &import_id,
-        )
+        )?;
+        // A (re-)imported book is live again: its own deletion Tombstone
+        // must not remove it, and its file is now the local truth.
+        crate::sync::note_book_imported(&root, &record.id)?;
+        Ok(record)
     })
     .await
 }
@@ -3792,12 +3951,23 @@ pub async fn save_annotations(
     store: tauri::State<'_, LibraryStore>,
     book_id: String,
     data: AnnotationsFile,
+    base: Option<AnnotationsFile>,
 ) -> AppResult<()> {
     let store = store.inner().clone();
     let root = crate::sync::sync_root(&app)?;
     run_blocking(move || {
         let before = store.get_annotations(&book_id)?;
-        let removed = crate::sync::removed_annotation_ids(&before, &data);
+        // With the writer's `base` (what it loaded before editing), the save
+        // rebases onto the disk: entries a Sync added since are kept, and only
+        // what the writer itself dropped counts as deleted. Without it, every
+        // id missing from `data` is a deletion.
+        let (data, removed) = match base {
+            Some(base) => crate::sync::rebase_annotations(&before, &base, data),
+            None => {
+                let removed = crate::sync::removed_annotation_ids(&before, &data);
+                (data, removed)
+            }
+        };
         store.save_annotations(&book_id, data)?;
         // Locally removed annotations become Tombstones so a later union
         // merge on another device cannot resurrect them.
@@ -4174,15 +4344,16 @@ mod tests {
 
         let (directory, store) = test_store();
         let source = Path::new("/source/symlink.epub");
-        let id = book_id_for_source(source);
+        // The id the content would derive is a symlink pointing outside.
+        let id = sha256_hex(b"unsafe")[..CONTENT_ID_HEX_CHARS].to_string();
         let outside = tempfile::tempdir().expect("outside directory");
         symlink(outside.path(), directory.path().join("books").join(&id)).expect("book symlink");
 
-        let error = store
+        let result = store
             .import_bytes(source, "book.epub".to_string(), b"unsafe".to_vec())
-            .expect_err("symlink import must fail");
+            .expect("import steers around the occupied id");
 
-        assert_eq!(error.code, AppErrorCode::StorageCorrupt);
+        assert_ne!(result.book_id, id);
         assert!(!outside.path().join("book.epub").exists());
         assert!(!outside.path().join(".imports").exists());
     }
@@ -5484,6 +5655,47 @@ mod tests {
     }
 
     #[test]
+    fn the_same_epub_gets_the_same_id_on_every_device() {
+        let (_one, device_a) = test_store();
+        let (_two, device_b) = test_store();
+
+        let a = import_book_with_name(&device_a, Path::new("/a/downloads/x.epub"), b"same-book", "X");
+        let b = import_book_with_name(&device_b, Path::new("/b/library/y.epub"), b"same-book", "X");
+
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn different_books_from_the_same_path_get_different_ids_on_two_devices() {
+        let (_one, device_a) = test_store();
+        let (_two, device_b) = test_store();
+        let path = Path::new("/home/me/Downloads/book.epub");
+
+        let a = import_book_with_name(&device_a, path, b"first-book", "First");
+        let b = import_book_with_name(&device_b, path, b"second-book", "Second");
+
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn importing_the_epub_of_a_sync_placeholder_promotes_it() {
+        let (_directory, store) = test_store();
+        let id = sha256_hex(b"remote-book")[..CONTENT_ID_HEX_CHARS].to_string();
+        store
+            .save_placeholder(&id, "Remote", "Author", Some(0.5), None, None, None)
+            .expect("placeholder");
+
+        let imported =
+            import_book_with_name(&store, Path::new("/local/remote.epub"), b"remote-book", "Remote");
+
+        assert_eq!(imported, id);
+        assert!(store.list_placeholders().expect("placeholders").is_empty());
+        let books = store.list_books().expect("books");
+        assert_eq!(books.len(), 1);
+        assert!(books[0].cached);
+    }
+
+    #[test]
     fn same_content_different_path_is_duplicate_and_does_not_stage() {
         let (directory, store) = test_store();
         let existing = import_test_book(&store, Path::new("/source/original.epub"));
@@ -5501,7 +5713,7 @@ mod tests {
         assert!(!directory
             .path()
             .join("books")
-            .join(book_id_for_source(copy))
+            .join(source_key_for_path(copy))
             .exists());
     }
 
@@ -5603,7 +5815,11 @@ mod tests {
         // timestamp so the next Sync treats it as a revival rather than a
         // deletion. Everything else is identical to what was deleted.
         assert!(restored.updated_at.is_some());
-        assert_eq!(BookRecord { updated_at: None, ..restored.clone() }, before);
+        assert_ne!(restored.updated_at, before.updated_at);
+        assert_eq!(
+            BookRecord { updated_at: before.updated_at.clone(), ..restored.clone() },
+            before
+        );
         assert!(root.join("books").join(&id).join("book.epub").is_file());
         assert!(root.join("sessions").join(&id).join("chat.jsonl").is_file());
         assert!(store.list_trashed_books().expect("list").is_empty());
@@ -5614,10 +5830,11 @@ mod tests {
     fn editing_metadata_bumps_the_record_revision_timestamp() {
         let (_directory, store) = test_store();
         let id = import_test_book(&store, Path::new("/source/revision.epub"));
-        // Importing alone gives the record no revision of its own.
-        assert!(store.read_library().expect("library").books[0]
+        // The import itself is the record's first revision.
+        let imported = store.read_library().expect("library").books[0]
             .updated_at
-            .is_none());
+            .clone()
+            .expect("import revision");
 
         let updated = store
             .update_book_metadata(
@@ -5633,7 +5850,7 @@ mod tests {
             .expect("update");
 
         let revision = updated.updated_at.expect("revision timestamp");
-        assert!(!revision.is_empty());
+        assert!(revision > imported);
         // It survives a round trip through library.json.
         let reloaded = store.read_library().expect("library");
         assert_eq!(reloaded.books[0].updated_at.as_deref(), Some(revision.as_str()));
@@ -5751,9 +5968,9 @@ mod tests {
         store.delete_book(&id).expect("delete");
         let entry_id = store.list_trashed_books().expect("list")[0].entry_id.clone();
 
-        // The same source derives the same book id, so the id is occupied
+        // The same content derives the same book id, so the id is occupied
         // again while the trash entry lingers.
-        let reimported = import_book_with_name(&store, source, b"occupied-two", "Occupied Again");
+        let reimported = import_book_with_name(&store, source, b"occupied-one", "Occupied Again");
         assert_eq!(reimported, id);
 
         let error = store
@@ -6429,6 +6646,7 @@ mod tests {
                 fraction: 0.42,
                 created_at: "2026-08-14T12:00:00+00:00".into(),
                 label: Some("Chapter 3".into()),
+                updated_at: None,
             }],
             highlights: vec![HighlightRecord {
                 id: "h_01hxyz".into(),
@@ -6437,6 +6655,7 @@ mod tests {
                 created_at: "2026-08-14T12:01:00+00:00".into(),
                 color: None,
                 note: None,
+                updated_at: None,
             }],
         }
     }
@@ -6773,6 +6992,8 @@ mod cached_flag_tests {
             content_version: None,
             cached: true,
             updated_at: None,
+            position_updated_at: None,
+            source_key: None,
             reading_status: None,
             status_updated_at: None,
             starred: None,

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { runSyncOnce } from "./sync-runner";
+import { runSyncOnce, syncBeforeExit } from "./sync-runner";
+import { hasUnsyncedActivity, notifySyncActivity } from "./sync-activity";
 
 const invokeMock = vi.fn();
 
@@ -272,5 +273,84 @@ describe("runSyncOnce", () => {
     expect(order.indexOf("sync_apply_merged_manifest")).toBeLessThan(
       order.indexOf("sync_upload_manifest"),
     );
+  });
+});
+
+describe("pass serialization", () => {
+  it("never overlaps two passes, even when started together", async () => {
+    setupStore();
+    const base = invokeMock.getMockImplementation()!;
+    let inFlight = 0;
+    let maxInFlight = 0;
+    invokeMock.mockImplementation(async (cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "sync_export_local_manifest") {
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+      }
+      // Let the other pass get scheduled while this one is mid-flight.
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      const result = await base(cmd, args);
+      if (cmd === "sync_sessions") inFlight -= 1;
+      return result;
+    });
+
+    await Promise.all([runSyncOnce(), runSyncOnce()]);
+
+    expect(maxInFlight).toBe(1);
+    expect(invokeMock.mock.calls.filter(([cmd]) => cmd === "sync_sessions")).toHaveLength(2);
+  });
+
+  it("keeps running queued passes after one fails", async () => {
+    setupStore();
+    const base = invokeMock.getMockImplementation()!;
+    let failNext = true;
+    invokeMock.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "sync_download_manifest" && failNext) {
+        failNext = false;
+        return Promise.reject(new Error("offline"));
+      }
+      return base(cmd, args);
+    });
+
+    const first = runSyncOnce();
+    const second = runSyncOnce();
+
+    await expect(first).rejects.toThrow("offline");
+    await expect(second).resolves.toBeUndefined();
+  });
+});
+
+describe("syncBeforeExit", () => {
+  it("pushes only when something changed since the last pass", async () => {
+    setupStore();
+    const base = invokeMock.getMockImplementation()!;
+    invokeMock.mockImplementation((cmd: string, args?: Record<string, unknown>) =>
+      cmd === "get_sync_config" ? Promise.resolve({ enabled: true }) : base(cmd, args),
+    );
+    await runSyncOnce();
+    invokeMock.mockClear();
+
+    await syncBeforeExit(1_000);
+    expect(invokeMock).not.toHaveBeenCalled();
+
+    notifySyncActivity();
+    await syncBeforeExit(1_000);
+    expect(invokeMock.mock.calls.map(([cmd]) => cmd)).toContain("sync_upload_manifest");
+    // A pre-exit push never uploads book files.
+    expect(invokeMock.mock.calls.map(([cmd]) => cmd)).not.toContain("sync_upload_book_files");
+    expect(hasUnsyncedActivity()).toBe(false);
+  });
+
+  it("gives up waiting after the timeout instead of holding the window open", async () => {
+    invokeMock.mockImplementation((cmd: string) =>
+      cmd === "get_sync_config"
+        ? Promise.resolve({ enabled: true })
+        : new Promise(() => {
+            // The Sync Backend never answers.
+          }),
+    );
+    notifySyncActivity();
+
+    await expect(syncBeforeExit(10)).resolves.toBeUndefined();
   });
 });
