@@ -64,6 +64,8 @@ export interface AssistantChatMessage {
   blocks?: AssistantBlock[];
   /** Terminal state of the persisted assistant message (UI only cares about non-normal endings). */
   stopReason?: "aborted" | "error";
+  /** Preset, credential-free failure reason when `stopReason` is "error". */
+  errorMessage?: string;
 }
 
 /**

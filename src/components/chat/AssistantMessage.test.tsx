@@ -340,6 +340,26 @@ describe("AssistantMessage", () => {
     expect(errored.queryByText("已停止")).toBeNull();
   });
 
+  it("renders the failure reason on errored assistant messages", () => {
+    const errored = render(
+      <AssistantMessage
+        message={{ role: "assistant", content: "", blocks: [], stopReason: "error", errorMessage: "API Key 无效或无权限，请检查模型配置" }}
+      />,
+    );
+    expect(errored.getByRole("alert").textContent).toContain("API Key 无效或无权限，请检查模型配置");
+    errored.unmount();
+
+    // Sessions persisted before reasons were classified carry no message.
+    const legacy = render(
+      <AssistantMessage message={{ role: "assistant", content: "回答到一半", stopReason: "error" }} />,
+    );
+    expect(legacy.getByRole("alert").textContent).toContain("模型请求失败");
+    legacy.unmount();
+
+    const normal = render(<AssistantMessage message={{ role: "assistant", content: "完整回答" }} />);
+    expect(normal.queryByRole("alert")).toBeNull();
+  });
+
   it("does not render the stopped marker while streaming", () => {
     const view = render(
       <AssistantMessage

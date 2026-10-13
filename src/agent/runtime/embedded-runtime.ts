@@ -214,7 +214,7 @@ export class LiteraAgentRuntime {
       if(finalAssistant.stopReason==="aborted"&&agent.state.messages[agent.state.messages.length-1]!==finalAssistant)agent.state.messages.push(finalAssistant);
       // The loop may insert a system message (tool declarations) ahead of the
       // prompt messages; it is runtime state, never a session entry.
-      const completed=agent.state.messages.slice(before).filter((message)=>message.role!=="system").slice(promptMessages.length+1);const entries:PiSessionEntry[]=[];let parent=session.leafId;for(const message of completed){const persisted=message.role==="assistant"&&message.stopReason==="error"?{...message,errorMessage:"模型请求失败"}:message;const entry=newEntry("message",parent,{message:persisted});entries.push(entry);parent=entry.id;}
+      const completed=agent.state.messages.slice(before).filter((message)=>message.role!=="system").slice(promptMessages.length+1);const entries:PiSessionEntry[]=[];let parent=session.leafId;for(const message of completed){const persisted=message.role==="assistant"&&message.stopReason==="error"?{...message,errorMessage:classifyPromptError(message.errorMessage??"").message}:message;const entry=newEntry("message",parent,{message:persisted});entries.push(entry);parent=entry.id;}
       if(entries.length){session.leafId=await this.sessions.append(promptBookId,session.header.id,session.leafId,entries);session.entries.push(...entries);}
       const aborted=completed.some((message)=>message.role==="assistant"&&message.stopReason==="aborted");
       const finalMessages=visibleMessages(session);const finalNavigation=sessionNavigation(session);
