@@ -1,5 +1,8 @@
 # Library shelf UI pass
 
+> Layout decisions ("Two rows", status tabs, toolbar right side) are superseded
+> by `.scratch/library-sidebar-layout/spec.md`.
+
 ## Problem
 
 The Library header packs about ten controls into the titlebar (search, status

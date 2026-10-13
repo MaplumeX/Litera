@@ -58,9 +58,11 @@ export function SessionList({
           : "absolute inset-x-0 top-[37px] bottom-0 z-10 flex flex-col bg-card"
       }
     >
-      <div className="flex items-center justify-between border-b px-3 py-2">
-        <span className="text-sm font-semibold">{t("chat.sessions")}</span>
-        {!isRail && (
+      {/* The rail sits under the window titlebar, which already holds its
+          toggle; only the overlay needs a title and a close button. */}
+      {!isRail && (
+        <div className="flex items-center justify-between border-b px-3 py-2">
+          <span className="text-sm font-semibold">{t("chat.sessions")}</span>
           <Button
             size="sm"
             variant="ghost"
@@ -70,8 +72,8 @@ export function SessionList({
           >
             <X />
           </Button>
-        )}
-      </div>
+        </div>
+      )}
       <div className="flex-1 space-y-1 overflow-y-auto p-2">
         <Button
           size="sm"

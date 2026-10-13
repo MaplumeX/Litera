@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent,
+  within, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AnnotationsFile, BookOpenContext } from "@/types/library";
 import type { ReaderViewHandle } from "@/components/ReaderView";
@@ -265,7 +266,7 @@ afterEach(() => {
 describe("reader / agent mode", () => {
   it("opens in reader mode when nothing is saved", async () => {
     const screen = await openReader();
-    expect(screen.getByLabelText("切换到 Agent 模式")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "阅读" }).getAttribute("aria-pressed")).toBe("true");
     expect(screen.getByLabelText("显示对话")).toBeTruthy();
     const title = screen.getByRole("heading", { level: 1 });
     expect(title.className).toContain("text-sm");
@@ -292,7 +293,7 @@ describe("reader / agent mode", () => {
   it("uses the settings default when the book has no memory", async () => {
     localStorage.setItem(DEFAULT_READER_MODE_KEY, "agent");
     const screen = await openReader();
-    expect(screen.getByLabelText("切换到阅读模式")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Agent" }).getAttribute("aria-pressed")).toBe("true");
     expect(screen.getByLabelText("会话列表")).toBeTruthy();
     expect(screen.queryByLabelText("显示会话列表")).toBeNull();
     expect(screen.queryByLabelText("隐藏会话列表")).toBeNull();
@@ -318,7 +319,7 @@ describe("reader / agent mode", () => {
     expect(screen.getByTestId("reader-chat-card").className).toContain("rounded-xl");
     expect(bookCell.className).not.toContain("border-l");
 
-    fireEvent.click(screen.getByLabelText("切换到 Agent 模式"));
+    fireEvent.click(screen.getByRole("button", { name: "Agent" }));
     expect(bookCell.hidden).toBe(true);
     fireEvent.click(screen.getByLabelText("显示书籍"));
     expect(bookCell.hidden).toBe(false);
@@ -336,21 +337,24 @@ describe("reader / agent mode", () => {
     localStorage.setItem(DEFAULT_READER_MODE_KEY, "reader");
     openContext.lastReaderMode = "agent";
     const screen = await openReader();
-    expect(screen.getByLabelText("切换到阅读模式")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Agent" }).getAttribute("aria-pressed")).toBe("true");
     expect(screen.queryByLabelText("显示对话")).toBeNull();
   });
 
   it("does not rewrite book memory when the settings default changes", async () => {
     openContext.lastReaderMode = "reader";
     const screen = await openReader();
-    expect(screen.getByLabelText("切换到 Agent 模式")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "阅读" }).getAttribute("aria-pressed")).toBe("true");
 
     fireEvent.click(screen.getByLabelText("字体与主题"));
     fireEvent.click(screen.getByRole("button", { name: "外观" }));
     fireEvent.click(screen.getByRole("radio", { name: "Agent" }));
 
     expect(localStorage.getItem(DEFAULT_READER_MODE_KEY)).toBe("agent");
-    expect(screen.getByLabelText("切换到 Agent 模式")).toBeTruthy();
+    // The settings dialog is modal, so the titlebar sits behind aria-hidden.
+    expect(
+      screen.getByRole("button", { name: "阅读", hidden: true }).getAttribute("aria-pressed"),
+    ).toBe("true");
     expect(
       invokeMock.mock.calls.some(
         (call) =>
@@ -367,19 +371,19 @@ describe("reader / agent mode", () => {
     const input = screen.getByPlaceholderText("输入问题…") as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value: "草稿还在" } });
 
-    fireEvent.click(screen.getByLabelText("切换到 Agent 模式"));
+    fireEvent.click(screen.getByRole("button", { name: "Agent" }));
 
     expect(screen.getByTestId("reader-view")).toBe(reader);
     expect(screen.getByTestId("chat-panel")).toBe(chat);
     expect((screen.getByPlaceholderText("输入问题…") as HTMLTextAreaElement).value).toBe(
       "草稿还在",
     );
-    expect(screen.getByLabelText("切换到阅读模式")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Agent" }).getAttribute("aria-pressed")).toBe("true");
   });
 
   it("persists the per-book mode on toggle", async () => {
     const screen = await openReader();
-    fireEvent.click(screen.getByLabelText("切换到 Agent 模式"));
+    fireEvent.click(screen.getByRole("button", { name: "Agent" }));
     await waitFor(
       () => {
         expect(invokeMock).toHaveBeenCalledWith(
@@ -558,12 +562,12 @@ describe("reader / agent mode", () => {
 
   it("keeps collapsed book and session rail when switching modes", async () => {
     const screen = await openReader();
-    fireEvent.click(screen.getByLabelText("切换到 Agent 模式"));
+    fireEvent.click(screen.getByRole("button", { name: "Agent" }));
     fireEvent.click(screen.getByLabelText("会话列表"));
     fireEvent.click(screen.getByLabelText("显示书籍"));
     fireEvent.click(screen.getByLabelText("隐藏书籍"));
-    fireEvent.click(screen.getByLabelText("切换到阅读模式"));
-    fireEvent.click(screen.getByLabelText("切换到 Agent 模式"));
+    fireEvent.click(screen.getByRole("button", { name: "阅读" }));
+    fireEvent.click(screen.getByRole("button", { name: "Agent" }));
     expect(screen.queryByRole("button", { name: "新建会话" })).toBeNull();
     expect(screen.getByLabelText("显示书籍")).toBeTruthy();
     expect(screen.getByTestId("reader-shell").style.gridTemplateColumns).toBe("1fr 0px");
@@ -577,7 +581,7 @@ describe("reader / agent mode", () => {
     };
     const screen = await openReader();
     expect(screen.getByLabelText("隐藏对话")).toBeTruthy();
-    fireEvent.click(screen.getByLabelText("切换到 Agent 模式"));
+    fireEvent.click(screen.getByRole("button", { name: "Agent" }));
     expect(screen.getByLabelText("显示书籍")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "新建会话" })).toBeNull();
   });
@@ -608,7 +612,7 @@ describe("reader / agent mode", () => {
   it("uses first-open layout defaults when the book has no lastLayout", async () => {
     const screen = await openReader();
     expect(screen.getByLabelText("显示对话")).toBeTruthy();
-    fireEvent.click(screen.getByLabelText("切换到 Agent 模式"));
+    fireEvent.click(screen.getByRole("button", { name: "Agent" }));
     expect(screen.getByLabelText("显示书籍")).toBeTruthy();
     expect(screen.getByTestId("reader-book-cell").hidden).toBe(true);
     expect(screen.getByRole("button", { name: "新建会话" })).toBeTruthy();
@@ -776,9 +780,20 @@ describe("reader TTS chrome", () => {
     expect(screen.queryByTestId("reader-tts-bar")).toBeNull();
   });
 
-  it("disables play when the agent-mode book is hidden", async () => {
+  it("hides read-aloud while the agent-mode book is hidden", async () => {
     localStorage.setItem(DEFAULT_READER_MODE_KEY, "agent");
     const screen = await openReader();
-    expect((screen.getByLabelText("朗读") as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByLabelText("朗读")).toBeNull();
+    fireEvent.click(screen.getByLabelText("显示书籍"));
+    expect(screen.getByLabelText("朗读")).toBeTruthy();
+  });
+
+  it("puts the session toggle in the titlebar and drops the panel header in agent mode", async () => {
+    localStorage.setItem(DEFAULT_READER_MODE_KEY, "agent");
+    const screen = await openReader();
+    const header = screen.container.querySelector("header")!;
+    expect(within(header).getByRole("button", { name: "会话列表" })).toBeTruthy();
+    expect(screen.queryByTestId("chat-panel-header")).toBeNull();
+    expect(screen.getByRole("button", { name: "设置" })).toBeTruthy();
   });
 });

@@ -9,6 +9,7 @@ import {
   formatLibraryTimestamp,
   progressPercent,
   withCoverRevision,
+  type LibraryStatusFilter,
 } from "@/lib/library-shelf";
 import {
   BookActionContext,
@@ -32,6 +33,8 @@ interface BookCardProps {
   /** Enter select mode with this book already selected. */
   onEnterSelect?: (bookId: string) => void;
   coverRev?: number;
+  /** The shelf's active filter, so the status chip does not repeat it. */
+  statusFilter?: LibraryStatusFilter;
 }
 
 function coverUrl(path: string, coverRev?: number): string {
@@ -121,6 +124,7 @@ export function BookCard({
   openDisabled = false,
   onEnterSelect,
   coverRev,
+  statusFilter,
 }: BookCardProps) {
   const { t } = useT();
   const pct = progressPercent(book.lastFraction);
@@ -144,9 +148,14 @@ export function BookCard({
           "relative aspect-[2/3] w-full overflow-hidden rounded-cover bg-muted shadow-cover transition-[box-shadow,transform,opacity] duration-200 hover:shadow-cover-hover active:scale-[0.98] motion-reduce:transition-none motion-reduce:active:scale-100",
           selectMode && selected && "ring-2 ring-primary ring-offset-2 ring-offset-background",
         )}
-        onClick={() => {
+        onClick={(e) => {
           if (selectMode) {
             onToggleSelect?.(book.id);
+            return;
+          }
+          // Ctrl/⌘-click starts a selection, as in a file manager.
+          if ((e.ctrlKey || e.metaKey) && onEnterSelect) {
+            onEnterSelect(book.id);
             return;
           }
           void onOpen(book.id);
@@ -174,7 +183,7 @@ export function BookCard({
                 style={{ width: `${pct}%` }}
               />
             </span>
-            <span className="absolute bottom-1.5 right-1.5 rounded-sm bg-background/80 px-1 py-px text-[10px] font-medium tabular-nums text-foreground/80">
+            <span className="absolute bottom-1.5 right-1.5 rounded-sm bg-background/80 px-1 py-px text-[10px] font-medium tabular-nums text-foreground/80 opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-within:opacity-100 motion-reduce:transition-none">
               {pct}%
             </span>
           </>
@@ -241,6 +250,7 @@ export function BookCard({
           <BookStatusMenu
             book={book}
             onChange={(choice) => onChangeStatus(book, choice)}
+            statusFilter={statusFilter}
             className="mt-1"
           />
         )}
@@ -268,6 +278,7 @@ interface BookListRowProps {
   /** Enter select mode with this book already selected. */
   onEnterSelect?: (bookId: string) => void;
   coverRev?: number;
+  statusFilter?: LibraryStatusFilter;
   /** Reserve the "not downloaded" column; the shelf sets it for every row or none. */
   cacheColumn?: boolean;
 }
@@ -287,6 +298,7 @@ export function BookListRow({
   openDisabled = false,
   onEnterSelect,
   coverRev,
+  statusFilter,
   cacheColumn = book.cached === false,
 }: BookListRowProps) {
   const { t, locale } = useT();
@@ -313,9 +325,14 @@ export function BookListRow({
       <button
         type="button"
         className="flex min-w-0 flex-1 items-center gap-3 text-left"
-        onClick={() => {
+        onClick={(e) => {
           if (selectMode) {
             onToggleSelect?.(book.id);
+            return;
+          }
+          // Ctrl/⌘-click starts a selection, as in a file manager.
+          if ((e.ctrlKey || e.metaKey) && onEnterSelect) {
+            onEnterSelect(book.id);
             return;
           }
           void onOpen(book.id);
@@ -381,6 +398,7 @@ export function BookListRow({
         <BookStatusMenu
           book={book}
           onChange={(choice) => onChangeStatus(book, choice)}
+          statusFilter={statusFilter}
         />
       )}
       {!selectMode && onToggleStar && (
@@ -408,7 +426,7 @@ export function BookListRow({
 }
 
 /**
- * A Continue reading tile: a thumbnail and the progress to resume from. It is
+ * A Continue reading tile: the cover and the progress to resume from. It is
  * never shown in select mode, so it carries no selection state.
  */
 export function BookResumeTile({
@@ -438,27 +456,22 @@ export function BookResumeTile({
 
   return (
     <BookActionContext {...actions}>
-      <button
-        type="button"
-        title={book.title}
-        className="flex min-w-0 items-center gap-3 rounded-lg bg-card p-2.5 text-left shadow-soft transition-colors hover:bg-muted/70 disabled:opacity-60 motion-reduce:transition-none"
-        onClick={() => {
-          void onOpen(book.id);
-        }}
-        disabled={opening || openDisabled}
-      >
-        <span className="h-14 w-10 shrink-0 overflow-hidden rounded-cover bg-muted shadow-cover">
-          <BookCoverImage book={book} coverRev={coverRev} small />
-        </span>
-        <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-medium">{book.title}</span>
-          {book.author && (
-            <span className="mt-0.5 block truncate text-xs text-muted-foreground">
-              {book.author}
-            </span>
-          )}
-          <span className="mt-1.5 flex items-center gap-2">
-            <span className="h-1 flex-1 overflow-hidden rounded-full bg-foreground/10">
+      <div className="group relative w-24 shrink-0">
+        <button
+          type="button"
+          title={book.title}
+          className="flex w-full flex-col gap-1.5 text-left disabled:opacity-60"
+          onClick={() => {
+            void onOpen(book.id);
+          }}
+          disabled={opening || openDisabled}
+        >
+          <span className="block aspect-[2/3] w-full overflow-hidden rounded-cover bg-muted shadow-cover transition-[box-shadow,transform] duration-200 group-hover:shadow-cover-hover group-active:scale-[0.98] motion-reduce:transition-none motion-reduce:group-active:scale-100">
+            <BookCoverImage book={book} coverRev={coverRev} />
+          </span>
+          <span className="block truncate text-xs font-medium">{book.title}</span>
+          <span className="flex items-center gap-1.5">
+            <span className="h-0.5 flex-1 overflow-hidden rounded-full bg-foreground/10">
               <span
                 className="block h-full bg-primary"
                 style={{ width: `${pct ?? 0}%` }}
@@ -472,8 +485,14 @@ export function BookResumeTile({
                   : `${pct}%`}
             </span>
           </span>
-        </span>
-      </button>
+        </button>
+        <div className="absolute right-1 top-1 z-10 opacity-0 transition-opacity duration-200 group-hover:opacity-100 has-[:focus-visible]:opacity-100 has-[[data-state=open]]:opacity-100 motion-reduce:transition-none">
+          <BookActionDropdown
+            className="h-6 w-6 border border-border/80 bg-background"
+            {...actions}
+          />
+        </div>
+      </div>
     </BookActionContext>
   );
 }

@@ -402,12 +402,13 @@ describe("reader annotation chrome", () => {
       "目录",
       "标注",
       "字体与主题",
-      "切换到 Agent 模式",
+      "阅读",
+      "Agent",
       "显示对话",
       "关闭窗口",
     ];
     const headerButtons = [...header!.querySelectorAll("button")].map(
-      (button) => button.getAttribute("aria-label"),
+      (button) => button.getAttribute("aria-label") ?? button.textContent,
     );
     expect(headerButtons.filter((name) => name && toolbarNames.includes(name))).toEqual(
       toolbarNames,
@@ -434,20 +435,22 @@ describe("reader annotation chrome", () => {
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     );
     const screen = await openReader();
-    fireEvent.click(screen.getByLabelText("切换到 Agent 模式"));
+    fireEvent.click(screen.getByRole("button", { name: "Agent" }));
     const header = screen.container.querySelector("header");
     expect(header).toBeTruthy();
     const toolbarNames = [
       "返回书库",
+      "会话列表",
       "字体与主题",
       "目录",
       "标注",
-      "切换到阅读模式",
+      "阅读",
+      "Agent",
       "显示书籍",
       "关闭窗口",
     ];
     const headerButtons = [...header!.querySelectorAll("button")].map(
-      (button) => button.getAttribute("aria-label"),
+      (button) => button.getAttribute("aria-label") ?? button.textContent,
     );
     expect(headerButtons.filter((name) => name && toolbarNames.includes(name))).toEqual(
       toolbarNames,

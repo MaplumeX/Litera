@@ -137,11 +137,10 @@ describe("ChatPanel session layouts", () => {
     );
     expect(view.getByRole("button", { name: "新建会话" })).toBeTruthy();
     expect(view.queryByRole("button", { name: "关闭" })).toBeNull();
-    const header = view.getByTestId("chat-panel-header");
-    expect(header.className).toContain("border-b");
-    expect(within(header).getByRole("heading", { name: "阅读助手" }).className).toContain(
-      "font-semibold",
-    );
+    // The reader titlebar names the book and toggles the rail: no panel header.
+    expect(view.queryByTestId("chat-panel-header")).toBeNull();
+    expect(view.queryByText("会话列表")).toBeNull();
+    expect(view.getByRole("button", { name: "设置" })).toBeTruthy();
   });
 
   it("keeps the overlay list in docked variant", () => {

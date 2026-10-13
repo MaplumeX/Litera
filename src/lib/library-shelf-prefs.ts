@@ -137,3 +137,24 @@ export function saveLibraryStatusFilter(filter: LibraryStatusFilter): void {
     // private mode / quota
   }
 }
+
+export const LIBRARY_SIDEBAR_COLLAPSED_KEY = "litera.librarySidebarCollapsed";
+
+/** Only an explicit collapse is remembered; anything else keeps it open. */
+export function loadLibrarySidebarCollapsed(): boolean {
+  try {
+    if (typeof localStorage === "undefined") return false;
+    return localStorage.getItem(LIBRARY_SIDEBAR_COLLAPSED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function saveLibrarySidebarCollapsed(collapsed: boolean): void {
+  try {
+    if (typeof localStorage === "undefined") return;
+    localStorage.setItem(LIBRARY_SIDEBAR_COLLAPSED_KEY, collapsed ? "1" : "0");
+  } catch {
+    // private mode / quota
+  }
+}

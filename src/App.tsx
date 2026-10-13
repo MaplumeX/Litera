@@ -16,13 +16,12 @@ import {
   useTitlebarWindowDrag,
 } from "@/components/WindowControls";
 import {
-  BookOpen,
   BookText,
   Bookmark,
-  Bot,
   ChevronLeft,
   List,
   MessageSquare,
+  PanelLeft,
   Pause,
   Type,
   Volume2,
@@ -85,6 +84,8 @@ import { useOpenPaths } from "@/lib/use-open-paths";
 import { notifySyncActivity } from "@/lib/sync-activity";
 import { useSyncScheduler } from "@/lib/use-sync-scheduler";
 import { useT } from "@/lib/i18n";
+import { shortBookTitle } from "@/lib/book-title";
+import { cn } from "@/lib/utils";
 import { clampTocWidth, loadTocWidth, saveTocWidth } from "@/lib/toc-sidebar-width";
 import {
   clampAgentBookWidth,
@@ -1117,12 +1118,32 @@ function App() {
           <ChevronLeft />
         </Button>
         {readerMode === "reader" ? tocAnnotationButtons : null}
+        {readerMode === "agent" && (
+          <Button
+            size="icon-sm"
+            variant={sessionRailOpen ? "secondary" : "ghost"}
+            onClick={() => {
+              const next = !sessionRailOpen;
+              setSessionRailOpen(next);
+              schedulePersistLayout({
+                chatCollapsed,
+                bookCollapsed,
+                sessionRailOpen: next,
+              });
+            }}
+            aria-label={t("chat.sessions")}
+            aria-pressed={sessionRailOpen}
+          >
+            <PanelLeft />
+          </Button>
+        )}
         <h1
           className="min-w-0 shrink truncate select-none text-sm font-medium"
+          title={bookTitle}
           data-titlebar-drag
           {...titlebarDrag}
         >
-          {bookTitle}
+          {shortBookTitle(bookTitle)}
         </h1>
         <div
           className="min-h-0 min-w-0 flex-1 select-none self-stretch"
@@ -1130,17 +1151,21 @@ function App() {
           {...titlebarDrag}
         />
         <div className="flex items-center gap-1">
-          <Button
-            size="icon-sm"
-            variant="ghost"
-            disabled={bookHidden}
-            aria-label={
-              tts.status === "playing" ? t("reader.ttsPause") : t("reader.ttsPlay")
-            }
-            onClick={() => tts.toggle()}
-          >
-            {tts.status === "playing" ? <Pause /> : <Volume2 />}
-          </Button>
+          {/* Read-aloud reads the Book pane; with the pane hidden in Agent
+              mode it has nothing to read, so it steps aside. */}
+          {!(readerMode === "agent" && bookHidden) && (
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              disabled={bookHidden}
+              aria-label={
+                tts.status === "playing" ? t("reader.ttsPause") : t("reader.ttsPlay")
+              }
+              onClick={() => tts.toggle()}
+            >
+              {tts.status === "playing" ? <Pause /> : <Volume2 />}
+            </Button>
+          )}
           <Button
             size="icon-sm"
             variant="ghost"
@@ -1149,22 +1174,34 @@ function App() {
           >
             <Type />
           </Button>
+          {readerMode === "agent" ? tocAnnotationButtons : null}
         </div>
         <div className="h-4 w-px shrink-0 bg-border" />
-        {readerMode === "agent" ? tocAnnotationButtons : null}
         <div className="flex items-center gap-1">
-          <Button
-            size="icon-sm"
-            variant="ghost"
-            onClick={() =>
-              handleReaderModeChange(readerMode === "reader" ? "agent" : "reader")
-            }
-            aria-label={
-              readerMode === "reader" ? t("reader.switchToAgent") : t("reader.switchToReader")
-            }
+          <div
+            role="group"
+            aria-label={t("reader.mode")}
+            className="flex items-center rounded-md border p-px"
           >
-            {readerMode === "reader" ? <Bot /> : <BookOpen />}
-          </Button>
+            {(["reader", "agent"] as const).map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                aria-pressed={readerMode === mode}
+                onClick={() => {
+                  if (readerMode !== mode) handleReaderModeChange(mode);
+                }}
+                className={cn(
+                  "h-6 rounded-[5px] px-2 text-xs transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring motion-reduce:transition-none",
+                  readerMode === mode
+                    ? "bg-secondary font-medium text-foreground"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {t(mode === "reader" ? "settings.defaultMode.reader" : "settings.defaultMode.agent")}
+              </button>
+            ))}
+          </div>
           {readerMode === "reader" ? (
             <Button
               size="icon-sm"
@@ -1339,14 +1376,6 @@ function App() {
               bookId={fileData?.bookId ?? ""}
               variant={readerMode === "agent" ? "workspace" : "docked"}
               sessionRailOpen={sessionRailOpen}
-              onSessionRailOpenChange={(open) => {
-                setSessionRailOpen(open);
-                schedulePersistLayout({
-                  chatCollapsed,
-                  bookCollapsed,
-                  sessionRailOpen: open,
-                });
-              }}
             />
           </div>
         </div>
