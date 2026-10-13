@@ -268,7 +268,11 @@ describe("ReaderProgressBar", () => {
         onSeek={() => {}}
       />,
     );
-    expect(getByTestId("reader-chapter-progress").textContent).toBe("本章 25%");
+    const chapterProgress = getByTestId("reader-chapter-progress");
+    expect(chapterProgress.textContent).toBe("25%");
+    expect(chapterProgress.title).toBe("本章 25%");
+    // Always laid out, so hovering the bar never resizes the track.
+    expect(chapterProgress.className).not.toMatch(/\bhidden\b/);
     const remaining = getByTestId("reader-chapter-remaining");
     expect(remaining.style.left).toBe("30%");
     expect(remaining.style.width).toBe("30%");

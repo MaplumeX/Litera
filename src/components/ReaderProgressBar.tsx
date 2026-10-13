@@ -94,12 +94,15 @@ export function ReaderProgressBar({
       <span className="min-w-0 max-w-[9rem] shrink truncate text-xs text-muted-foreground">
         {chapterLabel}
       </span>
+      {/* Always shown at a fixed width: toggling it on hover resized the track
+          and made the bar jump under the pointer. */}
       {chapterPct != null && (
         <span
           data-testid="reader-chapter-progress"
-          className="hidden shrink-0 text-xs text-muted-foreground/70 tabular-nums group-focus-within/bar:inline group-hover/bar:inline"
+          className="w-8 shrink-0 text-xs text-muted-foreground/70 tabular-nums"
+          title={t("reader.chapterProgress", { pct: chapterPct })}
         >
-          {t("reader.chapterProgress", { pct: chapterPct })}
+          {chapterPct}%
         </span>
       )}
       <div
