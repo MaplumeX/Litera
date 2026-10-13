@@ -9,6 +9,7 @@ import {
 } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { MessagesSquare, Settings, AlertCircle, RefreshCw } from "lucide-react";
 import { useAgentBridge } from "@/lib/use-agent-bridge";
 import { useAgentConfig } from "@/lib/use-agent-config";
@@ -45,8 +46,9 @@ interface ChatPanelProps {
   onOpenQuote?: (location: QuoteLocation, quote: string) => void;
   bookId: string;
   variant?: "docked" | "workspace";
+  /** Workspace variant: whether the session rail shows. The host owns the
+   * toggle (the reader titlebar); defaults to open. */
   sessionRailOpen?: boolean;
-  onSessionRailOpenChange?: (open: boolean) => void;
 }
 
 export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
@@ -59,7 +61,6 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       bookId,
       variant = "docked",
       sessionRailOpen,
-      onSessionRailOpenChange,
     },
     ref,
   ) {
@@ -103,10 +104,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       chapterHref?: string;
     } | null>(null);
     const [showSessionList, setShowSessionList] = useState(false);
-    const [internalRailOpen, setInternalRailOpen] = useState(true);
     const isWorkspace = variant === "workspace";
-    const railOpen = sessionRailOpen ?? internalRailOpen;
-    const setRailOpen = onSessionRailOpenChange ?? setInternalRailOpen;
+    const railOpen = sessionRailOpen ?? true;
     const [showConfig, setShowConfig] = useState(false);
     const [submitting, setSubmitting] = useState(false);
     const [invokeError, setInvokeError] = useState<string | null>(null);
@@ -496,13 +495,18 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 
     return (
       <CitationContext.Provider value={citationActions}>
-        <div data-testid="chat-panel" className="relative flex h-full min-h-0 bg-card">
+        {/* As the Agent-mode workspace the panel shares the window's surface;
+            docked beside the book it is a card. */}
+        <div
+          data-testid="chat-panel"
+          className={cn("relative flex h-full min-h-0", isWorkspace ? "bg-background" : "bg-card")}
+        >
           {isWorkspace && (
             <div
               hidden={!railOpen}
               className={
                 railOpen
-                  ? "h-full min-h-0 shrink-0 overflow-hidden border-r"
+                  ? "h-full min-h-0 shrink-0 overflow-hidden"
                   : "h-full w-0 overflow-hidden"
               }
             >
@@ -510,45 +514,14 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
             </div>
           )}
           <div className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col">
-          <div
-            data-testid="chat-panel-header"
-            className={
-              isWorkspace
-                ? "flex items-center justify-between border-b px-3 py-2"
-                : "flex items-center justify-between px-3 py-2"
-            }
-          >
-            <div className="flex items-center gap-2">
-              <Button
-                size="icon-xs"
-                variant={isWorkspace && railOpen ? "secondary" : "ghost"}
-                onClick={() => {
-                  if (isWorkspace) setRailOpen(!railOpen);
-                  else setShowSessionList((value) => !value);
-                }}
-                disabled={!bookId}
-                aria-label={t("chat.sessions")}
-              >
-                <MessagesSquare />
-              </Button>
-              <h2 className={isWorkspace ? "text-sm font-semibold" : "text-sm font-medium"}>
-                {t("chat.title")}
-              </h2>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] text-muted-foreground">
-                {bookReady ? t("chat.ready") : t("chat.waitingBook")}
-              </span>
-              <Button
-                size="icon-xs"
-                variant="ghost"
-                onClick={() => setShowConfig(true)}
-                aria-label={t("chat.settings")}
-              >
-                <Settings />
-              </Button>
-            </div>
-          </div>
+          {/* No header of its own: the titlebar names the book, and the session
+              and settings buttons sit in the input row. Only a notice shows
+              while the book is still loading. */}
+          {!bookReady && (
+            <p className="px-4 py-1.5 text-xs text-muted-foreground" role="status">
+              {t("chat.waitingBook")}
+            </p>
+          )}
 
           {!isWorkspace && showSessionList && sessionList}
 
@@ -693,6 +666,21 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
             thinkingLevel={thinkingLevel}
             onThinkingLevelChange={(level) => void handleThinkingLevelChange(level)}
             leadingControls={
+              <>
+              {/* In Agent mode the titlebar toggles the session rail. */}
+              {!isWorkspace && (
+                <Button
+                  size="icon-xs"
+                  variant="ghost"
+                  className="text-muted-foreground"
+                  onClick={() => setShowSessionList((value) => !value)}
+                  disabled={!bookId}
+                  aria-label={t("chat.sessions")}
+                  aria-pressed={showSessionList}
+                >
+                  <MessagesSquare />
+                </Button>
+              )}
               <ModelSwitcher
                 provider={configSnapshot?.provider ?? null}
                 model={configSnapshot?.model ?? null}
@@ -708,6 +696,16 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                 onModelSelect={(model) => void handleModelSelect(model)}
                 onOpenConfig={() => setShowConfig(true)}
               />
+              <Button
+                size="icon-xs"
+                variant="ghost"
+                className="text-muted-foreground"
+                onClick={() => setShowConfig(true)}
+                aria-label={t("chat.settings")}
+              >
+                <Settings />
+              </Button>
+              </>
             }
           />
           <AgentConfigDialog open={showConfig} onClose={() => setShowConfig(false)} />

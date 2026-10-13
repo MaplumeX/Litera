@@ -218,6 +218,27 @@
   display: none;
 }
 
+/* 对话消息流本身的滚动条：平时隐藏，指针移入消息流时才浮现，
+ * 不在对话和书之间多画一道竖条。 */
+.chat-message-scroll {
+  scrollbar-color: transparent transparent;
+}
+.chat-message-scroll:hover {
+  scrollbar-color: oklch(0.6 0 0 / 35%) transparent;
+}
+.dark .chat-message-scroll:hover {
+  scrollbar-color: oklch(0.8 0 0 / 30%) transparent;
+}
+.chat-message-scroll::-webkit-scrollbar-thumb {
+  background-color: transparent;
+}
+.chat-message-scroll:hover::-webkit-scrollbar-thumb {
+  background-color: oklch(0.6 0 0 / 35%);
+}
+.dark .chat-message-scroll:hover::-webkit-scrollbar-thumb {
+  background-color: oklch(0.8 0 0 / 30%);
+}
+
 /* 思维导图画布：markmap 内嵌样式把文字/圆圈/代码块颜色写死为浅色值
  * （--markmap-text-color:#333 等），夜间模式下不可读。
  * 用更高优先级选择器把它们映射到主题 token，light/dark 自动适配。 */
@@ -231,28 +252,19 @@
   --markmap-highlight-bg: var(--accent);
 }
 
-/* 阅读器目录/标注抽屉：从左侧滑入，遮罩淡入。 */
+/* 阅读器侧边面板（目录与标注）：从左侧滑入。 */
 @keyframes reader-drawer-in {
   from {
     transform: translateX(-12px);
     opacity: 0;
   }
 }
-@keyframes reader-scrim-in {
-  from {
-    opacity: 0;
-  }
-}
 .reader-drawer-in {
   animation: reader-drawer-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
-.reader-scrim-in {
-  animation: reader-scrim-in 180ms ease-out;
-}
 
 @media (prefers-reduced-motion: reduce) {
-  .reader-drawer-in,
-  .reader-scrim-in {
+  .reader-drawer-in {
     animation: none;
   }
   .chat-typing-dot {

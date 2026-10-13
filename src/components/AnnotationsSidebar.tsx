@@ -30,13 +30,14 @@ export function AnnotationsSidebar({
 }: AnnotationsSidebarProps) {
   const { t } = useT();
   return (
-    <nav className="flex h-full w-full flex-col overflow-hidden">
-      <div className="flex h-12 shrink-0 items-center border-b px-3 text-sm font-medium">
-        {t("annotations.title")}
-      </div>
-      <div className="flex-1 overflow-y-auto py-1">
-        <section className="border-b py-3">
-          <div className="flex items-center justify-between px-4 pb-2">
+    <nav
+      aria-label={t("annotations.title")}
+      className="flex h-full w-full flex-col overflow-hidden"
+    >
+      {/* Sections are set apart by space, not rules. */}
+      <div className="flex-1 space-y-5 overflow-y-auto pb-3">
+        <section>
+          <div className="flex items-center justify-between px-4 pb-1">
             <h2 className="text-xs font-medium text-muted-foreground">
               {t("annotations.bookmarks")}
             </h2>
@@ -79,7 +80,7 @@ export function AnnotationsSidebar({
             ))
           )}
         </section>
-        <section className="py-3">
+        <section>
           <h2 className="px-4 pb-2 text-xs font-medium text-muted-foreground">
             {t("annotations.highlights")}
           </h2>

@@ -137,23 +137,20 @@ describe("ChatPanel session layouts", () => {
     );
     expect(view.getByRole("button", { name: "新建会话" })).toBeTruthy();
     expect(view.queryByRole("button", { name: "关闭" })).toBeNull();
-    const header = view.getByTestId("chat-panel-header");
-    expect(header.className).toContain("border-b");
-    expect(within(header).getByRole("heading", { name: "阅读助手" }).className).toContain(
-      "font-semibold",
-    );
+    // The reader titlebar names the book and toggles the rail: no panel header.
+    expect(view.queryByTestId("chat-panel-header")).toBeNull();
+    expect(view.queryByText("会话列表")).toBeNull();
+    expect(view.getByRole("button", { name: "设置" })).toBeTruthy();
   });
 
   it("keeps the overlay list in docked variant", () => {
     const view = openSessionList();
     expect(view.getByRole("button", { name: "关闭" })).toBeTruthy();
     expect(view.getByRole("button", { name: "新建会话" })).toBeTruthy();
-    const header = view.getByTestId("chat-panel-header");
-    expect(header.className).not.toContain("border-b");
-    const title = within(header).getByRole("heading", { name: "阅读助手" });
-    expect(title.className).toContain("font-medium");
-    expect(title.className).not.toContain("font-semibold");
-    expect(view.getByRole("button", { name: "会话列表" })).toBeTruthy();
+    // No header row: the session and settings buttons sit in the input row.
+    expect(view.queryByTestId("chat-panel-header")).toBeNull();
+    expect(view.queryByText("已就绪")).toBeNull();
+    expect(view.getByRole("button", { name: "会话列表" }).getAttribute("aria-pressed")).toBe("true");
     expect(view.getByRole("button", { name: "设置" })).toBeTruthy();
   });
 

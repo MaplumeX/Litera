@@ -9,7 +9,8 @@ import {
   titlebarClassName,
   useTitlebarWindowDrag,
 } from "@/components/WindowControls";
-import { Plus, Settings, X } from "lucide-react";
+import { PanelLeft, Plus, Settings, X } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { BookCard, BookListRow, BookResumeTile } from "@/components/BookCard";
 import { BookDetailsDialog } from "@/components/BookDetailsDialog";
 import { TrashDialog } from "@/components/TrashDialog";
@@ -18,6 +19,7 @@ import {
   LibraryShelfToolbar,
   STATUS_OPTIONS,
 } from "@/components/LibraryShelfToolbar";
+import { LibrarySidebar } from "@/components/LibrarySidebar";
 import {
   BookImportConfirmDialog,
   BookImportNotices,
@@ -26,11 +28,11 @@ import { invokeErrorMessage } from "@/lib/app-error";
 import { notifySyncActivity } from "@/lib/sync-activity";
 import { useBookImport } from "@/lib/use-book-import";
 import { useT } from "@/lib/i18n";
+import { detectDesktopOs } from "@/lib/platform";
 import {
   countByStatus,
   filterBooks,
   filterByStatus,
-  isLibraryStatusFilter,
   naturalOrderFor,
   sortBooks,
   takeRecent,
@@ -39,11 +41,13 @@ import {
   type LibraryStatusFilter,
 } from "@/lib/library-shelf";
 import {
+  loadLibrarySidebarCollapsed,
   loadLibrarySort,
   loadLibrarySortOrder,
   loadLibraryStatusFilter,
   loadLibraryView,
   parseLibrarySort,
+  saveLibrarySidebarCollapsed,
   saveLibrarySort,
   saveLibrarySortOrder,
   saveLibraryStatusFilter,
@@ -79,6 +83,26 @@ function isTextEntry(target: EventTarget | null): boolean {
   );
 }
 
+/** Below Tailwind's `md` the sidebar becomes a drawer. */
+const WIDE_QUERY = "(min-width: 48rem)";
+
+function matchesWide(): boolean {
+  // jsdom and very old webviews have no matchMedia: treat them as wide.
+  return typeof window.matchMedia !== "function" || window.matchMedia(WIDE_QUERY).matches;
+}
+
+function useWideWindow(): boolean {
+  const [wide, setWide] = useState(matchesWide);
+  useEffect(() => {
+    if (typeof window.matchMedia !== "function") return;
+    const query = window.matchMedia(WIDE_QUERY);
+    const onChange = () => setWide(query.matches);
+    query.addEventListener("change", onChange);
+    return () => query.removeEventListener("change", onChange);
+  }, []);
+  return wide;
+}
+
 /** `update_book_curation` arguments: null leaves a field alone. */
 interface CurationChange {
   readingStatus: string | null;
@@ -105,6 +129,9 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
   const [statusFilter, setStatusFilter] = useState<LibraryStatusFilter>(
     loadLibraryStatusFilter,
   );
+  const wide = useWideWindow();
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(loadLibrarySidebarCollapsed);
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const [detailsBook, setDetailsBook] = useState<BookRecord | null>(null);
   const [trashOpen, setTrashOpen] = useState(false);
   const [trashEntries, setTrashEntries] = useState<TrashEntry[]>([]);
@@ -313,22 +340,43 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
     saveLibrarySortOrder(nextOrder);
   }, []);
 
-  const handleOrderToggle = useCallback(() => {
-    const next: LibrarySortOrder = order === "asc" ? "desc" : "asc";
+  const handleOrderChange = useCallback((next: LibrarySortOrder) => {
     setOrder(next);
     saveLibrarySortOrder(next);
-  }, [order]);
+  }, []);
 
   const handleViewChange = useCallback((next: LibraryViewMode) => {
     setView(next);
     saveLibraryView(next);
   }, []);
 
-  const handleStatusFilterChange = useCallback((value: string) => {
-    if (!isLibraryStatusFilter(value)) return;
+  const handleStatusFilterChange = useCallback((value: LibraryStatusFilter) => {
     setStatusFilter(value);
     saveLibraryStatusFilter(value);
+    setDrawerOpen(false);
   }, []);
+
+  // Wide windows collapse the sidebar in place (remembered); narrow ones
+  // open it as a drawer over the shelf.
+  const handleToggleSidebar = useCallback(() => {
+    if (!wide) {
+      setDrawerOpen((open) => !open);
+      return;
+    }
+    setSidebarCollapsed((collapsed) => {
+      saveLibrarySidebarCollapsed(!collapsed);
+      return !collapsed;
+    });
+  }, [wide]);
+
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setDrawerOpen(false);
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [drawerOpen]);
 
   const handleClearFilters = useCallback(() => {
     setSearch("");
@@ -551,25 +599,89 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
     onToggleSelect: handleToggleSelect,
     onEnterSelect: handleEnterSelect,
     openDisabled: importing,
+    statusFilter,
   };
 
+  const sidebarProps = {
+    statusFilter,
+    counts: statusCounts,
+    onStatusFilterChange: handleStatusFilterChange,
+    onImport: () => {
+      setDrawerOpen(false);
+      void handleImport();
+    },
+    importing,
+    trashCount: trashEntries.length,
+    onOpenTrash: () => {
+      setDrawerOpen(false);
+      setTrashOpen(true);
+    },
+    busy,
+  };
+
+  // The sidebar runs the window's full height when docked, so the window's
+  // brand row moves into it; otherwise the titlebar carries it.
+  const sidebarDocked = loaded && wide && !sidebarCollapsed;
+  const brand = (
+    <>
+      <Button
+        size="icon-sm"
+        variant="ghost"
+        className="text-muted-foreground"
+        onClick={handleToggleSidebar}
+        aria-label={t("library.toggleSidebar")}
+        aria-expanded={wide ? !sidebarCollapsed : drawerOpen}
+        disabled={!loaded}
+      >
+        <PanelLeft />
+      </Button>
+      <h1
+        className="select-none text-sm font-medium"
+        data-titlebar-drag
+        {...titlebarDrag}
+      >
+        Litera
+      </h1>
+      <div
+        className="min-h-0 min-w-0 flex-1 select-none self-stretch"
+        data-titlebar-drag
+        {...titlebarDrag}
+      />
+    </>
+  );
+
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <header className={titlebarClassName()}>
-        <h1
-          className="select-none text-sm font-medium"
-          data-titlebar-drag
-          {...titlebarDrag}
-        >
-          Litera
-        </h1>
-        <div
-          className="min-h-0 min-w-0 flex-1 select-none self-stretch"
-          data-titlebar-drag
-          {...titlebarDrag}
+    <div className="flex min-h-0 flex-1">
+      {sidebarDocked && (
+        <LibrarySidebar
+          {...sidebarProps}
+          header={
+            <div className={cn(titlebarClassName({ bordered: false }), "gap-2")}>
+              {brand}
+            </div>
+          }
         />
-        <div className="flex items-center gap-2">
-          <div className="relative">
+      )}
+
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header
+          className={titlebarClassName({
+            bordered: false,
+            trafficLightInset: !sidebarDocked,
+          })}
+        >
+          <div className="flex flex-1 basis-0 items-center gap-2 self-stretch">
+            {sidebarDocked ? (
+              <div
+                className="min-h-0 min-w-0 flex-1 select-none self-stretch"
+                data-titlebar-drag
+                {...titlebarDrag}
+              />
+            ) : (
+              brand
+            )}
+          </div>
+          <div className="relative w-full min-w-32 max-w-md">
             <Input
               ref={searchRef}
               type="text"
@@ -582,9 +694,9 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
                   setSearch("");
                 }
               }}
-              className="h-8 w-44 pr-7 lg:w-64"
+              className="peer h-8 w-full pr-14"
             />
-            {search && (
+            {search ? (
               <button
                 type="button"
                 className="absolute right-1.5 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
@@ -596,154 +708,176 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
               >
                 <X className="size-3.5" />
               </button>
-            )}
-          </div>
-          <Button
-            size="sm"
-            onClick={() => void handleImport()}
-            disabled={busy}
-          >
-            <Plus className="size-4" />
-            <span>{importing ? t("library.importing") : t("library.import")}</span>
-          </Button>
-          <Button
-            size="icon-sm"
-            variant="ghost"
-            onClick={onOpenSettings}
-            aria-label={t("library.settings")}
-          >
-            <Settings />
-          </Button>
-        </div>
-        <WindowControls />
-      </header>
-
-      {books.length > 0 &&
-        (selectMode ? (
-          <LibrarySelectionBar
-            selectedCount={selectedIds.size}
-            allSelected={allVisibleSelected}
-            onSelectAll={handleSelectAll}
-            allStarred={allSelectedStarred}
-            onToggleStar={handleBatchStar}
-            onMarkAs={handleBatchStatus}
-            onDelete={() => void requestDelete(selectedBooks)}
-            onCancel={exitSelectMode}
-            busy={busy}
-          />
-        ) : (
-          <LibraryShelfToolbar
-            statusFilter={statusFilter}
-            counts={statusCounts}
-            onStatusFilterChange={handleStatusFilterChange}
-            sort={sort}
-            onSortChange={handleSortChange}
-            order={order}
-            onOrderToggle={handleOrderToggle}
-            view={view}
-            onViewChange={handleViewChange}
-            onEnterSelect={() => handleEnterSelect()}
-            trashCount={trashEntries.length}
-            onOpenTrash={() => setTrashOpen(true)}
-            busy={busy}
-          />
-        ))}
-
-      {loadError && (
-        <div role="alert" className="border-b border-destructive/40 bg-destructive/10 px-4 py-2 text-sm text-destructive">
-          {t("library.loadFailed", { message: loadError })}
-        </div>
-      )}
-
-      <BookImportNotices
-        notices={notices}
-        dismissNotice={dismissNotice}
-        onOpenBook={onOpenBook}
-        actionDisabled={importing}
-      />
-
-      <div className="flex-1 overflow-y-auto p-4">
-        {!loaded || (books.length === 0 && loadError) ? null : books.length === 0 ? (
-          <div className="flex h-full items-center justify-center">
-            <div className="text-center space-y-3">
-              <p className="text-muted-foreground">{t("library.empty")}</p>
-              <p className="text-xs text-muted-foreground">{t("library.dropHint")}</p>
-              <Button
-                onClick={() => void handleImport()}
-                disabled={busy}
-              >
-                <Plus className="size-4" />
-                <span>{importing ? t("library.importing") : t("library.importEpub")}</span>
-              </Button>
-            </div>
-          </div>
-        ) : visible.length === 0 ? (
-          // The status filter is persisted, so a reopened app can land on a
-          // narrowed shelf: name the filter and offer a way out.
-          <div className="flex h-full items-center justify-center">
-            <div className="text-center space-y-3">
-              <p className="text-muted-foreground">
-                {statusFilterOption && statusFilter !== "all"
-                  ? t("library.noMatchesInFilter", {
-                      filter: t(statusFilterOption.labelKey),
-                    })
-                  : t("library.noMatches")}
-              </p>
-              <Button size="sm" variant="outline" onClick={handleClearFilters}>
-                {t("library.clearFilters")}
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-6">
-            {recents.length > 0 && (
-              <section>
-                <h2 className="mb-2 text-sm font-medium">
-                  {t("library.continueReading")}
-                </h2>
-                <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3">
-                  {recents.map((book) => (
-                    <BookResumeTile
-                      key={`recent-${book.id}`}
-                      book={book}
-                      opening={openingBookId === book.id}
-                      coverRev={coverRev[book.id]}
-                      {...bookProps}
-                    />
-                  ))}
-                </div>
-              </section>
-            )}
-            {view === "list" ? (
-              <div data-shelf="main" className="flex flex-col gap-2">
-                {visible.map((book) => (
-                  <BookListRow
-                    key={book.id}
-                    book={book}
-                    opening={openingBookId === book.id}
-                    selected={selectedIds.has(book.id)}
-                    coverRev={coverRev[book.id]}
-                    cacheColumn={cacheColumn}
-                    {...bookProps}
-                  />
-                ))}
-              </div>
             ) : (
-              <div data-shelf="main" className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-6">
-                {visible.map((book) => (
-                  <BookCard
-                    key={book.id}
-                    book={book}
-                    opening={openingBookId === book.id}
-                    selected={selectedIds.has(book.id)}
-                    coverRev={coverRev[book.id]}
-                    {...bookProps}
-                  />
-                ))}
-              </div>
+              <kbd
+                className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 rounded border bg-muted px-1.5 font-sans text-[10px] text-muted-foreground peer-focus:hidden"
+                aria-hidden
+              >
+                {detectDesktopOs() === "macos" ? "⌘F" : "Ctrl F"}
+              </kbd>
             )}
           </div>
-        )}
+          <div className="flex flex-1 basis-0 items-center justify-end gap-2 self-stretch">
+            <div
+              className="min-h-0 min-w-0 flex-1 select-none self-stretch"
+              data-titlebar-drag
+              {...titlebarDrag}
+            />
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              onClick={onOpenSettings}
+              aria-label={t("library.settings")}
+            >
+              <Settings />
+            </Button>
+            <WindowControls />
+          </div>
+        </header>
+
+        <div className="relative flex min-h-0 flex-1">
+          {loaded && !wide && drawerOpen && (
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-label={t("library.statusFilter")}
+              className="absolute inset-0 z-40 flex"
+            >
+              <LibrarySidebar {...sidebarProps} autoFocus className="shadow-float" />
+              <div
+                className="flex-1 bg-foreground/20"
+                aria-hidden
+                onClick={() => setDrawerOpen(false)}
+              />
+            </div>
+          )}
+
+          <div className="flex min-w-0 flex-1 flex-col">
+            {books.length > 0 &&
+              (selectMode ? (
+                <LibrarySelectionBar
+                  selectedCount={selectedIds.size}
+                  allSelected={allVisibleSelected}
+                  onSelectAll={handleSelectAll}
+                  allStarred={allSelectedStarred}
+                  onToggleStar={handleBatchStar}
+                  onMarkAs={handleBatchStatus}
+                  onDelete={() => void requestDelete(selectedBooks)}
+                  onCancel={exitSelectMode}
+                  busy={busy}
+                />
+              ) : (
+                <LibraryShelfToolbar
+                  statusFilter={statusFilter}
+                  count={visible.length}
+                  searching={searching}
+                  sort={sort}
+                  onSortChange={handleSortChange}
+                  order={order}
+                  onOrderChange={handleOrderChange}
+                  view={view}
+                  onViewChange={handleViewChange}
+                />
+              ))}
+
+            {loadError && (
+              <div role="alert" className="border-b border-destructive/40 bg-destructive/10 px-4 py-2 text-sm text-destructive">
+                {t("library.loadFailed", { message: loadError })}
+              </div>
+            )}
+
+            <BookImportNotices
+              notices={notices}
+              dismissNotice={dismissNotice}
+              onOpenBook={onOpenBook}
+              actionDisabled={importing}
+            />
+
+            <div className="flex-1 overflow-y-auto px-6 pb-6 pt-2">
+              {!loaded || (books.length === 0 && loadError) ? null : books.length === 0 ? (
+                <div className="flex h-full items-center justify-center">
+                  <div className="text-center space-y-3">
+                    <p className="text-muted-foreground">{t("library.empty")}</p>
+                    <p className="text-xs text-muted-foreground">{t("library.dropHint")}</p>
+                    <Button
+                      onClick={() => void handleImport()}
+                      disabled={busy}
+                    >
+                      <Plus className="size-4" />
+                      <span>{importing ? t("library.importing") : t("library.importEpub")}</span>
+                    </Button>
+                  </div>
+                </div>
+              ) : visible.length === 0 ? (
+                // The status filter is persisted, so a reopened app can land on a
+                // narrowed shelf: name the filter and offer a way out.
+                <div className="flex h-full items-center justify-center">
+                  <div className="text-center space-y-3">
+                    <p className="text-muted-foreground">
+                      {statusFilterOption && statusFilter !== "all"
+                        ? t("library.noMatchesInFilter", {
+                            filter: t(statusFilterOption.labelKey),
+                          })
+                        : t("library.noMatches")}
+                    </p>
+                    <Button size="sm" variant="outline" onClick={handleClearFilters}>
+                      {t("library.clearFilters")}
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  {recents.length > 0 && (
+                    <section>
+                      <h2 className="mb-1 text-sm font-medium">
+                        {t("library.continueReading")}
+                      </h2>
+                      <div className="-mx-6 flex gap-4 overflow-x-auto px-6 pb-3 pt-1">
+                        {recents.map((book) => (
+                          <BookResumeTile
+                            key={`recent-${book.id}`}
+                            book={book}
+                            opening={openingBookId === book.id}
+                            coverRev={coverRev[book.id]}
+                            {...bookProps}
+                          />
+                        ))}
+                      </div>
+                    </section>
+                  )}
+                  {view === "list" ? (
+                    <div data-shelf="main" className="flex flex-col gap-2">
+                      {visible.map((book) => (
+                        <BookListRow
+                          key={book.id}
+                          book={book}
+                          opening={openingBookId === book.id}
+                          selected={selectedIds.has(book.id)}
+                          coverRev={coverRev[book.id]}
+                          cacheColumn={cacheColumn}
+                          {...bookProps}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <div data-shelf="main" className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-6">
+                      {visible.map((book) => (
+                        <BookCard
+                          key={book.id}
+                          book={book}
+                          opening={openingBookId === book.id}
+                          selected={selectedIds.has(book.id)}
+                          coverRev={coverRev[book.id]}
+                          {...bookProps}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       </div>
 
       <BookDetailsDialog

@@ -4,10 +4,12 @@ import {
   DEFAULT_LIBRARY_SORT,
   DEFAULT_LIBRARY_STATUS_FILTER,
   DEFAULT_LIBRARY_VIEW,
+  LIBRARY_SIDEBAR_COLLAPSED_KEY,
   LIBRARY_SORT_KEY,
   LIBRARY_SORT_ORDER_KEY,
   LIBRARY_STATUS_FILTER_KEY,
   LIBRARY_VIEW_KEY,
+  loadLibrarySidebarCollapsed,
   loadLibrarySort,
   loadLibrarySortOrder,
   loadLibraryStatusFilter,
@@ -16,6 +18,7 @@ import {
   parseLibrarySortOrder,
   parseLibraryStatusFilter,
   parseLibraryView,
+  saveLibrarySidebarCollapsed,
   saveLibrarySort,
   saveLibrarySortOrder,
   saveLibraryStatusFilter,
@@ -27,6 +30,7 @@ afterEach(() => {
   localStorage.removeItem(LIBRARY_SORT_ORDER_KEY);
   localStorage.removeItem(LIBRARY_STATUS_FILTER_KEY);
   localStorage.removeItem(LIBRARY_VIEW_KEY);
+  localStorage.removeItem(LIBRARY_SIDEBAR_COLLAPSED_KEY);
 });
 
 describe("parseLibrarySort / parseLibraryView", () => {
@@ -103,5 +107,20 @@ describe("library status filter prefs", () => {
   it("ignores an invalid stored filter", () => {
     localStorage.setItem(LIBRARY_STATUS_FILTER_KEY, "masonry");
     expect(loadLibraryStatusFilter()).toBe(DEFAULT_LIBRARY_STATUS_FILTER);
+  });
+});
+
+describe("library sidebar collapsed pref", () => {
+  it("defaults to expanded and round-trips a collapse", () => {
+    expect(loadLibrarySidebarCollapsed()).toBe(false);
+    saveLibrarySidebarCollapsed(true);
+    expect(loadLibrarySidebarCollapsed()).toBe(true);
+    saveLibrarySidebarCollapsed(false);
+    expect(loadLibrarySidebarCollapsed()).toBe(false);
+  });
+
+  it("treats an unknown stored value as expanded", () => {
+    localStorage.setItem(LIBRARY_SIDEBAR_COLLAPSED_KEY, "yes");
+    expect(loadLibrarySidebarCollapsed()).toBe(false);
   });
 });

@@ -11,8 +11,6 @@ interface TocSidebarProps {
   currentHref?: string;
   expanded: string[];
   onToggle: (key: string) => void;
-  onExpandAll: () => void;
-  onCollapseAll: () => void;
   onGoTo: (href: string) => void;
 }
 
@@ -59,7 +57,7 @@ function TocNode({
         className={cn(
           "relative flex w-full items-center rounded-md px-2 py-1.5 text-sm transition-colors duration-150 motion-reduce:transition-none",
           isCurrent
-            ? "bg-accent font-medium text-accent-foreground before:absolute before:inset-y-1.5 before:left-0 before:w-0.5 before:rounded-full before:bg-primary"
+            ? "bg-accent font-medium text-accent-foreground"
             : "text-muted-foreground hover:bg-accent/70 hover:text-accent-foreground",
         )}
         style={{ paddingLeft: `${(path.length - 1) * 12 + 12}px` }}
@@ -111,43 +109,53 @@ function TocNode({
   );
 }
 
+/** Expand-all / collapse-all, for the side panel's header while on Contents. */
+export function TocSidebarActions({
+  onExpandAll,
+  onCollapseAll,
+}: {
+  onExpandAll: () => void;
+  onCollapseAll: () => void;
+}) {
+  const { t } = useT();
+  return (
+    <>
+      <Button
+        type="button"
+        size="icon-xs"
+        variant="ghost"
+        className="text-muted-foreground"
+        aria-label={t("toc.expandAll")}
+        onClick={onExpandAll}
+      >
+        <ChevronsUpDown />
+      </Button>
+      <Button
+        type="button"
+        size="icon-xs"
+        variant="ghost"
+        className="text-muted-foreground"
+        aria-label={t("toc.collapseAll")}
+        onClick={onCollapseAll}
+      >
+        <ChevronsDownUp />
+      </Button>
+    </>
+  );
+}
+
 export function TocSidebar({
   toc,
   currentHref,
   expanded,
   onToggle,
-  onExpandAll,
-  onCollapseAll,
   onGoTo,
 }: TocSidebarProps) {
   const { t } = useT();
   const listRef = useRef<HTMLDivElement>(null);
   return (
-    <nav className="flex h-full w-full flex-col overflow-hidden">
-      <div className="flex h-12 shrink-0 items-center border-b px-3 text-sm font-medium">
-        {t("toc.title")}
-        <div className="ml-auto flex items-center gap-1">
-          <Button
-            type="button"
-            size="icon-xs"
-            variant="ghost"
-            aria-label={t("toc.expandAll")}
-            onClick={onExpandAll}
-          >
-            <ChevronsUpDown />
-          </Button>
-          <Button
-            type="button"
-            size="icon-xs"
-            variant="ghost"
-            aria-label={t("toc.collapseAll")}
-            onClick={onCollapseAll}
-          >
-            <ChevronsDownUp />
-          </Button>
-        </div>
-      </div>
-      <div ref={listRef} className="flex-1 overflow-y-auto px-1.5 py-2">
+    <nav aria-label={t("toc.title")} className="flex h-full w-full flex-col overflow-hidden">
+      <div ref={listRef} className="flex-1 overflow-y-auto px-1.5 pb-2">
         {toc.length === 0 ? (
           <div className="px-4 py-2 text-xs text-muted-foreground">{t("toc.empty")}</div>
         ) : (

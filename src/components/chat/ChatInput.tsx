@@ -105,7 +105,7 @@ export function ChatInput({
           </button>
         </div>
       )}
-      <div className="rounded-2xl border bg-background shadow-soft transition-shadow duration-200 focus-within:ring-1 focus-within:ring-ring motion-reduce:transition-none">
+      <div className="group/input rounded-2xl border bg-background shadow-soft transition-shadow duration-200 focus-within:ring-1 focus-within:ring-ring motion-reduce:transition-none">
         <textarea
           ref={textareaRef}
           className={cn(
@@ -132,7 +132,10 @@ export function ChatInput({
                 ))}
               </SelectContent>
             </Select>
-            <span className="text-[10px] text-muted-foreground">{t("chat.inputHint")}</span>
+            {/* The key hint only matters while typing. */}
+            <span className="hidden truncate text-[10px] text-muted-foreground group-focus-within/input:inline">
+              {t("chat.inputHint")}
+            </span>
           </div>
           {isStreaming ? (
             <Button size="icon-sm" onClick={onAbort} aria-label={t("chat.stop")}>

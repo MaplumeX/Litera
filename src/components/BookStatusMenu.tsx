@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { useT, type MessageKey } from "@/lib/i18n";
+import type { LibraryStatusFilter } from "@/lib/library-shelf";
 
 /** The statuses in menu order. */
 export const READING_STATUSES: readonly ReadingStatus[] = [
@@ -27,25 +28,31 @@ export const STATUS_LABEL_KEYS: Record<ReadingStatus, MessageKey> = {
 /**
  * The reading-status control: a label that opens a menu of the statuses.
  *
- * An unread Book's label only shows on hover, focus, or while its menu is
- * open: every new import is unread, so a fresh shelf would otherwise carry the
- * same chip on every card. The host must carry Tailwind's `group` class. It
+ * The label stays visible only when it tells the reader something the card
+ * does not: Paused and Finished. Unread (every new import) and Reading (the
+ * progress bar says it) show only on hover, focus, or while the menu is open,
+ * as does any status the shelf is already filtered to. The host must carry
+ * Tailwind's `group` class. It
  * owns no IPC: the host supplies `onChange`, so the card and the list row
  * share one implementation and the menu can be tested without the shelf.
  */
 export function BookStatusMenu({
   book,
   onChange,
+  statusFilter,
   className,
 }: {
   book: BookRecord;
   onChange: (status: ReadingStatus) => void;
+  /** The shelf's active filter: a chip naming it would repeat on every card. */
+  statusFilter?: LibraryStatusFilter;
   className?: string;
 }) {
   const { t } = useT();
   const current = book.readingStatus;
   const currentLabel = t(STATUS_LABEL_KEYS[current]);
-  const quiet = current === "unread";
+  const quiet =
+    current === "unread" || current === "reading" || current === statusFilter;
 
   return (
     <DropdownMenu>
