@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { QuoteLocation } from "@/agent/book/book-content";
@@ -30,6 +32,9 @@ const SAMPLE = [
   "",
   "See [docs](https://example.com).",
 ].join("\n");
+
+// Vitest stubs CSS imports, so read the stylesheet used by AssistantMessage.
+const katexStyles = readFileSync(createRequire(import.meta.url).resolve("katex/dist/katex.min.css"), "utf8");
 
 describe("AssistantMessage", () => {
   it("renders common markdown as structured HTML", () => {
@@ -372,6 +377,32 @@ describe("AssistantMessage", () => {
 });
 
 describe("AssistantMessage math rendering", () => {
+  it.each([
+    String.raw`结果 $\boxed{\frac{1}{2}}$。`,
+    String.raw`结果 \(\boxed{\frac{1}{2}}\)。`,
+    String.raw`$$\boxed{\frac{1}{2}}$$`,
+    String.raw`\[\boxed{\frac{1}{2}}\]`,
+  ])("renders a boxed formula with matching KaTeX layout styles: %s", (content) => {
+    const style = document.createElement("style");
+    style.textContent = katexStyles;
+    document.head.append(style);
+    try {
+      const { container } = render(
+        <AssistantMessage message={{ role: "assistant", content }} />,
+      );
+      expect(container.querySelector(".katex-error")).toBeNull();
+      const frame = container.querySelector(".katex-html .fbox");
+      expect(frame).toBeTruthy();
+      // Rendering alone succeeds even when the CSS comes from an incompatible
+      // KaTeX version; the box needs the matching stretchy layout rule as well.
+      const frameStyle = getComputedStyle(frame!);
+      expect(frameStyle.position).toBe("relative");
+      expect(frameStyle.width).toBe("100%");
+    } finally {
+      style.remove();
+    }
+  });
+
   it("renders inline math as KaTeX HTML without the raw $...$ source (AC1)", () => {
     const { container } = render(
       <AssistantMessage message={{ role: "assistant", content: "能量 $E=mc^2$ 很有名。" }} />,
