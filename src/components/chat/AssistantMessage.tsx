@@ -88,6 +88,18 @@ const MarkdownBody = memo(function MarkdownBody({ text }: { text: string }) {
   );
 });
 
+/** Settled assistant-style Markdown (math, Citations) outside a message bubble. */
+export function MarkdownText({ text }: { text: string }) {
+  const normalized = useMemo(() => normalizeLatexDelimiters(text), [text]);
+  return (
+    <div className="prose prose-sm max-w-none overflow-x-auto dark:prose-invert">
+      <CitationSettledContext.Provider value={true}>
+        <MarkdownBody text={normalized} />
+      </CitationSettledContext.Provider>
+    </div>
+  );
+}
+
 const TextBlock = memo(function TextBlock({
   text,
   streaming,

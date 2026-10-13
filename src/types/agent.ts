@@ -89,7 +89,8 @@ type EventEnvelope = {
 
 type RequestCorrelation = { requestId?: string };
 type BookCorrelation = { bookId: string };
-type PromptCorrelation = BookCorrelation & { sessionId: string; promptId: string };
+type SessionCorrelation = BookCorrelation & { sessionId: string };
+type PromptCorrelation = SessionCorrelation & { promptId: string };
 
 export type AgentEvent = EventEnvelope & (
   | ({ type: "book_loading" } & BookCorrelation & RequestCorrelation)
@@ -102,9 +103,12 @@ export type AgentEvent = EventEnvelope & (
   | ({ type: "thinking_end"; contentIndex: number } & PromptCorrelation)
   | ({ type: "tool_start"; toolCallId: string; tool: string; params: unknown } & PromptCorrelation)
   | ({ type: "tool_end"; toolCallId: string; result: unknown; isError: boolean } & PromptCorrelation)
-  | ({ type: "compaction_started" } & PromptCorrelation)
-  | ({ type: "compaction_completed" } & PromptCorrelation)
-  | ({ type: "compaction_failed" } & PromptCorrelation)
+  // Context maintenance runs inside a prompt or in the background after one,
+  // so compaction events correlate to the Session, not to a prompt.
+  // `reason: "overflow"`: a request exceeded the context window and is retried after compaction.
+  | ({ type: "compaction_started"; reason: "budget" | "overflow" } & SessionCorrelation)
+  | ({ type: "compaction_completed"; messages: AgentMessage[]; anchors: string[]; navigation: Record<string, AnchorBranchInfo> } & SessionCorrelation)
+  | ({ type: "compaction_failed"; aborted: boolean } & SessionCorrelation)
   | ({ type: "retry_scheduled"; attempt: number; maxAttempts: number; delayMs: number } & PromptCorrelation)
   | ({ type: "prompt_end"; messages?: AgentMessage[]; anchors?: string[]; navigation?: Record<string, AnchorBranchInfo> } & PromptCorrelation)
   | ({ type: "prompt_aborted"; messages?: AgentMessage[]; anchors?: string[]; navigation?: Record<string, AnchorBranchInfo> } & PromptCorrelation & RequestCorrelation)

@@ -28,8 +28,7 @@ import { EmptyState } from "./EmptyState";
 import { SessionConfigDialog, type SessionConfigTarget } from "./SessionConfigDialog";
 import { SessionList } from "./SessionList";
 import { TypingIndicator } from "./TypingIndicator";
-import { CompactionChip } from "./CompactionChip";
-import { CompactionNotice } from "./CompactionNotice";
+import { CompactionNotice, CompactionStatus } from "./CompactionNotice";
 import { ChatOutlineRail, userMessagePreview } from "./ChatOutlineRail";
 import { useT } from "@/lib/i18n";
 
@@ -622,7 +621,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
               </div>
             )}
             {state.compaction && (
-              <CompactionChip status={state.compaction.status} />
+              <CompactionStatus status={state.compaction.status} />
             )}
             {(!lastChatMessage || lastChatMessage.role === "user") &&
               !isStreaming &&
