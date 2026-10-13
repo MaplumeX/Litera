@@ -5,6 +5,9 @@ import { useT } from "@/lib/i18n";
 import { fractionFromPointer, movedPastSlop } from "@/lib/reader-progress";
 import { cn } from "@/lib/utils";
 
+const CHAPTER_ARROW_CLASS =
+  "opacity-0 transition-opacity duration-150 group-hover/bar:opacity-100 focus-visible:opacity-100 motion-reduce:transition-none";
+
 interface ReaderProgressBarProps {
   fraction: number;
   chapterLabel: string;
@@ -58,12 +61,15 @@ export function ReaderProgressBar({
   return (
     <div
       data-testid="reader-progress-bar"
-      className="flex h-11 shrink-0 items-center gap-1 px-2 pb-2"
+      className="group/bar flex h-11 shrink-0 items-center gap-1 px-2 pb-2"
     >
+      {/* Chapter arrows repeat page turning, so they stay out of sight until
+          the bar is hovered or reached by keyboard. */}
       <Button
         type="button"
         size="icon-sm"
         variant="ghost"
+        className={CHAPTER_ARROW_CLASS}
         disabled={!canPrevChapter}
         aria-label={t("reader.prevChapter")}
         onClick={() => onPrevChapter?.()}
@@ -130,12 +136,13 @@ export function ReaderProgressBar({
             )}
             style={{ width: `${visualPct}%` }}
           />
-          {/* Chapter boundaries cut the rail into segments. */}
+          {/* Chapter boundaries cut the rail only while seeking: at rest a
+              book with many short chapters would read as a dashed line. */}
           {ticks.map((tick, i) => (
             <div
               key={`${tick}-${i}`}
               data-testid="reader-progress-tick"
-              className="pointer-events-none absolute inset-y-0 w-0.5 -translate-x-1/2 bg-background"
+              className="pointer-events-none absolute inset-y-0 w-0.5 -translate-x-1/2 bg-background opacity-0 transition-opacity duration-150 group-hover/progress:opacity-100 group-data-[dragging]/progress:opacity-100 motion-reduce:transition-none"
               style={{ left: `${tick * 100}%` }}
             />
           ))}
@@ -155,6 +162,7 @@ export function ReaderProgressBar({
         type="button"
         size="icon-sm"
         variant="ghost"
+        className={CHAPTER_ARROW_CLASS}
         disabled={!canNextChapter}
         aria-label={t("reader.nextChapter")}
         onClick={() => onNextChapter?.()}

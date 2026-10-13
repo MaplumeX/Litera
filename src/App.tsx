@@ -17,7 +17,6 @@ import {
 } from "@/components/WindowControls";
 import {
   BookText,
-  Bookmark,
   ChevronLeft,
   List,
   MessageSquare,
@@ -43,7 +42,8 @@ import {
 } from "@/components/BookImportFeedback";
 import { ReaderProgressBar } from "@/components/ReaderProgressBar";
 import { ReaderTtsBar } from "@/components/ReaderTtsBar";
-import { TocSidebar } from "@/components/TocSidebar";
+import { TocSidebar, TocSidebarActions } from "@/components/TocSidebar";
+import { ReaderSidePanel, type ReaderSidePanelTab } from "@/components/ReaderSidePanel";
 import { AnnotationsSidebar } from "@/components/AnnotationsSidebar";
 import {
   appendBookmark,
@@ -164,6 +164,9 @@ function SyncFailureBanner({
   );
 }
 
+/** The side panel floats this far in from its cell's edges (Tailwind `2`). */
+const SIDE_PANEL_INSET_PX = 8;
+
 function App() {
   const { t, setLocale, locale } = useT();
   const titlebarDrag = useTitlebarWindowDrag();
@@ -187,12 +190,13 @@ function App() {
   const [bookCollapsed, setBookCollapsed] = useState(false);
   const [chatWidth, setChatWidth] = useState(loadChatPanelWidth);
   const [agentBookWidth, setAgentBookWidth] = useState(loadAgentBookWidth);
-  const [tocVisible, setTocVisible] = useState(false);
+  // Contents and Annotations share one side panel, switched by tab.
+  const [sidePanelOpen, setSidePanelOpen] = useState(false);
+  const [sidePanelTab, setSidePanelTab] = useState<ReaderSidePanelTab>("toc");
   // Agent mode: the chapter picked from the TOC as the discussion scope. It
   // overrides the Book pane's position as the prompt's chapter context.
   const [chapterScope, setChapterScope] = useState<{ href: string; label: string } | null>(null);
   const [tocWidth, setTocWidth] = useState(loadTocWidth);
-  const [annotationsVisible, setAnnotationsVisible] = useState(false);
   const [annotations, setAnnotations] = useState<AnnotationsFile>(emptyAnnotations);
   const annotationsRef = useRef(annotations);
   annotationsRef.current = annotations;
@@ -237,7 +241,7 @@ function App() {
   });
   const chatRef = useRef<ChatPanelHandle>(null);
   const shellRef = useRef<HTMLDivElement>(null);
-  const tocDrawerRef = useRef<HTMLDivElement>(null);
+  const sidePanelRef = useRef<HTMLDivElement>(null);
   const tocResizeRef = useRef<{ startX: number; startWidth: number; maxWidth: number } | null>(
     null,
   );
@@ -410,7 +414,7 @@ function App() {
   // Escape closes overlay drawers. Page turning lives in ReaderView
   // (chapter iframe + host); do not handle ArrowLeft/ArrowRight here.
   useEffect(() => {
-    if (view !== "reader" || (!tocVisible && !annotationsVisible)) return;
+    if (view !== "reader" || !sidePanelOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
       if (
@@ -421,25 +425,26 @@ function App() {
         return;
       if (e.key === "Escape") {
         e.preventDefault();
-        setTocVisible(false);
-        setAnnotationsVisible(false);
+        setSidePanelOpen(false);
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [view, tocVisible, annotationsVisible]);
+  }, [view, sidePanelOpen]);
 
   // A persisted width may exceed the current reader container (e.g. the window
   // was resized smaller since the width was saved); clamp it back on open so
   // the drawer and its resize handle never leave the container.
   useEffect(() => {
-    if (!tocVisible) return;
-    const container = tocDrawerRef.current?.parentElement;
-    const maxWidth = container?.getBoundingClientRect().width;
+    if (!sidePanelOpen) return;
+    const container = sidePanelRef.current?.parentElement;
+    const containerWidth = container?.getBoundingClientRect().width;
+    const maxWidth =
+      containerWidth == null ? undefined : containerWidth - 2 * SIDE_PANEL_INSET_PX;
     if (maxWidth != null && maxWidth > 0 && tocWidthRef.current > maxWidth) {
       setTocWidth(clampTocWidth(tocWidthRef.current, maxWidth));
     }
-  }, [tocVisible]);
+  }, [sidePanelOpen]);
 
   const persistAnnotations = useCallback(
     async (bookId: string, next: AnnotationsFile) => {
@@ -584,8 +589,8 @@ function App() {
     setToc([]);
     setTocExpanded([]);
     setSectionTicks([]);
-    setTocVisible(false);
-    setAnnotationsVisible(false);
+    setSidePanelOpen(false);
+    setSidePanelTab("toc");
     setAnnotations(emptyAnnotations());
     annotationsRef.current = emptyAnnotations();
     setReaderMode("reader");
@@ -740,7 +745,7 @@ function App() {
     } else {
       goToChapterHref(href);
     }
-    setTocVisible(false);
+    setSidePanelOpen(false);
   }, [bookCollapsed, goToChapterHref, readerMode, toc]);
 
   // A Citation's "Open in Book": reveal a collapsed Agent-mode Book pane
@@ -803,10 +808,11 @@ function App() {
 
   const startTocResize = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
     if (e.button !== 0) return;
-    const drawer = tocDrawerRef.current;
+    const drawer = sidePanelRef.current;
     if (!drawer) return;
     const container = drawer.parentElement;
-    const maxWidth = container?.getBoundingClientRect().width ?? window.innerWidth;
+    const maxWidth =
+      (container?.getBoundingClientRect().width ?? window.innerWidth) - 2 * SIDE_PANEL_INSET_PX;
     tocResizeRef.current = {
       startX: e.clientX,
       startWidth: drawer.getBoundingClientRect().width,
@@ -879,8 +885,7 @@ function App() {
   }, []);
 
   const closeOverlays = useCallback(() => {
-    setTocVisible(false);
-    setAnnotationsVisible(false);
+    setSidePanelOpen(false);
   }, []);
 
   const jumpToAnnotation = useCallback(async (cfi: string, fraction?: number) => {
@@ -983,36 +988,76 @@ function App() {
     />
   );
 
-  // Reading mode: the TOC is a drawer over the Book. Agent mode: it opens over
-  // the Session, so picking a chapter never needs the Book pane.
+  // Reading mode: the side panel is a drawer over the Book. Agent mode: it
+  // opens over the Session, so picking a chapter never needs the Book pane.
   const tocCurrentHref =
     readerMode === "agent" ? chapterScope?.href ?? progress.chapterHref : progress.chapterHref;
-  const tocDrawer = tocVisible ? (
+  // Annotations jump the Book, so showing them reveals a collapsed Book pane.
+  const revealBookForAnnotations = () => {
+    if (!bookCollapsed) return;
+    setBookCollapsed(false);
+    schedulePersistLayout({
+      chatCollapsed,
+      bookCollapsed: false,
+      sessionRailOpen,
+    });
+  };
+  const handleSidePanelTabChange = (tab: ReaderSidePanelTab) => {
+    setSidePanelTab(tab);
+    if (tab === "annotations") revealBookForAnnotations();
+  };
+  const sidePanel = sidePanelOpen ? (
     <>
+      {/* Clicking outside closes the panel; the book stays fully legible. */}
       <button
         type="button"
-        className="reader-scrim-in absolute inset-0 z-20 bg-foreground/5 backdrop-blur-[2px]"
-        aria-label={t("reader.closeToc")}
-        onClick={() => setTocVisible(false)}
+        className="absolute inset-0 z-20 cursor-default"
+        aria-label={
+          sidePanelTab === "toc" ? t("reader.closeToc") : t("reader.closeAnnotations")
+        }
+        onClick={() => setSidePanelOpen(false)}
       />
       <div
-        ref={tocDrawerRef}
-        className="reader-drawer-in absolute inset-y-0 left-0 z-30 overflow-hidden bg-background shadow-float"
+        ref={sidePanelRef}
+        className="reader-drawer-in absolute inset-y-2 left-2 z-30 overflow-hidden rounded-xl border bg-card shadow-float"
         style={{ width: tocWidth }}
       >
-        <TocSidebar
-          toc={toc}
-          currentHref={tocCurrentHref}
-          expanded={tocExpanded}
-          onToggle={handleTocToggle}
-          onExpandAll={handleTocExpandAll}
-          onCollapseAll={handleTocCollapseAll}
-          onGoTo={handleTocGoTo}
-        />
+        <ReaderSidePanel
+          tab={sidePanelTab}
+          onTabChange={handleSidePanelTabChange}
+          actions={
+            sidePanelTab === "toc" ? (
+              <TocSidebarActions
+                onExpandAll={handleTocExpandAll}
+                onCollapseAll={handleTocCollapseAll}
+              />
+            ) : null
+          }
+        >
+          {sidePanelTab === "toc" ? (
+            <TocSidebar
+              toc={toc}
+              currentHref={tocCurrentHref}
+              expanded={tocExpanded}
+              onToggle={handleTocToggle}
+              onGoTo={handleTocGoTo}
+            />
+          ) : (
+            <AnnotationsSidebar
+              bookmarks={annotations.bookmarks}
+              highlights={annotations.highlights}
+              onAddBookmark={handleAddBookmark}
+              onJumpBookmark={handleJumpBookmark}
+              onDeleteBookmark={handleDeleteBookmark}
+              onJumpHighlight={handleJumpHighlight}
+              onDeleteHighlight={handleDeleteHighlight}
+            />
+          )}
+        </ReaderSidePanel>
       </div>
       <div
-        className="absolute inset-y-0 z-40 w-1.5 cursor-col-resize touch-none select-none bg-transparent hover:bg-primary/30"
-        style={{ left: tocWidth - 3 }}
+        className="absolute inset-y-2 z-40 w-1.5 cursor-col-resize touch-none select-none bg-transparent hover:bg-primary/30"
+        style={{ left: SIDE_PANEL_INSET_PX + tocWidth - 3 }}
         role="separator"
         aria-orientation="vertical"
         onPointerDown={startTocResize}
@@ -1023,40 +1068,20 @@ function App() {
     </>
   ) : null;
 
-  const tocAnnotationButtons = (
-    <div className="flex items-center gap-1">
-      <Button
-        size="icon-sm"
-        variant={tocVisible ? "secondary" : "ghost"}
-        onClick={() => {
-          setTocVisible(!tocVisible);
-          setAnnotationsVisible(false);
-        }}
-        aria-label={t("reader.toc")}
-      >
-        <List />
-      </Button>
-      <Button
-        size="icon-sm"
-        variant={annotationsVisible ? "secondary" : "ghost"}
-        onClick={() => {
-          const next = !annotationsVisible;
-          setAnnotationsVisible(next);
-          setTocVisible(false);
-          if (next && bookCollapsed) {
-            setBookCollapsed(false);
-            schedulePersistLayout({
-              chatCollapsed,
-              bookCollapsed: false,
-              sessionRailOpen,
-            });
-          }
-        }}
-        aria-label={t("reader.annotations")}
-      >
-        <Bookmark />
-      </Button>
-    </div>
+  const sidePanelButton = (
+    <Button
+      size="icon-sm"
+      variant={sidePanelOpen ? "secondary" : "ghost"}
+      onClick={() => {
+        const next = !sidePanelOpen;
+        setSidePanelOpen(next);
+        if (next && sidePanelTab === "annotations") revealBookForAnnotations();
+      }}
+      aria-label={t("reader.sidePanel")}
+      aria-expanded={sidePanelOpen}
+    >
+      <List />
+    </Button>
   );
 
   if (view === "library") {
@@ -1107,8 +1132,8 @@ function App() {
         onOpenBook={handleOpenBook}
         actionDisabled={bookImport.importing}
       />
-      {/* Top toolbar */}
-      <header className={titlebarClassName()}>
+      {/* Top toolbar: no rule underneath, tone and space separate it. */}
+      <header className={titlebarClassName({ bordered: false })}>
         <Button
           size="icon-sm"
           variant="ghost"
@@ -1117,7 +1142,7 @@ function App() {
         >
           <ChevronLeft />
         </Button>
-        {readerMode === "reader" ? tocAnnotationButtons : null}
+        {readerMode === "reader" ? sidePanelButton : null}
         {readerMode === "agent" && (
           <Button
             size="icon-sm"
@@ -1174,14 +1199,13 @@ function App() {
           >
             <Type />
           </Button>
-          {readerMode === "agent" ? tocAnnotationButtons : null}
+          {readerMode === "agent" ? sidePanelButton : null}
         </div>
-        <div className="h-4 w-px shrink-0 bg-border" />
         <div className="flex items-center gap-1">
           <div
             role="group"
             aria-label={t("reader.mode")}
-            className="flex items-center rounded-md border p-px"
+            className="flex items-center gap-0.5"
           >
             {(["reader", "agent"] as const).map((mode) => (
               <button
@@ -1192,7 +1216,7 @@ function App() {
                   if (readerMode !== mode) handleReaderModeChange(mode);
                 }}
                 className={cn(
-                  "h-6 rounded-[5px] px-2 text-xs transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring motion-reduce:transition-none",
+                  "h-7 rounded-md px-2 text-xs transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring motion-reduce:transition-none",
                   readerMode === mode
                     ? "bg-secondary font-medium text-foreground"
                     : "text-muted-foreground hover:text-foreground",
@@ -1288,28 +1312,7 @@ function App() {
                 onDismiss={readingStatus.dismissFinishPrompt}
               />
             )}
-            {readerMode === "reader" && tocDrawer}
-            {annotationsVisible && (
-              <>
-                <button
-                  type="button"
-                  className="reader-scrim-in absolute inset-0 z-20 bg-foreground/5 backdrop-blur-[2px]"
-                  aria-label={t("reader.closeAnnotations")}
-                  onClick={() => setAnnotationsVisible(false)}
-                />
-                <div className="reader-drawer-in absolute inset-y-0 left-0 z-30 w-56 overflow-hidden bg-background shadow-float">
-                  <AnnotationsSidebar
-                    bookmarks={annotations.bookmarks}
-                    highlights={annotations.highlights}
-                    onAddBookmark={handleAddBookmark}
-                    onJumpBookmark={handleJumpBookmark}
-                    onDeleteBookmark={handleDeleteBookmark}
-                    onJumpHighlight={handleJumpHighlight}
-                    onDeleteHighlight={handleDeleteHighlight}
-                  />
-                </div>
-              </>
-            )}
+            {readerMode === "reader" && sidePanel}
           </div>
           {tts.error ? (
             <div
@@ -1354,7 +1357,7 @@ function App() {
           }
           style={{ gridArea: "chat" }}
         >
-          {readerMode === "agent" && tocDrawer}
+          {readerMode === "agent" && sidePanel}
           {/* Docked beside the book, the assistant floats as a card; as the
               Agent-mode workspace it fills its cell edge to edge. */}
           <div

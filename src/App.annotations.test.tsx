@@ -267,7 +267,7 @@ async function openReader() {
     fireEvent.click(screen.getByText("open-book"));
   });
   await waitFor(() => {
-    expect(screen.getByLabelText("标注")).toBeTruthy();
+    expect(screen.getByLabelText("目录与标注")).toBeTruthy();
   });
   return screen;
 }
@@ -311,18 +311,28 @@ describe("reader annotation chrome", () => {
     expect(screen.getByTestId("reader-book-cell").contains(screen.getByTestId("reader-progress-bar"))).toBe(true);
     expect(screen.getByText("Chapter 1")).toBeTruthy();
     expect(screen.getByText("10%")).toBeTruthy();
-    fireEvent.click(screen.getByLabelText("标注"));
+    // Contents and Annotations share one panel and switch by tab.
+    fireEvent.click(screen.getByLabelText("目录与标注"));
+    expect(screen.getByRole("tab", { name: "目录" }).getAttribute("aria-selected")).toBe("true");
+    fireEvent.click(screen.getByRole("tab", { name: "标注" }));
     expect(screen.getByText("添加书签")).toBeTruthy();
     expect(screen.getByText("还没有书签")).toBeTruthy();
 
-    fireEvent.click(screen.getByLabelText("目录"));
+    fireEvent.click(screen.getByRole("tab", { name: "目录" }));
     expect(screen.queryByText("添加书签")).toBeNull();
-    expect(screen.getByText("目录")).toBeTruthy();
+    expect(screen.getByRole("navigation", { name: "目录" })).toBeTruthy();
+
+    // Reopening returns to the last tab.
+    fireEvent.click(screen.getByRole("tab", { name: "标注" }));
+    fireEvent.click(screen.getByLabelText("目录与标注"));
+    fireEvent.click(screen.getByLabelText("目录与标注"));
+    expect(screen.getByText("添加书签")).toBeTruthy();
   });
 
   it("saves a bookmark snapshot without writing BookRecord fields", async () => {
     const screen = await openReader();
-    fireEvent.click(screen.getByLabelText("标注"));
+    fireEvent.click(screen.getByLabelText("目录与标注"));
+    fireEvent.click(screen.getByRole("tab", { name: "标注" }));
     await act(async () => {
       fireEvent.click(screen.getByLabelText("添加书签"));
     });
@@ -367,7 +377,8 @@ describe("reader annotation chrome", () => {
     await waitFor(() => {
       expect(screen.getByRole("alert").textContent).toContain("bad json");
     });
-    fireEvent.click(screen.getByLabelText("标注"));
+    fireEvent.click(screen.getByLabelText("目录与标注"));
+    fireEvent.click(screen.getByRole("tab", { name: "标注" }));
     await act(async () => {
       fireEvent.click(screen.getByLabelText("添加书签"));
     });
@@ -399,8 +410,7 @@ describe("reader annotation chrome", () => {
     expect(header!.querySelectorAll("[data-titlebar-drag]")).toHaveLength(2);
     const toolbarNames = [
       "返回书库",
-      "目录",
-      "标注",
+      "目录与标注",
       "字体与主题",
       "阅读",
       "Agent",
@@ -442,8 +452,7 @@ describe("reader annotation chrome", () => {
       "返回书库",
       "会话列表",
       "字体与主题",
-      "目录",
-      "标注",
+      "目录与标注",
       "阅读",
       "Agent",
       "显示书籍",
@@ -608,9 +617,9 @@ describe("reader TOC drawer resize", () => {
 
   async function openToc() {
     const screen = await openReader();
-    fireEvent.click(screen.getByLabelText("目录"));
+    fireEvent.click(screen.getByLabelText("目录与标注"));
     const drawer = screen.container.querySelector(
-      ".absolute.inset-y-0.left-0.z-30",
+      ".absolute.inset-y-2.left-2.z-30",
     ) as HTMLElement | null;
     const container = drawer?.parentElement as HTMLElement | null;
     expect(drawer).toBeTruthy();
@@ -661,7 +670,8 @@ describe("reader TOC drawer resize", () => {
     const handle = screen.getByRole("separator", { orientation: "vertical" });
     fireEvent.pointerDown(handle, { clientX: 224, button: 0 });
     fireEvent.pointerMove(handle, { clientX: 2000, button: 0 });
-    expect(drawer.style.width).toBe("800px");
+    // The panel floats 8px in from both edges of its 800px cell.
+    expect(drawer.style.width).toBe("784px");
   });
 
   it("keeps the width after closing and reopening the drawer", async () => {
@@ -672,11 +682,11 @@ describe("reader TOC drawer resize", () => {
     fireEvent.pointerUp(handle, { clientX: 324, button: 0 });
     expect(drawer.style.width).toBe("324px");
 
-    fireEvent.click(screen.getByLabelText("目录"));
+    fireEvent.click(screen.getByLabelText("目录与标注"));
     expect(screen.queryByRole("separator", { orientation: "vertical" })).toBeNull();
-    fireEvent.click(screen.getByLabelText("目录"));
+    fireEvent.click(screen.getByLabelText("目录与标注"));
     const reopened = screen.container.querySelector(
-      ".absolute.inset-y-0.left-0.z-30",
+      ".absolute.inset-y-2.left-2.z-30",
     ) as HTMLElement | null;
     expect(reopened?.style.width).toBe("324px");
   });
@@ -684,13 +694,11 @@ describe("reader TOC drawer resize", () => {
 
 describe("reader TOC nested collapse", () => {
   function tocNav(screen: ReturnType<typeof render>) {
-    const nav = screen.getByText("目录").closest("nav");
-    if (!nav) throw new Error("expected TOC nav");
-    return nav;
+    return screen.getByRole("navigation", { name: "目录" });
   }
 
   async function openTocDrawer(screen: ReturnType<typeof render>) {
-    fireEvent.click(screen.getByLabelText("目录"));
+    fireEvent.click(screen.getByLabelText("目录与标注"));
     await waitFor(() => {
       expect(within(tocNav(screen)).getByText("第一部分")).toBeTruthy();
     });
@@ -706,7 +714,7 @@ describe("reader TOC nested collapse", () => {
     expect(within(nav).getByText("第一章")).toBeTruthy();
     expect(readerHandle.goToTocItem).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByLabelText("目录"));
+    fireEvent.click(screen.getByLabelText("目录与标注"));
     expect(screen.queryByText("第一部分")).toBeNull();
 
     nav = await openTocDrawer(screen);
@@ -739,7 +747,7 @@ describe("reader TOC nested collapse", () => {
       fireEvent.click(screen.getByText("open-book-2"));
     });
     await waitFor(() => {
-      expect(screen.getByLabelText("标注")).toBeTruthy();
+      expect(screen.getByLabelText("目录与标注")).toBeTruthy();
     });
 
     const nextNav = await openTocDrawer(screen);
@@ -764,10 +772,10 @@ describe("reader TOC nested collapse", () => {
     const nav = await openTocDrawer(screen);
     expect(within(nav).queryByText("第三章")).toBeNull();
 
-    fireEvent.click(within(nav).getByLabelText("全部展开"));
+    fireEvent.click(screen.getByLabelText("全部展开"));
     expect(within(nav).getByText("第三章")).toBeTruthy();
 
-    fireEvent.click(within(nav).getByLabelText("全部折叠"));
+    fireEvent.click(screen.getByLabelText("全部折叠"));
     expect(within(nav).getByText("第一章")).toBeTruthy();
     expect(within(nav).queryByText("第三章")).toBeNull();
   });

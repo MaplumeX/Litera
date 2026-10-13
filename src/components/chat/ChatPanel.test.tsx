@@ -147,12 +147,10 @@ describe("ChatPanel session layouts", () => {
     const view = openSessionList();
     expect(view.getByRole("button", { name: "关闭" })).toBeTruthy();
     expect(view.getByRole("button", { name: "新建会话" })).toBeTruthy();
-    const header = view.getByTestId("chat-panel-header");
-    expect(header.className).not.toContain("border-b");
-    const title = within(header).getByRole("heading", { name: "阅读助手" });
-    expect(title.className).toContain("font-medium");
-    expect(title.className).not.toContain("font-semibold");
-    expect(view.getByRole("button", { name: "会话列表" })).toBeTruthy();
+    // No header row: the session and settings buttons sit in the input row.
+    expect(view.queryByTestId("chat-panel-header")).toBeNull();
+    expect(view.queryByText("已就绪")).toBeNull();
+    expect(view.getByRole("button", { name: "会话列表" }).getAttribute("aria-pressed")).toBe("true");
     expect(view.getByRole("button", { name: "设置" })).toBeTruthy();
   });
 

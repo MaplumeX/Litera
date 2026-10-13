@@ -34,13 +34,13 @@ const noop = {
 };
 
 describe("AnnotationsSidebar", () => {
-  it("uses a title row as dense as the window header", () => {
-    const { getByText } = render(
+  it("leaves the title row to the side panel and draws no rules", () => {
+    const { getByRole, queryByText, container } = render(
       <AnnotationsSidebar bookmarks={[]} highlights={[]} {...noop} />,
     );
-    expect(getByText("标注").className).toContain("h-12");
-    expect(getByText("标注").className).toContain("px-3");
-    expect(getByText("标注").className).not.toContain("py-3");
+    expect(getByRole("navigation", { name: "标注" })).toBeTruthy();
+    expect(queryByText("标注")).toBeNull();
+    expect(container.querySelector(".border-b")).toBeNull();
   });
 
   it("shows empty states for both sections", () => {

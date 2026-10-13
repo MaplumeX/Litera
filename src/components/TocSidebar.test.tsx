@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, within } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TocItem } from "@/components/ReaderView";
-import { TocSidebar } from "@/components/TocSidebar";
+import { TocSidebar, TocSidebarActions } from "@/components/TocSidebar";
 import { setLocale } from "@/lib/i18n";
 import { ancestorKeysForHref, collapsibleKeys } from "@/lib/toc-items";
 
@@ -94,8 +94,6 @@ function renderSidebar(
       toc={tree}
       expanded={collapsibleKeys(tree)}
       onToggle={() => {}}
-      onExpandAll={() => {}}
-      onCollapseAll={() => {}}
       onGoTo={() => {}}
       {...props}
     />,
@@ -103,12 +101,10 @@ function renderSidebar(
 }
 
 describe("TocSidebar", () => {
-  it("uses a title row as dense as the window header", () => {
-    const { getByText } = renderSidebar();
-    const title = getByText("目录").closest(".h-12");
-    expect(title?.className).toContain("h-12");
-    expect(title?.className).toContain("px-3");
-    expect(title?.className).not.toContain("py-3");
+  it("leaves the title row to the side panel", () => {
+    const { getByRole, queryByText } = renderSidebar();
+    expect(getByRole("navigation", { name: "目录" })).toBeTruthy();
+    expect(queryByText("目录")).toBeNull();
   });
 
   it("highlights the current chapter and still jumps from a nested row", () => {
@@ -117,6 +113,8 @@ describe("TocSidebar", () => {
     const current = rowOf(getByText("第一章"));
     expect(current.className).toContain("bg-accent");
     expect(current.className).toContain("font-medium");
+    // Background alone marks it: no extra side bar.
+    expect(current.className).not.toContain("before:");
     expect(rowOf(getByText("第二章")).className).toContain("text-muted-foreground");
     fireEvent.click(getByText("第一章"));
     expect(onGoTo).toHaveBeenCalledWith("c1");
@@ -171,10 +169,12 @@ describe("TocSidebar", () => {
     expect(onToggle).toHaveBeenCalledWith("0");
   });
 
-  it("calls expand-all and collapse-all from the title row", () => {
+  it("calls expand-all and collapse-all from the header actions", () => {
     const onExpandAll = vi.fn();
     const onCollapseAll = vi.fn();
-    const { getByLabelText } = renderSidebar({ onExpandAll, onCollapseAll });
+    const { getByLabelText } = render(
+      <TocSidebarActions onExpandAll={onExpandAll} onCollapseAll={onCollapseAll} />,
+    );
     fireEvent.click(getByLabelText("全部展开"));
     fireEvent.click(getByLabelText("全部折叠"));
     expect(onExpandAll).toHaveBeenCalledTimes(1);
@@ -204,7 +204,9 @@ describe("TocSidebar", () => {
 
   it("labels collapse chrome in English", () => {
     setLocale("en");
-    const { getByLabelText } = renderSidebar();
+    const { getByLabelText } = render(
+      <TocSidebarActions onExpandAll={() => {}} onCollapseAll={() => {}} />,
+    );
     expect(getByLabelText("Expand all")).toBeTruthy();
     expect(getByLabelText("Collapse all")).toBeTruthy();
   });

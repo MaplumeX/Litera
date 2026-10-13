@@ -508,46 +508,13 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
             </div>
           )}
           <div className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col">
-          {/* As the Agent-mode workspace the window titlebar already names the
-              book and holds the session toggle, so the panel carries no header
-              of its own: only a notice while the book is still loading. */}
-          {isWorkspace ? (
-            !bookReady && (
-              <p className="px-4 py-1.5 text-xs text-muted-foreground" role="status">
-                {t("chat.waitingBook")}
-              </p>
-            )
-          ) : (
-            <div
-              data-testid="chat-panel-header"
-              className="flex items-center justify-between px-3 py-2"
-            >
-              <div className="flex items-center gap-2">
-                <Button
-                  size="icon-xs"
-                  variant="ghost"
-                  onClick={() => setShowSessionList((value) => !value)}
-                  disabled={!bookId}
-                  aria-label={t("chat.sessions")}
-                >
-                  <MessagesSquare />
-                </Button>
-                <h2 className="text-sm font-medium">{t("chat.title")}</h2>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-[10px] text-muted-foreground">
-                  {bookReady ? t("chat.ready") : t("chat.waitingBook")}
-                </span>
-                <Button
-                  size="icon-xs"
-                  variant="ghost"
-                  onClick={() => setShowConfig(true)}
-                  aria-label={t("chat.settings")}
-                >
-                  <Settings />
-                </Button>
-              </div>
-            </div>
+          {/* No header of its own: the titlebar names the book, and the session
+              and settings buttons sit in the input row. Only a notice shows
+              while the book is still loading. */}
+          {!bookReady && (
+            <p className="px-4 py-1.5 text-xs text-muted-foreground" role="status">
+              {t("chat.waitingBook")}
+            </p>
           )}
 
           {!isWorkspace && showSessionList && sessionList}
@@ -694,6 +661,20 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
             onThinkingLevelChange={(level) => void handleThinkingLevelChange(level)}
             leadingControls={
               <>
+              {/* In Agent mode the titlebar toggles the session rail. */}
+              {!isWorkspace && (
+                <Button
+                  size="icon-xs"
+                  variant="ghost"
+                  className="text-muted-foreground"
+                  onClick={() => setShowSessionList((value) => !value)}
+                  disabled={!bookId}
+                  aria-label={t("chat.sessions")}
+                  aria-pressed={showSessionList}
+                >
+                  <MessagesSquare />
+                </Button>
+              )}
               <ModelSwitcher
                 provider={configSnapshot?.provider ?? null}
                 model={configSnapshot?.model ?? null}
@@ -709,17 +690,15 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                 onModelSelect={(model) => void handleModelSelect(model)}
                 onOpenConfig={() => setShowConfig(true)}
               />
-              {isWorkspace && (
-                <Button
-                  size="icon-xs"
-                  variant="ghost"
-                  className="text-muted-foreground"
-                  onClick={() => setShowConfig(true)}
-                  aria-label={t("chat.settings")}
-                >
-                  <Settings />
-                </Button>
-              )}
+              <Button
+                size="icon-xs"
+                variant="ghost"
+                className="text-muted-foreground"
+                onClick={() => setShowConfig(true)}
+                aria-label={t("chat.settings")}
+              >
+                <Settings />
+              </Button>
               </>
             }
           />
