@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { fractionFromPointer, movedPastSlop, sectionIndexAt } from "./reader-progress";
+import {
+  chapterBoundsAt,
+  chapterTicks,
+  fractionFromPointer,
+  movedPastSlop,
+  percentOf,
+  sectionIndexAt,
+} from "./reader-progress";
 
 describe("fractionFromPointer", () => {
   it("maps the left edge to 0", () => {
@@ -55,5 +62,66 @@ describe("sectionIndexAt", () => {
     expect(sectionIndexAt(0.49, ticks)).toBe(1);
     expect(sectionIndexAt(0.5, ticks)).toBe(2);
     expect(sectionIndexAt(1, ticks)).toBe(2);
+  });
+});
+
+describe("percentOf", () => {
+  it("rounds down so the last pages never read 100%", () => {
+    expect(percentOf(0.995)).toBe(99);
+    expect(percentOf(0.4299)).toBe(42);
+  });
+
+  it("reads 100% only at the end", () => {
+    expect(percentOf(1)).toBe(100);
+  });
+
+  it("absorbs float noise", () => {
+    expect(percentOf(0.29)).toBe(29);
+    expect(percentOf(0.57)).toBe(57);
+  });
+
+  it("clamps out-of-range fractions", () => {
+    expect(percentOf(-0.1)).toBe(0);
+    expect(percentOf(1.2)).toBe(100);
+  });
+});
+
+describe("chapterTicks", () => {
+  const sections = [0, 0.1, 0.3, 0.6, 1];
+
+  it("drops ticks for sections that continue the previous chapter", () => {
+    const toc = ["front", "ch1", "ch1", "ch2"];
+    expect(chapterTicks(sections, (i) => toc[i])).toEqual([0, 0.1, 0.6, 1]);
+  });
+
+  it("merges leading sections without a TOC entry into one", () => {
+    const toc = [null, null, "ch1", "ch2"];
+    expect(chapterTicks(sections, (i) => toc[i])).toEqual([0, 0.3, 0.6, 1]);
+  });
+
+  it("skips empty sections that would stack two ticks", () => {
+    const toc = ["ch1", "note", "ch2"];
+    expect(chapterTicks([0, 0.5, 0.5, 1], (i) => toc[i])).toEqual([0, 0.5, 1]);
+  });
+
+  it("keeps section ticks when nothing maps to the TOC", () => {
+    expect(chapterTicks(sections, () => undefined)).toEqual(sections);
+  });
+
+  it("passes short tick lists through", () => {
+    expect(chapterTicks([], () => "x")).toEqual([]);
+  });
+});
+
+describe("chapterBoundsAt", () => {
+  const ticks = [0, 0.25, 0.5, 1];
+
+  it("returns the chapter around a fraction", () => {
+    expect(chapterBoundsAt(0.3, ticks)).toEqual({ start: 0.25, end: 0.5 });
+    expect(chapterBoundsAt(1, ticks)).toEqual({ start: 0.5, end: 1 });
+  });
+
+  it("returns undefined without ticks", () => {
+    expect(chapterBoundsAt(0.3, [])).toBeUndefined();
   });
 });

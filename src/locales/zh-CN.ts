@@ -39,6 +39,7 @@ export const zhCN = {
   "reader.progress": "阅读进度",
   "reader.progressPreview": "{chapter} · {pct}%",
   "reader.progressPercent": "{pct}%",
+  "reader.chapterProgress": "本章 {pct}%",
   "reader.ttsPlay": "朗读",
   "reader.ttsPause": "暂停",
   "reader.ttsStop": "停止",

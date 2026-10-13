@@ -118,6 +118,12 @@ describe("shouldIgnorePagingTarget", () => {
     expect(shouldIgnorePagingTarget(inner)).toBe(true);
   });
 
+  it("ignores sliders, which own their arrow keys", () => {
+    const slider = document.createElement("div");
+    slider.setAttribute("role", "slider");
+    expect(shouldIgnorePagingTarget(slider)).toBe(true);
+  });
+
   it("allows ordinary reading targets and null", () => {
     expect(shouldIgnorePagingTarget(document.createElement("p"))).toBe(false);
     expect(shouldIgnorePagingTarget(null)).toBe(false);

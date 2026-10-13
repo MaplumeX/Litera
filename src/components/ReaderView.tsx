@@ -16,7 +16,7 @@ import {
   type WheelPagingState,
 } from "@/lib/reader-paging";
 import { quoteSearchQueries } from "@/lib/citations";
-import { sectionIndexAt } from "@/lib/reader-progress";
+import { chapterTicks, sectionIndexAt } from "@/lib/reader-progress";
 import { TTS_HIGHLIGHT_COLOR, TTS_OVERLAY_KEY } from "@/lib/reader-tts";
 import { clampSnap, footnotePopupCss, TYPOGRAPHY_RANGES } from "@/lib/reader-styles";
 import {
@@ -71,7 +71,8 @@ export interface ReaderViewHandle {
   next: () => void;
   goToFraction: (frac: number) => void;
   goToTocItem: (href: string) => void;
-  getSectionFractions: () => number[];
+  /** Chapter start fractions plus a trailing 1, one per TOC entry rather than per spine file. */
+  getChapterTicks: () => number[];
   previewLabelAt: (fraction: number) => string | undefined;
   goToCfi: (cfi: string) => Promise<boolean>;
   /** Go to a quoted sentence in the chapter at `href` and outline it; falls back to the chapter start. */
@@ -901,9 +902,16 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         ?.goTo?.(href)
         .catch((err: unknown) => console.error("goTo error:", err));
     }, []);
-    const getSectionFractions = useCallback((): number[] => {
-      const view = viewRef.current as unknown as { getSectionFractions?: () => number[] };
-      return view?.getSectionFractions?.() ?? [];
+    const getChapterTicks = useCallback((): number[] => {
+      const view = viewRef.current as unknown as {
+        getSectionFractions?: () => number[];
+        getProgressOf?: (index: number) => { tocItem?: unknown };
+      };
+      if (!view) return [];
+      return chapterTicks(
+        view.getSectionFractions?.() ?? [],
+        (index) => view.getProgressOf?.(index)?.tocItem,
+      );
     }, []);
     const previewLabelAt = useCallback((fraction: number): string | undefined => {
       const view = viewRef.current as unknown as {
@@ -1053,7 +1061,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         next,
         goToFraction,
         goToTocItem,
-        getSectionFractions,
+        getChapterTicks,
         previewLabelAt,
         goToCfi,
         goToQuote,
@@ -1077,7 +1085,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         next,
         goToFraction,
         goToTocItem,
-        getSectionFractions,
+        getChapterTicks,
         previewLabelAt,
         goToCfi,
         goToQuote,

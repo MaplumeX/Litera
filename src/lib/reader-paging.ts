@@ -49,7 +49,8 @@ export function shouldIgnorePagingTarget(el: EventTarget | null): boolean {
   const tag = node.tagName;
   if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
   if (node.isContentEditable || node.contentEditable === "true") return true;
-  return Boolean(node.closest?.('[role="dialog"]'));
+  // Sliders (the progress bar) own their arrow keys.
+  return Boolean(node.closest?.('[role="dialog"], [role="slider"]'));
 }
 
 export function shouldIgnoreSpaceTarget(el: EventTarget | null): boolean {

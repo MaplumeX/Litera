@@ -205,7 +205,7 @@ function App() {
   annotationsRef.current = annotations;
   const [toc, setToc] = useState<TocItem[]>([]);
   const [tocExpanded, setTocExpanded] = useState<string[]>([]);
-  const [sectionTicks, setSectionTicks] = useState<number[]>([]);
+  const [chapterTicks, setChapterTicks] = useState<number[]>([]);
   const [persistenceError, setPersistenceError] = useState<string | null>(null);
   const [openingBookId, setOpeningBookId] = useState<string | null>(null);
   const {
@@ -529,7 +529,7 @@ function App() {
       });
       setToc([]);
       setTocExpanded([]);
-      setSectionTicks([]);
+      setChapterTicks([]);
       setCurrentBook({
         id: context.bookId,
         title: context.title,
@@ -603,7 +603,7 @@ function App() {
     setChapterScope(null);
     setToc([]);
     setTocExpanded([]);
-    setSectionTicks([]);
+    setChapterTicks([]);
     setSidePanelOpen(false);
     setSidePanelTab("toc");
     setAnnotations(emptyAnnotations());
@@ -672,7 +672,7 @@ function App() {
   const handleBookReady = useCallback((bookToc: TocItem[]) => {
     setToc(bookToc);
     setTocExpanded(ancestorKeysForHref(bookToc, progressRef.current.chapterHref));
-    setSectionTicks(readerRef.current?.getSectionFractions() ?? []);
+    setChapterTicks(readerRef.current?.getChapterTicks() ?? []);
     // Apply saved styles now that the renderer exists.
     readerRef.current?.setStyles(generateStylesCss(styleStateRef.current));
     readerRef.current?.setColumnCount(styleStateRef.current.columnCount);
@@ -1379,7 +1379,7 @@ function App() {
           <ReaderProgressBar
             fraction={progress.fraction}
             chapterLabel={chapterLabel}
-            ticks={sectionTicks}
+            ticks={chapterTicks}
             onSeek={seekProgress}
             onPrevChapter={handlePrevChapter}
             onNextChapter={handleNextChapter}
