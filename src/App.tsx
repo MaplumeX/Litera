@@ -83,6 +83,7 @@ import { useBookImport } from "@/lib/use-book-import";
 import { useOpenPaths } from "@/lib/use-open-paths";
 import { notifySyncActivity } from "@/lib/sync-activity";
 import { useSyncScheduler } from "@/lib/use-sync-scheduler";
+import { syncBeforeExit } from "@/lib/sync-runner";
 import { useT } from "@/lib/i18n";
 import { shortBookTitle } from "@/lib/book-title";
 import { cn } from "@/lib/utils";
@@ -166,6 +167,8 @@ function SyncFailureBanner({
 
 /** The side panel floats this far in from its cell's edges (Tailwind `2`). */
 const SIDE_PANEL_INSET_PX = 8;
+/** How long closing the window may wait on a final sync push. */
+const SYNC_BEFORE_EXIT_TIMEOUT_MS = 5_000;
 
 function App() {
   const { t, setLocale, locale } = useT();
@@ -266,6 +269,9 @@ function App() {
   // Do not save until get_annotations succeeds; a failed/in-flight load
   // must not replace books/<id>/annotations.json with an empty snapshot.
   const annotationsWritableRef = useRef(false);
+  // Bumped by every local annotations edit, so a reload that raced one is
+  // discarded rather than hiding the edit.
+  const annotationsEditCountRef = useRef(0);
   // Track latest style state so handleBookReady can apply it after renderer mounts.
   // The ref holds the resolved (light/dark) theme for reader CSS injection.
   const styleStateRef = useRef(styleState);
@@ -377,6 +383,12 @@ function App() {
         } finally {
           if (timeout) clearTimeout(timeout);
         }
+        // Push what changed since the last pass (the debounced push may not
+        // have fired yet), or the next device opened would start from stale
+        // reading positions. Never blocks closing for long.
+        await syncBeforeExit(SYNC_BEFORE_EXIT_TIMEOUT_MS).catch((error: unknown) => {
+          console.warn("Sync before close failed:", error);
+        });
         try {
           embeddedAgentRuntime.closeBook();
           await getCurrentWindow().destroy();
@@ -447,9 +459,11 @@ function App() {
   }, [sidePanelOpen]);
 
   const persistAnnotations = useCallback(
-    async (bookId: string, next: AnnotationsFile) => {
+    async (bookId: string, next: AnnotationsFile, base: AnnotationsFile) => {
       try {
-        await invoke("save_annotations", { bookId, data: next });
+        // `base` is what this edit started from: the backend keeps entries a
+        // Sync wrote since then, and only counts our own removals as deletions.
+        await invoke("save_annotations", { bookId, data: next, base });
         notifySyncActivity();
       } catch (error) {
         reportPersistenceError(error);
@@ -464,10 +478,11 @@ function App() {
       const bookId = fileData?.bookId;
       if (!bookId || !annotationsWritableRef.current) return;
       const previous = annotationsRef.current;
+      annotationsEditCountRef.current += 1;
       annotationsRef.current = next;
       setAnnotations(next);
       try {
-        await persistAnnotations(bookId, next);
+        await persistAnnotations(bookId, next, previous);
       } catch {
         annotationsRef.current = previous;
         setAnnotations(previous);
@@ -669,6 +684,30 @@ function App() {
       unionKeys(current, ancestorKeysForHref(toc, progress.chapterHref)),
     );
   }, [progress.chapterHref, toc]);
+
+  // A Sync may have merged other devices' annotations into the open book's
+  // file; show them, and make the next edit start from them.
+  useEffect(() => {
+    const bookId = fileData?.bookId;
+    if (!bookId) return;
+    let disposed = false;
+    const reloadAnnotations = () => {
+      if (!annotationsWritableRef.current) return;
+      const editCount = annotationsEditCountRef.current;
+      void invoke<AnnotationsFile>("get_annotations", { bookId })
+        .then((data) => {
+          if (disposed || annotationsEditCountRef.current !== editCount) return;
+          annotationsRef.current = data;
+          setAnnotations(data);
+        })
+        .catch(reportPersistenceError);
+    };
+    window.addEventListener("litera:sync-applied", reloadAnnotations);
+    return () => {
+      disposed = true;
+      window.removeEventListener("litera:sync-applied", reloadAnnotations);
+    };
+  }, [fileData?.bookId, reportPersistenceError]);
 
   // Sync may deliver a new UI language in the preferences envelope; apply it
   // live (typography/theme refresh via usePreferences' own listener).

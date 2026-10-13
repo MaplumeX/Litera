@@ -180,16 +180,50 @@ function activeBookTombstone(
   );
 }
 
-function mergeByNewestTimestamp<T extends { id: string }>(
+/**
+ * A total order on values that differ only in content, so a tie between two
+ * equally-timestamped copies resolves the same way on every device.
+ */
+function stableKey(value: unknown): string {
+  return JSON.stringify(value, (_key, item: unknown) =>
+    item && typeof item === "object" && !Array.isArray(item)
+      ? Object.fromEntries(
+          Object.entries(item as Record<string, unknown>).sort(([a], [b]) =>
+            a < b ? -1 : a > b ? 1 : 0,
+          ),
+        )
+      : item,
+  );
+}
+
+interface AnnotationLike {
+  id: string;
+  cfi: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+/** An annotation's revision: its last edit, or its creation. */
+function annotationRevision(item: AnnotationLike): string {
+  return item.updatedAt ?? item.createdAt;
+}
+
+/** Whether `a` should win over `b`: newer revision, then content order. */
+function annotationWins(a: AnnotationLike, b: AnnotationLike): boolean {
+  const left = annotationRevision(a);
+  const right = annotationRevision(b);
+  if (left !== right) return left > right;
+  return stableKey(a) > stableKey(b);
+}
+
+function mergeByNewestRevision<T extends AnnotationLike>(
   local: T[],
   remote: T[],
-  timestampOf: (item: T) => string,
 ): Map<string, T> {
   const merged = new Map<string, T>();
-  for (const item of local) merged.set(item.id, item);
-  for (const item of remote) {
+  for (const item of [...local, ...remote]) {
     const existing = merged.get(item.id);
-    if (!existing || timestampOf(item) > timestampOf(existing)) {
+    if (!existing || annotationWins(item, existing)) {
       merged.set(item.id, item);
     }
   }
@@ -213,6 +247,26 @@ function filterTombstoned<T extends { id: string }>(
   return items;
 }
 
+/**
+ * One annotation per CFI: two devices marking the same spot create two ids,
+ * which the stored file cannot hold. The newer one (then the lower id) wins
+ * on every device alike.
+ */
+function dedupeByCfi<T extends AnnotationLike>(items: Map<string, T>): T[] {
+  const byCfi = new Map<string, T>();
+  for (const item of items.values()) {
+    const existing = byCfi.get(item.cfi);
+    if (
+      !existing ||
+      annotationRevision(item) > annotationRevision(existing) ||
+      (annotationRevision(item) === annotationRevision(existing) && item.id < existing.id)
+    ) {
+      byCfi.set(item.cfi, item);
+    }
+  }
+  return [...items.values()].filter((item) => byCfi.get(item.cfi) === item);
+}
+
 function mergeAnnotations(
   local: AnnotationsFile,
   remote: AnnotationsFile,
@@ -221,21 +275,21 @@ function mergeAnnotations(
   now: string,
 ): AnnotationsFile {
   const highlights = filterTombstoned(
-    mergeByNewestTimestamp(local.highlights, remote.highlights, (item) => item.createdAt),
+    mergeByNewestRevision(local.highlights, remote.highlights),
     bookId,
     tombstones,
     now,
   );
   const bookmarks = filterTombstoned(
-    mergeByNewestTimestamp(local.bookmarks, remote.bookmarks, (item) => item.createdAt),
+    mergeByNewestRevision(local.bookmarks, remote.bookmarks),
     bookId,
     tombstones,
     now,
   );
   return {
     schemaVersion: Math.max(local.schemaVersion ?? 1, remote.schemaVersion ?? 1),
-    highlights: [...highlights.values()],
-    bookmarks: [...bookmarks.values()],
+    highlights: dedupeByCfi(highlights),
+    bookmarks: dedupeByCfi(bookmarks),
   };
 }
 
@@ -287,6 +341,15 @@ function mergeStatus(
   return pick(local.readingStatus >= remote.readingStatus ? local : remote);
 }
 
+/** The parts of a book whose winner `mergeBooks` picks as a whole. */
+function recordContent(book: SyncedBook) {
+  return {
+    metadata: book.metadata,
+    fileRevision: book.fileRevision ?? null,
+    coverRevision: book.coverRevision ?? null,
+  };
+}
+
 function mergeBooks(
   bookId: string,
   local: SyncedBook,
@@ -298,7 +361,13 @@ function mergeBooks(
   // activity: a metadata change that no page turn accompanies must still win.
   const localRevision = bookRevision(local);
   const remoteRevision = bookRevision(remote);
-  const localNewer = localRevision >= remoteRevision;
+  // Equal revisions (say, neither side ever edited the record) still need
+  // one winner both merge orders agree on, or each device keeps its own copy
+  // and the Manifest flips between them on every upload.
+  const localNewer =
+    localRevision !== remoteRevision
+      ? localRevision > remoteRevision
+      : stableKey(recordContent(local)) >= stableKey(recordContent(remote));
   const [newerMetadata, olderMetadata] = localNewer
     ? [local.metadata, remote.metadata]
     : [remote.metadata, local.metadata];

@@ -152,7 +152,8 @@ export function updateHighlight(
     return data;
   }
   const highlights = data.highlights.slice();
-  highlights[index] = nextItem;
+  // The edit time orders this copy against other devices' in the sync merge.
+  highlights[index] = { ...nextItem, updatedAt: new Date().toISOString() };
   return { ...data, highlights };
 }
 

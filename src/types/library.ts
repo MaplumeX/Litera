@@ -120,6 +120,8 @@ export interface BookmarkRecord {
   fraction: number;
   createdAt: string;
   label?: string;
+  /** Last edit; the sync merge orders copies by this, else createdAt. */
+  updatedAt?: string;
 }
 
 export type HighlightColor = "yellow" | "green" | "blue" | "pink" | "orange";
@@ -132,6 +134,8 @@ export interface HighlightRecord {
   createdAt: string;
   color?: HighlightColor;
   note?: string;
+  /** Last color/note edit; the sync merge orders copies by this, else createdAt. */
+  updatedAt?: string;
 }
 
 export interface AnnotationsFile {

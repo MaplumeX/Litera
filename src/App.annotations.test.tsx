@@ -362,6 +362,48 @@ describe("reader annotation chrome", () => {
     expect(JSON.stringify(payload.data)).not.toContain("color");
   });
 
+  it("shows annotations a Sync merged while the book was open, and edits keep them", async () => {
+    const synced: AnnotationsFile = {
+      schemaVersion: 1,
+      highlights: [],
+      bookmarks: [
+        {
+          id: "from-other-device",
+          cfi: "epubcfi(/6/2!/4/2)",
+          fraction: 0.1,
+          createdAt: "2026-01-01T00:00:00.000Z",
+          label: "另一台设备",
+        },
+      ],
+    };
+    const screen = await openReader();
+    fireEvent.click(screen.getByLabelText("目录与标注"));
+    fireEvent.click(screen.getByRole("tab", { name: "标注" }));
+
+    // A sync pass lands and rewrites the book's annotations on disk.
+    invokeMock.mockImplementation((cmd: string, args?: unknown) => {
+      if (cmd === "get_annotations") return Promise.resolve(synced);
+      return Promise.resolve(cmd === "open_book_bytes" ? new ArrayBuffer(8) : undefined);
+    });
+    await act(async () => {
+      window.dispatchEvent(new CustomEvent("litera:sync-applied", { detail: {} }));
+    });
+    await waitFor(() => {
+      expect(screen.getByText("另一台设备")).toBeTruthy();
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByLabelText("添加书签"));
+    });
+    const payload = invokeMock.mock.calls.find((call) => call[0] === "save_annotations")?.[1] as {
+      data: AnnotationsFile;
+      base: AnnotationsFile;
+    };
+    // The edit starts from the synced file, so it is not a deletion.
+    expect(payload.base).toEqual(synced);
+    expect(payload.data.bookmarks.map((item) => item.id)).toContain("from-other-device");
+  });
+
   it("does not overwrite annotations after a corrupt load", async () => {
     invokeMock.mockImplementation((cmd: string) => {
       if (cmd === "get_book_open_context") return Promise.resolve(openContext);

@@ -443,9 +443,10 @@ impl PiSessionStore {
     /// id — local order first, remote-only entries appended in remote order —
     /// so diverged branches on either device survive the merge (both remain
     /// navigable; the active-branch leaf pointer stays per-device). Creates
-    /// the session locally when this device has never seen it. Returns the
-    /// content now stored locally.
-    pub fn merge_remote_session(&self, book_id: &str, remote_content: &str) -> AppResult<String> {
+    /// the session locally when this device has never seen it. Returns
+    /// whether the local copy held entries the remote lacked — i.e. whether
+    /// the Sync Backend needs the merged result pushed back.
+    pub fn merge_remote_session(&self, book_id: &str, remote_content: &str) -> AppResult<bool> {
         validate_id("bookId", book_id)?;
         let _guard = self
             .gate
@@ -467,6 +468,12 @@ impl PiSessionStore {
             Err(error) if is_unknown_session(&error) => None,
             Err(error) => return Err(error),
         };
+        let remote_ids: HashSet<String> = remote_entries
+            .iter()
+            .filter_map(entry_id)
+            .map(str::to_string)
+            .collect();
+        let mut local_has_extra = false;
         let (header, entries) = match local_path.as_ref() {
             Some(path) => {
                 recover_truncated_tail(path)?;
@@ -476,6 +483,7 @@ impl PiSessionStore {
                     .filter_map(entry_id)
                     .map(str::to_string)
                     .collect();
+                local_has_extra = ids.iter().any(|id| !remote_ids.contains(id));
                 for entry in remote_entries {
                     let Some(id) = entry_id(&entry) else { continue };
                     if !ids.contains(id) {
@@ -511,7 +519,7 @@ impl PiSessionStore {
                 crate::library::atomic_write(&path, content.as_bytes(), "synced session")?;
             }
         }
-        Ok(content)
+        Ok(local_has_extra)
     }
 }
 

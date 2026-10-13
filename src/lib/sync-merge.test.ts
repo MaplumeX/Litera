@@ -650,3 +650,76 @@ describe("reading status merge", () => {
     expect(metadata.readingStatus).toBe("finished");
   });
 });
+
+describe("review fixes", () => {
+  const T0 = "2026-01-01T00:00:00.000Z";
+  const T1 = "2026-01-02T00:00:00.000Z";
+
+  function bookWith(highlights: HighlightRecord[], bookmarks: BookmarkRecord[] = []): SyncManifest {
+    return {
+      ...baseRemote(),
+      books: { b1: syncedBook({ annotations: annotationsFile(highlights, bookmarks) }) },
+    };
+  }
+
+  const original: HighlightRecord = {
+    id: "h1",
+    cfi: "epubcfi(/6/4!/2)",
+    excerpt: "x",
+    createdAt: T0,
+    color: "yellow",
+  };
+
+  it("an edited highlight wins in both merge orders", () => {
+    const edited: HighlightRecord = { ...original, color: "green", note: "why", updatedAt: T1 };
+    const a = bookWith([edited]);
+    const b = bookWith([original]);
+
+    for (const merged of [mergeManifests(a, b, NOW), mergeManifests(b, a, NOW)]) {
+      expect(merged.books.b1.annotations.highlights).toEqual([edited]);
+    }
+  });
+
+  it("equally-timestamped copies of one highlight pick the same winner everywhere", () => {
+    const blue: HighlightRecord = { ...original, color: "blue" };
+    const ab = mergeManifests(bookWith([original]), bookWith([blue]), NOW);
+    const ba = mergeManifests(bookWith([blue]), bookWith([original]), NOW);
+
+    expect(ab.books.b1.annotations.highlights).toEqual(ba.books.b1.annotations.highlights);
+  });
+
+  it("two annotations on the same CFI collapse to one, the same one in both orders", () => {
+    const mine: HighlightRecord = { ...original, id: "mine", createdAt: T0 };
+    const theirs: HighlightRecord = { ...original, id: "theirs", createdAt: T1 };
+    const markA: BookmarkRecord = { id: "ba", cfi: "epubcfi(/8)", fraction: 0.1, createdAt: T0 };
+    const markB: BookmarkRecord = { id: "bb", cfi: "epubcfi(/8)", fraction: 0.1, createdAt: T0 };
+
+    const ab = mergeManifests(bookWith([mine], [markA]), bookWith([theirs], [markB]), NOW);
+    const ba = mergeManifests(bookWith([theirs], [markB]), bookWith([mine], [markA]), NOW);
+
+    for (const merged of [ab, ba]) {
+      expect(merged.books.b1.annotations.highlights.map((item) => item.id)).toEqual(["theirs"]);
+      expect(merged.books.b1.annotations.bookmarks.map((item) => item.id)).toEqual(["ba"]);
+    }
+  });
+
+  it("books with equal revisions but different content converge on one copy", () => {
+    const left: SyncManifest = {
+      ...baseRemote(),
+      books: {
+        b1: syncedBook({ metadata: { title: "Old file title", author: "A" }, fileRevision: "rev-old" }),
+      },
+    };
+    const right: SyncManifest = {
+      ...baseRemote(),
+      books: {
+        b1: syncedBook({ metadata: { title: "New file title", author: "A" }, fileRevision: "rev-new" }),
+      },
+    };
+
+    const ab = mergeManifests(left, right, NOW);
+    const ba = mergeManifests(right, left, NOW);
+
+    expect(ab.books.b1).toEqual(ba.books.b1);
+  });
+});

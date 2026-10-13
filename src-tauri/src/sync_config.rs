@@ -150,6 +150,22 @@ mod tests {
     }
 
     #[test]
+    fn only_a_new_location_counts_as_a_different_backend() {
+        let config = sample_config();
+        let mut rotated = config.clone();
+        rotated.access_key = "AKIAOTHER".to_string();
+        rotated.secret_key = "other-secret".to_string();
+        rotated.path_style = !config.path_style;
+        rotated.enabled = false;
+        rotated.endpoint = format!("  {}/ ", config.endpoint);
+        assert!(same_backend(&config, &rotated));
+
+        let mut moved = config.clone();
+        moved.bucket = "another-bucket".to_string();
+        assert!(!same_backend(&config, &moved));
+    }
+
+    #[test]
     fn missing_config_file_reads_as_unconfigured() {
         let dir = temp_sync_dir();
 
@@ -285,6 +301,15 @@ fn merge_blank_secret(
     config
 }
 
+/// Whether two configurations address the same bucket. Credentials, the
+/// addressing style, and the enabled flag may change without changing where
+/// the data lives.
+fn same_backend(left: &SyncBackendConfig, right: &SyncBackendConfig) -> bool {
+    left.endpoint.trim().trim_end_matches('/') == right.endpoint.trim().trim_end_matches('/')
+        && left.region.trim() == right.region.trim()
+        && left.bucket.trim() == right.bucket.trim()
+}
+
 #[tauri::command]
 pub async fn save_sync_config(
     app: tauri::AppHandle,
@@ -294,6 +319,9 @@ pub async fn save_sync_config(
     let previous = read_sync_config(&root)?;
     let was_enabled = previous.as_ref().is_some_and(|previous| previous.enabled);
     let newly_enabled = config.enabled && !was_enabled;
+    let backend_changed = previous
+        .as_ref()
+        .is_some_and(|previous| !same_backend(previous, &config));
     let config = merge_blank_secret(config, previous.as_ref());
     let config = run_blocking(move || {
         write_sync_config(&root, &config)?;
@@ -301,6 +329,9 @@ pub async fn save_sync_config(
         // become this device's sync baseline.
         if newly_enabled {
             crate::sync::note_sync_enabled(&root)?;
+        }
+        if backend_changed {
+            crate::sync::note_sync_backend_changed(&root)?;
         }
         Ok(config)
     })

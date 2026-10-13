@@ -31,10 +31,11 @@ export function useSyncScheduler(): SyncScheduler {
   const [persistentFailure, setPersistentFailure] = useState<string | null>(null);
   const consecutiveFailuresRef = useRef(0);
   const runningRef = useRef(false);
+  // A request that arrived mid-pass: run once more afterwards, so changes made
+  // during a pass do not wait for the periodic timer.
+  const rerunRef = useRef(false);
 
-  const sync = useCallback(async () => {
-    if (runningRef.current) return;
-    runningRef.current = true;
+  const runPass = useCallback(async () => {
     try {
       const config = await invoke<SyncConfigLike | null>("get_sync_config");
       if (!config?.enabled) return;
@@ -51,10 +52,24 @@ export function useSyncScheduler(): SyncScheduler {
       if (consecutiveFailuresRef.current >= SYNC_FAILURE_THRESHOLD) {
         setPersistentFailure(message);
       }
+    }
+  }, []);
+
+  const sync = useCallback(async () => {
+    if (runningRef.current) {
+      rerunRef.current = true;
+      return;
+    }
+    runningRef.current = true;
+    try {
+      do {
+        rerunRef.current = false;
+        await runPass();
+      } while (rerunRef.current);
     } finally {
       runningRef.current = false;
     }
-  }, []);
+  }, [runPass]);
 
   useEffect(() => {
     let disposed = false;

@@ -203,38 +203,39 @@ fn tombstone_key(tombstone: &SyncTombstoneData) -> String {
     }
 }
 
-fn upsert_tombstones(root: &Path, additions: Vec<SyncTombstoneData>) -> AppResult<()> {
-    if additions.is_empty() {
-        return Ok(());
-    }
-    let mut state = read_sync_state(root)?;
+fn upsert_tombstones(state: &mut SyncState, additions: Vec<SyncTombstoneData>) {
     for addition in additions {
         state.tombstones.retain(|existing| {
             tombstone_key(existing) != tombstone_key(&addition)
         });
         state.tombstones.push(addition);
     }
-    // Opportunistic purge: expired tombstones never resurrect anything and
-    // need not linger in local state.
-    state.tombstones.retain(is_tombstone_active);
-    write_sync_state(root, &state)
+    // Opportunistic purge of expired annotation Tombstones: they never
+    // resurrect anything and own no objects. Expired book Tombstones stay
+    // until sync_sessions purges their objects from the Sync Backend.
+    state
+        .tombstones
+        .retain(|tombstone| tombstone.kind == "book" || is_tombstone_active(tombstone));
 }
 
 /// Record that a book was deleted locally, so other devices learn of the
 /// deletion instead of resurrecting the book from their own copies.
 pub fn record_book_tombstone(root: &Path, book_id: &str) -> AppResult<()> {
     validate_sync_id(book_id)?;
-    let device_id = read_sync_state(root)?.device_id;
-    upsert_tombstones(
-        root,
-        vec![SyncTombstoneData {
-            kind: "book".to_string(),
-            book_id: book_id.to_string(),
-            annotation_id: None,
-            device_id,
-            deleted_at: chrono::Utc::now().to_rfc3339(),
-        }],
-    )
+    update_sync_state(root, |state| {
+        let device_id = state.device_id.clone();
+        upsert_tombstones(
+            state,
+            vec![SyncTombstoneData {
+                kind: "book".to_string(),
+                book_id: book_id.to_string(),
+                annotation_id: None,
+                device_id,
+                deleted_at: chrono::Utc::now().to_rfc3339(),
+            }],
+        );
+        Ok(())
+    })
 }
 
 /// Revoke a locally recorded book Tombstone. Used by Restore: a book that
@@ -242,72 +243,150 @@ pub fn record_book_tombstone(root: &Path, book_id: &str) -> AppResult<()> {
 /// wrote.
 pub fn remove_book_tombstone(root: &Path, book_id: &str) -> AppResult<()> {
     validate_sync_id(book_id)?;
-    let mut state = read_sync_state(root)?;
-    let before = state.tombstones.len();
-    state
-        .tombstones
-        .retain(|tombstone| !(tombstone.kind == "book" && tombstone.book_id == book_id));
-    if state.tombstones.len() == before {
-        return Ok(());
-    }
-    write_sync_state(root, &state)
+    update_sync_state(root, |state| {
+        state
+            .tombstones
+            .retain(|tombstone| !(tombstone.kind == "book" && tombstone.book_id == book_id));
+        Ok(())
+    })
+}
+
+/// A book was (re-)imported locally: like Restore, its own deletion
+/// Tombstone is revoked, and the imported file is now this device's truth,
+/// so any pending "newer file on the Sync Backend" marker is dropped.
+pub fn note_book_imported(root: &Path, book_id: &str) -> AppResult<()> {
+    validate_sync_id(book_id)?;
+    update_sync_state(root, |state| {
+        state
+            .tombstones
+            .retain(|tombstone| !(tombstone.kind == "book" && tombstone.book_id == book_id));
+        state.stale_files.remove(book_id);
+        Ok(())
+    })
 }
 
 /// Record an annotations save: bump the book's annotationsUpdatedAt and
 /// remember removed ids as Tombstones.
 pub fn note_annotations_saved(root: &Path, book_id: &str, removed_ids: &[String]) -> AppResult<()> {
     validate_sync_id(book_id)?;
-    let device_id = read_sync_state(root)?.device_id;
-    let now = chrono::Utc::now().to_rfc3339();
-    let additions = removed_ids
+    update_sync_state(root, |state| {
+        let device_id = state.device_id.clone();
+        let now = chrono::Utc::now().to_rfc3339();
+        let additions = removed_ids
+            .iter()
+            .map(|annotation_id| SyncTombstoneData {
+                kind: "annotation".to_string(),
+                book_id: book_id.to_string(),
+                annotation_id: Some(annotation_id.clone()),
+                device_id: device_id.clone(),
+                deleted_at: now.clone(),
+            })
+            .collect();
+        upsert_tombstones(state, additions);
+        state
+            .annotations_updated_at
+            .insert(book_id.to_string(), now);
+        Ok(())
+    })
+}
+
+/// Rebase an annotations save onto the file currently on disk.
+///
+/// `base` is what the writer loaded before editing, `next` what it wants
+/// stored. Only ids the writer saw and dropped count as deletions; entries
+/// that reached the disk after the writer loaded (a Sync landing while the
+/// reader was open) are kept rather than silently deleted — and, crucially,
+/// never recorded as Tombstones that would delete them on every device.
+/// Returns the data to store and the removed ids.
+pub fn rebase_annotations(
+    current: &AnnotationsFile,
+    base: &AnnotationsFile,
+    mut next: AnnotationsFile,
+) -> (AnnotationsFile, Vec<String>) {
+    let removed = removed_annotation_ids(base, &next);
+    let known: std::collections::HashSet<&str> = base
+        .highlights
         .iter()
-        .map(|annotation_id| SyncTombstoneData {
-            kind: "annotation".to_string(),
-            book_id: book_id.to_string(),
-            annotation_id: Some(annotation_id.clone()),
-            device_id: device_id.clone(),
-            deleted_at: now.clone(),
-        })
+        .map(|item| item.id.as_str())
+        .chain(base.bookmarks.iter().map(|item| item.id.as_str()))
+        .chain(next.highlights.iter().map(|item| item.id.as_str()))
+        .chain(next.bookmarks.iter().map(|item| item.id.as_str()))
         .collect();
-    upsert_tombstones(root, additions)?;
-    let mut state = read_sync_state(root)?;
-    state
-        .annotations_updated_at
-        .insert(book_id.to_string(), now);
-    write_sync_state(root, &state)
+    let highlight_cfis: std::collections::HashSet<String> =
+        next.highlights.iter().map(|item| item.cfi.clone()).collect();
+    let bookmark_cfis: std::collections::HashSet<String> =
+        next.bookmarks.iter().map(|item| item.cfi.clone()).collect();
+    // An unseen entry on the same CFI as one the writer stores would make
+    // the file invalid; the writer's own entry wins that spot.
+    let unseen_highlights: Vec<_> = current
+        .highlights
+        .iter()
+        .filter(|item| !known.contains(item.id.as_str()) && !highlight_cfis.contains(&item.cfi))
+        .cloned()
+        .collect();
+    let unseen_bookmarks: Vec<_> = current
+        .bookmarks
+        .iter()
+        .filter(|item| !known.contains(item.id.as_str()) && !bookmark_cfis.contains(&item.cfi))
+        .cloned()
+        .collect();
+    next.highlights.extend(unseen_highlights);
+    next.bookmarks.extend(unseen_bookmarks);
+    (next, removed)
 }
 
 /// A local preferences edit: marks the local envelope as newest for the merge.
 pub fn note_preferences_saved(root: &Path) -> AppResult<()> {
-    let mut state = read_sync_state(root)?;
-    state.preferences_updated_at = Some(chrono::Utc::now().to_rfc3339());
-    write_sync_state(root, &state)
+    update_sync_state(root, |state| {
+        state.preferences_updated_at = Some(chrono::Utc::now().to_rfc3339());
+        Ok(())
+    })
 }
 
 /// A local provider-settings edit: marks the local envelope as newest.
 pub fn note_provider_saved(root: &Path) -> AppResult<()> {
-    let mut state = read_sync_state(root)?;
-    state.provider_updated_at = Some(chrono::Utc::now().to_rfc3339());
-    write_sync_state(root, &state)
+    update_sync_state(root, |state| {
+        state.provider_updated_at = Some(chrono::Utc::now().to_rfc3339());
+        Ok(())
+    })
 }
 
 /// Sync being enabled for the first time: the current local preferences and
 /// provider settings become this device's baseline (timestamps, only when
 /// the device has never recorded an edit).
 pub fn note_sync_enabled(root: &Path) -> AppResult<()> {
-    let mut state = read_sync_state(root)?;
-    // Epoch baseline, not "now": a device enabling Sync for the first time
-    // must lose merges against any envelope another device actually edited,
-    // so the new device feels pre-configured rather than clobbering the
-    // backend with its untouched defaults.
-    let epoch = EPOCH_BASELINE.to_string();
-    if state.preferences_updated_at.is_none() {
-        state.preferences_updated_at = Some(epoch.clone());
-    }
-    if state.provider_updated_at.is_none() {
-        state.provider_updated_at = Some(epoch);
-    }
-    write_sync_state(root, &state)
+    update_sync_state(root, |state| {
+        // Epoch baseline, not "now": a device enabling Sync for the first time
+        // must lose merges against any envelope another device actually edited,
+        // so the new device feels pre-configured rather than clobbering the
+        // backend with its untouched defaults.
+        let epoch = EPOCH_BASELINE.to_string();
+        if state.preferences_updated_at.is_none() {
+            state.preferences_updated_at = Some(epoch.clone());
+        }
+        if state.provider_updated_at.is_none() {
+            state.provider_updated_at = Some(epoch);
+        }
+        Ok(())
+    })
+}
+
+/// The Sync Backend changed (endpoint, region, bucket, or addressing): what
+/// this device knows about the old backend's objects says nothing about the
+/// new one. Forget it so every book file and session uploads again, and the
+/// first bulk upload asks for confirmation again. Local data — Tombstones,
+/// timestamps, preferences — is kept and merges into the new backend.
+pub fn note_sync_backend_changed(root: &Path) -> AppResult<()> {
+    update_sync_state(root, |state| {
+        state.book_revisions.clear();
+        state.session_revisions.clear();
+        state.stale_files.clear();
+        state.bulk_upload_confirmed = false;
+        state.last_etag.clear();
+        state.last_synced_at = None;
+        state.last_error = None;
+        Ok(())
+    })
 }
 
 fn validate_sync_id(id: &str) -> AppResult<()> {
@@ -349,10 +428,7 @@ pub fn export_local_manifest(
         };
         let position = match (&book.last_fraction, &book.last_cfi) {
             (Some(fraction), Some(cfi)) => Some(SyncPositionData {
-                // The reading state carries no timestamp of its own; the
-                // last-opened time is the closest recorded signal. Books
-                // never opened have no position at all.
-                updated_at: book.last_opened_at.clone().unwrap_or_default(),
+                updated_at: position_timestamp(book).unwrap_or_default().to_string(),
                 device_id: device_id.to_string(),
                 fraction: *fraction,
                 cfi: cfi.clone(),
@@ -388,6 +464,28 @@ pub fn export_local_manifest(
     Ok(manifest)
 }
 
+/// The explicit timestamp of a book's reading position: when it last moved.
+/// Records from before that was tracked fall back to the last-opened time.
+fn position_timestamp(book: &crate::library::BookRecord) -> Option<&str> {
+    book.position_updated_at
+        .as_deref()
+        .or(book.last_opened_at.as_deref())
+}
+
+/// Mirrors `bookRevision` in the TS merge engine: the explicit record edit
+/// time, or reading activity for manifests from before it existed.
+fn book_revision(book: &SyncedBookData) -> String {
+    if !book.book_updated_at.is_empty() {
+        return book.book_updated_at.clone();
+    }
+    let position = book
+        .position
+        .as_ref()
+        .map(|position| position.updated_at.clone())
+        .unwrap_or_default();
+    std::cmp::max(position, book.annotations_updated_at.clone())
+}
+
 /// Apply a merged Manifest to the local Library.
 ///
 /// `base` is the local Manifest snapshot taken when the sync pass started
@@ -398,11 +496,16 @@ pub fn export_local_manifest(
 ///
 /// Books with an active Tombstone are moved into the local trash (which
 /// itself never syncs); placeholder-only books lose their directory.
+///
+/// Returns the ids of local books whose EPUB is older than the file the
+/// merged Manifest names (another device re-imported a newer version); the
+/// caller marks them so the next open downloads the newer file.
 pub fn apply_merged_manifest(
     store: &LibraryStore,
     merged: &SyncManifestData,
     base: &SyncManifestData,
-) -> AppResult<()> {
+) -> AppResult<Vec<String>> {
+    let mut stale_files = Vec::new();
     // Deletions first: a book an active Tombstone names must not survive
     // this pass, even if a stale copy of it appears in the merged books.
     for tombstone in merged
@@ -448,19 +551,33 @@ pub fn apply_merged_manifest(
             // recorded timestamp the export used as the position's updatedAt;
             // a mismatch means a local page turn raced this sync pass and its
             // next export re-asserts the newer position.
-            let base_position = base
-                .books
-                .get(book_id)
-                .and_then(|book| book.position.as_ref());
-            let unchanged_since_export = match base_position {
-                Some(position) => record.last_opened_at.as_deref() == Some(position.updated_at.as_str()),
-                None => record.last_opened_at.is_none(),
+            let base_book = base.books.get(book_id);
+            let base_position = base_book.and_then(|book| book.position.as_ref());
+            let current_position = match (&record.last_fraction, &record.last_cfi) {
+                (Some(_), Some(_)) => Some(position_timestamp(record).unwrap_or_default()),
+                _ => None,
             };
+            let unchanged_since_export =
+                current_position == base_position.map(|position| position.updated_at.as_str());
             if unchanged_since_export {
                 if let Some(position) = &synced.position {
                     record.last_fraction = Some(position.fraction);
                     record.last_cfi = Some(position.cfi.clone());
-                    record.last_opened_at = Some(position.updated_at.clone());
+                    if !position.updated_at.is_empty() {
+                        record.position_updated_at = Some(position.updated_at.clone());
+                    }
+                }
+            }
+            // The merged file is a different, newer revision than the local
+            // EPUB: another device re-imported the book after this one last
+            // edited it. (A local re-import makes the local record newer, so
+            // it never marks itself stale.)
+            if let Some(revision) = &synced.file_revision {
+                let remote_newer = base_book
+                    .map(|book| synced.book_updated_at > book.book_updated_at)
+                    .unwrap_or(false);
+                if remote_newer && record.content_hash.as_deref() != Some(revision.as_str()) {
+                    stale_files.push(book_id.clone());
                 }
             }
         } else {
@@ -504,7 +621,7 @@ pub fn apply_merged_manifest(
             store.save_annotations(book_id, synced.annotations.clone())?;
         }
     }
-    Ok(())
+    Ok(stale_files)
 }
 
 fn is_tombstoned_book(manifest: &SyncManifestData, book_id: &str) -> bool {
@@ -975,6 +1092,11 @@ pub struct SyncState {
     pub preferences_updated_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_updated_at: Option<String>,
+    /// Local books whose EPUB is older than the revision on the Sync
+    /// Backend (another device re-imported a newer file). They are not
+    /// uploaded, and the next open downloads the newer file.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
+    pub stale_files: std::collections::BTreeSet<String>,
     /// Whether the user confirmed the first bulk upload estimate.
     #[serde(default)]
     pub bulk_upload_confirmed: bool,
@@ -1007,6 +1129,30 @@ pub fn read_sync_state(root: &Path) -> AppResult<SyncState> {
     serde_json::from_slice(&bytes).map_err(|error| {
         AppError::storage_corrupt(format!("Failed to parse sync-state.json: {error}"))
     })
+}
+
+/// Serializes every read-modify-write of sync-state.json. Sync passes,
+/// deletions, annotation saves, and preference edits all update the same
+/// file from different threads; without this, a write based on an older read
+/// silently drops another writer's Tombstone or timestamp.
+static SYNC_STATE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Read, modify, and write sync-state.json as one step under
+/// [`SYNC_STATE_LOCK`]. Never hold it across network I/O: collect remote
+/// results first, then fold them in here against the freshest state.
+pub fn update_sync_state<T>(
+    root: &Path,
+    update: impl FnOnce(&mut SyncState) -> AppResult<T>,
+) -> AppResult<T> {
+    // A panic elsewhere does not leave the file half-written (writes are
+    // atomic), so a poisoned lock is safe to reuse.
+    let _guard = SYNC_STATE_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut state = read_sync_state(root)?;
+    let result = update(&mut state)?;
+    write_sync_state(root, &state)?;
+    Ok(result)
 }
 
 pub fn write_sync_state(root: &Path, state: &SyncState) -> AppResult<()> {
@@ -1083,12 +1229,13 @@ pub async fn sync_export_local_manifest(
     let preferences = preferences.inner().clone();
     let root = sync_root(&app)?;
     run_sync_blocking(move || {
-        let mut state = read_sync_state(&root)?;
-        let mut manifest = export_local_manifest(&store, &state)?;
-        manifest.preferences =
-            build_preferences_envelope(&preferences, &mut state, locale.as_deref())?;
-        manifest.provider = build_provider_envelope(&root, &state);
-        write_sync_state(&root, &state)?;
+        let manifest = update_sync_state(&root, |state| {
+            let mut manifest = export_local_manifest(&store, state)?;
+            manifest.preferences =
+                build_preferences_envelope(&preferences, state, locale.as_deref())?;
+            manifest.provider = build_provider_envelope(&root, state);
+            Ok(manifest)
+        })?;
         serde_json::to_value(manifest)
             .map_err(|error| AppError::storage_io(format!("Failed to serialize manifest: {error}")))
     })
@@ -1191,23 +1338,31 @@ pub async fn sync_apply_merged_manifest(
     let store = store.inner().clone();
     let preferences = preferences.inner().clone();
     let root = sync_root(&app)?;
-    run_sync_blocking(move || {
-        let mut state = read_sync_state(&root)?;
-        apply_merged_manifest(&store, &manifest, &base)?;
+    run_sync_blocking(move || update_sync_state(&root, |state| {
+        let stale_files = apply_merged_manifest(&store, &manifest, &base)?;
+        state.stale_files.extend(stale_files);
 
-        apply_preference_envelopes(&root, &preferences, &mut state, &manifest)?;
+        apply_preference_envelopes(&root, &preferences, state, &manifest)?;
         // Deletions recorded while the network round trip was in flight must
         // survive: union by tombstone key with the newest deletedAt winning.
         // Expired book Tombstones are retained until their objects are purged.
         state.tombstones = merge_local_tombstones(state.tombstones.clone(), manifest.tombstones.clone());
+        // A book Tombstone the merge discarded as a revival (the book was
+        // restored or re-imported elsewhere after the deletion) must go from
+        // local state too; otherwise it lingers, and once expired its purge
+        // would delete the live book's objects from the Sync Backend.
+        drop_revived_tombstones(&mut state.tombstones, &manifest);
         state.preferences = manifest.preferences.clone();
         state.provider = manifest.provider.clone();
         state.last_etag = etag;
         state.last_synced_at = Some(chrono::Utc::now().to_rfc3339());
         for (book_id, synced) in &manifest.books {
-            state
-                .annotations_updated_at
-                .insert(book_id.clone(), synced.annotations_updated_at.clone());
+            // Never move a local annotations timestamp backwards: an edit
+            // made while the network round trip was in flight is newer.
+            let local = state.annotations_updated_at.entry(book_id.clone()).or_default();
+            if synced.annotations_updated_at > *local {
+                *local = synced.annotations_updated_at.clone();
+            }
             let entry = state.book_revisions.entry(book_id.clone()).or_default();
             if let Some(revision) = &synced.file_revision {
                 entry.file_revision = Some(revision.clone());
@@ -1216,9 +1371,24 @@ pub async fn sync_apply_merged_manifest(
                 entry.cover_revision = Some(revision.clone());
             }
         }
-        write_sync_state(&root, &state)
-    })
+        Ok(())
+    }))
     .await
+}
+
+/// Drop local book Tombstones for books the merged Manifest keeps alive with
+/// a revision newer than the deletion (mirrors the TS revival rule). A
+/// Tombstone newer than the book — a deletion made mid-sync — stays.
+fn drop_revived_tombstones(tombstones: &mut Vec<SyncTombstoneData>, merged: &SyncManifestData) {
+    tombstones.retain(|tombstone| {
+        if tombstone.kind != "book" {
+            return true;
+        }
+        match merged.books.get(&tombstone.book_id) {
+            Some(book) => book_revision(book) <= tombstone.deleted_at,
+            None => true,
+        }
+    });
 }
 
 #[tauri::command]
@@ -1242,14 +1412,15 @@ pub async fn sync_note_result(
 ) -> AppResult<()> {
     let root = sync_root(&app)?;
     run_sync_blocking(move || {
-        let mut state = read_sync_state(&root)?;
-        if success {
-            state.last_synced_at = Some(chrono::Utc::now().to_rfc3339());
-            state.last_error = None;
-        } else {
-            state.last_error = error;
-        }
-        write_sync_state(&root, &state)
+        update_sync_state(&root, |state| {
+            if success {
+                state.last_synced_at = Some(chrono::Utc::now().to_rfc3339());
+                state.last_error = None;
+            } else {
+                state.last_error = error;
+            }
+            Ok(())
+        })
     })
     .await
 }
@@ -1348,6 +1519,7 @@ mod tombstone_tests {
             created_at: created_at.to_string(),
             color: None,
             note: None,
+            updated_at: None,
         }
     }
 
@@ -1358,6 +1530,7 @@ mod tombstone_tests {
             fraction: 0.5,
             created_at: created_at.to_string(),
             label: None,
+            updated_at: None,
         }
     }
 
@@ -1964,6 +2137,11 @@ fn pending_uploads(store: &LibraryStore, state: &SyncState) -> AppResult<Vec<Pen
     let library = store.read_library_public()?;
     let mut pending = Vec::new();
     for book in &library.books {
+        // An older file than the Sync Backend's must not be pushed back
+        // over the newer revision; it is replaced on the next open.
+        if state.stale_files.contains(&book.id) {
+            continue;
+        }
         let (epub_path, cover_path) = store.book_files(&book.id)?;
         if !epub_path.is_file() {
             continue;
@@ -1999,6 +2177,22 @@ fn pending_uploads(store: &LibraryStore, state: &SyncState) -> AppResult<Vec<Pen
             revision,
             cover_path: if cover_path.is_file() { Some(cover_path) } else { None },
         });
+    }
+    Ok(pending)
+}
+
+/// The uploads this pass may run. The first bulk upload of an existing
+/// library happens only after the user confirmed the estimate; until then
+/// automatic syncs silently skip file uploads (the Manifest still converges).
+fn uploads_to_run(store: &LibraryStore, state: &mut SyncState) -> AppResult<Vec<PendingUpload>> {
+    let pending = pending_uploads(store, state)?;
+    if !state.bulk_upload_confirmed {
+        if !pending.is_empty() {
+            return Ok(Vec::new());
+        }
+        // Nothing to upload, so nothing to confirm: books imported from now
+        // on flow automatically.
+        state.bulk_upload_confirmed = true;
     }
     Ok(pending)
 }
@@ -2085,7 +2279,7 @@ async fn upload_multipart_attempt(
 /// Tombstone retention has elapsed, so the Sync Backend object set is
 /// cleaned up. Session objects for the book are released by the same rule.
 async fn purge_book_objects(
-    object_store: &object_store::aws::AmazonS3,
+    object_store: &impl ObjectStore,
     book_id: &str,
 ) -> AppResult<()> {
     delete_prefix(
@@ -2123,9 +2317,10 @@ pub async fn sync_estimate_upload(
 pub async fn sync_confirm_bulk_upload(app: tauri::AppHandle) -> AppResult<()> {
     let root = sync_root(&app)?;
     run_sync_blocking(move || {
-        let mut state = read_sync_state(&root)?;
-        state.bulk_upload_confirmed = true;
-        write_sync_state(&root, &state)
+        update_sync_state(&root, |state| {
+            state.bulk_upload_confirmed = true;
+            Ok(())
+        })
     })
     .await
 }
@@ -2141,17 +2336,10 @@ pub async fn sync_upload_book_files(
     let store = store.inner().clone();
     let state_root = root.clone();
     let (pending, recorded_revisions) = run_sync_blocking(move || {
-        let state = read_sync_state(&state_root)?;
-        let pending = pending_uploads(&store, &state)?;
-        // The first bulk upload of an existing library happens only after the
-        // user confirmed the estimate; afterwards new imports flow automatically.
-        // The first bulk upload happens only after the user confirmed the
-        // estimate; until then automatic syncs silently skip file uploads
-        // (the Manifest still converges).
-        if !state.bulk_upload_confirmed && !pending.is_empty() {
-            return Ok((Vec::new(), state.book_revisions.clone()));
-        }
-        Ok((pending, state.book_revisions.clone()))
+        update_sync_state(&state_root, |state| {
+            let pending = uploads_to_run(&store, state)?;
+            Ok((pending, state.book_revisions.clone()))
+        })
     })
     .await?;
     if pending.is_empty() {
@@ -2200,11 +2388,12 @@ pub async fn sync_upload_book_files(
 
     let root_for_write = root.clone();
     run_sync_blocking(move || {
-        let mut state = read_sync_state(&root_for_write)?;
-        for (book_id, entry) in revisions {
-            state.book_revisions.insert(book_id, entry);
-        }
-        write_sync_state(&root_for_write, &state)
+        update_sync_state(&root_for_write, |state| {
+            for (book_id, entry) in revisions {
+                state.book_revisions.insert(book_id, entry);
+            }
+            Ok(())
+        })
     })
     .await?;
 
@@ -2217,32 +2406,62 @@ pub async fn sync_download_book_file(
     store: tauri::State<'_, LibraryStore>,
     book_id: String,
 ) -> AppResult<()> {
-    // A book that is already local needs nothing — callers invoke this on
-    // every open, and for cached books it must stay a cheap no-op.
+    // A book that is already local and current needs nothing — callers
+    // invoke this on every open, and for cached books it must stay a cheap
+    // no-op.
     let store = store.inner().clone();
-    let already_local = run_sync_blocking({
+    let root = sync_root(&app)?;
+    let (already_local, stale) = run_sync_blocking({
         let store = store.clone();
         let book_id = book_id.clone();
+        let root = root.clone();
         move || {
-            Ok(store
+            let already_local = store
                 .read_library_public()?
                 .books
                 .iter()
-                .any(|book| book.id == book_id))
+                .any(|book| book.id == book_id);
+            let stale = read_sync_state(&root)?.stale_files.contains(&book_id);
+            Ok((already_local, stale))
         }
     })
     .await?;
-    if already_local {
+    if already_local && !stale {
         return Ok(());
     }
 
-    let root = sync_root(&app)?;
-    let config = crate::sync_config::read_sync_config(&root)?
+    let download = download_book_file(&root, &book_id).await;
+    if already_local {
+        // A newer file exists elsewhere, but the local one still opens:
+        // failing to fetch the update (offline, say) must not block reading.
+        let bytes = match download {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                eprintln!("[sync] Newer file for {book_id} not downloaded: {}", error.message);
+                return Ok(());
+            }
+        };
+        return run_sync_blocking(move || {
+            store.replace_synced_book_file(&book_id, &bytes)?;
+            update_sync_state(&root, |state| {
+                state.stale_files.remove(&book_id);
+                Ok(())
+            })
+        })
+        .await;
+    }
+    let bytes = download?;
+    run_sync_blocking(move || store.install_synced_book(&book_id, bytes)).await
+}
+
+/// Fetch a book's EPUB at the revision the Manifest last named.
+async fn download_book_file(root: &Path, book_id: &str) -> AppResult<Vec<u8>> {
+    let config = crate::sync_config::read_sync_config(root)?
         .ok_or_else(|| AppError::invalid_input("Sync is not configured"))?;
-    let state = read_sync_state(&root)?;
+    let state = read_sync_state(root)?;
     let revision = state
         .book_revisions
-        .get(&book_id)
+        .get(book_id)
         .and_then(|entry| entry.file_revision.clone())
         .ok_or_else(|| {
             AppError::invalid_input("Book file is not available on the sync backend")
@@ -2250,15 +2469,14 @@ pub async fn sync_download_book_file(
 
     let object_store = crate::sync_config::build_sync_store(&config)?;
     let result = object_store
-        .get(&epub_object_key(&book_id, &revision))
+        .get(&epub_object_key(book_id, &revision))
         .await
         .map_err(map_object_store_error)?;
     let bytes = result
         .bytes()
         .await
         .map_err(map_object_store_error)?;
-
-    run_sync_blocking(move || store.install_synced_book(&book_id, bytes.to_vec())).await
+    Ok(bytes.to_vec())
 }
 
 /// Download the cover for a book on demand. Returns whether a cover was
@@ -2569,34 +2787,54 @@ fn session_object_key(book_id: &str, session_id: &str) -> ObjectPath {
 pub struct SessionSyncSummary {
     pub uploaded: u64,
     pub downloaded: u64,
+    /// Sessions skipped because they could not be read or merged.
+    pub skipped: u64,
 }
 
 /// Upload locally changed sessions, download remote changes, and merge both
 /// sides (entry union by id, both branches kept).
 #[tauri::command]
-pub async fn sync_sessions(app: tauri::AppHandle) -> AppResult<SessionSyncSummary> {
-    use futures::TryStreamExt;
-
+pub async fn sync_sessions(
+    app: tauri::AppHandle,
+    store: tauri::State<'_, LibraryStore>,
+) -> AppResult<SessionSyncSummary> {
+    let store = store.inner().clone();
     let root = sync_root(&app)?;
     let config = crate::sync_config::read_sync_config(&root)?
         .ok_or_else(|| AppError::invalid_input("Sync is not configured"))?;
     let object_store = crate::sync_config::build_sync_store(&config)?;
+    sync_sessions_with(&root, store, &object_store).await
+}
 
+/// Store-generic core of [`sync_sessions`], testable against an in-memory
+/// Sync Backend.
+async fn sync_sessions_with(
+    root: &Path,
+    store: LibraryStore,
+    object_store: &impl ObjectStore,
+) -> AppResult<SessionSyncSummary> {
+    use futures::TryStreamExt;
+
+    let root = root.to_path_buf();
+    // A snapshot for lookups only. sync-state.json is never written from it:
+    // the network work below takes a while, and a deletion or annotation
+    // save landing meanwhile must not be overwritten. Results are folded into
+    // the freshest state at the end.
     let state_root = root.clone();
-    let (_initial_session_files, mut state) = run_sync_blocking(move || {
-        let store = crate::pi_sessions::PiSessionStore::new(state_root.clone())?;
-        let files = store.list_all_session_files()?;
-        let state = read_sync_state(&state_root)?;
-        Ok((files, state))
-    })
-    .await?;
+    let snapshot = run_sync_blocking(move || read_sync_state(&state_root)).await?;
+    let mut revisions: std::collections::BTreeMap<String, SessionRevisionState> =
+        std::collections::BTreeMap::new();
+    let revision_of = |revisions: &std::collections::BTreeMap<String, SessionRevisionState>,
+                       key: &str| {
+        revisions
+            .get(key)
+            .or_else(|| snapshot.session_revisions.get(key))
+            .cloned()
+            .unwrap_or_default()
+    };
 
     let mut summary = SessionSyncSummary::default();
 
-    // 1. Download remote sessions we have not yet seen (etag moved or new)
-    // and merge them locally BEFORE any upload: a PUT must never overwrite a
-    // remote copy without first unioning with it, or another device's
-    // diverged branch would exist only on that device until it syncs again.
     let remote_objects: Vec<object_store::ObjectMeta> = object_store
         .list(Some(&ObjectPath::from(SESSION_OBJECT_PREFIX)))
         .try_collect()
@@ -2621,10 +2859,12 @@ pub async fn sync_sessions(app: tauri::AppHandle) -> AppResult<SessionSyncSummar
             continue;
         }
         let key = format!("{book_id}/{session_id}");
-        let entry = state.session_revisions.entry(key).or_default();
+        let mut entry = revision_of(&revisions, &key);
         if entry.seen_etag.is_some() && entry.seen_etag == object.e_tag {
             continue;
         }
+        // Transport failures abort the pass (the backend is unreachable and
+        // the next pass retries); a bad object is skipped below instead.
         let result = object_store
             .get(&object.location)
             .await
@@ -2633,23 +2873,48 @@ pub async fn sync_sessions(app: tauri::AppHandle) -> AppResult<SessionSyncSummar
             .bytes()
             .await
             .map_err(map_object_store_error)?;
-        let content = String::from_utf8(bytes.to_vec()).map_err(|_| {
-            AppError::storage_corrupt("Synced session is not valid UTF-8")
-        })?;
-        let merge_root = root.clone();
-        let merge_book_id = book_id.to_string();
-        let merged = run_sync_blocking(move || {
-            let store = crate::pi_sessions::PiSessionStore::new(merge_root)?;
-            store.merge_remote_session(&merge_book_id, &content)
-        })
-        .await?;
+        let remote_hash = crate::library::sha256_hex(&bytes);
+        let merged = match String::from_utf8(bytes.to_vec()) {
+            Ok(content) => {
+                let merge_root = root.clone();
+                let merge_book_id = book_id.to_string();
+                run_sync_blocking(move || {
+                    let store = crate::pi_sessions::PiSessionStore::new(merge_root)?;
+                    store.merge_remote_session(&merge_book_id, &content)
+                })
+                .await
+            }
+            Err(_) => Err(AppError::storage_corrupt("Synced session is not valid UTF-8")),
+        };
         entry.seen_etag = object.e_tag.clone();
-        entry.content_hash = Some(crate::library::sha256_hex(merged.as_bytes()));
-        summary.downloaded += 1;
+        match merged {
+            Ok(local_has_extra) => {
+                // Remote already holds everything: the merged local file
+                // counts as uploaded. Otherwise record the remote's hash, so
+                // the upload below sees a difference and pushes the union
+                // back. (Comparing entries, not bytes, keeps two devices
+                // whose files differ only in entry order from ping-ponging.)
+                entry.content_hash = Some(if local_has_extra {
+                    remote_hash
+                } else {
+                    // Unreadable now: fall back to forcing one re-upload.
+                    local_session_hash(&root, book_id, session_id)
+                        .await
+                        .unwrap_or(remote_hash)
+                });
+                summary.downloaded += 1;
+            }
+            Err(error) => {
+                // One unreadable or unmergeable session must not fail every
+                // pass forever. Remember its etag so it is retried only once
+                // it changes; the local copy (if any) still uploads below.
+                eprintln!("[sync] Skipping remote session {location}: {}", error.message);
+                summary.skipped += 1;
+            }
+        }
+        revisions.insert(key, entry);
     }
 
-    // 2. Upload sessions whose content changed since the last upload (the
-    // downloads above may have merged remote branches in, growing content).
     let upload_root = root.clone();
     let local_files = run_sync_blocking(move || {
         let store = crate::pi_sessions::PiSessionStore::new(upload_root.clone())?;
@@ -2657,12 +2922,20 @@ pub async fn sync_sessions(app: tauri::AppHandle) -> AppResult<SessionSyncSummar
     })
     .await?;
     for file in &local_files {
-        let content = fs::read_to_string(&file.path).map_err(|error| {
-            AppError::storage_io(format!("Failed to read session for upload: {error}"))
-        })?;
+        let content = match fs::read_to_string(&file.path) {
+            Ok(content) => content,
+            Err(error) => {
+                eprintln!(
+                    "[sync] Skipping local session {}: {error}",
+                    file.path.display()
+                );
+                summary.skipped += 1;
+                continue;
+            }
+        };
         let hash = crate::library::sha256_hex(content.as_bytes());
         let key = format!("{}/{}", file.book_id, file.session_id);
-        let entry = state.session_revisions.entry(key).or_default();
+        let mut entry = revision_of(&revisions, &key);
         if entry.content_hash.as_deref() == Some(hash.as_str()) {
             continue;
         }
@@ -2675,30 +2948,74 @@ pub async fn sync_sessions(app: tauri::AppHandle) -> AppResult<SessionSyncSummar
             .map_err(map_object_store_error)?;
         entry.content_hash = Some(hash);
         entry.seen_etag = result.e_tag;
+        revisions.insert(key, entry);
         summary.uploaded += 1;
     }
 
-    // 3. Opportunistic cleanup: expired Tombstones release their book file
-    // and session objects on the Sync Backend; once purged, the Tombstone
-    // itself is dropped from local state.
-    for book_id in expired_book_tombstones(&state) {
-        if purge_book_objects(&object_store, &book_id).await.is_ok() {
-            state
-                .tombstones
-                .retain(|tombstone| tombstone_key(tombstone) != format!("book:{book_id}"));
+    // Expired book Tombstones release their objects — unless the book is
+    // alive on this device after all (revived elsewhere), in which case the
+    // Tombstone is simply dropped and the objects stay.
+    let live_books: std::collections::HashSet<String> = run_sync_blocking(move || {
+        let mut live: std::collections::HashSet<String> = store
+            .read_library_public()?
+            .books
+            .into_iter()
+            .map(|book| book.id)
+            .collect();
+        live.extend(store.list_placeholders()?.into_iter().map(|book| book.id));
+        Ok(live)
+    })
+    .await?;
+    let mut released = Vec::new();
+    for book_id in expired_book_tombstones(&snapshot) {
+        if live_books.contains(&book_id) {
+            released.push(book_id);
+            continue;
+        }
+        if purge_book_objects(object_store, &book_id).await.is_ok() {
+            released.push(book_id);
         }
     }
 
     let write_root = root.clone();
-    run_sync_blocking(move || write_sync_state(&write_root, &state)).await?;
+    run_sync_blocking(move || {
+        update_sync_state(&write_root, |state| {
+            state.session_revisions.extend(revisions);
+            state.tombstones.retain(|tombstone| {
+                !(tombstone.kind == "book"
+                    && released.contains(&tombstone.book_id)
+                    && !is_tombstone_active(tombstone))
+            });
+            Ok(())
+        })
+    })
+    .await?;
 
     Ok(summary)
 }
 
-/// Delete every object stored under a book's session prefix: the 30-day
-/// Tombstone retention has elapsed.
+/// Hash of a session file as stored locally (after a merge wrote it).
+async fn local_session_hash(root: &Path, book_id: &str, session_id: &str) -> AppResult<String> {
+    let root = root.to_path_buf();
+    let book_id = book_id.to_string();
+    let session_id = session_id.to_string();
+    run_sync_blocking(move || {
+        let store = crate::pi_sessions::PiSessionStore::new(root)?;
+        let file = store
+            .list_all_session_files()?
+            .into_iter()
+            .find(|file| file.book_id == book_id && file.session_id == session_id)
+            .ok_or_else(|| AppError::storage_io("Merged session file is missing"))?;
+        let bytes = fs::read(&file.path).map_err(|error| {
+            AppError::storage_io(format!("Failed to read merged session: {error}"))
+        })?;
+        Ok(crate::library::sha256_hex(&bytes))
+    })
+    .await
+}
+
 async fn purge_session_objects(
-    object_store: &object_store::aws::AmazonS3,
+    object_store: &impl ObjectStore,
     book_id: &str,
 ) -> AppResult<()> {
     delete_prefix(
@@ -2710,7 +3027,7 @@ async fn purge_session_objects(
 
 /// Delete every object under a Sync Backend prefix.
 async fn delete_prefix(
-    object_store: &object_store::aws::AmazonS3,
+    object_store: &impl ObjectStore,
     prefix: &ObjectPath,
 ) -> AppResult<()> {
     use futures::TryStreamExt;
@@ -2960,5 +3277,465 @@ mod preference_sync_tests {
             state.preferences_updated_at.as_deref(),
             Some("2026-01-01T00:00:00Z")
         );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Review fixes: state lock, revived Tombstones, session round trips, file
+// revisions, rebased annotation saves.
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod review_fix_tests {
+    use super::*;
+    use crate::library::{BookmarkRecord, HighlightRecord};
+    use object_store::memory::InMemory;
+    use serde_json::{json, Value};
+
+    fn temp_store() -> (tempfile::TempDir, LibraryStore) {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let store = LibraryStore::initialize(directory.path().to_path_buf()).expect("store");
+        (directory, store)
+    }
+
+    fn highlight(id: &str, cfi: &str) -> HighlightRecord {
+        HighlightRecord {
+            id: id.to_string(),
+            cfi: cfi.to_string(),
+            excerpt: "text".to_string(),
+            created_at: "2026-01-01T00:00:00+00:00".to_string(),
+            color: None,
+            note: None,
+            updated_at: None,
+        }
+    }
+
+    fn annotations(highlights: Vec<HighlightRecord>) -> AnnotationsFile {
+        AnnotationsFile {
+            highlights,
+            ..AnnotationsFile::empty()
+        }
+    }
+
+    fn ids(file: &AnnotationsFile) -> Vec<String> {
+        let mut ids: Vec<String> = file
+            .highlights
+            .iter()
+            .map(|item| item.id.clone())
+            .chain(file.bookmarks.iter().map(|item: &BookmarkRecord| item.id.clone()))
+            .collect();
+        ids.sort();
+        ids
+    }
+
+    #[test]
+    fn a_rebased_save_keeps_entries_synced_after_the_writer_loaded() {
+        // The reader loaded h1 and h2; a Sync then added h3 on disk.
+        let base = annotations(vec![highlight("h1", "epubcfi(/1)"), highlight("h2", "epubcfi(/2)")]);
+        let current = annotations(vec![
+            highlight("h1", "epubcfi(/1)"),
+            highlight("h2", "epubcfi(/2)"),
+            highlight("h3", "epubcfi(/3)"),
+        ]);
+        // The reader deletes h2 and adds h4.
+        let next = annotations(vec![highlight("h1", "epubcfi(/1)"), highlight("h4", "epubcfi(/4)")]);
+
+        let (stored, removed) = rebase_annotations(&current, &base, next);
+
+        assert_eq!(removed, vec!["h2".to_string()]);
+        assert_eq!(ids(&stored), vec!["h1", "h3", "h4"]);
+    }
+
+    #[test]
+    fn a_rebased_save_lets_the_writer_win_a_contested_cfi() {
+        let base = annotations(vec![]);
+        let current = annotations(vec![highlight("remote", "epubcfi(/1)")]);
+        let next = annotations(vec![highlight("local", "epubcfi(/1)")]);
+
+        let (stored, removed) = rebase_annotations(&current, &base, next);
+
+        assert!(removed.is_empty());
+        assert_eq!(ids(&stored), vec!["local"]);
+    }
+
+    #[test]
+    fn concurrent_state_writers_never_drop_each_others_tombstones() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let root = directory.path().to_path_buf();
+        let threads: Vec<_> = (0..8)
+            .map(|index| {
+                let root = root.clone();
+                std::thread::spawn(move || {
+                    record_book_tombstone(&root, &format!("book{index}")).expect("record");
+                })
+            })
+            .collect();
+        for thread in threads {
+            thread.join().expect("join");
+        }
+
+        let state = read_sync_state(&root).expect("state");
+        assert_eq!(state.tombstones.len(), 8);
+    }
+
+    fn synced_book(book_updated_at: &str) -> SyncedBookData {
+        SyncedBookData {
+            metadata: SyncBookMetadata {
+                title: "T".to_string(),
+                author: String::new(),
+                description: None,
+                publisher: None,
+                language: None,
+                series: None,
+                reading_status: None,
+                status_updated_at: None,
+                starred: None,
+            },
+            position: None,
+            annotations: AnnotationsFile::empty(),
+            annotations_updated_at: String::new(),
+            file_revision: None,
+            cover_revision: None,
+            book_updated_at: book_updated_at.to_string(),
+        }
+    }
+
+    fn book_tombstone(book_id: &str, deleted_at: &str) -> SyncTombstoneData {
+        SyncTombstoneData {
+            kind: "book".to_string(),
+            book_id: book_id.to_string(),
+            annotation_id: None,
+            device_id: "device-b".to_string(),
+            deleted_at: deleted_at.to_string(),
+        }
+    }
+
+    #[test]
+    fn a_tombstone_the_merge_revived_leaves_local_state_but_a_mid_sync_one_stays() {
+        let mut merged = SyncManifestData::default();
+        // Restored elsewhere after the deletion: a revival.
+        merged
+            .books
+            .insert("revived".to_string(), synced_book("2026-06-02T00:00:00+00:00"));
+        // Still in the merged books only because the export predates a
+        // deletion made while the network round trip was in flight.
+        merged
+            .books
+            .insert("deletedmidsync".to_string(), synced_book("2026-06-01T00:00:00+00:00"));
+        let mut tombstones = vec![
+            book_tombstone("revived", "2026-06-01T00:00:00+00:00"),
+            book_tombstone("deletedmidsync", "2026-06-03T00:00:00+00:00"),
+            book_tombstone("gone", "2026-06-01T00:00:00+00:00"),
+        ];
+
+        drop_revived_tombstones(&mut tombstones, &merged);
+
+        let left: Vec<&str> = tombstones.iter().map(|t| t.book_id.as_str()).collect();
+        assert_eq!(left, vec!["deletedmidsync", "gone"]);
+    }
+
+    #[test]
+    fn importing_a_book_revokes_its_tombstone_and_stale_marker() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        record_book_tombstone(directory.path(), "book1").expect("record");
+        update_sync_state(directory.path(), |state| {
+            state.stale_files.insert("book1".to_string());
+            Ok(())
+        })
+        .expect("stale");
+
+        note_book_imported(directory.path(), "book1").expect("imported");
+
+        let state = read_sync_state(directory.path()).expect("state");
+        assert!(state.tombstones.is_empty());
+        assert!(state.stale_files.is_empty());
+    }
+
+    #[test]
+    fn changing_the_backend_forgets_what_the_old_one_held() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        record_book_tombstone(directory.path(), "book1").expect("record");
+        update_sync_state(directory.path(), |state| {
+            state.bulk_upload_confirmed = true;
+            state.last_etag = "etag".to_string();
+            state.book_revisions.insert(
+                "book1".to_string(),
+                BookRevisionState { file_revision: Some("rev".to_string()), cover_revision: None },
+            );
+            state
+                .session_revisions
+                .insert("book1/s1".to_string(), SessionRevisionState::default());
+            Ok(())
+        })
+        .expect("seed");
+
+        note_sync_backend_changed(directory.path()).expect("changed");
+
+        let state = read_sync_state(directory.path()).expect("state");
+        assert!(state.book_revisions.is_empty());
+        assert!(state.session_revisions.is_empty());
+        assert!(!state.bulk_upload_confirmed);
+        assert!(state.last_etag.is_empty());
+        // Local deletions still have to reach the new backend.
+        assert_eq!(state.tombstones.len(), 1);
+    }
+
+    #[test]
+    fn an_empty_first_upload_counts_as_confirmed_so_later_imports_flow() {
+        let (_dir, store) = temp_store();
+        let mut state = SyncState::default();
+
+        assert!(uploads_to_run(&store, &mut state).expect("run").is_empty());
+        assert!(state.bulk_upload_confirmed);
+
+        store
+            .import_bytes(Path::new("/tmp/new.epub"), "new.epub".to_string(), b"new".to_vec())
+            .expect("import");
+        assert_eq!(uploads_to_run(&store, &mut state).expect("run").len(), 1);
+    }
+
+    #[test]
+    fn an_existing_library_still_waits_for_confirmation() {
+        let (_dir, store) = temp_store();
+        store
+            .import_bytes(Path::new("/tmp/old.epub"), "old.epub".to_string(), b"old".to_vec())
+            .expect("import");
+        let mut state = SyncState::default();
+
+        assert!(uploads_to_run(&store, &mut state).expect("run").is_empty());
+        assert!(!state.bulk_upload_confirmed);
+    }
+
+    fn imported(store: &LibraryStore, bytes: &[u8]) -> crate::library::BookRecord {
+        let result = store
+            .import_bytes(Path::new("/tmp/book.epub"), "book.epub".to_string(), bytes.to_vec())
+            .expect("import");
+        store
+            .read_library_public()
+            .expect("library")
+            .books
+            .into_iter()
+            .find(|book| book.id == result.book_id)
+            .expect("record")
+    }
+
+    #[test]
+    fn a_newer_remote_file_marks_the_local_book_stale_and_is_not_reuploaded() {
+        let (_dir, store) = temp_store();
+        let book = imported(&store, b"version-one");
+        let state = SyncState { device_id: "device-a".to_string(), ..SyncState::default() };
+        let base = export_local_manifest(&store, &state).expect("export");
+        let mut merged = base.clone();
+        let synced = merged.books.get_mut(&book.id).expect("book");
+        synced.file_revision = Some(crate::library::sha256_hex(b"version-two"));
+        synced.book_updated_at = "2999-01-01T00:00:00+00:00".to_string();
+
+        let stale = apply_merged_manifest(&store, &merged, &base).expect("apply");
+        assert_eq!(stale, vec![book.id.clone()]);
+
+        let state = SyncState {
+            bulk_upload_confirmed: true,
+            stale_files: stale.into_iter().collect(),
+            ..SyncState::default()
+        };
+        assert!(pending_uploads(&store, &state).expect("pending").is_empty());
+
+        store
+            .replace_synced_book_file(&book.id, b"version-two")
+            .expect("replace");
+        let replaced = store
+            .read_library_public()
+            .expect("library")
+            .books
+            .into_iter()
+            .find(|record| record.id == book.id)
+            .expect("record");
+        assert_eq!(
+            replaced.content_hash,
+            Some(crate::library::sha256_hex(b"version-two"))
+        );
+        assert_ne!(replaced.content_version, book.content_version);
+    }
+
+    #[test]
+    fn an_older_remote_revision_does_not_mark_a_fresh_local_import_stale() {
+        let (_dir, store) = temp_store();
+        let book = imported(&store, b"version-one");
+        let state = SyncState::default();
+        let base = export_local_manifest(&store, &state).expect("export");
+        let mut merged = base.clone();
+        merged.books.get_mut(&book.id).expect("book").file_revision =
+            Some(crate::library::sha256_hex(b"version-zero"));
+
+        let stale = apply_merged_manifest(&store, &merged, &base).expect("apply");
+        assert!(stale.is_empty());
+    }
+
+    #[test]
+    fn opening_a_book_does_not_age_its_position_for_sync() {
+        let (_dir, store) = temp_store();
+        let book = imported(&store, b"position");
+        store
+            .update_reading_state(&book.id, Some(0.1), None, None, None, Some("epubcfi(/1)".into()))
+            .expect("move");
+        let state = SyncState::default();
+        let before = export_local_manifest(&store, &state).expect("export");
+        let moved_at = before.books[&book.id].position.clone().expect("position").updated_at;
+
+        // Opening and re-reporting the same position is not progress.
+        store.mark_book_opened(&book.id).expect("open");
+        store
+            .update_reading_state(&book.id, Some(0.1), None, None, None, Some("epubcfi(/1)".into()))
+            .expect("same position");
+        let after = export_local_manifest(&store, &state).expect("export");
+        assert_eq!(after.books[&book.id].position.clone().expect("position").updated_at, moved_at);
+
+        // A real move is.
+        store
+            .update_reading_state(&book.id, Some(0.2), None, None, None, Some("epubcfi(/2)".into()))
+            .expect("move again");
+        let moved = export_local_manifest(&store, &state).expect("export");
+        assert!(moved.books[&book.id].position.clone().expect("position").updated_at > moved_at);
+    }
+
+    // -- Sessions against an in-memory Sync Backend --------------------------
+
+    struct Device {
+        _dir: tempfile::TempDir,
+        root: PathBuf,
+        store: LibraryStore,
+        sessions: crate::pi_sessions::PiSessionStore,
+    }
+
+    fn device() -> Device {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().to_path_buf();
+        let store = LibraryStore::initialize(root.clone()).expect("store");
+        let sessions = crate::pi_sessions::PiSessionStore::new(root.clone()).expect("sessions");
+        Device { _dir: dir, root, store, sessions }
+    }
+
+    fn message(id: &str, parent: Option<&str>) -> Value {
+        json!({
+            "type": "message",
+            "id": id,
+            "parentId": parent,
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+            "message": {"role": "user", "content": id, "timestamp": 1},
+        })
+    }
+
+    async fn sync(device: &Device, remote: &InMemory) -> SessionSyncSummary {
+        sync_sessions_with(&device.root, device.store.clone(), remote)
+            .await
+            .expect("sync sessions")
+    }
+
+    async fn remote_entry_ids(remote: &InMemory, book: &str, session: &str) -> Vec<String> {
+        let bytes = remote
+            .get(&session_object_key(book, session))
+            .await
+            .expect("get")
+            .bytes()
+            .await
+            .expect("bytes");
+        let mut ids: Vec<String> = String::from_utf8(bytes.to_vec())
+            .expect("utf8")
+            .lines()
+            .skip(1)
+            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+            .filter_map(|entry| entry["id"].as_str().map(str::to_string))
+            .collect();
+        ids.sort();
+        ids
+    }
+
+    fn session_id(device: &Device) -> String {
+        device.sessions.list_all_session_files().expect("files")[0]
+            .session_id
+            .clone()
+    }
+
+    #[test]
+    fn diverged_sessions_converge_on_the_backend_without_ping_pong() {
+        tauri::async_runtime::block_on(async {
+            let remote = InMemory::new();
+            let a = device();
+            let b = device();
+            a.sessions.create("book1").expect("create");
+            let id = session_id(&a);
+            a.sessions
+                .append("book1", &id, None, vec![message("shared01", None)])
+                .expect("append");
+            sync(&a, &remote).await;
+            assert_eq!(sync(&b, &remote).await.downloaded, 1);
+
+            // Both devices continue the conversation independently.
+            b.sessions
+                .append("book1", &id, Some("shared01"), vec![message("fromb001", Some("shared01"))])
+                .expect("append b");
+            a.sessions
+                .append("book1", &id, Some("shared01"), vec![message("froma001", Some("shared01"))])
+                .expect("append a");
+            sync(&b, &remote).await;
+            // A merges B's entries and must push its own back.
+            let summary = sync(&a, &remote).await;
+            assert_eq!(summary.uploaded, 1);
+            assert_eq!(
+                remote_entry_ids(&remote, "book1", &id).await,
+                vec!["froma001", "fromb001", "shared01"]
+            );
+
+            // Converged: further passes on either side move nothing.
+            sync(&b, &remote).await;
+            let quiet_a = sync(&a, &remote).await;
+            let quiet_b = sync(&b, &remote).await;
+            assert_eq!((quiet_a.uploaded, quiet_b.uploaded), (0, 0));
+        });
+    }
+
+    #[test]
+    fn a_corrupt_remote_session_is_skipped_instead_of_failing_every_pass() {
+        tauri::async_runtime::block_on(async {
+            let remote = InMemory::new();
+            remote
+                .put(&session_object_key("book1", "broken"), PutPayload::from(vec![0xff, 0xfe]))
+                .await
+                .expect("seed");
+            let a = device();
+
+            assert_eq!(sync(&a, &remote).await.skipped, 1);
+            // Not retried until the object changes.
+            assert_eq!(sync(&a, &remote).await.skipped, 0);
+        });
+    }
+
+    #[test]
+    fn an_expired_tombstone_never_purges_a_book_that_is_alive_here() {
+        tauri::async_runtime::block_on(async {
+            let remote = InMemory::new();
+            let a = device();
+            let live = imported(&a.store, b"alive");
+            for book_id in [live.id.as_str(), "gonebook"] {
+                remote
+                    .put(&epub_object_key(book_id, "rev"), PutPayload::from(b"epub".to_vec()))
+                    .await
+                    .expect("seed");
+            }
+            update_sync_state(&a.root, |state| {
+                state.tombstones = vec![
+                    book_tombstone(&live.id, "2020-01-01T00:00:00+00:00"),
+                    book_tombstone("gonebook", "2020-01-01T00:00:00+00:00"),
+                ];
+                Ok(())
+            })
+            .expect("seed state");
+
+            sync(&a, &remote).await;
+
+            assert!(remote.head(&epub_object_key(&live.id, "rev")).await.is_ok());
+            assert!(remote.head(&epub_object_key("gonebook", "rev")).await.is_err());
+            assert!(read_sync_state(&a.root).expect("state").tombstones.is_empty());
+        });
     }
 }
