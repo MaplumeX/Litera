@@ -84,103 +84,143 @@ describe("LiteraAgentRuntime",()=>{
     expect(appends[0].entries[0].parentId).toBeNull();
   });
 
-  it("compacts after an overflow, persists the compaction entry, and rebuilds context",async()=>{
-    const current=session();const batches:PiSessionEntry[][]=[];const projections:AgentMessage[][]=[];
-    // Pre-seed a long history (each message ~5000 tokens) so the cut point has
-    // enough content to summarize once compaction triggers.
-    const long="a".repeat(20_000);
-    current.entries=[
-      {type:"message",id:"u1",parentId:null,timestamp:now,message:{role:"user",content:long,timestamp:1}},
-      {type:"message",id:"a1",parentId:"u1",timestamp:now,message:{role:"assistant",content:[{type:"text",text:long}],usage:{input:0,output:0,cacheRead:0,cacheWrite:0,totalTokens:0,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}},stopReason:"stop",timestamp:2}},
-      {type:"message",id:"u2",parentId:"a1",timestamp:now,message:{role:"user",content:long,timestamp:3}},
-      {type:"message",id:"a2",parentId:"u2",timestamp:now,message:{role:"assistant",content:[{type:"text",text:long}],usage:{input:0,output:0,cacheRead:0,cacheWrite:0,totalTokens:0,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}},stopReason:"stop",timestamp:4}},
-      {type:"message",id:"u3",parentId:"a2",timestamp:now,message:{role:"user",content:long,timestamp:5}},
-      {type:"message",id:"a3",parentId:"u3",timestamp:now,message:{role:"assistant",content:[{type:"text",text:long}],usage:{input:0,output:0,cacheRead:0,cacheWrite:0,totalTokens:0,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}},stopReason:"stop",timestamp:6}},
-    ];
-    current.leafId="a3";
-    const sessions:SessionPort={create:async()=>current,list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,entries)=>{batches.push(entries);return entries[entries.length-1]?.id??null;}};
-    const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:1}),toc:async()=>[],readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:1,text:"chapter"}),search:async()=>[],close:()=>{}};
-    const faux=createFauxCore({tokensPerSecond:10_000});
-    faux.setResponses([
-      fauxAssistantMessage("x",{stopReason:"error",errorMessage:"prompt is too long: 200000 tokens > 100000 maximum"}),
-      fauxAssistantMessage("summary of the conversation"),
-      fauxAssistantMessage("third answer"),
-    ]);
-    const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret",thinkingLevel:"off"};
-    const runtime=new LiteraAgentRuntime({sessions,book,loadConfig:async()=>config,loadStream:async()=>faux.streamSimple});
-    runtime.subscribe((event:AgentEvent)=>{if(event.type==="prompt_end"&&event.messages)projections.push(event.messages);});
-    await runtime.openBook("book",new ArrayBuffer(1));
-    await runtime.switchSession("session-1");
-    await runtime.prompt("second question",{});
-    await runtime.prompt("third question",{});
-    const compactions=batches.flat().filter((entry)=>entry.type==="compaction");
-    expect(compactions).toHaveLength(1);
-    expect(compactions[0].summary).toBe("summary of the conversation");
-    expect(typeof compactions[0].firstKeptEntryId).toBe("string");
-    expect(typeof compactions[0].tokensBefore).toBe("number");
-    expect(current.entries.some((entry)=>entry.type==="compaction")).toBe(true);
-    // The UI projection keeps the full history and marks the compaction with a
-    // notice, unlike the model context which drops the compacted-away turns.
-    const projection=projections[projections.length-1];
-    expect(projection.filter((message)=>message.role==="notice")).toHaveLength(1);
-    expect(projection[0]).toMatchObject({role:"user"});
-    expect((projection[0] as {content:string}).content).toHaveLength(20_000);
-  });
+  describe("context maintenance",()=>{
+    const zeroUsage={input:0,output:0,cacheRead:0,cacheWrite:0,totalTokens:0,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}};
+    const text=(chars:number)=>"a".repeat(chars);
+    const userEntry=(id:string,parentId:string|null,content:string):PiSessionEntry=>({type:"message",id,parentId,timestamp:now,message:{role:"user",content,timestamp:1}});
+    const assistantEntry=(id:string,parentId:string,content:unknown[]):PiSessionEntry=>({type:"message",id,parentId,timestamp:now,message:{role:"assistant",content,usage:zeroUsage,stopReason:"stop",timestamp:2}});
+    /** Six alternating user/assistant entries of `chars` characters each, leaf "a3". */
+    function history(chars:number):PiSessionEntry[]{const ids=["u1","a1","u2","a2","u3","a3"];return ids.map((id,index)=>index%2?assistantEntry(id,ids[index-1],[{type:"text",text:text(chars)}]):userEntry(id,index?ids[index-1]:null,text(chars)));}
+    function harness(entries:PiSessionEntry[],contextWindow?:number,options:{holdSummary?:boolean}={}){
+      const current=session();current.entries=entries;current.leafId=entries.at(-1)?.id??null;
+      const batches:PiSessionEntry[][]=[];const events:AgentEvent[]=[];const requests:string[]=[];
+      const sessions:SessionPort={create:async()=>current,list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,appended)=>{batches.push(appended);return appended.at(-1)?.id??null;}};
+      const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:1}),toc:async()=>[],readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:1,text:"chapter"}),search:async()=>[],close:()=>{}};
+      const faux=createFauxCore({tokensPerSecond:1_000_000});
+      const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret",thinkingLevel:"off",...(contextWindow?{contextWindow}:{})};
+      const runtime=new LiteraAgentRuntime({sessions,book,loadConfig:async()=>config,loadStream:async()=>(async(requestModel,context,streamOptions)=>{
+        const isSummary=getCurrentSystemPrompt(context.messages)?.includes("context summarization")??false;
+        requests.push(isSummary?"summary":JSON.stringify(context.messages));
+        if(isSummary&&options.holdSummary)await new Promise((resolve)=>streamOptions?.signal?.addEventListener("abort",resolve));
+        return faux.streamSimple(requestModel,context,streamOptions);
+      })});
+      runtime.subscribe((event)=>{events.push(event);});
+      const appended=(type:string)=>batches.flat().filter((entry)=>entry.type===type);
+      return {current,batches,events,requests,faux,runtime,appended,start:async()=>{await runtime.openBook("book",new ArrayBuffer(1));await runtime.switchSession("session-1");}};
+    }
 
-  it("keeps the system prompt and persists the user once when compaction runs before the prompt",async()=>{
-    const current=session();const batches:PiSessionEntry[][]=[];const systemPrompts:Array<string|undefined>=[];
-    const long="a".repeat(20_000);
-    const usage=(totalTokens:number)=>({input:totalTokens,output:0,cacheRead:0,cacheWrite:0,totalTokens,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}});
-    const ids=["u1","a1","u2","a2","u3","a3"];
-    // The last assistant reports usage near the context window, so the
-    // pre-prompt compaction check fires before the new question is sent.
-    current.entries=ids.map((id,index)=>({type:"message",id,parentId:index?ids[index-1]:null,timestamp:now,message:index%2?{role:"assistant",content:[{type:"text",text:long}],usage:usage(index===5?95_000:0),stopReason:"stop",timestamp:Date.now()}:{role:"user",content:long,timestamp:index}}));
-    current.leafId="a3";
-    const sessions:SessionPort={create:async()=>current,list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,entries)=>{batches.push(entries);return entries[entries.length-1]?.id??null;}};
-    const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:1}),toc:async()=>[],readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:1,text:"chapter"}),search:async()=>[],close:()=>{}};
-    const faux=createFauxCore({tokensPerSecond:100_000});
-    faux.setResponses([fauxAssistantMessage("summary of the conversation"),fauxAssistantMessage("answer")]);
-    const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret",thinkingLevel:"off",contextWindow:100_000};
-    const runtime=new LiteraAgentRuntime({sessions,book,loadConfig:async()=>config,loadStream:async()=>((requestModel,context,options)=>{systemPrompts.push(getCurrentSystemPrompt(context.messages));return faux.streamSimple(requestModel,context,options);})});
-    await runtime.openBook("book",new ArrayBuffer(1));
-    await runtime.switchSession("session-1");
-    await runtime.prompt("fourth question",{});
-    expect(batches.flat().filter((entry)=>entry.type==="compaction")).toHaveLength(1);
-    // The prompt request after compaction still carries the Litera system prompt.
-    expect(systemPrompts.at(-1)).toBe(SYSTEM_PROMPT);
-    const users=batches.flat().filter((entry)=>entry.type==="message"&&(entry.message as {role?:string}).role==="user");
-    expect(users.map((entry)=>(entry.message as {content?:unknown}).content)).toEqual(["fourth question"]);
-  });
+    it("unlocks the input before compacting in the background, and the next prompt sees the summary",async()=>{
+      // 40k window: compactAt 34k. History is ~30k tokens, so only the answer to
+      // the long question crosses the threshold.
+      const h=harness(history(20_000),40_000);
+      h.faux.setResponses([fauxAssistantMessage("answer"),fauxAssistantMessage("summary of the conversation"),fauxAssistantMessage("next answer")]);
+      await h.start();
+      await h.runtime.prompt(text(20_000),{});
+      const types=h.events.map((event)=>event.type);
+      expect(types.indexOf("prompt_end")).toBeGreaterThanOrEqual(0);
+      expect(types.indexOf("compaction_started")).toBeGreaterThan(types.indexOf("prompt_end"));
+      await h.runtime.prompt("next question",{});
+      expect(h.appended("compaction")).toHaveLength(1);
+      expect(h.appended("compaction")[0]).toMatchObject({summary:"summary of the conversation",firstKeptEntryId:expect.any(String)});
+      expect(h.requests.at(-1)).toContain("summary of the conversation");
+      const completed=h.events.find((event)=>event.type==="compaction_completed");
+      expect(completed?.type==="compaction_completed"&&completed.messages.some((message)=>message.role==="notice")).toBe(true);
+    });
 
-  it("emits compaction_started and compaction_completed on a successful compaction",async()=>{
-    const current=session();const batches:PiSessionEntry[][]=[];const events:string[]=[];
-    const long="a".repeat(20_000);
-    current.entries=[
-      {type:"message",id:"u1",parentId:null,timestamp:now,message:{role:"user",content:long,timestamp:1}},
-      {type:"message",id:"a1",parentId:"u1",timestamp:now,message:{role:"assistant",content:[{type:"text",text:long}],usage:{input:0,output:0,cacheRead:0,cacheWrite:0,totalTokens:0,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}},stopReason:"stop",timestamp:2}},
-      {type:"message",id:"u2",parentId:"a1",timestamp:now,message:{role:"user",content:long,timestamp:3}},
-      {type:"message",id:"a2",parentId:"u2",timestamp:now,message:{role:"assistant",content:[{type:"text",text:long}],usage:{input:0,output:0,cacheRead:0,cacheWrite:0,totalTokens:0,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}},stopReason:"stop",timestamp:4}},
-      {type:"message",id:"u3",parentId:"a2",timestamp:now,message:{role:"user",content:long,timestamp:5}},
-      {type:"message",id:"a3",parentId:"u3",timestamp:now,message:{role:"assistant",content:[{type:"text",text:long}],usage:{input:0,output:0,cacheRead:0,cacheWrite:0,totalTokens:0,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}},stopReason:"stop",timestamp:6}},
-    ];
-    current.leafId="a3";
-    const sessions:SessionPort={create:async()=>current,list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,entries)=>{batches.push(entries);return entries[entries.length-1]?.id??null;}};
-    const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:1}),toc:async()=>[],readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:1,text:"chapter"}),search:async()=>[],close:()=>{}};
-    const faux=createFauxCore({tokensPerSecond:10_000});
-    faux.setResponses([
-      fauxAssistantMessage("x",{stopReason:"error",errorMessage:"prompt is too long: 200000 tokens > 100000 maximum"}),
-      fauxAssistantMessage("summary of the conversation"),
-      fauxAssistantMessage("third answer"),
-    ]);
-    const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret",thinkingLevel:"off"};
-    const runtime=new LiteraAgentRuntime({sessions,book,loadConfig:async()=>config,loadStream:async()=>faux.streamSimple});
-    runtime.subscribe((event)=>{events.push(event.type);});
-    await runtime.openBook("book",new ArrayBuffer(1));
-    await runtime.switchSession("session-1");
-    await runtime.prompt("second question",{});
-    await runtime.prompt("third question",{});
-    expect(events).toContain("compaction_started");
-    expect(events).toContain("compaction_completed");
+    it("prunes old Book text without a model call when that is enough",async()=>{
+      const entries:PiSessionEntry[]=[
+        userEntry("u1",null,"explain chapter one"),
+        assistantEntry("c1","u1",[{type:"toolCall",id:"call1",name:"read_chapter",arguments:{chapterIndex:0}}]),
+        {type:"message",id:"r1",parentId:"c1",timestamp:now,message:{role:"toolResult",toolCallId:"call1",toolName:"read_chapter",content:[{type:"text",text:"CHAPTER-TEXT ".repeat(7_000)}],isError:false,timestamp:3}},
+        assistantEntry("a1","r1",[{type:"text",text:"chapter one is about whales"}]),
+        userEntry("u2","a1","and then?"),
+        assistantEntry("a2","u2",[{type:"text",text:"more whales"}]),
+      ];
+      const h=harness(entries,40_000);
+      h.faux.setResponses([fauxAssistantMessage("answer"),fauxAssistantMessage("second answer")]);
+      await h.start();
+      await h.runtime.prompt("question",{});
+      await h.runtime.prompt("another question",{});
+      expect(h.appended("context_prune")).toMatchObject([{throughEntryId:"a1"}]);
+      expect(h.appended("compaction")).toHaveLength(0);
+      expect(h.requests).not.toContain("summary");
+      expect(h.requests.at(-1)).not.toContain("CHAPTER-TEXT");
+      expect(h.requests.at(-1)).toContain("cleared to save context");
+      // The transcript still shows the full tool result.
+      expect(h.current.entries.find((entry)=>entry.id==="r1")).toBeDefined();
+    });
+
+    it("compacts and retries once when a request overflows the context window",async()=>{
+      const h=harness(history(20_000));
+      h.faux.setResponses([
+        fauxAssistantMessage("x",{stopReason:"error",errorMessage:"prompt is too long: 200000 tokens > 100000 maximum"}),
+        fauxAssistantMessage("summary of the conversation"),
+        fauxAssistantMessage("answer"),
+        fauxAssistantMessage("fourth answer"),
+      ]);
+      await h.start();
+      await h.runtime.prompt("third question",{});
+      expect(h.events.map((event)=>event.type)).toContain("retry_scheduled");
+      expect(h.events).toContainEqual(expect.objectContaining({type:"compaction_started",reason:"overflow"}));
+      expect(h.appended("compaction")).toHaveLength(1);
+      const messages=h.batches.flat().filter((entry)=>entry.type==="message").map((entry)=>entry.message as {role:string;content:unknown;stopReason?:string});
+      expect(messages.filter((message)=>message.role==="user").map((message)=>message.content)).toEqual(["third question"]);
+      expect(messages.filter((message)=>message.role==="assistant").map((message)=>message.stopReason)).toEqual(["stop"]);
+      const end=h.events.find((event)=>event.type==="prompt_end");
+      expect(end?.type==="prompt_end"&&end.messages?.filter((message)=>message.role==="notice")).toHaveLength(1);
+      // The compacted context does not retrigger compaction on the next turn.
+      await h.runtime.prompt("fourth question",{});
+      await h.runtime.settled();
+      expect(h.appended("compaction")).toHaveLength(1);
+    });
+
+    it("reports the overflow when compaction cannot recover it",async()=>{
+      const h=harness(history(20_000));
+      h.faux.setResponses([fauxAssistantMessage("x",{stopReason:"error",errorMessage:"prompt is too long: 200000 tokens > 100000 maximum"})]);
+      await h.start();
+      await h.runtime.prompt("third question",{});
+      expect(h.events).toContainEqual(expect.objectContaining({type:"compaction_failed",aborted:false}));
+      expect(h.appended("compaction")).toHaveLength(0);
+      const assistants=h.batches.flat().filter((entry)=>entry.type==="message"&&(entry.message as {role:string}).role==="assistant");
+      expect(assistants.map((entry)=>(entry.message as {stopReason:string}).stopReason)).toEqual(["error"]);
+    });
+
+    it("stops background compaction on abort without persisting it",async()=>{
+      const h=harness(history(20_000),40_000,{holdSummary:true});
+      h.faux.setResponses([fauxAssistantMessage("answer"),fauxAssistantMessage("summary of the conversation")]);
+      await h.start();
+      await h.runtime.prompt(text(20_000),{});
+      await vi.waitFor(()=>expect(h.requests.at(-1)).toBe("summary"));
+      h.runtime.abort();
+      await h.runtime.settled();
+      expect(h.appended("compaction")).toHaveLength(0);
+      expect(h.events).toContainEqual(expect.objectContaining({type:"compaction_failed",aborted:true}));
+    });
+
+    it("keeps the system prompt and persists the user once when compaction runs before the prompt",async()=>{
+      const current=session();const batches:PiSessionEntry[][]=[];const systemPrompts:Array<string|undefined>=[];
+      const long="a".repeat(20_000);
+      const usage=(totalTokens:number)=>({input:totalTokens,output:0,cacheRead:0,cacheWrite:0,totalTokens,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}});
+      const ids=["u1","a1","u2","a2","u3","a3"];
+      // The last assistant reports usage near the context window, so the
+      // pre-prompt compaction check fires before the new question is sent.
+      current.entries=ids.map((id,index)=>({type:"message",id,parentId:index?ids[index-1]:null,timestamp:now,message:index%2?{role:"assistant",content:[{type:"text",text:long}],usage:usage(index===5?95_000:0),stopReason:"stop",timestamp:Date.now()}:{role:"user",content:long,timestamp:index}}));
+      current.leafId="a3";
+      const sessions:SessionPort={create:async()=>current,list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,entries)=>{batches.push(entries);return entries[entries.length-1]?.id??null;}};
+      const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:1}),toc:async()=>[],readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:1,text:"chapter"}),search:async()=>[],close:()=>{}};
+      const faux=createFauxCore({tokensPerSecond:100_000});
+      faux.setResponses([fauxAssistantMessage("summary of the conversation"),fauxAssistantMessage("answer")]);
+      const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret",thinkingLevel:"off",contextWindow:100_000};
+      const runtime=new LiteraAgentRuntime({sessions,book,loadConfig:async()=>config,loadStream:async()=>((requestModel,context,options)=>{systemPrompts.push(getCurrentSystemPrompt(context.messages));return faux.streamSimple(requestModel,context,options);})});
+      await runtime.openBook("book",new ArrayBuffer(1));
+      await runtime.switchSession("session-1");
+      await runtime.prompt("fourth question",{});
+      expect(batches.flat().filter((entry)=>entry.type==="compaction")).toHaveLength(1);
+      // The prompt request after compaction still carries the Litera system prompt.
+      expect(systemPrompts.at(-1)).toBe(SYSTEM_PROMPT);
+      const users=batches.flat().filter((entry)=>entry.type==="message"&&(entry.message as {role?:string}).role==="user");
+      expect(users.map((entry)=>(entry.message as {content?:unknown}).content)).toEqual(["fourth question"]);
+    });
   });
 
   it("does not compact a short session",async()=>{
@@ -193,60 +233,6 @@ describe("LiteraAgentRuntime",()=>{
     await runtime.openBook("book",new ArrayBuffer(1));
     await runtime.prompt("question",{});
     expect(batches.flat().filter((entry)=>entry.type==="compaction")).toHaveLength(0);
-  });
-
-  it("swallows compaction failures without blocking the prompt",async()=>{
-    const current=session();const batches:PiSessionEntry[][]=[];const events:string[]=[];
-    const sessions:SessionPort={create:async()=>current,list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,entries)=>{batches.push(entries);return entries[entries.length-1]?.id??null;}};
-    const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:1}),toc:async()=>[],readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:1,text:"chapter"}),search:async()=>[],close:()=>{}};
-    const faux=createFauxCore({tokensPerSecond:10_000});
-    faux.setResponses([
-      fauxAssistantMessage("first answer"),
-      fauxAssistantMessage("x",{stopReason:"error",errorMessage:"prompt is too long: 200000 tokens > 100000 maximum"}),
-    ]);
-    const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret",thinkingLevel:"off"};
-    const runtime=new LiteraAgentRuntime({sessions,book,loadConfig:async()=>config,loadStream:async()=>faux.streamSimple});
-    runtime.subscribe((event)=>{events.push(event.type);});
-    await runtime.openBook("book",new ArrayBuffer(1));
-    await runtime.prompt("first question",{});
-    await runtime.prompt("second question",{});
-    // The summarization request has no queued response → compaction fails silently.
-    expect(batches.flat().filter((entry)=>entry.type==="compaction")).toHaveLength(0);
-    expect(events).toContain("prompt_end");
-    expect(events).not.toContain("compaction_started");
-    expect(events).not.toContain("compaction_completed");
-  });
-
-  it("does not compact again immediately after a compaction (debounce)",async()=>{
-    const current=session();const batches:PiSessionEntry[][]=[];
-    const long="a".repeat(20_000);
-    current.entries=[
-      {type:"message",id:"u1",parentId:null,timestamp:now,message:{role:"user",content:long,timestamp:1}},
-      {type:"message",id:"a1",parentId:"u1",timestamp:now,message:{role:"assistant",content:[{type:"text",text:long}],usage:{input:0,output:0,cacheRead:0,cacheWrite:0,totalTokens:0,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}},stopReason:"stop",timestamp:2}},
-      {type:"message",id:"u2",parentId:"a1",timestamp:now,message:{role:"user",content:long,timestamp:3}},
-      {type:"message",id:"a2",parentId:"u2",timestamp:now,message:{role:"assistant",content:[{type:"text",text:long}],usage:{input:0,output:0,cacheRead:0,cacheWrite:0,totalTokens:0,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}},stopReason:"stop",timestamp:4}},
-      {type:"message",id:"u3",parentId:"a2",timestamp:now,message:{role:"user",content:long,timestamp:5}},
-      {type:"message",id:"a3",parentId:"u3",timestamp:now,message:{role:"assistant",content:[{type:"text",text:long}],usage:{input:0,output:0,cacheRead:0,cacheWrite:0,totalTokens:0,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}},stopReason:"stop",timestamp:6}},
-    ];
-    current.leafId="a3";
-    const sessions:SessionPort={create:async()=>current,list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,entries)=>{batches.push(entries);return entries[entries.length-1]?.id??null;}};
-    const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:1}),toc:async()=>[],readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:1,text:"chapter"}),search:async()=>[],close:()=>{}};
-    const faux=createFauxCore({tokensPerSecond:10_000});
-    faux.setResponses([
-      fauxAssistantMessage("x",{stopReason:"error",errorMessage:"prompt is too long: 200000 tokens > 100000 maximum"}),
-      fauxAssistantMessage("summary of the conversation"),
-      fauxAssistantMessage("third answer"),
-      fauxAssistantMessage("fourth answer"),
-    ]);
-    const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret",thinkingLevel:"off"};
-    const runtime=new LiteraAgentRuntime({sessions,book,loadConfig:async()=>config,loadStream:async()=>faux.streamSimple});
-    await runtime.openBook("book",new ArrayBuffer(1));
-    await runtime.switchSession("session-1");
-    await runtime.prompt("second question",{});
-    await runtime.prompt("third question",{});
-    await runtime.prompt("fourth question",{});
-    // Only one compaction: the post-compaction prompt must not retrigger it.
-    expect(batches.flat().filter((entry)=>entry.type==="compaction")).toHaveLength(1);
   });
 
   it("reserves the prompt before async preflight so concurrent prompts cannot race",async()=>{

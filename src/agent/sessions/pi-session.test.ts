@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { activeBranch, branchLeafId, branchNavigation, contextBranch, convertPiContextToLlm, decodePiSession, piContextMessages, sessionConfig, sessionSummary, visibleMessageEntries, visibleMessages } from "./pi-session";
+import type { PiSessionEntry } from "./pi-session";
 
 const timestamp = "2026-08-14T00:00:00Z";
 const ts = (n: number) => new Date(Date.parse(timestamp) + n * 1000).toISOString();
@@ -496,5 +497,66 @@ describe("Pi session decoder", () => {
     const normalized = makeSession([{ type: "message", id: "a", parentId: null, timestamp, message: { role: "assistant", content: null } }], "a");
     expect((normalized.entries[0].message as { content: unknown }).content).toEqual([]);
     expect(() => makeSession([{ type: "message", id: "a", parentId: null, timestamp, message: { role: "toolResult", content: [], toolCallId: "call" } }], "a")).toThrow("Invalid Pi tool result");
+  });
+});
+
+describe("contextBranch pruning", () => {
+  const call = (id: string, parentId: string, callId: string, name: string, args: Record<string, unknown>) => ({ type: "message", id, parentId, timestamp, message: { role: "assistant", content: [{ type: "toolCall", id: callId, name, arguments: args }], timestamp: 1 } });
+  const result = (id: string, parentId: string, callId: string, name: string, text: string) => ({ type: "message", id, parentId, timestamp, message: { role: "toolResult", toolCallId: callId, toolName: name, content: [{ type: "text", text }], isError: false, timestamp: 1 } });
+  const prune = (id: string, parentId: string, throughEntryId: string) => ({ type: "context_prune", id, parentId, timestamp, throughEntryId });
+  const resultText = (item: PiSessionEntry) => ((item.message as { content: Array<{ text: string }> }).content[0].text);
+  const base = [
+    entry("u1", null, "user", "explain chapter 3"),
+    call("c1", "u1", "call1", "read_chapter", { chapterIndex: 3, part: 1 }),
+    result("r1", "c1", "call1", "read_chapter", "long chapter text"),
+    call("c2", "r1", "call2", "draw_mindmap", { title: "t" }),
+    result("r2", "c2", "call2", "draw_mindmap", "{\"ok\":true}"),
+    entry("a1", "r2", "assistant", "answer"),
+    entry("u2", "a1", "user", "and chapter 4?"),
+    call("c3", "u2", "call3", "read_chapter", { chapterIndex: 4 }),
+    result("r3", "c3", "call3", "read_chapter", "chapter four"),
+  ];
+
+  it("replaces Book tool results up to the prune with re-read placeholders, keeping the call pairing", () => {
+    const session = makeSession([...base, prune("p1", "r3", "a1")], "p1");
+    const projected = contextBranch(session);
+    const r1 = projected.find((item) => item.id === "r1")!;
+    expect(r1.pruned).toBe(true);
+    expect(r1.message).toMatchObject({ role: "toolResult", toolCallId: "call1", toolName: "read_chapter", isError: false });
+    expect(resultText(r1)).toBe("[Result of read_chapter(chapterIndex=3, part=1) was cleared to save context. Call read_chapter again if you need it.]");
+    // Non-Book tools and results after the prune point stay intact.
+    expect(resultText(projected.find((item) => item.id === "r2")!)).toBe("{\"ok\":true}");
+    expect(resultText(projected.find((item) => item.id === "r3")!)).toBe("chapter four");
+  });
+
+  it("applies only the latest prune and leaves the display branch untouched", () => {
+    const session = makeSession([...base, prune("p1", "r3", "u1"), prune("p2", "p1", "r3")], "p2");
+    const projected = contextBranch(session);
+    expect(projected.filter((item) => item.pruned).map((item) => item.id)).toEqual(["r1", "r3"]);
+    expect(resultText(activeBranch(session).find((item) => item.id === "r1")!)).toBe("long chapter text");
+    expect(visibleMessages(session).map((message) => message.role)).toEqual(["user", "assistant", "user", "assistant"]);
+  });
+
+  it("combines with a later compaction", () => {
+    const compaction = { type: "compaction", id: "cmp", parentId: "p1", timestamp, summary: "sum", firstKeptEntryId: "u2", tokensBefore: 1 };
+    const session = makeSession([...base, prune("p1", "r3", "r3"), compaction], "cmp");
+    const projected = contextBranch(session);
+    expect(projected.map((item) => item.id)).toEqual(["cmp", "u2", "c3", "r3", "p1"]);
+    expect(projected.find((item) => item.id === "r3")!.pruned).toBe(true);
+  });
+
+  it("does not apply a prune from another branch", () => {
+    const session = makeSession([...base, prune("p1", "r3", "r3"), entry("u2b", "a1", "user", "edited")], "u2b");
+    expect(contextBranch(session).some((item) => item.pruned)).toBe(false);
+  });
+
+  it("sends placeholders to the model", () => {
+    const session = makeSession([...base, prune("p1", "r3", "r3")], "p1");
+    const toolResults = convertPiContextToLlm(piContextMessages(session)).filter((message) => message.role === "toolResult");
+    expect(toolResults.map((message) => (message.content[0] as { text: string }).text)).toEqual([
+      expect.stringContaining("read_chapter(chapterIndex=3, part=1)"),
+      "{\"ok\":true}",
+      expect.stringContaining("read_chapter(chapterIndex=4)"),
+    ]);
   });
 });

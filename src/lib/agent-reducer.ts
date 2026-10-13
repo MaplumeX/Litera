@@ -19,7 +19,11 @@ export interface AgentState {
   messages: AgentMessage[];
   sessions: AgentSessionSummary[];
   error: AgentError | null;
-  compaction: { status: "compacting" | "compacted" } | null;
+  /**
+   * Context maintenance in progress (`recovering`: after a request overflowed,
+   * before the retry), or the last one failed (cleared by the next prompt).
+   */
+  compaction: { status: "compacting" | "recovering" | "failed" } | null;
   sessionListRequestId: string | null;
   /** Branch navigation per visible-message anchorId (empty when no forks). */
   branchNavigation: Record<string, AnchorBranchInfo>;
@@ -75,6 +79,10 @@ function matchesPrompt(
   return state.activeBookId === event.bookId
     && state.sessionId === event.sessionId
     && state.promptId === event.promptId;
+}
+
+function matchesSession(state: AgentState, event: { bookId: string; sessionId: string }): boolean {
+  return state.activeBookId === event.bookId && state.sessionId === event.sessionId;
 }
 
 function textContent(blocks: AssistantBlock[]): string {
@@ -204,11 +212,28 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
         }),
       };
     case "compaction_started":
-      return matchesPrompt(base, event) ? { ...base, compaction: { status: "compacting" } } : base;
+      return matchesSession(base, event)
+        ? { ...base, compaction: { status: event.reason === "overflow" ? "recovering" : "compacting" } }
+        : base;
     case "compaction_completed":
-      return matchesPrompt(base, event) ? { ...base, compaction: { status: "compacted" } } : base;
+      if (!matchesSession(base, event)) return base;
+      if (!base.promptId) return applyNavigation({ ...base, compaction: null, messages: event.messages }, event);
+      // During a prompt the transcript also holds the optimistic question and
+      // streamed state the projection lacks. The compaction entry sits at the
+      // persisted leaf, so its notice is the projection's last item: insert it
+      // at that position and keep the in-flight tail after it.
+      {
+        const noticeIndex = event.messages.length - 1;
+        const notice = event.messages[noticeIndex];
+        if (notice?.role !== "notice" || base.messages.length < noticeIndex) return { ...base, compaction: null };
+        return applyNavigation({
+          ...base,
+          compaction: null,
+          messages: [...base.messages.slice(0, noticeIndex), notice, ...base.messages.slice(noticeIndex)],
+        }, event);
+      }
     case "compaction_failed":
-      return matchesPrompt(base, event) ? { ...base, compaction: null } : base;
+      return matchesSession(base, event) ? { ...base, compaction: event.aborted ? null : { status: "failed" } } : base;
     case "retry_scheduled":
       // The retry restarts the whole turn: drop the failed attempt's streamed
       // bubble so the next attempt does not append onto it.
@@ -218,8 +243,8 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
     case "prompt_aborted":
       if (!matchesPrompt(base, event)) return base;
       {
-        // The notice item in the projection now carries the durable
-        // "compacted here" marker, so the transient chip is cleared.
+        // A compaction during the prompt shows up as a notice item in the
+        // projection, so the pending state is cleared.
         const next = { ...base, status: "bookReady" as const, promptId: null, compaction: null };
         // Streaming deltas already maintained messages; the runtime's full
         // projection replaces them (equal content) and refreshes navigation.
@@ -344,7 +369,13 @@ export function agentReducer(state: AgentState, action: AgentAction): AgentState
       return { ...state, sessionListRequestId: action.requestId };
     case "prompt_queued":
       if (state.activeBookId !== action.bookId) return state;
-      return { ...state, status: "prompting", promptId: action.promptId, error: null };
+      return {
+        ...state,
+        status: "prompting",
+        promptId: action.promptId,
+        error: null,
+        compaction: state.compaction?.status === "failed" ? null : state.compaction,
+      };
     case "prompt_queue_failed":
       if (state.promptId !== action.promptId) return state;
       return {

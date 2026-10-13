@@ -565,26 +565,31 @@ function rect(top: number, bottom: number): DOMRect {
   };
 }
 
-describe("ChatPanel compaction chip", () => {
-  it("renders a compacting chip with spinner text", () => {
+describe("ChatPanel compaction status", () => {
+  it("renders a pending divider with a spinner while compacting", () => {
     bridgeState = readyState({ compaction: { status: "compacting" } });
     const view = render(<ChatPanel currentChapterHref="OEBPS/ch1.xhtml" bookId="book-1" />);
-    expect(view.getByText("正在压缩上下文…")).toBeTruthy();
-    expect(view.container.querySelector(".animate-spin")).toBeTruthy();
+    expect(within(view.getByTestId("compaction-status")).getByText("正在压缩上下文…")).toBeTruthy();
+    expect(view.getByTestId("compaction-status").querySelector(".animate-spin")).toBeTruthy();
   });
 
-  it("renders a compacted chip without spinner", () => {
-    bridgeState = readyState({ compaction: { status: "compacted" } });
+  it("says why the answer restarts when a request overflowed", () => {
+    bridgeState = readyState({ compaction: { status: "recovering" } });
     const view = render(<ChatPanel currentChapterHref="OEBPS/ch1.xhtml" bookId="book-1" />);
-    expect(view.getByText("上下文已压缩")).toBeTruthy();
-    expect(view.container.querySelector(".animate-spin")).toBeNull();
+    expect(within(view.getByTestId("compaction-status")).getByText("上下文超出限制，正在压缩后重新回答…")).toBeTruthy();
   });
 
-  it("does not render a chip when compaction is null", () => {
+  it("renders a failure line without a spinner", () => {
+    bridgeState = readyState({ compaction: { status: "failed" } });
+    const view = render(<ChatPanel currentChapterHref="OEBPS/ch1.xhtml" bookId="book-1" />);
+    expect(view.getByText("上下文压缩失败，下次回答后会重试")).toBeTruthy();
+    expect(view.getByTestId("compaction-status").querySelector(".animate-spin")).toBeNull();
+  });
+
+  it("renders nothing when compaction is null", () => {
     bridgeState = readyState({ compaction: null });
     const view = render(<ChatPanel currentChapterHref="OEBPS/ch1.xhtml" bookId="book-1" />);
-    expect(view.queryByText("正在压缩上下文…")).toBeNull();
-    expect(view.queryByText("上下文已压缩")).toBeNull();
+    expect(view.queryByTestId("compaction-status")).toBeNull();
   });
 });
 
@@ -618,6 +623,10 @@ describe("ChatPanel compaction notice", () => {
     });
     const view = render(<ChatPanel currentChapterHref="OEBPS/ch1.xhtml" bookId="book-1" />);
     fireEvent.click(within(view.getByTestId("compaction-notice")).getByRole("button"));
-    expect(view.getByTestId("compaction-notice-summary").textContent).toContain("保留要点");
+    const summary = view.getByTestId("compaction-notice-summary");
+    expect(summary.textContent).toContain("保留要点");
+    // The summary renders as Markdown, not as raw source.
+    expect(within(summary).getByRole("heading", { name: "Goal" })).toBeTruthy();
+    expect(summary.textContent).not.toContain("##");
   });
 });

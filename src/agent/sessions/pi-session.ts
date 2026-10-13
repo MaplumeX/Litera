@@ -141,24 +141,66 @@ export function activeBranch(session: DecodedPiSession): PiSessionEntry[] {
 }
 
 /**
+ * Tools whose results are Book content the model can fetch again, so Pruning
+ * may clear them from the model context.
+ */
+export const PRUNABLE_TOOLS: ReadonlySet<string> = new Set(["read_chapter", "search_in_book", "get_toc"]);
+
+/** A toolResult entry of a prunable tool that the projection has not cleared yet. */
+export function isPrunableEntry(entry: PiSessionEntry): boolean {
+  if (entry.type !== "message" || entry.pruned === true) return false;
+  const message = object(entry.message);
+  return message?.role === "toolResult" && PRUNABLE_TOOLS.has(string(message.toolName) ?? "");
+}
+
+function prunedPlaceholder(toolName: string, args: Record<string, unknown> | undefined): string {
+  const call = `${toolName}(${Object.entries(args ?? {}).map(([key, value]) => `${key}=${JSON.stringify(value)}`).join(", ")})`;
+  return `[Result of ${call} was cleared to save context. Call ${toolName} again if you need it.]`;
+}
+
+/**
  * Model-context projection of the active branch: the entries the LLM sees.
  *
  * Applies the branch's latest compaction, replacing everything before its
- * `firstKeptEntryId` with the compaction summary entry. Use this only for
- * model-facing concerns (context messages, snapshot/model-change bookkeeping,
- * compaction cut points); UI and session-level logic use `activeBranch`.
+ * `firstKeptEntryId` with the compaction summary entry, then the latest
+ * `context_prune`, replacing prunable tool results up to its `throughEntryId`
+ * with placeholders (marked `pruned: true`; the tool call pairing is kept).
+ * Use this only for model-facing concerns (context messages, snapshot/model-
+ * change bookkeeping, maintenance cut points); UI and session-level logic use
+ * `activeBranch`.
  */
 export function contextBranch(session: DecodedPiSession): PiSessionEntry[] {
   const path = activeBranch(session);
-  let latestCompaction: PiSessionEntry | undefined;
-  for (let index = path.length - 1; index >= 0; index -= 1) {
-    if (path[index].type === "compaction") { latestCompaction = path[index]; break; }
+  const latestCompaction = [...path].reverse().find((entry) => entry.type === "compaction");
+  // A prune before the latest compaction still applies to the entries the
+  // compaction kept.
+  const latestPrune = [...path].reverse().find((entry) => entry.type === "context_prune");
+  let projected = path;
+  if (latestCompaction) {
+    const compactIndex = path.indexOf(latestCompaction);
+    const firstKeptId = string(latestCompaction.firstKeptEntryId);
+    const keptIndex = firstKeptId ? path.findIndex((entry) => entry.id === firstKeptId) : -1;
+    projected = [latestCompaction, ...(keptIndex >= 0 ? path.slice(keptIndex, compactIndex) : []), ...path.slice(compactIndex + 1)];
   }
-  if (!latestCompaction) return path;
-  const compactIndex = path.indexOf(latestCompaction);
-  const firstKeptId = string(latestCompaction.firstKeptEntryId);
-  const keptIndex = firstKeptId ? path.findIndex((entry) => entry.id === firstKeptId) : -1;
-  return [latestCompaction, ...(keptIndex >= 0 ? path.slice(keptIndex, compactIndex) : []), ...path.slice(compactIndex + 1)];
+  const throughIndex = latestPrune ? path.findIndex((entry) => entry.id === latestPrune.throughEntryId) : -1;
+  if (throughIndex < 0) return projected;
+  const prunedIds = new Set(path.slice(0, throughIndex + 1).filter(isPrunableEntry).map((entry) => entry.id));
+  if (prunedIds.size === 0) return projected;
+  const callArgs = new Map<string, Record<string, unknown>>();
+  for (const entry of path) {
+    const message = object(entry.message);
+    if (entry.type !== "message" || message?.role !== "assistant" || !Array.isArray(message.content)) continue;
+    for (const part of message.content) {
+      const block = object(part);
+      if (block?.type === "toolCall" && typeof block.id === "string") callArgs.set(block.id, object(block.arguments) ?? {});
+    }
+  }
+  return projected.map((entry) => {
+    if (!prunedIds.has(entry.id)) return entry;
+    const message = object(entry.message)!;
+    const text = prunedPlaceholder(string(message.toolName) ?? "tool", callArgs.get(string(message.toolCallId) ?? ""));
+    return { ...entry, pruned: true, message: { ...message, content: [{ type: "text", text }] } };
+  });
 }
 
 export function piContextMessages(session: DecodedPiSession): PiAgentMessage[] {

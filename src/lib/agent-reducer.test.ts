@@ -135,33 +135,63 @@ describe("agentReducer", () => {
     expect(state.sessions[0].title).toBe("Title");
   });
 
-  it("sets compaction to compacting on compaction_started", () => {
-    let state = createAgentState("book-a");
-    state = reduce(state, { version: 1, type: "prompt_started", bookId: "book-a", sessionId: "s", promptId: "p" });
-    state = reduce(state, { version: 2, type: "compaction_started", bookId: "book-a", sessionId: "s", promptId: "p" });
+  const compactionEvent = { bookId: "book-a", sessionId: "s" } as const;
+  const notice = { role: "notice", summary: "sum", tokensBefore: 42 } as const;
+  const settledSession = () => reduce(createAgentState("book-a"), { version: 1, type: "session_switched", bookId: "book-a", sessionId: "s", messages: [{ role: "user", content: "one" }] });
+
+  it("tracks background compaction after the prompt has ended", () => {
+    let state = settledSession();
+    state = reduce(state, { version: 2, type: "compaction_started", ...compactionEvent, reason: "budget" });
     expect(state.compaction).toEqual({ status: "compacting" });
+    state = reduce(state, { version: 3, type: "compaction_completed", ...compactionEvent, messages: [{ role: "user", content: "one" }, notice], anchors: ["u1", "c1"], navigation: {} });
+    expect(state.compaction).toBeNull();
+    expect(state.messages.map((message) => message.role)).toEqual(["user", "notice"]);
+    expect(state.branchAnchors).toEqual(["u1", "c1"]);
   });
 
-  it("sets compaction to compacted on compaction_completed", () => {
-    let state = createAgentState("book-a");
-    state = reduce(state, { version: 1, type: "prompt_started", bookId: "book-a", sessionId: "s", promptId: "p" });
-    state = reduce(state, { version: 2, type: "compaction_started", bookId: "book-a", sessionId: "s", promptId: "p" });
-    state = reduce(state, { version: 3, type: "compaction_completed", bookId: "book-a", sessionId: "s", promptId: "p" });
-    expect(state.compaction).toEqual({ status: "compacted" });
+  it("inserts the notice before the queued question when compaction completes before the prompt", () => {
+    let state = settledSession();
+    state = agentReducer(state, { type: "prompt_queued", bookId: "book-a", promptId: "p" });
+    state = agentReducer(state, { type: "user_message", message: { role: "user", content: "two" } });
+    state = reduce(state, { version: 2, type: "compaction_started", ...compactionEvent, reason: "budget" });
+    state = reduce(state, { version: 3, type: "compaction_completed", ...compactionEvent, messages: [{ role: "user", content: "one" }, notice], anchors: ["u1", "c1"], navigation: {} });
+    expect(state.compaction).toBeNull();
+    expect(state.messages).toEqual([{ role: "user", content: "one" }, notice, { role: "user", content: "two" }]);
   });
 
-  it("clears compaction on compaction_failed", () => {
-    let state = createAgentState("book-a");
-    state = reduce(state, { version: 1, type: "prompt_started", bookId: "book-a", sessionId: "s", promptId: "p" });
-    state = reduce(state, { version: 2, type: "compaction_started", bookId: "book-a", sessionId: "s", promptId: "p" });
-    state = reduce(state, { version: 3, type: "compaction_failed", bookId: "book-a", sessionId: "s", promptId: "p" });
+  it("explains an overflow retry and keeps the notice when the failed attempt is dropped", () => {
+    let state = settledSession();
+    state = reduce(state, { version: 2, type: "prompt_started", bookId: "book-a", sessionId: "s", promptId: "p" });
+    state = agentReducer(state, { type: "user_message", message: { role: "user", content: "two" } });
+    state = reduce(state, { version: 3, type: "text_delta", bookId: "book-a", sessionId: "s", promptId: "p", delta: "partial" });
+    state = reduce(state, { version: 4, type: "compaction_started", ...compactionEvent, reason: "overflow" });
+    expect(state.compaction).toEqual({ status: "recovering" });
+    state = reduce(state, { version: 5, type: "compaction_completed", ...compactionEvent, messages: [{ role: "user", content: "one" }, { role: "user", content: "two" }, notice], anchors: [], navigation: {} });
+    expect(state.messages.map((message) => message.role)).toEqual(["user", "user", "notice", "assistant"]);
+    state = reduce(state, { version: 6, type: "retry_scheduled", bookId: "book-a", sessionId: "s", promptId: "p", attempt: 1, maxAttempts: 1, delayMs: 0 });
+    expect(state.messages.map((message) => message.role)).toEqual(["user", "user", "notice"]);
+  });
+
+  it("shows a failed compaction until the next prompt, and hides an aborted one", () => {
+    let state = settledSession();
+    state = reduce(state, { version: 2, type: "compaction_failed", ...compactionEvent, aborted: false });
+    expect(state.compaction).toEqual({ status: "failed" });
+    state = agentReducer(state, { type: "prompt_queued", bookId: "book-a", promptId: "p" });
+    expect(state.compaction).toBeNull();
+    state = reduce(state, { version: 3, type: "compaction_failed", ...compactionEvent, aborted: true });
+    expect(state.compaction).toBeNull();
+  });
+
+  it("ignores compaction events of another session", () => {
+    let state = settledSession();
+    state = reduce(state, { version: 2, type: "compaction_started", bookId: "book-a", sessionId: "other", reason: "budget" });
     expect(state.compaction).toBeNull();
   });
 
   it("clears compaction on prompt_end", () => {
     let state = createAgentState("book-a");
     state = reduce(state, { version: 1, type: "prompt_started", bookId: "book-a", sessionId: "s", promptId: "p" });
-    state = reduce(state, { version: 2, type: "compaction_completed", bookId: "book-a", sessionId: "s", promptId: "p" });
+    state = reduce(state, { version: 2, type: "compaction_started", ...compactionEvent, reason: "budget" });
     state = reduce(state, { version: 3, type: "prompt_end", bookId: "book-a", sessionId: "s", promptId: "p" });
     expect(state.compaction).toBeNull();
   });
@@ -187,7 +217,7 @@ describe("agentReducer", () => {
   it("clears compaction on session_switched", () => {
     let state = createAgentState("book-a");
     state = reduce(state, { version: 1, type: "prompt_started", bookId: "book-a", sessionId: "s", promptId: "p" });
-    state = reduce(state, { version: 2, type: "compaction_completed", bookId: "book-a", sessionId: "s", promptId: "p" });
+    state = reduce(state, { version: 2, type: "compaction_started", ...compactionEvent, reason: "budget" });
     state = reduce(state, { version: 3, type: "session_switched", bookId: "book-a", sessionId: "s2", messages: [] });
     expect(state.compaction).toBeNull();
   });
@@ -195,7 +225,7 @@ describe("agentReducer", () => {
   it("clears compaction on session_rewound", () => {
     let state = createAgentState("book-a");
     state = reduce(state, { version: 1, type: "prompt_started", bookId: "book-a", sessionId: "s", promptId: "p" });
-    state = reduce(state, { version: 2, type: "compaction_started", bookId: "book-a", sessionId: "s", promptId: "p" });
+    state = reduce(state, { version: 2, type: "compaction_started", ...compactionEvent, reason: "budget" });
     state = reduce(state, { version: 3, type: "session_rewound", bookId: "book-a", sessionId: "s", promptId: "p", messages: [] });
     expect(state.compaction).toBeNull();
   });
