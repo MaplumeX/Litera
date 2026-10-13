@@ -4,7 +4,7 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
-import { Bot, RefreshCw } from "lucide-react";
+import { AlertCircle, Bot, RefreshCw } from "lucide-react";
 import type { AssistantBlock, AssistantChatMessage } from "@/types/agent";
 import { ToolCallCard } from "./ToolCallCard";
 import { AnswerProcess } from "./AnswerProcess";
@@ -206,6 +206,12 @@ export const AssistantMessage = memo(function AssistantMessage({
         {!streaming && message.stopReason === "aborted" && (
           <div className="flex h-6 items-center">
             <span className="text-[10px] text-muted-foreground/70">{t("chat.stopped")}</span>
+          </div>
+        )}
+        {!streaming && message.stopReason === "error" && (
+          <div role="alert" className="flex items-start gap-1.5 text-xs text-destructive">
+            <AlertCircle className="mt-px h-3.5 w-3.5 shrink-0" />
+            <span>{message.errorMessage ?? t("chat.requestFailed")}</span>
           </div>
         )}
       </div>

@@ -353,6 +353,7 @@ export function visibleMessages(session: DecodedPiSession): UiAgentMessage[] {
       continue;
     }
     const stopReason = message.stopReason === "aborted" || message.stopReason === "error" ? message.stopReason : undefined;
+    const errorMessage = stopReason === "error" ? string(message.errorMessage) ?? undefined : undefined;
     const blocks: AssistantBlock[] = Array.isArray(message.content)
       ? message.content.flatMap((part): AssistantBlock[] => {
           const block = object(part);
@@ -390,8 +391,10 @@ export function visibleMessages(session: DecodedPiSession): UiAgentMessage[] {
       // The bubble's terminal state is the run's last persisted entry.
       if (stopReason) last.stopReason = stopReason;
       else delete last.stopReason;
+      if (errorMessage) last.errorMessage = errorMessage;
+      else delete last.errorMessage;
     } else {
-      output.push({ role: "assistant", content: textBlocksContent(blocks), blocks, ...(stopReason ? { stopReason } : {}) });
+      output.push({ role: "assistant", content: textBlocksContent(blocks), blocks, ...(stopReason ? { stopReason } : {}), ...(errorMessage ? { errorMessage } : {}) });
       blocks.forEach((block, blockIndex) => {
         if (block.type === "toolCall") {
           toolOwners.set(block.toolCall.toolCallId, { messageIndex: output.length - 1, blockIndex });

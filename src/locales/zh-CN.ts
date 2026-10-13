@@ -346,6 +346,7 @@ export const zhCN = {
   "chat.branchNext": "切换到下一个分支",
   "chat.regenerate": "重新生成",
   "chat.stopped": "已停止",
+  "chat.requestFailed": "模型请求失败",
 
   "agent.title": "LLM 设置",
   "agent.description": "配置 LLM 供应商、API Key 与模型。",

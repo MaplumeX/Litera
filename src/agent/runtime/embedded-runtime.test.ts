@@ -498,13 +498,13 @@ describe("LiteraAgentRuntime",()=>{
   });
 
   it("does not retry a deterministic 401 auth failure",async()=>{
-    const current=session();const events:string[]=[];
-    const sessions:SessionPort={create:async()=>current,list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,entries)=>entries.at(-1)?.id??null};
+    const current=session();const events:string[]=[];const batches:PiSessionEntry[][]=[];const ends:AgentEvent[]=[];
+    const sessions:SessionPort={create:async()=>current,list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,entries)=>{batches.push(entries);return entries.at(-1)?.id??null;}};
     const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:1}),toc:async()=>[],readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:1,text:"chapter"}),search:async()=>[],close:()=>{}};
     const faux=createFauxCore({tokensPerSecond:10_000});faux.setResponses([fauxAssistantMessage("x",{stopReason:"error",errorMessage:"401: unauthorized, invalid api key"}),fauxAssistantMessage("never reached")]);
     const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret",thinkingLevel:"off"};
     const runtime=new LiteraAgentRuntime({sessions,book,loadConfig:async()=>config,loadStream:async()=>faux.streamSimple});
-    runtime.subscribe((event)=>{events.push(event.type);});
+    runtime.subscribe((event)=>{events.push(event.type);ends.push(event);});
     await runtime.openBook("book",new ArrayBuffer(1));
     vi.useFakeTimers();
     const prompt=runtime.prompt("question",{},"prompt-auth");
@@ -513,6 +513,12 @@ describe("LiteraAgentRuntime",()=>{
     vi.useRealTimers();
     expect(events).not.toContain("retry_scheduled");
     expect(events).toContain("prompt_end");
+    // The classified reason is persisted and surfaced on the final message; the raw provider text never is.
+    const reason="API Key 无效或无权限，请检查模型配置";
+    const persisted=batches.flat().filter((entry)=>entry.type==="message").map((entry)=>entry.message as {stopReason?:string;errorMessage?:string});
+    expect(persisted.at(-1)).toMatchObject({stopReason:"error",errorMessage:reason});
+    const end=ends.find((event)=>event.type==="prompt_end");
+    expect(end?.type==="prompt_end"&&end.messages.at(-1)).toMatchObject({role:"assistant",stopReason:"error",errorMessage:reason});
   });
 
   it("persists a draw_mindmap receipt and the intact tool-call params",async()=>{
