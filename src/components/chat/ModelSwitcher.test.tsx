@@ -109,6 +109,15 @@ describe("ModelSwitcher", () => {
     expect(view.queryByRole("listbox")).toBeNull();
   });
 
+  it("opens provider config from the popover footer and closes the list", async () => {
+    const onOpenConfig = vi.fn();
+    const { view } = renderSwitcher({ onOpenConfig });
+    await openList(view);
+    fireEvent.click(view.getByRole("button", { name: "管理模型与服务商…" }));
+    expect(onOpenConfig).toHaveBeenCalledTimes(1);
+    expect(view.queryByRole("listbox")).toBeNull();
+  });
+
   it("disables the trigger while streaming", () => {
     const { view } = renderSwitcher({ isStreaming: true });
     expect((view.getByRole("button", { name: "模型" }) as HTMLButtonElement).disabled).toBe(true);

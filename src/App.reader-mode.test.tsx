@@ -805,6 +805,6 @@ describe("reader TTS chrome", () => {
     const header = screen.container.querySelector("header")!;
     expect(within(header).getByRole("button", { name: "会话列表" })).toBeTruthy();
     expect(screen.queryByTestId("chat-panel-header")).toBeNull();
-    expect(screen.getByRole("button", { name: "设置" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "模型" })).toBeTruthy();
   });
 });

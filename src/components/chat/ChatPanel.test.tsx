@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createAgentState, type AgentState } from "@/lib/agent-reducer";
 
@@ -85,6 +85,15 @@ function openSessionList() {
   return view;
 }
 
+/** Opens the first session's ⋯ menu and picks an item by name. */
+async function chooseSessionAction(view: ReturnType<typeof render>, name: string) {
+  fireEvent.keyDown(view.getAllByRole("button", { name: "会话操作" })[0], { key: "Enter" });
+  const item = await waitFor(() => view.getByRole("menuitem", { name }));
+  act(() => {
+    item.click();
+  });
+}
+
 async function clickNewSession(view: ReturnType<typeof render>) {
   fireEvent.click(view.getByRole("button", { name: "新建会话" }));
   await act(async () => {
@@ -140,18 +149,21 @@ describe("ChatPanel session layouts", () => {
     // The reader titlebar names the book and toggles the rail: no panel header.
     expect(view.queryByTestId("chat-panel-header")).toBeNull();
     expect(view.queryByText("会话列表")).toBeNull();
-    expect(view.getByRole("button", { name: "设置" })).toBeTruthy();
+    expect(view.getByRole("button", { name: "模型" })).toBeTruthy();
   });
 
-  it("keeps the overlay list in docked variant", () => {
+  it("opens the session list as a popover from the input row in docked variant", () => {
     const view = openSessionList();
-    expect(view.getByRole("button", { name: "关闭" })).toBeTruthy();
+    // Dismissed from where it opens, so it needs no close button.
+    expect(view.queryByRole("button", { name: "关闭" })).toBeNull();
     expect(view.getByRole("button", { name: "新建会话" })).toBeTruthy();
-    // No header row: the session and settings buttons sit in the input row.
+    // No header row: the session button and model switcher sit in the input row.
     expect(view.queryByTestId("chat-panel-header")).toBeNull();
     expect(view.queryByText("已就绪")).toBeNull();
-    expect(view.getByRole("button", { name: "会话列表" }).getAttribute("aria-pressed")).toBe("true");
-    expect(view.getByRole("button", { name: "设置" })).toBeTruthy();
+    expect(view.getByRole("button", { name: "会话列表" }).getAttribute("aria-expanded")).toBe("true");
+    expect(view.getByRole("button", { name: "模型" })).toBeTruthy();
+    // Provider setup lives in the model switcher, not as a toolbar button.
+    expect(view.queryByRole("button", { name: "设置" })).toBeNull();
   });
 
   it("does not hide the message column when the rail collapses", () => {
@@ -184,7 +196,7 @@ describe("ChatPanel session layouts", () => {
     });
     expect(switchSession).toHaveBeenCalledWith("session-2");
 
-    fireEvent.click(view.getAllByRole("button", { name: "重命名" })[0]);
+    await chooseSessionAction(view, "重命名");
     fireEvent.change(view.getByDisplayValue("新会话"), { target: { value: "新标题" } });
     fireEvent.keyDown(view.getByDisplayValue("新标题"), { key: "Enter" });
     await act(async () => {
@@ -192,9 +204,13 @@ describe("ChatPanel session layouts", () => {
     });
     expect(renameSession).toHaveBeenCalledWith("session-1", "新标题");
 
-    fireEvent.click(view.getAllByText("删除")[0]);
+    await chooseSessionAction(view, "删除");
+    // Deletion is permanent, so it waits for confirmation.
+    const confirm = await waitFor(() => view.getByRole("alertdialog"));
+    expect(within(confirm).getByText("删除「新会话」？")).toBeTruthy();
+    expect(deleteSession).not.toHaveBeenCalled();
     await act(async () => {
-      await Promise.resolve();
+      within(confirm).getByRole("button", { name: "删除" }).click();
     });
     expect(deleteSession).toHaveBeenCalledWith("session-1");
   });
@@ -209,7 +225,7 @@ describe("ChatPanel session layouts", () => {
       <ChatPanel variant="workspace" currentChapterHref="OEBPS/ch1.xhtml" bookId="book-1" />,
     );
 
-    fireEvent.click(view.getAllByRole("button", { name: "重命名" })[0]);
+    await chooseSessionAction(view, "重命名");
     const input = view.getByDisplayValue("新会话");
     fireEvent.change(input, { target: { value: "失焦保存" } });
     fireEvent.blur(input);
@@ -220,7 +236,7 @@ describe("ChatPanel session layouts", () => {
     expect(view.queryByDisplayValue("失焦保存")).toBeNull();
 
     renameSession.mockClear();
-    fireEvent.click(view.getAllByRole("button", { name: "重命名" })[0]);
+    await chooseSessionAction(view, "重命名");
     const emptyInput = view.getByDisplayValue("新会话");
     fireEvent.change(emptyInput, { target: { value: "   " } });
     fireEvent.blur(emptyInput);
@@ -241,7 +257,7 @@ describe("ChatPanel session layouts", () => {
       <ChatPanel variant="workspace" currentChapterHref="OEBPS/ch1.xhtml" bookId="book-1" />,
     );
 
-    fireEvent.click(view.getAllByRole("button", { name: "重命名" })[0]);
+    await chooseSessionAction(view, "重命名");
     const input = view.getByDisplayValue("新会话");
     fireEvent.change(input, { target: { value: "不保存的标题" } });
     fireEvent.keyDown(input, { key: "Escape" });
@@ -265,7 +281,7 @@ describe("ChatPanel session layouts", () => {
 
     // First edit: commit via Enter with an empty title (cancels, input unmounts
     // without blur consuming the committed flag).
-    fireEvent.click(view.getAllByRole("button", { name: "重命名" })[0]);
+    await chooseSessionAction(view, "重命名");
     const emptyInput = view.getByDisplayValue("新会话");
     fireEvent.change(emptyInput, { target: { value: "" } });
     fireEvent.keyDown(emptyInput, { key: "Enter" });
@@ -276,7 +292,7 @@ describe("ChatPanel session layouts", () => {
 
     // Second edit: blur-save must still work.
     renameSession.mockClear();
-    fireEvent.click(view.getAllByRole("button", { name: "重命名" })[0]);
+    await chooseSessionAction(view, "重命名");
     const input = view.getByDisplayValue("新会话");
     fireEvent.change(input, { target: { value: "第二次失焦" } });
     fireEvent.blur(input);
@@ -284,6 +300,36 @@ describe("ChatPanel session layouts", () => {
       await Promise.resolve();
     });
     expect(renameSession).toHaveBeenCalledWith("session-1", "第二次失焦");
+  });
+
+  it("closes the docked popover after switching sessions", async () => {
+    bridgeState = readyState({
+      sessions: [
+        { id: "session-1", title: "新会话", createdAt: "1", updatedAt: "1" },
+        { id: "session-2", title: "另一会话", createdAt: "2", updatedAt: "2" },
+      ],
+    });
+    const view = openSessionList();
+    fireEvent.click(view.getByRole("button", { name: /另一会话/ }));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(switchSession).toHaveBeenCalledWith("session-2");
+    expect(view.queryByRole("button", { name: "新建会话" })).toBeNull();
+  });
+
+  it("keeps the session when deletion is cancelled", async () => {
+    bridgeState = readyState({
+      sessions: [{ id: "session-1", title: "新会话", createdAt: "1", updatedAt: "1" }],
+    });
+    const view = renderWorkspace();
+    await chooseSessionAction(view, "删除");
+    const confirm = await waitFor(() => view.getByRole("alertdialog"));
+    act(() => {
+      within(confirm).getByRole("button", { name: "取消" }).click();
+    });
+    await waitFor(() => expect(view.queryByRole("alertdialog")).toBeNull());
+    expect(deleteSession).not.toHaveBeenCalled();
   });
 
   it("creates a session from the workspace rail without closing it", async () => {
@@ -309,7 +355,7 @@ describe("ChatPanel session layouts", () => {
       <ChatPanel variant="workspace" currentChapterHref="OEBPS/ch1.xhtml" bookId="book-1" />,
     );
 
-    fireEvent.click(view.getAllByRole("button", { name: "会话设置" })[0]);
+    await chooseSessionAction(view, "会话设置");
     expect(view.getByRole("dialog")).toBeTruthy();
     const dialog = view.getByRole("dialog");
 

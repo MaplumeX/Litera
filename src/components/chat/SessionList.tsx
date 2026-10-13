@@ -1,10 +1,32 @@
-import { useEffect, useRef } from "react";
-import { Pencil, Plus, Settings, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { MoreHorizontal, Pencil, Plus, Settings, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import type { AgentSessionSummary } from "@/types/agent";
 import { useT } from "@/lib/i18n";
-import { formatSessionTime } from "@/lib/session-time";
+import {
+  SESSION_TIME_GROUPS,
+  formatSessionTime,
+  sessionTimeGroup,
+  type SessionTimeGroup,
+} from "@/lib/session-time";
 
 interface SessionListProps {
   sessions: AgentSessionSummary[];
@@ -12,8 +34,7 @@ interface SessionListProps {
   isStreaming: boolean;
   editingSessionId: string | null;
   editingTitle: string;
-  layout?: "overlay" | "rail";
-  onClose?: () => void;
+  layout?: "popover" | "rail";
   onNewSession: () => void;
   onSwitchSession: (id: string) => void;
   onStartRename: (id: string, title: string) => void;
@@ -24,14 +45,29 @@ interface SessionListProps {
   onOpenSettings: (session: AgentSessionSummary) => void;
 }
 
+/** Buckets sessions under time headings, keeping their order within each. */
+function groupSessions(sessions: AgentSessionSummary[]) {
+  const now = new Date();
+  const buckets = new Map<SessionTimeGroup, AgentSessionSummary[]>();
+  for (const session of sessions) {
+    const group = sessionTimeGroup(session.updatedAt, now);
+    const bucket = buckets.get(group);
+    if (bucket) bucket.push(session);
+    else buckets.set(group, [session]);
+  }
+  return SESSION_TIME_GROUPS.flatMap((group) => {
+    const items = buckets.get(group);
+    return items ? [{ group, items }] : [];
+  });
+}
+
 export function SessionList({
   sessions,
   activeSessionId,
   isStreaming,
   editingSessionId,
   editingTitle,
-  layout = "overlay",
-  onClose,
+  layout = "popover",
   onNewSession,
   onSwitchSession,
   onStartRename,
@@ -43,6 +79,7 @@ export function SessionList({
 }: SessionListProps) {
   const { t, locale } = useT();
   const isRail = layout === "rail";
+  const [pendingDelete, setPendingDelete] = useState<AgentSessionSummary | null>(null);
   // Marks Enter/Esc as already committed so the following blur does not save again.
   const renameCommittedRef = useRef(false);
   // The input unmounts on Enter/Esc commit (React does not fire blur on unmount),
@@ -51,131 +88,200 @@ export function SessionList({
   useEffect(() => {
     renameCommittedRef.current = false;
   }, [editingSessionId]);
+
   return (
     <div
       className={
         isRail
           ? // Set apart from the conversation by tone, like the library sidebar.
             "flex h-full min-h-0 w-[240px] shrink-0 flex-col bg-sidebar"
-          : "absolute inset-x-0 top-[37px] bottom-0 z-10 flex flex-col bg-card"
+          : "flex max-h-[min(60vh,28rem)] min-h-0 flex-col"
       }
     >
       {/* The rail sits under the window titlebar, which already holds its
-          toggle; only the overlay needs a title and a close button. */}
-      {!isRail && (
-        <div className="flex items-center justify-between border-b px-3 py-2">
-          <span className="text-sm font-semibold">{t("chat.sessions")}</span>
+          toggle, so it leads with the new-session action alone; the popover
+          names itself and keeps that action in its title row. */}
+      {isRail ? (
+        <div className="p-2 pb-1">
           <Button
             size="sm"
             variant="ghost"
-            className="h-7 px-2 text-xs"
-            onClick={onClose}
-            aria-label={t("chat.close")}
+            className="w-full justify-start font-normal text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground"
+            onClick={onNewSession}
+            disabled={isStreaming}
           >
-            <X />
+            <Plus />
+            {t("chat.newSession")}
+          </Button>
+        </div>
+      ) : (
+        <div className="flex items-center justify-between border-b py-1.5 pr-1.5 pl-3">
+          <span className="text-xs font-medium text-muted-foreground">{t("chat.sessions")}</span>
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            className="text-muted-foreground hover:text-foreground"
+            onClick={onNewSession}
+            disabled={isStreaming}
+            aria-label={t("chat.newSession")}
+            title={t("chat.newSession")}
+          >
+            <Plus />
           </Button>
         </div>
       )}
-      <div className="flex-1 space-y-1 overflow-y-auto p-2">
-        <Button
-          size="sm"
-          variant="ghost"
-          className="w-full justify-start font-normal text-muted-foreground hover:text-foreground"
-          onClick={onNewSession}
-          disabled={isStreaming}
-        >
-          <Plus />
-          {t("chat.newSession")}
-        </Button>
+      <div className={cn("min-h-0 flex-1 overflow-y-auto p-1.5", isRail && "pt-0")}>
         {sessions.length === 0 && (
           <p className="px-2 py-4 text-center text-xs text-muted-foreground">
             {t("chat.noSessions")}
           </p>
         )}
-        {sessions.map((session) => (
-          <div
-            key={session.id}
-            className={cn(
-              "group flex items-center gap-1 rounded-md px-2 py-1.5 text-sm",
-              // The rail sits on the sidebar tone, the overlay on the card.
-              activeSessionId === session.id
-                ? isRail
-                  ? "bg-sidebar-accent"
-                  : "bg-muted"
-                : isRail
-                  ? "hover:bg-sidebar-accent/60"
-                  : "hover:bg-muted/70",
-            )}
-          >
-            {editingSessionId === session.id ? (
-              <input
-                className="min-w-0 flex-1 rounded border bg-background px-1 py-0.5 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-                value={editingTitle}
-                onChange={(event) => onTitleChange(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    event.preventDefault();
-                    renameCommittedRef.current = true;
-                    onSaveRename(session.id);
-                  } else if (event.key === "Escape") {
-                    event.preventDefault();
-                    renameCommittedRef.current = true;
-                    onCancelRename();
-                  }
-                }}
-                onBlur={() => {
-                  if (renameCommittedRef.current) {
-                    renameCommittedRef.current = false;
-                    return;
-                  }
-                  onSaveRename(session.id);
-                }}
-                autoFocus
-              />
-            ) : (
-              <>
-                <button
-                  className="flex-1 truncate text-left disabled:opacity-50"
-                  onClick={() => onSwitchSession(session.id)}
-                  title={session.title}
-                  disabled={isStreaming}
+        {groupSessions(sessions).map(({ group, items }) => (
+          <section key={group} className="mt-2 first:mt-0">
+            <h3 className="px-2 pt-1 pb-0.5 text-[11px] font-medium text-muted-foreground/80">
+              {t(`chat.sessionGroup.${group}`)}
+            </h3>
+            {items.map((session) => {
+              const active = activeSessionId === session.id;
+              return (
+                <div
+                  key={session.id}
+                  className={cn(
+                    "group relative flex items-center rounded-md text-sm",
+                    // The rail sits on the sidebar tone, the popover on its own surface.
+                    active
+                      ? isRail
+                        ? "bg-sidebar-accent"
+                        : "bg-accent"
+                      : isRail
+                        ? "hover:bg-sidebar-accent/60"
+                        : "hover:bg-accent/60",
+                  )}
                 >
-                  <div className="truncate font-medium">{session.title}</div>
-                  <div
-                    className="truncate text-xs text-muted-foreground"
-                    title={new Date(session.updatedAt).toLocaleString(locale)}
-                  >
-                    {formatSessionTime(session.updatedAt, locale)}
-                  </div>
-                </button>
-                <button
-                  className="px-1 text-muted-foreground opacity-0 hover:text-primary disabled:opacity-30 group-hover:opacity-100"
-                  onClick={() => onStartRename(session.id, session.title)}
-                  disabled={isStreaming}
-                  aria-label={t("chat.rename")}
-                >
-                  <Pencil className="h-3.5 w-3.5" />
-                </button>
-                <button
-                  className="px-1 text-muted-foreground opacity-0 hover:text-primary disabled:opacity-30 group-hover:opacity-100"
-                  onClick={() => onOpenSettings(session)}
-                  disabled={isStreaming}
-                  aria-label={t("chat.sessionSettings")}
-                >
-                  <Settings className="h-3.5 w-3.5" />
-                </button>
-                <button
-                  className="px-1 text-xs text-destructive opacity-0 hover:underline disabled:opacity-30 group-hover:opacity-100"
-                  onClick={() => onDeleteSession(session.id)}
-                  disabled={isStreaming}
-                >
-                  {t("common.delete")}
-                </button>
-              </>
-            )}
-          </div>
+                  {active && (
+                    <span
+                      aria-hidden
+                      className="absolute top-1/2 left-0 h-4 w-0.5 -translate-y-1/2 rounded-full bg-primary"
+                    />
+                  )}
+                  {editingSessionId === session.id ? (
+                    <input
+                      className="mx-1 my-0.5 min-w-0 flex-1 rounded border bg-background px-1.5 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                      value={editingTitle}
+                      onChange={(event) => onTitleChange(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          renameCommittedRef.current = true;
+                          onSaveRename(session.id);
+                        } else if (event.key === "Escape") {
+                          event.preventDefault();
+                          // Keep Esc from also dismissing the popover.
+                          event.stopPropagation();
+                          renameCommittedRef.current = true;
+                          onCancelRename();
+                        }
+                      }}
+                      onBlur={() => {
+                        if (renameCommittedRef.current) {
+                          renameCommittedRef.current = false;
+                          return;
+                        }
+                        onSaveRename(session.id);
+                      }}
+                      autoFocus
+                    />
+                  ) : (
+                    <>
+                      <button
+                        className="flex min-w-0 flex-1 items-center gap-2 rounded-md py-1.5 pr-2 pl-2.5 text-left outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50"
+                        onClick={() => onSwitchSession(session.id)}
+                        title={session.title}
+                        disabled={isStreaming}
+                        aria-current={active ? "true" : undefined}
+                      >
+                        <span className={cn("min-w-0 flex-1 truncate", active && "font-medium")}>
+                          {session.title}
+                        </span>
+                        {/* The time gives way to the actions button on hover,
+                            keyboard focus, or while the menu is open. */}
+                        <span
+                          className="min-w-6 shrink-0 text-right text-[11px] tabular-nums text-muted-foreground group-hover:invisible group-has-[:focus-visible]:invisible group-has-[[data-state=open]]:invisible"
+                          title={new Date(session.updatedAt).toLocaleString(locale)}
+                        >
+                          {formatSessionTime(session.updatedAt, locale)}
+                        </span>
+                      </button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <button
+                            type="button"
+                            className="absolute right-1 flex h-6 w-6 items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-opacity outline-none hover:text-foreground focus-visible:opacity-100 focus-visible:ring-1 focus-visible:ring-ring group-hover:opacity-100 group-has-[:focus-visible]:opacity-100 disabled:pointer-events-none data-[state=open]:opacity-100"
+                            disabled={isStreaming}
+                            aria-label={t("chat.sessionActions")}
+                          >
+                            <MoreHorizontal className="h-4 w-4" />
+                          </button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent
+                          align="end"
+                          className="min-w-36"
+                          // Rename autofocuses its input; returning focus to the
+                          // trigger would blur and commit it at once.
+                          onCloseAutoFocus={(event) => event.preventDefault()}
+                        >
+                          <DropdownMenuItem onSelect={() => onStartRename(session.id, session.title)}>
+                            <Pencil />
+                            {t("chat.rename")}
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onSelect={() => onOpenSettings(session)}>
+                            <Settings />
+                            {t("chat.sessionSettings")}
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            variant="destructive"
+                            onSelect={() => setPendingDelete(session)}
+                          >
+                            <Trash2 />
+                            {t("common.delete")}
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </>
+                  )}
+                </div>
+              );
+            })}
+          </section>
         ))}
       </div>
+      <AlertDialog
+        open={pendingDelete !== null}
+        onOpenChange={(open) => {
+          if (!open) setPendingDelete(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {t("chat.deleteSessionTitle", { title: pendingDelete?.title ?? "" })}
+            </AlertDialogTitle>
+            <AlertDialogDescription>{t("chat.deleteSessionDescription")}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={() => {
+                if (pendingDelete) onDeleteSession(pendingDelete.id);
+              }}
+            >
+              {t("common.delete")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
