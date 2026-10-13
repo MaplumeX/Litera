@@ -41,6 +41,7 @@ export const en: { [K in MessageKey]: string } = {
   "reader.progress": "Reading progress",
   "reader.progressPreview": "{chapter} · {pct}%",
   "reader.progressPercent": "{pct}%",
+  "reader.chapterProgress": "{pct}% of chapter",
   "reader.ttsPlay": "Read aloud",
   "reader.ttsPause": "Pause",
   "reader.ttsStop": "Stop",

@@ -62,7 +62,7 @@ const readerHandle: ReaderViewHandle = {
   next: vi.fn(),
   goToFraction: vi.fn(async () => {}),
   goToTocItem: vi.fn(),
-  getSectionFractions: () => [],
+  getChapterTicks: () => [],
   previewLabelAt: () => undefined,
   goToCfi: vi.fn(async () => true),
   setStyles: vi.fn(),

@@ -199,4 +199,86 @@ describe("ReaderProgressBar", () => {
     fireEvent.pointerMove(track, { clientX: 200 });
     expect(getByTestId("reader-progress-preview").textContent).toBe("Chapter 2 · 50%");
   });
+
+  it("rounds the percent down near the end", () => {
+    const { getByText } = render(
+      <ReaderProgressBar fraction={0.996} chapterLabel="第一章" onSeek={() => {}} />,
+    );
+    expect(getByText("99%")).toBeTruthy();
+  });
+
+  it("exposes slider semantics", () => {
+    const { getByRole } = render(
+      <ReaderProgressBar fraction={0.42} chapterLabel="第一章" onSeek={() => {}} />,
+    );
+    const slider = getByRole("slider", { name: "阅读进度" });
+    expect(slider.tabIndex).toBe(0);
+    expect(slider.getAttribute("aria-valuenow")).toBe("42");
+    expect(slider.getAttribute("aria-valuetext")).toBe("第一章 · 42%");
+  });
+
+  it("seeks and changes chapters from the keyboard", () => {
+    const onSeek = vi.fn();
+    const onPrevChapter = vi.fn();
+    const onNextChapter = vi.fn();
+    const { getByRole } = render(
+      <ReaderProgressBar
+        fraction={0.5}
+        chapterLabel="第一章"
+        onSeek={onSeek}
+        onPrevChapter={onPrevChapter}
+        onNextChapter={onNextChapter}
+        canPrevChapter
+        canNextChapter={false}
+      />,
+    );
+    const slider = getByRole("slider");
+    fireEvent.keyDown(slider, { key: "ArrowRight" });
+    expect(onSeek).toHaveBeenLastCalledWith(0.51);
+    fireEvent.keyDown(slider, { key: "ArrowLeft" });
+    expect(onSeek).toHaveBeenLastCalledWith(0.49);
+    fireEvent.keyDown(slider, { key: "Home" });
+    expect(onSeek).toHaveBeenLastCalledWith(0);
+    fireEvent.keyDown(slider, { key: "End" });
+    expect(onSeek).toHaveBeenLastCalledWith(1);
+    fireEvent.keyDown(slider, { key: "PageUp" });
+    expect(onPrevChapter).toHaveBeenCalledOnce();
+    fireEvent.keyDown(slider, { key: "PageDown" });
+    expect(onNextChapter).not.toHaveBeenCalled();
+  });
+
+  it("keeps the preview bubble inside the track at the edges", () => {
+    const { getByLabelText, getByTestId } = render(
+      <ReaderProgressBar fraction={0.1} chapterLabel="第一章" onSeek={() => {}} />,
+    );
+    const track = getByLabelText("阅读进度");
+    mockTrackRect(track);
+    fireEvent.pointerMove(track, { clientX: 100 });
+    expect(getByTestId("reader-progress-preview").style.transform).toBe("translateX(-0%)");
+    fireEvent.pointerMove(track, { clientX: 300 });
+    expect(getByTestId("reader-progress-preview").style.transform).toBe("translateX(-100%)");
+  });
+
+  it("shows progress through the current chapter", () => {
+    const { getByTestId } = render(
+      <ReaderProgressBar
+        fraction={0.3}
+        chapterLabel="第二章"
+        ticks={[0, 0.2, 0.6, 1]}
+        onSeek={() => {}}
+      />,
+    );
+    expect(getByTestId("reader-chapter-progress").textContent).toBe("本章 25%");
+    const remaining = getByTestId("reader-chapter-remaining");
+    expect(remaining.style.left).toBe("30%");
+    expect(remaining.style.width).toBe("30%");
+  });
+
+  it("skips chapter progress when the book is one chapter", () => {
+    const { queryByTestId } = render(
+      <ReaderProgressBar fraction={0.3} chapterLabel="全书" ticks={[0, 1]} onSeek={() => {}} />,
+    );
+    expect(queryByTestId("reader-chapter-progress")).toBeNull();
+    expect(queryByTestId("reader-chapter-remaining")).toBeNull();
+  });
 });
