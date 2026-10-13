@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import {
   Book,
   BookCheck,
@@ -42,13 +42,16 @@ interface LibrarySidebarProps {
   busy: boolean;
   /** Move focus to the active filter on mount, for the narrow-window drawer. */
   autoFocus?: boolean;
+  /** Titlebar row on top, when the sidebar runs the window's full height. */
+  header?: ReactNode;
   className?: string;
 }
 
 /**
  * The shelf's navigation: status filters on top, the rare global actions
  * (Import, Trash) pinned to the bottom. Every item is always present, so
- * nothing shifts as counts change; a zero count is a muted dot.
+ * nothing shifts as counts change; a zero count shows nothing. Groups are
+ * set apart by space and the sidebar by its tone, not by rules.
  */
 export function LibrarySidebar({
   statusFilter,
@@ -60,6 +63,7 @@ export function LibrarySidebar({
   onOpenTrash,
   busy,
   autoFocus = false,
+  header,
   className,
 }: LibrarySidebarProps) {
   const { t } = useT();
@@ -72,58 +76,51 @@ export function LibrarySidebar({
   return (
     <aside
       className={cn(
-        "flex w-52 shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground",
+        "flex w-52 shrink-0 flex-col bg-sidebar text-sidebar-foreground",
         className,
       )}
     >
+      {header}
       <nav
         aria-label={t("library.statusFilter")}
-        className="min-h-0 flex-1 overflow-y-auto p-2"
+        className={cn("min-h-0 flex-1 overflow-y-auto p-2", header && "pt-1")}
       >
         {STATUS_OPTIONS.map((option) => {
           const active = option.value === statusFilter;
           const Icon = FILTER_ICONS[option.value];
           const count = counts[option.value];
           return (
-            <Fragment key={option.value}>
-              {/* Starred is orthogonal to Reading status, not a fifth status. */}
-              {option.value === "starred" && (
-                <div className="mx-2.5 my-2 h-px bg-sidebar-border" aria-hidden />
+            <button
+              key={option.value}
+              ref={active ? activeRef : undefined}
+              type="button"
+              aria-current={active ? "page" : undefined}
+              onClick={() => onStatusFilterChange(option.value)}
+              className={cn(
+                ITEM_CLASS,
+                // Starred is orthogonal to Reading status, not a fifth status.
+                option.value === "starred" && "mt-4",
+                active
+                  ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
+                  : IDLE_ITEM_CLASS,
               )}
-              <button
-                ref={active ? activeRef : undefined}
-                type="button"
-                aria-current={active ? "page" : undefined}
-                onClick={() => onStatusFilterChange(option.value)}
-                className={cn(
-                  ITEM_CLASS,
-                  active
-                    ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
-                    : IDLE_ITEM_CLASS,
-                )}
-              >
-                <Icon className="size-4 shrink-0 opacity-70" aria-hidden />
-                <span className="min-w-0 flex-1 truncate text-left">
-                  {t(option.labelKey)}
+            >
+              <Icon className="size-4 shrink-0 opacity-70" aria-hidden />
+              <span className="min-w-0 flex-1 truncate text-left">
+                {t(option.labelKey)}
+              </span>
+              {count > 0 ? (
+                <span className="text-xs tabular-nums text-muted-foreground">
+                  {count}
                 </span>
-                {count > 0 ? (
-                  <span className="text-xs tabular-nums text-muted-foreground">
-                    {count}
-                  </span>
-                ) : (
-                  <>
-                    <span className="text-xs text-muted-foreground/50" aria-hidden>
-                      ·
-                    </span>
-                    <span className="sr-only">0</span>
-                  </>
-                )}
-              </button>
-            </Fragment>
+              ) : (
+                <span className="sr-only">0</span>
+              )}
+            </button>
           );
         })}
       </nav>
-      <div className="border-t border-sidebar-border p-2">
+      <div className="p-2">
         <button
           type="button"
           onClick={onImport}

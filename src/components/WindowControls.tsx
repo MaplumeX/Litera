@@ -24,10 +24,22 @@ type LastPointerDown = {
   y: number;
 };
 
-export function titlebarClassName(): string {
+interface TitlebarClassOptions {
+  /** Rule under the bar; off where tone alone separates it from content. */
+  bordered?: boolean;
+  /** Leave room for the macOS traffic lights; off for a bar that does not
+      start at the window's left edge. */
+  trafficLightInset?: boolean;
+}
+
+export function titlebarClassName({
+  bordered = true,
+  trafficLightInset = true,
+}: TitlebarClassOptions = {}): string {
   return cn(
-    "flex h-12 shrink-0 items-center gap-3 border-b",
-    detectDesktopOs() === "macos" ? "pl-[72px] pr-4" : "px-4",
+    "flex h-12 shrink-0 items-center gap-3",
+    bordered && "border-b",
+    trafficLightInset && detectDesktopOs() === "macos" ? "pl-[72px] pr-4" : "px-4",
   );
 }
 

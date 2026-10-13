@@ -403,7 +403,12 @@ describe("LibraryView", () => {
     expect(title.className).not.toContain("text-lg");
     expect(title.className).not.toContain("font-semibold");
     expect(header!.hasAttribute("data-titlebar-drag")).toBe(false);
-    expect(header!.querySelectorAll("[data-titlebar-drag]")).toHaveLength(3);
+    // With the sidebar docked, the brand row sits atop it and the titlebar
+    // keeps a spacer on each side of search.
+    expect(header!.contains(title)).toBe(false);
+    expect(title.hasAttribute("data-titlebar-drag")).toBe(true);
+    expect(title.parentElement!.querySelectorAll("[data-titlebar-drag]")).toHaveLength(2);
+    expect(header!.querySelectorAll("[data-titlebar-drag]")).toHaveLength(2);
     expect(getByPlaceholderText("搜索书名、作者、系列…").hasAttribute("data-titlebar-drag")).toBe(false);
     for (const name of ["切换侧边栏", "设置", "最小化", "最大化", "关闭窗口"]) {
       expect(getByRole("button", { name }).hasAttribute("data-titlebar-drag")).toBe(false);
@@ -427,13 +432,21 @@ describe("LibraryView", () => {
     vi.spyOn(window.navigator, "userAgent", "get").mockReturnValue(
       "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko)",
     );
-    const { findByText, container, queryByRole } = render(
+    const { findByText, container, getByRole, queryByRole } = render(
       <LibraryView onOpenBook={() => {}} onOpenSettings={() => {}} />,
     );
     await findByText("Stored Title");
 
+    // The docked sidebar starts at the window's left edge, so it takes the
+    // traffic-light inset and the titlebar beside it does not.
+    const brandRow = getByRole("heading", { name: "Litera" }).parentElement;
+    expect(brandRow?.className).toContain("pl-[72px]");
     const header = container.querySelector("header");
-    expect(header?.className).toContain("pl-[72px]");
+    expect(header?.className).not.toContain("pl-[72px]");
+    getByRole("button", { name: "切换侧边栏" }).click();
+    await waitFor(() => {
+      expect(header?.className).toContain("pl-[72px]");
+    });
     expect(queryByRole("button", { name: "最小化" })).toBeNull();
     expect(queryByRole("button", { name: "最大化" })).toBeNull();
     expect(queryByRole("button", { name: "关闭窗口" })).toBeNull();
@@ -1444,13 +1457,14 @@ describe("LibraryView — sidebar layout", () => {
     expect(await findByText("没有可恢复的书")).toBeTruthy();
   });
 
-  it("renders a zero count as a muted dot", async () => {
+  it("shows nothing for a zero count but still names it", async () => {
     const { findByText, getByRole } = render(
       <LibraryView onOpenBook={() => {}} onOpenSettings={() => {}} />,
     );
     await findByText("Stored Title");
     const starred = getByRole("button", { name: /^星标\s*0$/ });
-    expect(starred.textContent).toContain("·");
+    expect(starred.textContent).not.toContain("·");
+    expect(starred.querySelector(".sr-only")?.textContent).toBe("0");
   });
 
   it("collapses the sidebar and remembers it", async () => {
@@ -1478,10 +1492,10 @@ describe("LibraryView — sidebar layout", () => {
       <LibraryView onOpenBook={() => {}} onOpenSettings={() => {}} />,
     );
     await findByText("Other");
-    expect(getByRole("heading", { level: 2, name: /^全部\s*·\s*2$/ })).toBeTruthy();
+    expect(getByRole("heading", { level: 2, name: /^全部\s*2$/ })).toBeTruthy();
     getByRole("button", { name: /^在读/ }).click();
     await waitFor(() => {
-      expect(getByRole("heading", { level: 2, name: /^在读\s*·\s*1$/ })).toBeTruthy();
+      expect(getByRole("heading", { level: 2, name: /^在读\s*1$/ })).toBeTruthy();
     });
   });
 

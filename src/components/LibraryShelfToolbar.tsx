@@ -45,10 +45,11 @@ export const STATUS_OPTIONS: { value: LibraryStatusFilter; labelKey: MessageKey 
   { value: "starred", labelKey: "library.status.starred" },
 ];
 
-const TOOLBAR_CLASS = "flex h-11 shrink-0 items-center gap-2 border-b px-4";
+// No rule underneath: the page title and the shelf below it share one surface.
+const TOOLBAR_CLASS = "flex h-12 shrink-0 items-center gap-2 px-6";
 
 const SEGMENT_CLASS =
-  "inline-flex size-7 items-center justify-center rounded-[5px] transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring motion-reduce:transition-none [&_svg]:size-4";
+  "inline-flex size-7 items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring motion-reduce:transition-none [&_svg]:size-4";
 
 interface LibraryShelfToolbarProps {
   statusFilter: LibraryStatusFilter;
@@ -64,9 +65,9 @@ interface LibraryShelfToolbarProps {
 }
 
 /**
- * The header of the shelf column: what is shown on the left, how it is
- * ordered and laid out on the right. Filters live in the sidebar, so this row
- * only describes the current view.
+ * The header of the shelf column: what is shown on the left, as the page's
+ * title, how it is ordered and laid out on the right. Filters live in the
+ * sidebar, so this row only describes the current view.
  */
 export function LibraryShelfToolbar({
   statusFilter,
@@ -86,10 +87,9 @@ export function LibraryShelfToolbar({
   const orderLabel = t(order === "asc" ? "library.orderAsc" : "library.orderDesc");
   return (
     <div className={TOOLBAR_CLASS}>
-      <h2 className="min-w-0 truncate text-sm font-medium">
+      <h2 className="min-w-0 truncate text-lg font-semibold tracking-tight">
         {filterOption && t(filterOption.labelKey)}
-        <span className="font-normal text-muted-foreground">
-          {" · "}
+        <span className="ml-2 text-sm font-normal tabular-nums text-muted-foreground">
           {searching ? t("library.searchResults", { count }) : count}
         </span>
       </h2>
@@ -139,7 +139,7 @@ export function LibraryShelfToolbar({
           </DropdownMenuContent>
         </DropdownMenu>
 
-        <div className="flex items-center rounded-md border p-px">
+        <div className="flex items-center gap-0.5">
           {(
             [
               ["grid", "library.viewGrid", LayoutGrid],

@@ -70,6 +70,21 @@ them reads as more important than another:
   with a one-line title and a progress bar with percent beneath. No card
   border or background. Show/hide rules from the previous spec are unchanged.
 
+## Fewer rules (follow-up)
+
+Supersedes the divider, zero-count `·`, "Titlebar" left side and segmented
+control border above. Regions are separated by tone and space, not lines:
+
+- The docked sidebar runs the window's full height; its top row carries the
+  sidebar toggle + "Litera" (and the macOS traffic-light inset). When the
+  sidebar is collapsed or a drawer, they return to the titlebar. Search is
+  centered in the content column.
+- No rule under the titlebar or the content header, none on the sidebar's
+  edge, before Starred (extra space instead) or above Import / Trash.
+- A zero count shows nothing (screen readers still hear "0").
+- The content header reads as a page title: filter name large, count small
+  and muted, no "·". Grid/list toggle has no outer border.
+
 ## Out of scope
 
 - Fixed column widths / max content width for the grid.
