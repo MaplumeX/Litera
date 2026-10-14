@@ -76,6 +76,11 @@ const readerHandle: ReaderViewHandle = {
   goToQuote: vi.fn(async () => true),
   setStyles: vi.fn(),
   setColumnCount: vi.fn(),
+  setFlow: vi.fn(),
+  goBack: vi.fn(),
+  goForward: vi.fn(),
+  searchBook: vi.fn(() => null),
+  clearSearch: vi.fn(),
   getToc: () => [],
   getLocation: () => ({
     cfi: "epubcfi(/6/8!/4/2,/1:0,/1:80)",
@@ -460,7 +465,7 @@ describe("reader / agent mode", () => {
     localStorage.setItem(DEFAULT_READER_MODE_KEY, "agent");
     const screen = await openReader();
     expect(screen.getByTestId("reader-shell").style.gridTemplateColumns).toBe("1fr 0px");
-    fireEvent.click(screen.getByLabelText("目录与标注"));
+    fireEvent.click(screen.getByLabelText("目录、标注与搜索"));
     expect(screen.getByTestId("reader-shell").style.gridTemplateColumns).toBe("1fr 0px");
     expect(screen.getByTestId("reader-book-cell").hidden).toBe(true);
     const close = screen.getByLabelText("关闭目录");
@@ -470,7 +475,7 @@ describe("reader / agent mode", () => {
   it("reveals a collapsed agent-mode book when switching the side panel to annotations", async () => {
     localStorage.setItem(DEFAULT_READER_MODE_KEY, "agent");
     const screen = await openReader();
-    fireEvent.click(screen.getByLabelText("目录与标注"));
+    fireEvent.click(screen.getByLabelText("目录、标注与搜索"));
     expect(screen.getByTestId("reader-book-cell").hidden).toBe(true);
     fireEvent.click(screen.getByRole("tab", { name: "标注" }));
     expect(screen.getByTestId("reader-book-cell").hidden).toBe(false);
@@ -479,7 +484,7 @@ describe("reader / agent mode", () => {
 
   it("keeps the TOC drawer over the book in reading mode", async () => {
     const screen = await openReader();
-    fireEvent.click(screen.getByLabelText("目录与标注"));
+    fireEvent.click(screen.getByLabelText("目录、标注与搜索"));
     expect(screen.getByTestId("reader-book-cell").contains(screen.getByLabelText("关闭目录"))).toBe(true);
   });
 
@@ -490,7 +495,7 @@ describe("reader / agent mode", () => {
     ];
     localStorage.setItem(DEFAULT_READER_MODE_KEY, "agent");
     const screen = await openReader();
-    fireEvent.click(screen.getByLabelText("目录与标注"));
+    fireEvent.click(screen.getByLabelText("目录、标注与搜索"));
     fireEvent.click(screen.getByText("第二章"));
 
     expect(screen.queryByLabelText("关闭目录")).toBeNull();
@@ -518,7 +523,7 @@ describe("reader / agent mode", () => {
     localStorage.setItem(DEFAULT_READER_MODE_KEY, "agent");
     const screen = await openReader();
     fireEvent.click(screen.getByLabelText("显示书籍"));
-    fireEvent.click(screen.getByLabelText("目录与标注"));
+    fireEvent.click(screen.getByLabelText("目录、标注与搜索"));
     fireEvent.click(screen.getByText("第一章"));
     expect(readerHandle.goToTocItem).toHaveBeenCalledWith("ch1.xhtml");
     expect(screen.getByText("讨论范围：第一章")).toBeTruthy();
@@ -528,7 +533,7 @@ describe("reader / agent mode", () => {
     mockToc = [{ label: "第一章", href: "ch1.xhtml" }];
     const screen = await openReader();
     fireEvent.click(screen.getByLabelText("显示对话"));
-    fireEvent.click(screen.getByLabelText("目录与标注"));
+    fireEvent.click(screen.getByLabelText("目录、标注与搜索"));
     fireEvent.click(screen.getByText("第一章"));
     expect(readerHandle.goToTocItem).toHaveBeenCalledWith("ch1.xhtml");
     expect(screen.queryByText("讨论范围：第一章")).toBeNull();

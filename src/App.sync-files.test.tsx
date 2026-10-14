@@ -67,6 +67,11 @@ const readerHandle: ReaderViewHandle = {
   goToCfi: vi.fn(async () => true),
   setStyles: vi.fn(),
   setColumnCount: vi.fn(),
+  setFlow: vi.fn(),
+  goBack: vi.fn(),
+  goForward: vi.fn(),
+  searchBook: vi.fn(() => null),
+  clearSearch: vi.fn(),
   getToc: () => [],
   getLocation: () => ({
     cfi: "epubcfi(/6/8!/4/2,/1:0,/1:80)",

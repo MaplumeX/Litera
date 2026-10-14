@@ -333,10 +333,14 @@ a { color: #6db4ff !important; }
 img { filter: brightness(0.8) !important; }`,
 };
 
+/** Pictures open in the viewer on click (see `opensImageViewer`); links keep their pointer. */
+const IMAGE_CURSOR_CSS = "img, svg image { cursor: zoom-in; } a[href] img, a[href] image { cursor: pointer; }";
+
 /** Combine font + typography + theme into a single CSS string for `view.renderer.setStyles`. */
 export function generateStylesCss(state: ReaderStyleState): string {
   let fontCss = `html, body { font-family: ${cssFontFamily(state.fontFamily)}; font-size: ${state.fontSize}px !important; line-height: ${state.lineHeight}; letter-spacing: ${state.letterSpacing}em; max-width: ${state.contentWidth}em; margin-inline: auto; padding-inline: ${state.pagePadding}rem; text-align: ${state.textAlign}; }
-p { margin-block-end: ${state.paragraphSpacing}em !important; text-indent: ${state.firstLineIndent}em !important; }`;
+p { margin-block-end: ${state.paragraphSpacing}em !important; text-indent: ${state.firstLineIndent}em !important; }
+${IMAGE_CURSOR_CSS}`;
   if (state.overrideFont) {
     fontCss += `\nhtml, body, p, div, span, li, blockquote, td, th, a, h1, h2, h3, h4, h5, h6 { font-family: ${cssFontFamily(state.fontFamily)} !important; }
 code, kbd, pre, samp { font-family: monospace !important; }`;

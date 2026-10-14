@@ -9,12 +9,20 @@ import {
 import {
   bindPointerPaging,
   consumeWheelDelta,
+  hitFromClientX,
+  isFindShortcut,
+  isSeekBurst,
   pageLocalX,
   pageWidthOf,
-  shouldIgnorePagingTarget,
-  shouldIgnoreSpaceTarget,
+  isScrollKeyAction,
+  readerKeyAction,
+  scrollAreaAt,
+  scrolledBoundaryDirection,
+  type ReaderKeyAction,
   type WheelPagingState,
 } from "@/lib/reader-paging";
+import type { ReaderFlow } from "@/lib/reader-flow";
+import { opensImageViewer, readerImageAt, type ReaderImage } from "@/lib/reader-images";
 import { quoteSearchQueries } from "@/lib/citations";
 import { chapterTicks, sectionIndexAt } from "@/lib/reader-progress";
 import { TTS_HIGHLIGHT_COLOR, TTS_OVERLAY_KEY } from "@/lib/reader-tts";
@@ -29,6 +37,7 @@ import {
 import { SelectionToolbar } from "@/components/SelectionToolbar";
 import { HighlightEditor } from "@/components/HighlightEditor";
 import { FootnotePopup } from "@/components/FootnotePopup";
+import { ImageViewer } from "@/components/ImageViewer";
 import type { HighlightColor, HighlightRecord } from "@/types/library";
 
 // foliate.js view.js defines the <foliate-view> custom element.
@@ -60,6 +69,24 @@ export interface SelectionCapture {
   chapterHref?: string;
 }
 
+export interface ReaderHistoryState {
+  canGoBack: boolean;
+  canGoForward: boolean;
+}
+
+/** Lines scrolled per ↑/↓ press in scrolled flow. */
+const SCROLL_LINE_PX = 80;
+
+type FoliateHistory = EventTarget & {
+  back: () => void;
+  forward: () => void;
+  canGoBack: boolean;
+  canGoForward: boolean;
+  clear: () => void;
+  pushState: (state: unknown) => void;
+  replaceState: (state: unknown) => void;
+};
+
 export interface TocItem {
   label: string;
   href: string;
@@ -79,6 +106,13 @@ export interface ReaderViewHandle {
   goToQuote: (href: string, quote: string) => Promise<boolean>;
   setStyles: (css: string) => void;
   setColumnCount: (count: number) => void;
+  setFlow: (flow: ReaderFlow) => void;
+  /** Return to where the last jump (link, TOC, search hit, seek) started. */
+  goBack: () => void;
+  goForward: () => void;
+  /** Whole-book search; foliate outlines every match until `clearSearch`. */
+  searchBook: (query: string) => AsyncIterator<unknown> | null;
+  clearSearch: () => void;
   getToc: () => TocItem[];
   getLocation: () => ReaderLocation | null;
   getSelectionCfi: () => SelectionCfi | null;
@@ -120,8 +154,16 @@ interface ReaderViewProps {
   initialCfi?: string;
   /** Called after the book is opened and toc is available. */
   onBookReady?: (toc: TocItem[]) => void;
-  /** Space play/pause while the chapter iframe or window is focused. */
+  /** Space play/pause while read-aloud is active (see `ttsActive`). */
   onTtsToggle?: () => void;
+  /** Read-aloud is playing or paused: Space toggles it instead of turning the page. */
+  ttsActive?: boolean;
+  /** Back / forward availability after each navigation. */
+  onHistoryChange?: (state: ReaderHistoryState) => void;
+  /** Ctrl/⌘+F pressed while the chapter has focus. */
+  onFindRequest?: () => void;
+  /** The Book pane is hidden: keys must not move a book nobody can see. */
+  keysDisabled?: boolean;
   /** User-initiated relocate while TTS should resync from the new visible range. */
   onUserRelocate?: () => void;
   /** Reader CSS (font/theme) to inject into footnote popup inner views. */
@@ -263,6 +305,10 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       initialCfi,
       onBookReady,
       onTtsToggle,
+      ttsActive = false,
+      onHistoryChange,
+      onFindRequest,
+      keysDisabled = false,
       onUserRelocate,
       stylesCss,
     },
@@ -286,6 +332,19 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
     onBookReadyRef.current = onBookReady;
     onTtsToggleRef.current = onTtsToggle;
     onUserRelocateRef.current = onUserRelocate;
+    const ttsActiveRef = useRef(ttsActive);
+    ttsActiveRef.current = ttsActive;
+    const onHistoryChangeRef = useRef(onHistoryChange);
+    onHistoryChangeRef.current = onHistoryChange;
+    const onFindRequestRef = useRef(onFindRequest);
+    onFindRequestRef.current = onFindRequest;
+    const keysDisabledRef = useRef(keysDisabled);
+    keysDisabledRef.current = keysDisabled;
+    // Scrolled flow: native scrolling, no tap zones, ↑/↓ scroll by lines.
+    const scrolledRef = useRef(false);
+    // Last progress-bar seek, so a burst of seeks is one history entry.
+    const lastSeekAtRef = useRef(0);
+    const [image, setImage] = useState<ReaderImage | null>(null);
     // Latest reader CSS for footnote inner views (read inside the mount effect).
     const stylesCssRef = useRef(stylesCss);
     stylesCssRef.current = stylesCss;
@@ -473,20 +532,93 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       const handleWheel = (e: Event) => {
         const we = e as WheelEvent;
         if (we.ctrlKey) return;
-        we.preventDefault();
         const delta = Math.abs(we.deltaX) > Math.abs(we.deltaY) ? we.deltaX : we.deltaY;
         const now = we.timeStamp || Date.now();
+        if (scrolledRef.current) {
+          // Native scrolling inside the section; only a push past its end
+          // (or start) moves on to the neighbouring section.
+          const renderer = (el as unknown as {
+            renderer?: { start?: number; size?: number; viewSize?: number };
+          }).renderer;
+          const dir = scrolledBoundaryDirection(we.deltaY, {
+            start: renderer?.start ?? 0,
+            size: renderer?.size ?? 0,
+            viewSize: renderer?.viewSize ?? 0,
+          });
+          if (dir === 0) {
+            wheelState = { accumulated: 0, lastTime: now, flipped: false };
+            return;
+          }
+          we.preventDefault();
+          const result = consumeWheelDelta(wheelState, we.deltaY, now, we.deltaMode);
+          wheelState = result.state;
+          if (result.turn === dir) {
+            if (dir === 1) pageNext();
+            else pagePrev();
+          }
+          return;
+        }
+        we.preventDefault();
         const result = consumeWheelDelta(wheelState, delta, now, we.deltaMode);
         wheelState = result.state;
         if (result.turn === 1) pageNext();
         else if (result.turn === -1) pagePrev();
       };
 
+      type FoliateNav = {
+        history?: FoliateHistory;
+        goToFraction?: (frac: number) => Promise<void>;
+        renderer?: { prev?: (distance?: number) => Promise<void>; next?: (distance?: number) => Promise<void> };
+      };
+      const runKeyAction = (action: ReaderKeyAction) => {
+        const view = el as unknown as FoliateNav;
+        switch (action) {
+          case "left":
+            pageLeft();
+            break;
+          case "right":
+            pageRight();
+            break;
+          case "prev":
+            pagePrev();
+            break;
+          case "next":
+            pageNext();
+            break;
+          case "lineUp":
+            void view.renderer?.prev?.(SCROLL_LINE_PX);
+            break;
+          case "lineDown":
+            void view.renderer?.next?.(SCROLL_LINE_PX);
+            break;
+          case "start":
+            void view.goToFraction?.(0);
+            break;
+          case "end":
+            void view.goToFraction?.(1);
+            break;
+          case "back":
+            view.history?.back();
+            break;
+          case "forward":
+            view.history?.forward();
+            break;
+          case "ttsToggle":
+            onTtsToggleRef.current?.();
+            break;
+        }
+      };
+
+      // Last scroll area outside the Book the reader pressed in (chat
+      // transcript, side panel list); cleared by a press in the Book.
+      let lastScrollArea: Element | null = null;
+      const handleWindowPointerDown = (e: Event) => {
+        lastScrollArea = scrollAreaAt(e.target, el);
+      };
       const handleKeyDown = (e: Event) => {
         const ke = e as KeyboardEvent;
         if (ke.defaultPrevented) return;
-        if (ke.altKey || ke.metaKey || ke.ctrlKey || ke.shiftKey) return;
-        if (ke.key === "Escape") {
+        if (ke.key === "Escape" && !(ke.altKey || ke.metaKey || ke.ctrlKey || ke.shiftKey)) {
           // The footnote popup listens on window, but keydown from the chapter
           // iframe never reaches it; close the popup here when focus is inside.
           closeHighlightEditorRef.current();
@@ -496,33 +628,49 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
           }
           return;
         }
-        if (ke.key === " " || ke.code === "Space") {
-          if (shouldIgnoreSpaceTarget(ke.target)) return;
+        if (keysDisabledRef.current) return;
+        const action = readerKeyAction(ke, {
+          scrolled: scrolledRef.current,
+          ttsActive: ttsActiveRef.current,
+        });
+        if (!action) return;
+        // Unfocused keys after a press in another scroll area scroll that area.
+        const unfocused = ke.target === document.body || ke.target === document;
+        if (unfocused && isScrollKeyAction(action) && lastScrollArea?.isConnected) return;
+        ke.preventDefault();
+        runKeyAction(action);
+      };
+      // Keys typed in the chapter never reach the window, so the find
+      // shortcut is forwarded from there; the window case is the App's.
+      const handleDocKeyDown = (e: Event) => {
+        const ke = e as KeyboardEvent;
+        if (!ke.defaultPrevented && isFindShortcut(ke)) {
           ke.preventDefault();
-          onTtsToggleRef.current?.();
+          onFindRequestRef.current?.();
           return;
         }
-        if (shouldIgnorePagingTarget(ke.target)) return;
-        if (ke.key === "ArrowLeft") {
-          ke.preventDefault();
-          pageLeft();
-        } else if (ke.key === "ArrowRight") {
-          ke.preventDefault();
-          pageRight();
-        }
+        handleKeyDown(e);
       };
 
+      // Tap zones only page in paginated flow; scrolled flow scrolls.
+      const tapLeft = () => {
+        if (!scrolledRef.current) pageLeft();
+      };
+      const tapRight = () => {
+        if (!scrolledRef.current) pageRight();
+      };
       const unbindHostPointer = bindPointerPaging(
         el,
         (ev) => ev.clientX - el.getBoundingClientRect().left,
         () => el.clientWidth,
         () => window.getSelection(),
-        pageLeft,
-        pageRight,
+        tapLeft,
+        tapRight,
         { onIdlePointerUp: () => closeHighlightEditorRef.current() },
       );
       el.addEventListener("wheel", handleWheel, { passive: false });
       window.addEventListener("keydown", handleKeyDown);
+      window.addEventListener("pointerdown", handleWindowPointerDown, true);
 
       let unbindDoc: (() => void) | undefined;
       const handleIframeSelection = (doc: Document) => {
@@ -558,8 +706,8 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
           (ev) => pageLocalX(ev.clientX, pageWidthOf(doc)),
           () => pageWidthOf(doc),
           () => doc.getSelection(),
-          pageLeft,
-          pageRight,
+          tapLeft,
+          tapRight,
           {
             shouldIgnore: (ev) => {
               const contents =
@@ -568,18 +716,40 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
                 const hit = overlayer?.hitTest?.({ x: ev.clientX, y: ev.clientY });
                 if (isHighlightOverlayKey(hit?.[0])) return true;
               }
+              const picture = readerImageAt(ev.target);
+              if (
+                picture &&
+                opensImageViewer({
+                  scrolled: scrolledRef.current,
+                  zone: hitFromClientX(
+                    pageLocalX(ev.clientX, pageWidthOf(doc)),
+                    pageWidthOf(doc),
+                  ),
+                  imageHeight: picture.height,
+                  pageHeight: doc.defaultView?.innerHeight ?? 0,
+                })
+              ) {
+                closeHighlightEditorRef.current();
+                setImage(picture.image);
+                return true;
+              }
               return false;
             },
             onIdlePointerUp: () => closeHighlightEditorRef.current(),
           },
         );
         const onSelectionChange = () => handleIframeSelection(doc);
-        doc.addEventListener("keydown", handleKeyDown);
+        const onDocPointerDown = () => {
+          lastScrollArea = null;
+        };
+        doc.addEventListener("pointerdown", onDocPointerDown);
+        doc.addEventListener("keydown", handleDocKeyDown);
         doc.addEventListener("wheel", handleWheel, { passive: false });
         doc.addEventListener("selectionchange", onSelectionChange);
         unbindDoc = () => {
           unbindPointer();
-          doc.removeEventListener("keydown", handleKeyDown);
+          doc.removeEventListener("keydown", handleDocKeyDown);
+          doc.removeEventListener("pointerdown", onDocPointerDown);
           doc.removeEventListener("wheel", handleWheel);
           doc.removeEventListener("selectionchange", onSelectionChange);
         };
@@ -748,7 +918,18 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       };
       el.addEventListener("link", handleLink as EventListener);
 
+      const history = (el as unknown as { history?: FoliateHistory }).history;
+      const handleHistoryChange = () => {
+        if (!history) return;
+        onHistoryChangeRef.current?.({
+          canGoBack: history.canGoBack,
+          canGoForward: history.canGoForward,
+        });
+      };
+      history?.addEventListener?.("index-change", handleHistoryChange);
+
       return () => {
+        history?.removeEventListener?.("index-change", handleHistoryChange);
         el.removeEventListener("relocate", handleRelocate as EventListener);
         el.removeEventListener("create-overlay", handleCreateOverlay as EventListener);
         el.removeEventListener("draw-annotation", handleDrawAnnotation as EventListener);
@@ -760,6 +941,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         unbindHostPointer();
         el.removeEventListener("wheel", handleWheel);
         window.removeEventListener("keydown", handleKeyDown);
+        window.removeEventListener("pointerdown", handleWindowPointerDown, true);
         (el as unknown as { close?: () => void }).close?.();
         el.remove();
         viewRef.current = null;
@@ -777,7 +959,10 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       paintedCfisRef.current = new Set();
       setSelectionPos(null);
       setEditor(null);
+      setImage(null);
       closeFootnote();
+      lastSeekAtRef.current = 0;
+      onHistoryChangeRef.current?.({ canGoBack: false, canGoForward: false });
       if (!fileData || !viewRef.current) return;
       const view = viewRef.current as unknown as {
         open: (file: File) => Promise<void>;
@@ -822,6 +1007,19 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
             console.error("foliate restore error:", err);
             await restoreFraction();
           }
+          // Restoring may take two navigations (init, then the saved
+          // fraction); the reader has not jumped anywhere yet, so start the
+          // history at the restored position with nothing to go back to.
+          const history = (view as unknown as { history?: FoliateHistory }).history;
+          if (history?.canGoBack) {
+            const at = (view as unknown as { lastLocation?: { cfi?: string } }).lastLocation?.cfi;
+            history.clear();
+            history.pushState(at ?? { fraction: fractionToRestore ?? 0 });
+          }
+          onHistoryChangeRef.current?.({
+            canGoBack: history?.canGoBack ?? false,
+            canGoForward: history?.canGoForward ?? false,
+          });
           // Notify App that the book is ready and toc is available.
           const book = (view as unknown as { book?: { toc?: TocItem[] } }).book;
           onBookReadyRef.current?.(book?.toc ?? []);
@@ -893,9 +1091,28 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       await (viewRef.current as unknown as { next?: () => Promise<void> })?.next?.();
     }, []);
     const goToFraction = useCallback(async (frac: number) => {
-      await (viewRef.current as unknown as { goToFraction?: (f: number) => Promise<void> })
-        ?.goToFraction?.(frac)
-        .catch((err: unknown) => console.error("goToFraction error:", err));
+      const view = viewRef.current as unknown as {
+        goToFraction?: (f: number) => Promise<void>;
+        resolveNavigation?: (target: unknown) => unknown;
+        renderer?: { goTo?: (target: unknown) => Promise<unknown> };
+        history?: FoliateHistory;
+      } | null;
+      if (!view) return;
+      const now = Date.now();
+      const burst = isSeekBurst(lastSeekAtRef.current, now);
+      lastSeekAtRef.current = now;
+      try {
+        if (burst && view.history && view.renderer?.goTo && view.resolveNavigation) {
+          // Still seeking (arrow keys on the progress bar): move the entry
+          // the burst pushed instead of stacking one per step.
+          await view.renderer.goTo(view.resolveNavigation({ fraction: frac }));
+          view.history.replaceState({ fraction: frac });
+        } else {
+          await view.goToFraction?.(frac);
+        }
+      } catch (err: unknown) {
+        console.error("goToFraction error:", err);
+      }
     }, []);
     const goToTocItem = useCallback(async (href: string) => {
       await (viewRef.current as unknown as { goTo?: (h: string) => Promise<void> })
@@ -972,6 +1189,30 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         renderer?: { setAttribute?: (name: string, value: string) => void };
       };
       view?.renderer?.setAttribute?.("max-column-count", String(n));
+    }, []);
+    const setFlow = useCallback((flow: ReaderFlow) => {
+      scrolledRef.current = flow === "scrolled";
+      const view = viewRef.current as unknown as {
+        renderer?: { setAttribute?: (name: string, value: string) => void };
+      };
+      view?.renderer?.setAttribute?.("flow", flow);
+    }, []);
+    const goBack = useCallback(() => {
+      (viewRef.current as unknown as { history?: FoliateHistory } | null)?.history?.back();
+    }, []);
+    const goForward = useCallback(() => {
+      (viewRef.current as unknown as { history?: FoliateHistory } | null)?.history?.forward();
+    }, []);
+    const searchBook = useCallback((query: string): AsyncIterator<unknown> | null => {
+      const view = viewRef.current as unknown as {
+        book?: unknown;
+        search?: (opts: { query: string }) => AsyncGenerator<unknown>;
+      } | null;
+      if (!view?.book || !view.search) return null;
+      return view.search({ query });
+    }, []);
+    const clearSearch = useCallback(() => {
+      (viewRef.current as unknown as { clearSearch?: () => void } | null)?.clearSearch?.();
     }, []);
     const getToc = useCallback((): TocItem[] => {
       const view = viewRef.current as unknown as { book?: { toc?: TocItem[] } };
@@ -1067,6 +1308,11 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         goToQuote,
         setStyles,
         setColumnCount,
+        setFlow,
+        goBack,
+        goForward,
+        searchBook,
+        clearSearch,
         getToc,
         getLocation,
         getSelectionCfi,
@@ -1091,6 +1337,11 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         goToQuote,
         setStyles,
         setColumnCount,
+        setFlow,
+        goBack,
+        goForward,
+        searchBook,
+        clearSearch,
         getToc,
         getLocation,
         getSelectionCfi,
@@ -1140,6 +1391,8 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
             }}
           />
         )}
+
+        {image && <ImageViewer image={image} onClose={() => setImage(null)} />}
 
         <FootnotePopup
           x={footnotePos.x}

@@ -286,3 +286,30 @@ describe("ReaderProgressBar", () => {
     expect(queryByTestId("reader-chapter-remaining")).toBeNull();
   });
 });
+
+describe("ReaderProgressBar history", () => {
+  it("shows back / forward only while they apply", () => {
+    const onBack = vi.fn();
+    const onForward = vi.fn();
+    const { rerender, queryByRole, getByRole } = render(
+      <ReaderProgressBar fraction={0.2} chapterLabel="第一章" onSeek={vi.fn()} />,
+    );
+    expect(queryByRole("button", { name: /返回跳转前的位置/ })).toBeNull();
+    expect(queryByRole("button", { name: /前进/ })).toBeNull();
+    rerender(
+      <ReaderProgressBar
+        fraction={0.2}
+        chapterLabel="第一章"
+        onSeek={vi.fn()}
+        canGoBack
+        canGoForward
+        onBack={onBack}
+        onForward={onForward}
+      />,
+    );
+    fireEvent.click(getByRole("button", { name: /返回跳转前的位置/ }));
+    fireEvent.click(getByRole("button", { name: /前进/ }));
+    expect(onBack).toHaveBeenCalled();
+    expect(onForward).toHaveBeenCalled();
+  });
+});

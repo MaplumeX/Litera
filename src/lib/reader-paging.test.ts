@@ -4,8 +4,13 @@ import {
   bindPointerPaging,
   consumeWheelDelta,
   hitFromClientX,
+  isFindShortcut,
+  isSeekBurst,
   pageLocalX,
   pageWidthOf,
+  readerKeyAction,
+  scrolledBoundaryDirection,
+  SEEK_BURST_MS,
   shouldIgnorePagingTarget,
   shouldIgnoreSpaceTarget,
   type WheelPagingState,
@@ -262,5 +267,101 @@ describe("consumeWheelDelta", () => {
     const result = consumeWheelDelta(idle(), 1, 1_000, 1);
     expect(result.turn).toBe(1);
     expect(result.state.flipped).toBe(true);
+  });
+});
+
+describe("readerKeyAction", () => {
+  const paged = { scrolled: false, ttsActive: false };
+  const scrolled = { scrolled: true, ttsActive: false };
+
+  it("turns pages with Space, Shift+Space, PageUp and PageDown", () => {
+    expect(readerKeyAction({ key: " " }, paged)).toBe("next");
+    expect(readerKeyAction({ key: " ", shiftKey: true }, paged)).toBe("prev");
+    expect(readerKeyAction({ key: "PageDown" }, paged)).toBe("next");
+    expect(readerKeyAction({ key: "PageUp" }, paged)).toBe("prev");
+  });
+
+  it("lets Space toggle read-aloud only while it is active", () => {
+    const tts = { scrolled: false, ttsActive: true };
+    expect(readerKeyAction({ key: " " }, tts)).toBe("ttsToggle");
+    expect(readerKeyAction({ key: " ", shiftKey: true }, tts)).toBe("prev");
+  });
+
+  it("keeps ←/→ as page direction and ↑/↓ as reading order", () => {
+    expect(readerKeyAction({ key: "ArrowLeft" }, paged)).toBe("left");
+    expect(readerKeyAction({ key: "ArrowRight" }, paged)).toBe("right");
+    expect(readerKeyAction({ key: "ArrowUp" }, paged)).toBe("prev");
+    expect(readerKeyAction({ key: "ArrowDown" }, paged)).toBe("next");
+  });
+
+  it("scrolls by lines with ↑/↓ in scrolled flow", () => {
+    expect(readerKeyAction({ key: "ArrowUp" }, scrolled)).toBe("lineUp");
+    expect(readerKeyAction({ key: "ArrowDown" }, scrolled)).toBe("lineDown");
+    expect(readerKeyAction({ key: "ArrowRight" }, scrolled)).toBe("right");
+  });
+
+  it("jumps to the book's ends with Home / End", () => {
+    expect(readerKeyAction({ key: "Home" }, paged)).toBe("start");
+    expect(readerKeyAction({ key: "End" }, paged)).toBe("end");
+  });
+
+  it("walks the jump history with Alt+←/→", () => {
+    expect(readerKeyAction({ key: "ArrowLeft", altKey: true }, paged)).toBe("back");
+    expect(readerKeyAction({ key: "ArrowRight", altKey: true }, paged)).toBe("forward");
+    expect(readerKeyAction({ key: "ArrowUp", altKey: true }, paged)).toBeNull();
+  });
+
+  it("leaves Ctrl/⌘ shortcuts and unknown keys alone", () => {
+    expect(readerKeyAction({ key: "ArrowRight", ctrlKey: true }, paged)).toBeNull();
+    expect(readerKeyAction({ key: " ", metaKey: true }, paged)).toBeNull();
+    expect(readerKeyAction({ key: "ArrowRight", shiftKey: true }, paged)).toBeNull();
+    expect(readerKeyAction({ key: "a" }, paged)).toBeNull();
+  });
+
+  it("ignores keys typed into fields, sliders and buttons", () => {
+    const input = document.createElement("input");
+    const slider = document.createElement("div");
+    slider.setAttribute("role", "slider");
+    const button = document.createElement("button");
+    expect(readerKeyAction({ key: "PageDown", target: input }, paged)).toBeNull();
+    expect(readerKeyAction({ key: "Home", target: slider }, paged)).toBeNull();
+    expect(readerKeyAction({ key: " ", target: button }, paged)).toBeNull();
+    // Arrows on a focused button still page; only Space would press it.
+    expect(readerKeyAction({ key: "ArrowRight", target: button }, paged)).toBe("right");
+  });
+});
+
+describe("isFindShortcut", () => {
+  it("matches Ctrl+F and ⌘+F only", () => {
+    expect(isFindShortcut({ key: "f", ctrlKey: true })).toBe(true);
+    expect(isFindShortcut({ key: "F", metaKey: true })).toBe(true);
+    expect(isFindShortcut({ key: "f" })).toBe(false);
+    expect(isFindShortcut({ key: "f", ctrlKey: true, shiftKey: true })).toBe(false);
+    expect(isFindShortcut({ key: "g", ctrlKey: true })).toBe(false);
+  });
+});
+
+describe("isSeekBurst", () => {
+  it("joins seeks closer together than the burst window", () => {
+    expect(isSeekBurst(0, 1_000)).toBe(false);
+    expect(isSeekBurst(1_000, 1_000 + SEEK_BURST_MS - 1)).toBe(true);
+    expect(isSeekBurst(1_000, 1_000 + SEEK_BURST_MS)).toBe(false);
+  });
+});
+
+describe("scrolledBoundaryDirection", () => {
+  it("scrolls natively inside the section", () => {
+    expect(scrolledBoundaryDirection(40, { start: 100, size: 500, viewSize: 2000 })).toBe(0);
+    expect(scrolledBoundaryDirection(-40, { start: 100, size: 500, viewSize: 2000 })).toBe(0);
+  });
+
+  it("crosses into the next section past the end", () => {
+    expect(scrolledBoundaryDirection(40, { start: 1500, size: 500, viewSize: 2000 })).toBe(1);
+    expect(scrolledBoundaryDirection(-40, { start: 1500, size: 500, viewSize: 2000 })).toBe(0);
+  });
+
+  it("crosses into the previous section past the start", () => {
+    expect(scrolledBoundaryDirection(-40, { start: 0, size: 500, viewSize: 2000 })).toBe(-1);
+    expect(scrolledBoundaryDirection(40, { start: 0, size: 500, viewSize: 2000 })).toBe(0);
   });
 });
