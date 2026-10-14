@@ -13,6 +13,8 @@ export interface AgentConfigSnapshot {
   provider: string | null;
   model: string | null;
   hasApiKey: boolean;
+  /** Built-in providers with a saved API key, including inactive ones. */
+  providersWithKey: string[];
   customProviders: CustomProviderEntry[];
   thinkingLevel: string;
 }
