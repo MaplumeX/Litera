@@ -67,6 +67,147 @@ export function shouldIgnoreSpaceTarget(el: EventTarget | null): boolean {
   return Boolean(node.closest?.('button, [role="button"], [role="slider"], input[type="range"]'));
 }
 
+/** What a key press does to the Book pane. */
+export type ReaderKeyAction =
+  | "prev"
+  | "next"
+  | "left"
+  | "right"
+  | "lineUp"
+  | "lineDown"
+  | "start"
+  | "end"
+  | "back"
+  | "forward"
+  | "ttsToggle";
+
+export interface ReaderKeyInput {
+  key: string;
+  code?: string;
+  altKey?: boolean;
+  ctrlKey?: boolean;
+  metaKey?: boolean;
+  shiftKey?: boolean;
+  target?: EventTarget | null;
+}
+
+export interface ReaderKeyContext {
+  /** Scrolled flow: ↑/↓ scroll a little instead of turning a page. */
+  scrolled: boolean;
+  /** Read-aloud is playing or paused, so Space toggles it instead of paging. */
+  ttsActive: boolean;
+}
+
+/**
+ * Map a key press to a reader action, or null when the key is not ours
+ * (typing into a field, a slider owning its arrows, a modifier shortcut).
+ * ←/→ follow the page direction; PageUp/PageDown and Space follow reading order.
+ */
+export function readerKeyAction(
+  input: ReaderKeyInput,
+  context: ReaderKeyContext,
+): ReaderKeyAction | null {
+  if (input.ctrlKey || input.metaKey) return null;
+  const isSpace = input.key === " " || input.code === "Space";
+  if (isSpace) {
+    if (input.altKey || shouldIgnoreSpaceTarget(input.target ?? null)) return null;
+    if (context.ttsActive && !input.shiftKey) return "ttsToggle";
+    return input.shiftKey ? "prev" : "next";
+  }
+  if (shouldIgnorePagingTarget(input.target ?? null)) return null;
+  if (input.altKey) {
+    if (input.shiftKey) return null;
+    if (input.key === "ArrowLeft") return "back";
+    if (input.key === "ArrowRight") return "forward";
+    return null;
+  }
+  if (input.shiftKey) return null;
+  switch (input.key) {
+    case "ArrowLeft":
+      return "left";
+    case "ArrowRight":
+      return "right";
+    case "ArrowUp":
+      return context.scrolled ? "lineUp" : "prev";
+    case "ArrowDown":
+      return context.scrolled ? "lineDown" : "next";
+    case "PageUp":
+      return "prev";
+    case "PageDown":
+      return "next";
+    case "Home":
+      return "start";
+    case "End":
+      return "end";
+    default:
+      return null;
+  }
+}
+
+/** Actions that also scroll whatever scroll area the reader last clicked. */
+const SCROLL_KEY_ACTIONS: ReadonlySet<ReaderKeyAction> = new Set([
+  "prev",
+  "next",
+  "lineUp",
+  "lineDown",
+  "start",
+  "end",
+]);
+
+export function isScrollKeyAction(action: ReaderKeyAction): boolean {
+  return SCROLL_KEY_ACTIONS.has(action);
+}
+
+/**
+ * The scrollable element (other than the Book) a pointer press landed in,
+ * if any. Chromium keyboard-scrolls the last clicked scroll area even
+ * without focus, so a later ↓ / Space there belongs to it, not the Book.
+ */
+export function scrollAreaAt(target: EventTarget | null, book: Element): Element | null {
+  let node = target instanceof Element ? target : null;
+  while (node && node !== node.ownerDocument.body) {
+    if (node === book) return null;
+    const { overflowY } = getComputedStyle(node);
+    if ((overflowY === "auto" || overflowY === "scroll") && node.scrollHeight > node.clientHeight) {
+      return node;
+    }
+    node = node.parentElement;
+  }
+  return null;
+}
+
+/** Ctrl/⌘+F, the find-in-book shortcut. */
+export function isFindShortcut(input: ReaderKeyInput): boolean {
+  return (
+    (input.ctrlKey || input.metaKey) === true &&
+    !input.altKey &&
+    !input.shiftKey &&
+    input.key.toLowerCase() === "f"
+  );
+}
+
+/** Jumps closer together than this (progress-bar arrow keys) are one history entry. */
+export const SEEK_BURST_MS = 1500;
+
+export function isSeekBurst(lastSeekAt: number, now: number): boolean {
+  return lastSeekAt > 0 && now - lastSeekAt < SEEK_BURST_MS;
+}
+
+/**
+ * Scrolled flow renders one section at a time: a wheel push past either end
+ * of the section moves to the neighbouring one. Returns the direction to
+ * cross in, or 0 when the wheel should just scroll natively.
+ */
+export function scrolledBoundaryDirection(
+  delta: number,
+  position: { start: number; size: number; viewSize: number },
+): -1 | 0 | 1 {
+  const { start, size, viewSize } = position;
+  if (delta > 0 && viewSize - (start + size) <= 2) return 1;
+  if (delta < 0 && start <= 0) return -1;
+  return 0;
+}
+
 const CLICK_SLOP_PX = 5;
 
 function hasHrefTarget(target: EventTarget | null): boolean {

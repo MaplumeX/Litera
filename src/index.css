@@ -252,7 +252,7 @@
   --markmap-highlight-bg: var(--accent);
 }
 
-/* 阅读器侧边面板（目录与标注）：从左侧滑入。 */
+/* 阅读器侧边面板（目录、标注与搜索）：从左侧滑入。 */
 @keyframes reader-drawer-in {
   from {
     transform: translateX(-12px);

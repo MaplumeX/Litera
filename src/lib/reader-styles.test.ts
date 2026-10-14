@@ -236,6 +236,7 @@ describe("generateStylesCss", () => {
       '@namespace epub url("http://www.idpf.org/2007/ops");' +
         "html, body { font-family: serif; font-size: 16px !important; line-height: 2; letter-spacing: 0.02em; max-width: 36em; margin-inline: auto; padding-inline: 1.25rem; text-align: justify; }\n" +
         "p { margin-block-end: 1.1em !important; text-indent: 2em !important; }\n" +
+        "img, svg image { cursor: zoom-in; } a[href] img, a[href] image { cursor: pointer; }\n" +
         'a[epub\\:type~="noteref"], a[epub|type~="noteref"], sup > a[href^="#"] { font-size: 0.83em !important; vertical-align: super !important; line-height: 1 !important; text-decoration: none !important; color: #2563eb !important; }\n' +
         'a[href] > sup { font-size: 0.83em !important; vertical-align: super !important; line-height: 1 !important; color: #2563eb !important; }\n' +
         'a[href]:has(> sup) { text-decoration: none !important; color: #2563eb !important; }',

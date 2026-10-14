@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import {
   ReaderView,
+  type ReaderHistoryState,
   type ReaderViewHandle,
   type SelectionCapture,
   type SelectionCfi,
@@ -45,6 +46,7 @@ import { ReaderTtsBar } from "@/components/ReaderTtsBar";
 import { TocSidebar, TocSidebarActions } from "@/components/TocSidebar";
 import { ReaderSidePanel, type ReaderSidePanelTab } from "@/components/ReaderSidePanel";
 import { AnnotationsSidebar } from "@/components/AnnotationsSidebar";
+import { BookSearchPanel } from "@/components/BookSearchPanel";
 import {
   appendBookmark,
   appendHighlight,
@@ -112,6 +114,9 @@ import {
   unionKeys,
 } from "@/lib/toc-items";
 import { useReaderTts } from "@/lib/use-reader-tts";
+import { useBookSearch } from "@/lib/use-book-search";
+import { loadReaderFlow } from "@/lib/reader-flow";
+import { isFindShortcut } from "@/lib/reader-paging";
 import { useReadingStatus } from "@/lib/use-reading-status";
 import { FinishBookPrompt } from "@/components/FinishBookPrompt";
 
@@ -200,6 +205,15 @@ function App() {
   // overrides the Book pane's position as the prompt's chapter context.
   const [chapterScope, setChapterScope] = useState<{ href: string; label: string } | null>(null);
   const [tocWidth, setTocWidth] = useState(loadTocWidth);
+  // Bumped by Ctrl/⌘+F so the search field takes focus even when already open.
+  const [searchFocusToken, setSearchFocusToken] = useState(0);
+  const [readerFlow, setReaderFlow] = useState(loadReaderFlow);
+  const readerFlowRef = useRef(readerFlow);
+  readerFlowRef.current = readerFlow;
+  const [readerHistory, setReaderHistory] = useState<ReaderHistoryState>({
+    canGoBack: false,
+    canGoForward: false,
+  });
   const [annotations, setAnnotations] = useState<AnnotationsFile>(emptyAnnotations);
   const annotationsRef = useRef(annotations);
   annotationsRef.current = annotations;
@@ -241,6 +255,12 @@ function App() {
     readerRef,
     bookHidden,
     fileKey: fileData?.bookId ?? null,
+  });
+  const bookSearch = useBookSearch({
+    search: (query) => readerRef.current?.searchBook(query) ?? null,
+    clear: () => readerRef.current?.clearSearch(),
+    goTo: (hit) => void readerRef.current?.goToCfi(hit.cfi),
+    resetKey: fileData?.bookId ?? null,
   });
   const chatRef = useRef<ChatPanelHandle>(null);
   const shellRef = useRef<HTMLDivElement>(null);
@@ -423,16 +443,23 @@ function App() {
     readerRef.current?.setColumnCount(styleState.columnCount);
   }, [styleState, resolvedTheme]);
 
+  useEffect(() => {
+    readerRef.current?.setFlow(readerFlow);
+  }, [readerFlow]);
+
   // Escape closes overlay drawers. Page turning lives in ReaderView
   // (chapter iframe + host); do not handle ArrowLeft/ArrowRight here.
   useEffect(() => {
     if (view !== "reader" || !sidePanelOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
+      // The panel's own fields (search) have nothing to undo with Esc.
+      const inPanel = sidePanelRef.current?.contains(target) ?? false;
       if (
-        target.tagName === "INPUT" ||
-        target.tagName === "TEXTAREA" ||
-        target.isContentEditable
+        !inPanel &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable)
       )
         return;
       if (e.key === "Escape") {
@@ -676,6 +703,7 @@ function App() {
     // Apply saved styles now that the renderer exists.
     readerRef.current?.setStyles(generateStylesCss(styleStateRef.current));
     readerRef.current?.setColumnCount(styleStateRef.current.columnCount);
+    readerRef.current?.setFlow(readerFlowRef.current);
   }, []);
 
   useEffect(() => {
@@ -1024,6 +1052,7 @@ function App() {
       overriddenKeys={overriddenKeys}
       theme={globalTheme}
       onThemeChange={setGlobalTheme}
+      onReaderFlowChange={setReaderFlow}
     />
   );
 
@@ -1043,8 +1072,31 @@ function App() {
   };
   const handleSidePanelTabChange = (tab: ReaderSidePanelTab) => {
     setSidePanelTab(tab);
-    if (tab === "annotations") revealBookForAnnotations();
+    if (tab !== "toc") revealBookForAnnotations();
   };
+  const openBookSearch = () => {
+    setSidePanelTab("search");
+    setSidePanelOpen(true);
+    setSearchFocusToken((n) => n + 1);
+    revealBookForAnnotations();
+  };
+  const openBookSearchRef = useRef(openBookSearch);
+  openBookSearchRef.current = openBookSearch;
+
+  // Ctrl/⌘+F finds in the open Book. Keys typed inside the chapter never
+  // reach the window; ReaderView forwards those through onFindRequest.
+  useEffect(() => {
+    if (view !== "reader") return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || !isFindShortcut(e)) return;
+      // Another dialog (settings) owns the keyboard while it is open.
+      if ((e.target as HTMLElement | null)?.closest?.('[role="dialog"]')) return;
+      e.preventDefault();
+      openBookSearchRef.current();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [view]);
   const sidePanel = sidePanelOpen ? (
     <>
       {/* Clicking outside closes the panel; the book stays fully legible. */}
@@ -1052,7 +1104,11 @@ function App() {
         type="button"
         className="absolute inset-0 z-20 cursor-default"
         aria-label={
-          sidePanelTab === "toc" ? t("reader.closeToc") : t("reader.closeAnnotations")
+          sidePanelTab === "toc"
+            ? t("reader.closeToc")
+            : sidePanelTab === "search"
+              ? t("search.close")
+              : t("reader.closeAnnotations")
         }
         onClick={() => setSidePanelOpen(false)}
       />
@@ -1080,6 +1136,19 @@ function App() {
               expanded={tocExpanded}
               onToggle={handleTocToggle}
               onGoTo={handleTocGoTo}
+            />
+          ) : sidePanelTab === "search" ? (
+            <BookSearchPanel
+              query={bookSearch.query}
+              onQueryChange={bookSearch.setQuery}
+              onSubmit={bookSearch.submit}
+              onStep={bookSearch.step}
+              onSelect={bookSearch.select}
+              onClear={bookSearch.reset}
+              results={bookSearch.results}
+              status={bookSearch.status}
+              activeCfi={bookSearch.activeCfi}
+              focusToken={searchFocusToken}
             />
           ) : (
             <AnnotationsSidebar
@@ -1114,7 +1183,7 @@ function App() {
       onClick={() => {
         const next = !sidePanelOpen;
         setSidePanelOpen(next);
-        if (next && sidePanelTab === "annotations") revealBookForAnnotations();
+        if (next && sidePanelTab !== "toc") revealBookForAnnotations();
       }}
       aria-label={t("reader.sidePanel")}
       aria-expanded={sidePanelOpen}
@@ -1343,6 +1412,10 @@ function App() {
                 initialCfi={currentBook?.lastCfi}
                 onBookReady={handleBookReady}
                 onTtsToggle={tts.toggle}
+                ttsActive={tts.status !== "idle"}
+                onHistoryChange={setReaderHistory}
+                onFindRequest={() => openBookSearchRef.current()}
+                keysDisabled={bookHidden}
                 onUserRelocate={tts.onUserRelocate}
                 stylesCss={generateStylesCss({ ...styleState, theme: resolvedTheme })}
               />
@@ -1386,6 +1459,10 @@ function App() {
             canPrevChapter={chapterNav.canPrev}
             canNextChapter={chapterNav.canNext}
             previewLabelAt={(frac) => readerRef.current?.previewLabelAt(frac)}
+            canGoBack={readerHistory.canGoBack}
+            canGoForward={readerHistory.canGoForward}
+            onBack={() => readerRef.current?.goBack()}
+            onForward={() => readerRef.current?.goForward()}
           />
         </div>
         <div

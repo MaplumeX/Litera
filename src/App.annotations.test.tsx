@@ -75,6 +75,11 @@ const readerHandle: ReaderViewHandle = {
   goToCfi: vi.fn(async () => true),
   setStyles: vi.fn(),
   setColumnCount: vi.fn(),
+  setFlow: vi.fn(),
+  goBack: vi.fn(),
+  goForward: vi.fn(),
+  searchBook: vi.fn(() => null),
+  clearSearch: vi.fn(),
   getToc: () => [],
   getLocation: () => ({
     cfi: "epubcfi(/6/8!/4/2,/1:0,/1:80)",
@@ -267,7 +272,7 @@ async function openReader() {
     fireEvent.click(screen.getByText("open-book"));
   });
   await waitFor(() => {
-    expect(screen.getByLabelText("目录与标注")).toBeTruthy();
+    expect(screen.getByLabelText("目录、标注与搜索")).toBeTruthy();
   });
   return screen;
 }
@@ -312,7 +317,7 @@ describe("reader annotation chrome", () => {
     expect(screen.getByText("Chapter 1")).toBeTruthy();
     expect(screen.getByText("10%")).toBeTruthy();
     // Contents and Annotations share one panel and switch by tab.
-    fireEvent.click(screen.getByLabelText("目录与标注"));
+    fireEvent.click(screen.getByLabelText("目录、标注与搜索"));
     expect(screen.getByRole("tab", { name: "目录" }).getAttribute("aria-selected")).toBe("true");
     fireEvent.click(screen.getByRole("tab", { name: "标注" }));
     expect(screen.getByText("添加书签")).toBeTruthy();
@@ -324,14 +329,44 @@ describe("reader annotation chrome", () => {
 
     // Reopening returns to the last tab.
     fireEvent.click(screen.getByRole("tab", { name: "标注" }));
-    fireEvent.click(screen.getByLabelText("目录与标注"));
-    fireEvent.click(screen.getByLabelText("目录与标注"));
+    fireEvent.click(screen.getByLabelText("目录、标注与搜索"));
+    fireEvent.click(screen.getByLabelText("目录、标注与搜索"));
     expect(screen.getByText("添加书签")).toBeTruthy();
+  });
+
+  it("opens find-in-book with Ctrl+F and jumps to a match", async () => {
+    vi.mocked(readerHandle.searchBook).mockImplementationOnce(() =>
+      (async function* () {
+        yield {
+          label: "第三章",
+          subitems: [
+            { cfi: "epubcfi(/6/8!/4/2/1:4)", excerpt: { pre: "走到", match: "河边", post: "" } },
+          ],
+        };
+        yield "done";
+      })(),
+    );
+    const screen = await openReader();
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    expect(screen.getByRole("tab", { name: "搜索" }).getAttribute("aria-selected")).toBe("true");
+    const field = screen.getByRole("searchbox", { name: "在书中搜索" });
+    expect(document.activeElement).toBe(field);
+    fireEvent.change(field, { target: { value: "河边" } });
+    await act(async () => {
+      fireEvent.keyDown(field, { key: "Enter" });
+    });
+    await waitFor(() => expect(screen.getByText("共 1 处")).toBeTruthy());
+    expect(readerHandle.searchBook).toHaveBeenCalledWith("河边");
+    const hit = screen.getAllByRole("button").find((el) => el.textContent === "走到河边");
+    fireEvent.click(hit!);
+    expect(readerHandle.goToCfi).toHaveBeenCalledWith("epubcfi(/6/8!/4/2/1:4)");
+    // The panel stays open so the next match is one click away.
+    expect(screen.getByRole("searchbox", { name: "在书中搜索" })).toBeTruthy();
   });
 
   it("saves a bookmark snapshot without writing BookRecord fields", async () => {
     const screen = await openReader();
-    fireEvent.click(screen.getByLabelText("目录与标注"));
+    fireEvent.click(screen.getByLabelText("目录、标注与搜索"));
     fireEvent.click(screen.getByRole("tab", { name: "标注" }));
     await act(async () => {
       fireEvent.click(screen.getByLabelText("添加书签"));
@@ -377,7 +412,7 @@ describe("reader annotation chrome", () => {
       ],
     };
     const screen = await openReader();
-    fireEvent.click(screen.getByLabelText("目录与标注"));
+    fireEvent.click(screen.getByLabelText("目录、标注与搜索"));
     fireEvent.click(screen.getByRole("tab", { name: "标注" }));
 
     // A sync pass lands and rewrites the book's annotations on disk.
@@ -419,7 +454,7 @@ describe("reader annotation chrome", () => {
     await waitFor(() => {
       expect(screen.getByRole("alert").textContent).toContain("bad json");
     });
-    fireEvent.click(screen.getByLabelText("目录与标注"));
+    fireEvent.click(screen.getByLabelText("目录、标注与搜索"));
     fireEvent.click(screen.getByRole("tab", { name: "标注" }));
     await act(async () => {
       fireEvent.click(screen.getByLabelText("添加书签"));
@@ -452,7 +487,7 @@ describe("reader annotation chrome", () => {
     expect(header!.querySelectorAll("[data-titlebar-drag]")).toHaveLength(2);
     const toolbarNames = [
       "返回书库",
-      "目录与标注",
+      "目录、标注与搜索",
       "字体与主题",
       "阅读",
       "Agent",
@@ -494,7 +529,7 @@ describe("reader annotation chrome", () => {
       "返回书库",
       "会话列表",
       "字体与主题",
-      "目录与标注",
+      "目录、标注与搜索",
       "阅读",
       "Agent",
       "显示书籍",
@@ -659,7 +694,7 @@ describe("reader TOC drawer resize", () => {
 
   async function openToc() {
     const screen = await openReader();
-    fireEvent.click(screen.getByLabelText("目录与标注"));
+    fireEvent.click(screen.getByLabelText("目录、标注与搜索"));
     const drawer = screen.container.querySelector(
       ".absolute.inset-y-2.left-2.z-30",
     ) as HTMLElement | null;
@@ -724,9 +759,9 @@ describe("reader TOC drawer resize", () => {
     fireEvent.pointerUp(handle, { clientX: 324, button: 0 });
     expect(drawer.style.width).toBe("324px");
 
-    fireEvent.click(screen.getByLabelText("目录与标注"));
+    fireEvent.click(screen.getByLabelText("目录、标注与搜索"));
     expect(screen.queryByRole("separator", { orientation: "vertical" })).toBeNull();
-    fireEvent.click(screen.getByLabelText("目录与标注"));
+    fireEvent.click(screen.getByLabelText("目录、标注与搜索"));
     const reopened = screen.container.querySelector(
       ".absolute.inset-y-2.left-2.z-30",
     ) as HTMLElement | null;
@@ -740,7 +775,7 @@ describe("reader TOC nested collapse", () => {
   }
 
   async function openTocDrawer(screen: ReturnType<typeof render>) {
-    fireEvent.click(screen.getByLabelText("目录与标注"));
+    fireEvent.click(screen.getByLabelText("目录、标注与搜索"));
     await waitFor(() => {
       expect(within(tocNav(screen)).getByText("第一部分")).toBeTruthy();
     });
@@ -756,7 +791,7 @@ describe("reader TOC nested collapse", () => {
     expect(within(nav).getByText("第一章")).toBeTruthy();
     expect(readerHandle.goToTocItem).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByLabelText("目录与标注"));
+    fireEvent.click(screen.getByLabelText("目录、标注与搜索"));
     expect(screen.queryByText("第一部分")).toBeNull();
 
     nav = await openTocDrawer(screen);
@@ -789,7 +824,7 @@ describe("reader TOC nested collapse", () => {
       fireEvent.click(screen.getByText("open-book-2"));
     });
     await waitFor(() => {
-      expect(screen.getByLabelText("目录与标注")).toBeTruthy();
+      expect(screen.getByLabelText("目录、标注与搜索")).toBeTruthy();
     });
 
     const nextNav = await openTocDrawer(screen);

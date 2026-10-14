@@ -27,6 +27,7 @@ import { AgentConfigForm } from "@/components/AgentConfigForm";
 import { SyncSettingsForm } from "@/components/settings/SyncSettingsForm";
 import { TypographyPreview } from "@/components/settings/TypographyPreview";
 import { cn } from "@/lib/utils";
+import { loadReaderFlow, saveReaderFlow, type ReaderFlow } from "@/lib/reader-flow";
 import {
   FONT_FAMILIES,
   TEXT_ALIGNS,
@@ -126,6 +127,8 @@ export interface SettingsDialogProps {
   overriddenKeys: TypographyKey[];
   theme: string;
   onThemeChange: (theme: string) => void;
+  /** Told when the page layout (paginated / scrolled) changes, so an open Book follows. */
+  onReaderFlowChange?: (flow: ReaderFlow) => void;
 }
 
 function RestoreButton({
@@ -532,10 +535,12 @@ export function SettingsDialog({
   overriddenKeys,
   theme,
   onThemeChange,
+  onReaderFlowChange,
 }: SettingsDialogProps) {
   const { t, locale, setLocale } = useT();
   const [section, setSection] = useState<SettingsSection>("typography");
   const [defaultReaderMode, setDefaultReaderMode] = useState(loadDefaultReaderMode);
+  const [readerFlow, setReaderFlow] = useState(loadReaderFlow);
   const [uiFontFamily, setUiFontFamily] = useState(loadUiFontFamily);
   const [uiFontSize, setUiFontSize] = useState(loadUiFontSize);
   const [version, setVersion] = useState<string | null>(null);
@@ -543,6 +548,7 @@ export function SettingsDialog({
   useEffect(() => {
     if (!open) return;
     setDefaultReaderMode(loadDefaultReaderMode());
+    setReaderFlow(loadReaderFlow());
     setUiFontFamily(loadUiFontFamily());
     setUiFontSize(loadUiFontSize());
   }, [open]);
@@ -817,6 +823,21 @@ export function SettingsDialog({
                       ]}
                       onChange={setLocale}
                       ariaLabel={t("settings.language")}
+                    />
+                  </PresetRow>
+                  <PresetRow label={t("settings.flow")}>
+                    <SegmentedControl
+                      value={readerFlow}
+                      options={[
+                        { value: "paginated" as ReaderFlow, label: t("settings.flow.paginated") },
+                        { value: "scrolled" as ReaderFlow, label: t("settings.flow.scrolled") },
+                      ]}
+                      onChange={(next) => {
+                        saveReaderFlow(next);
+                        setReaderFlow(next);
+                        onReaderFlowChange?.(next);
+                      }}
+                      ariaLabel={t("settings.flow")}
                     />
                   </PresetRow>
                   <PresetRow label={t("settings.defaultMode")}>

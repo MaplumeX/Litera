@@ -2,11 +2,12 @@ import type { ReactNode } from "react";
 import { useT, type MessageKey } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
-export type ReaderSidePanelTab = "toc" | "annotations";
+export type ReaderSidePanelTab = "toc" | "annotations" | "search";
 
 const TABS: { value: ReaderSidePanelTab; labelKey: MessageKey }[] = [
   { value: "toc", labelKey: "toc.title" },
   { value: "annotations", labelKey: "annotations.title" },
+  { value: "search", labelKey: "search.title" },
 ];
 
 interface ReaderSidePanelProps {
@@ -18,8 +19,8 @@ interface ReaderSidePanelProps {
 }
 
 /**
- * The reader's one side panel: Contents and Annotations share a frame and
- * switch by tab, so both are one titlebar button away and look alike.
+ * The reader's one side panel: Contents, Annotations and Search share a
+ * frame and switch by tab, so all are one titlebar button away and look alike.
  */
 export function ReaderSidePanel({ tab, onTabChange, actions, children }: ReaderSidePanelProps) {
   const { t } = useT();

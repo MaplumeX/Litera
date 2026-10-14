@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, Redo2, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useT } from "@/lib/i18n";
 import {
@@ -26,6 +26,11 @@ interface ReaderProgressBarProps {
   canPrevChapter?: boolean;
   canNextChapter?: boolean;
   previewLabelAt?: (frac: number) => string | undefined;
+  /** Return to where the last jump started; shown only when there is one. */
+  onBack?: () => void;
+  onForward?: () => void;
+  canGoBack?: boolean;
+  canGoForward?: boolean;
 }
 
 export function ReaderProgressBar({
@@ -38,6 +43,10 @@ export function ReaderProgressBar({
   canPrevChapter = false,
   canNextChapter = false,
   previewLabelAt,
+  onBack,
+  onForward,
+  canGoBack = false,
+  canGoForward = false,
 }: ReaderProgressBarProps) {
   const { t } = useT();
   const trackRef = useRef<HTMLDivElement>(null);
@@ -78,6 +87,32 @@ export function ReaderProgressBar({
       data-testid="reader-progress-bar"
       className="group/bar flex h-11 shrink-0 items-center gap-1 px-2 pb-2"
     >
+      {/* Back / forward stay visible while they apply: after a jump, the way
+          back is the thing the reader is looking for. */}
+      {canGoBack && (
+        <Button
+          type="button"
+          size="icon-sm"
+          variant="ghost"
+          aria-label={t("reader.historyBack")}
+          title={t("reader.historyBack")}
+          onClick={() => onBack?.()}
+        >
+          <Undo2 />
+        </Button>
+      )}
+      {canGoForward && (
+        <Button
+          type="button"
+          size="icon-sm"
+          variant="ghost"
+          aria-label={t("reader.historyForward")}
+          title={t("reader.historyForward")}
+          onClick={() => onForward?.()}
+        >
+          <Redo2 />
+        </Button>
+      )}
       {/* Chapter arrows repeat page turning, so they stay out of sight until
           the bar is hovered or reached by keyboard. */}
       <Button
