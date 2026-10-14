@@ -514,11 +514,10 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
   }, [askConfirm, pushNotice, refreshTrash, t, trashEntries.length]);
 
   const searching = search.trim().length > 0;
-  // Continue reading only shows when it adds something: not while searching
-  // or selecting, and not when the shelf is already newest-opened first, where
-  // its tiles would just repeat the shelf's first row.
-  const showRecents =
-    !searching && !selectMode && !(sort === "recent" && order === "desc");
+  // Continue reading is a fixed entry point, so it stays up whatever the sort,
+  // even when it repeats the shelf's first row; only searching or selecting
+  // hides it.
+  const showRecents = !searching && !selectMode;
   const recents = useMemo(
     // Continue reading narrows with the status filter like the main grid: a
     // reader looking at "unread" should not be shown other books up top.
@@ -860,7 +859,7 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
                       ))}
                     </div>
                   ) : (
-                    <div data-shelf="main" className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-6">
+                    <div data-shelf="main" className="grid grid-cols-[repeat(auto-fill,140px)] justify-between gap-x-6 gap-y-8">
                       {visible.map((book) => (
                         <BookCard
                           key={book.id}

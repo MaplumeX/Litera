@@ -479,21 +479,17 @@ describe("LibraryView", () => {
     });
   });
 
-  it("hides continue reading when the shelf is already newest-opened first", async () => {
+  it("shows continue reading even when the shelf is already newest-opened first", async () => {
     const opened: BookRecord = {
       ...book,
       readingStatus: "reading",
       lastOpenedAt: "2026-04-01T00:00:00+00:00",
     };
     setupInvoke({ list_books: () => [opened] });
-    const { findByText, getByRole, queryByText } = render(
+    const { findByText } = render(
       <LibraryView onOpenBook={() => {}} onOpenSettings={() => {}} />,
     );
-    await findByText("Stored Title");
     // Default sort: Recently opened, newest first.
-    expect(queryByText("继续阅读")).toBeNull();
-
-    await pickSortItem("升序");
     expect(await findByText("继续阅读")).toBeTruthy();
   });
 
@@ -589,10 +585,11 @@ describe("LibraryView", () => {
       lastOpenedAt: "2026-06-01T00:00:00+00:00",
     };
     setupInvoke({ list_books: () => [zeta, alpha] });
-    const { findByText, getByRole } = render(
+    const { findAllByText, getByRole } = render(
       <LibraryView onOpenBook={() => {}} onOpenSettings={() => {}} />,
     );
-    await findByText("Zeta");
+    // Zeta shows in both Continue reading and the shelf.
+    await findAllByText("Zeta");
     // "Recently opened" starts newest-first.
     expect(within(mainShelf()).getAllByTitle(/^(Alpha|Zeta)$/).map((el) => el.title)).toEqual([
       "Zeta",
