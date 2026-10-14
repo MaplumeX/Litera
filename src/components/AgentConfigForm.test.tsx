@@ -52,6 +52,7 @@ const builtinSnapshot: AgentConfigSnapshot = {
   provider: "openai",
   model: "gpt-4o",
   hasApiKey: true,
+  providersWithKey: ["anthropic", "openai"],
   customProviders: [
     {
       id: "custom-abc12345",
@@ -68,6 +69,7 @@ const customSnapshot: AgentConfigSnapshot = {
   provider: "custom-abc12345",
   model: "llama-3.1",
   hasApiKey: true,
+  providersWithKey: [],
   customProviders: builtinSnapshot.customProviders,
 };
 
@@ -82,6 +84,24 @@ async function openProviderSelect(view: ReturnType<typeof render>) {
     trigger.click();
   });
   await waitFor(() => view.getByRole("option", { name: "OpenAI" }));
+}
+
+async function chooseProvider(view: ReturnType<typeof render>, name: string) {
+  await openProviderSelect(view);
+  act(() => {
+    view.getByRole("option", { name }).click();
+  });
+  await waitFor(() => expect(view.queryByRole("listbox")).toBeNull());
+}
+
+function fillNewCustom(view: ReturnType<typeof render>, name: string, baseUrl: string) {
+  fireEvent.change(view.getByPlaceholderText("如：本地 Ollama"), { target: { value: name } });
+  fireEvent.change(view.getByPlaceholderText("如：http://localhost:11434/v1"), {
+    target: { value: baseUrl },
+  });
+  fireEvent.change(view.getByPlaceholderText("本地服务填任意占位值"), {
+    target: { value: "sk-local" },
+  });
 }
 
 async function openModelCombobox(view: ReturnType<typeof render>) {
@@ -129,8 +149,43 @@ describe("AgentConfigForm", () => {
     expect(hook.switchProvider).not.toHaveBeenCalled();
     expect(hook.save).not.toHaveBeenCalled();
     expect(hook.updateCustomProvider).not.toHaveBeenCalled();
-    expect(view.getByText("这个提供商")).toBeTruthy();
     expect(view.getByDisplayValue("http://localhost:11434/v1")).toBeTruthy();
+  });
+
+  it("keeps the saved key of an inactive built-in provider", async () => {
+    const view = renderForm(builtinSnapshot);
+    await chooseProvider(view, "Anthropic");
+
+    expect(view.getByPlaceholderText("已配置，留空保持不变")).toBeTruthy();
+    fireEvent.change(view.getByPlaceholderText("claude-opus-4-5"), {
+      target: { value: "claude-opus-4-5" },
+    });
+    await act(async () => {
+      view.getByRole("button", { name: "保存并应用" }).click();
+    });
+
+    expect(hook.save).toHaveBeenCalledWith("anthropic", "", "claude-opus-4-5");
+  });
+
+  it("requires a key for a built-in provider without one", async () => {
+    const view = renderForm(builtinSnapshot);
+    await chooseProvider(view, "DeepSeek");
+    fireEvent.change(view.getByPlaceholderText("deepseek-v4-pro"), {
+      target: { value: "deepseek-v4-pro" },
+    });
+
+    expect(view.getByPlaceholderText("输入 API Key")).toBeTruthy();
+    expect(
+      (view.getByRole("button", { name: "保存并应用" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+  });
+
+  it("orders fields provider, name, base url, key, then model", () => {
+    const view = renderForm(customSnapshot);
+    const labels = Array.from(view.container.querySelectorAll("label")).map(
+      (label) => label.textContent,
+    );
+    expect(labels).toEqual(["供应商", "名称", "Base URL", "API Key", "Model"]);
   });
 
   it("applies a built-in provider through save", async () => {
@@ -176,25 +231,17 @@ describe("AgentConfigForm", () => {
     expect(hook.switchProvider).toHaveBeenCalledWith("custom-abc12345", "llama-3.1");
   });
 
-  it("adds a custom provider without switching", async () => {
+  it("creates and switches to a custom provider picked from the dropdown", async () => {
     const view = renderForm(builtinSnapshot);
-    act(() => {
-      view.getByRole("button", { name: "添加自定义提供商" }).click();
-    });
+    await chooseProvider(view, "添加自定义提供商…");
 
-    fireEvent.change(view.getByPlaceholderText("如：本地 Ollama"), {
-      target: { value: "vLLM" },
-    });
-    fireEvent.change(view.getByPlaceholderText("如：http://localhost:11434/v1"), {
-      target: { value: "http://localhost:8000/v1" },
-    });
-    fireEvent.change(view.getByPlaceholderText("本地服务填任意占位值"), {
-      target: { value: "sk-local" },
-    });
+    expect(view.getByText("添加自定义 OpenAI 兼容供应商")).toBeTruthy();
+    expect(view.queryByRole("button", { name: "删除自定义供应商" })).toBeNull();
+    fillNewCustom(view, "vLLM", "http://localhost:8000/v1");
     await typeNewModelId(view, "qwen-2.5");
 
     await act(async () => {
-      view.getByRole("button", { name: "添加" }).click();
+      view.getByRole("button", { name: "保存并应用" }).click();
     });
 
     expect(hook.addCustomProvider).toHaveBeenCalledWith(
@@ -203,9 +250,42 @@ describe("AgentConfigForm", () => {
       "sk-local",
       ["qwen-2.5"],
     );
-    expect(hook.switchProvider).not.toHaveBeenCalled();
+    expect(hook.switchProvider).toHaveBeenCalledWith("custom-new", "qwen-2.5");
     expect(hook.save).not.toHaveBeenCalled();
-    expect(view.getByText(/已添加/)).toBeTruthy();
+  });
+
+  it("does not add the custom provider twice when the switch fails", async () => {
+    hook.switchProvider.mockRejectedValueOnce(new Error("boom"));
+    const view = renderForm(builtinSnapshot);
+    await chooseProvider(view, "添加自定义提供商…");
+    fillNewCustom(view, "vLLM", "http://localhost:8000/v1");
+    await typeNewModelId(view, "qwen-2.5");
+
+    await act(async () => {
+      view.getByRole("button", { name: "保存并应用" }).click();
+    });
+    expect(hook.addCustomProvider).toHaveBeenCalledTimes(1);
+
+    hook.snapshot = {
+      ...builtinSnapshot,
+      customProviders: [
+        ...builtinSnapshot.customProviders,
+        {
+          id: "custom-new",
+          name: "vLLM",
+          baseUrl: "http://localhost:8000/v1",
+          models: ["qwen-2.5"],
+          hasApiKey: true,
+        },
+      ],
+    };
+    view.rerender(<AgentConfigForm />);
+    await act(async () => {
+      view.getByRole("button", { name: "保存并应用" }).click();
+    });
+
+    expect(hook.addCustomProvider).toHaveBeenCalledTimes(1);
+    expect(hook.switchProvider).toHaveBeenLastCalledWith("custom-new", "qwen-2.5");
   });
 
   it("requires delete confirmation before removing a custom provider", async () => {
@@ -319,18 +399,8 @@ describe("AgentConfigForm", () => {
 
   it("replaces the model draft when refreshing a new custom provider", async () => {
     const view = renderForm(builtinSnapshot);
-    act(() => {
-      view.getByRole("button", { name: "添加自定义提供商" }).click();
-    });
-    fireEvent.change(view.getByPlaceholderText("如：本地 Ollama"), {
-      target: { value: "Ollama" },
-    });
-    fireEvent.change(view.getByPlaceholderText("如：http://localhost:11434/v1"), {
-      target: { value: "http://localhost:11434/v1" },
-    });
-    fireEvent.change(view.getByPlaceholderText("本地服务填任意占位值"), {
-      target: { value: "sk-local" },
-    });
+    await chooseProvider(view, "添加自定义提供商…");
+    fillNewCustom(view, "Ollama", "http://localhost:11434/v1");
     await typeNewModelId(view, "retired-model");
 
     await act(async () => {
@@ -338,9 +408,14 @@ describe("AgentConfigForm", () => {
     });
 
     expect(view.getByRole("combobox", { name: "Model" }).textContent).toBe("qwen-2.5");
+    expect(hook.listRemoteModels).toHaveBeenCalledWith(
+      "http://localhost:11434/v1",
+      "sk-local",
+      undefined,
+    );
     expect(hook.addCustomProvider).not.toHaveBeenCalled();
     await act(async () => {
-      view.getByRole("button", { name: "添加" }).click();
+      view.getByRole("button", { name: "保存并应用" }).click();
     });
     expect(hook.addCustomProvider).toHaveBeenCalledWith(
       "Ollama",

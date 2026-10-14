@@ -46,6 +46,7 @@ vi.mock("@/lib/use-agent-config", () => ({
       provider: "openai",
       model: "gpt-4",
       hasApiKey: true,
+      providersWithKey: [],
       customProviders: [],
     },
     load: vi.fn(),
@@ -596,7 +597,7 @@ describe("SettingsDialog", () => {
     act(() => {
       getByRole("button", { name: "AI" }).click();
     });
-    expect(getByText("当前使用")).toBeTruthy();
+    expect(getByText("供应商")).toBeTruthy();
   });
 
   it("shows book copy and restore-default only for overridden keys", () => {

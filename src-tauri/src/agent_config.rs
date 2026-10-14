@@ -34,6 +34,8 @@ pub struct AgentConfigSnapshot {
     pub provider: Option<String>,
     pub model: Option<String>,
     pub has_api_key: bool,
+    /// Built-in providers that have a saved API key, not just the active one.
+    pub providers_with_key: Vec<String>,
     pub custom_providers: Vec<CustomProviderEntry>,
     pub thinking_level: String,
 }
@@ -297,25 +299,22 @@ fn read_snapshot(agent_dir: &Path) -> AppResult<AgentConfigSnapshot> {
         .and_then(|value| value.as_str())
         .map(|string| string.to_string());
 
-    let has_api_key = match &provider {
-        Some(provider_id) => {
-            auth.get(provider_id)
-                .and_then(|entry| entry.get("type"))
-                .and_then(|value| value.as_str())
-                .map(|entry_type| entry_type == "api_key")
-                .unwrap_or(false)
-                && auth
-                    .get(provider_id)
-                    .and_then(|entry| entry.get("key"))
-                    .and_then(|value| value.as_str())
-                    .map(|key| !key.is_empty())
-                    .unwrap_or(false)
-        }
-        None => false,
-    };
+    let has_api_key = provider
+        .as_deref()
+        .is_some_and(|provider_id| auth_has_api_key(&auth, provider_id));
 
     let configured = provider.is_some() && model.is_some() && has_api_key;
     let custom_providers = read_custom_providers(agent_dir, &auth)?;
+    let providers_with_key = auth
+        .as_object()
+        .map(|entries| {
+            entries
+                .keys()
+                .filter(|id| !id.starts_with("custom-") && auth_has_api_key(&auth, id))
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default();
     let thinking_level = read_thinking_level(&settings);
 
     Ok(AgentConfigSnapshot {
@@ -323,6 +322,7 @@ fn read_snapshot(agent_dir: &Path) -> AppResult<AgentConfigSnapshot> {
         provider,
         model,
         has_api_key,
+        providers_with_key,
         custom_providers,
         thinking_level,
     })
@@ -438,6 +438,17 @@ fn read_runtime_config(agent_dir: &Path) -> AppResult<AgentRuntimeConfig> {
 ///
 /// models.json structure: `{ "providers": { "<customId>": { "name", "baseUrl", "api", "models": [{ "id" }] } } }`
 /// Returns empty vec when the file is absent.
+fn auth_has_api_key(auth: &serde_json::Value, provider_id: &str) -> bool {
+    let Some(entry) = auth.get(provider_id) else {
+        return false;
+    };
+    entry.get("type").and_then(Value::as_str) == Some("api_key")
+        && entry
+            .get("key")
+            .and_then(Value::as_str)
+            .is_some_and(|key| !key.is_empty())
+}
+
 fn read_custom_providers(
     agent_dir: &Path,
     auth: &serde_json::Value,
@@ -467,18 +478,7 @@ fn read_custom_providers(
             .to_string();
         let models = collect_model_ids(provider.get("models"));
 
-        let has_api_key = auth
-            .get(id)
-            .and_then(|entry| entry.get("type"))
-            .and_then(|value| value.as_str())
-            .map(|entry_type| entry_type == "api_key")
-            .unwrap_or(false)
-            && auth
-                .get(id)
-                .and_then(|entry| entry.get("key"))
-                .and_then(|value| value.as_str())
-                .map(|key| !key.is_empty())
-                .unwrap_or(false);
+        let has_api_key = auth_has_api_key(auth, id);
 
         entries.push(CustomProviderEntry {
             id: id.clone(),
@@ -1049,6 +1049,25 @@ mod tests {
         assert_eq!(snapshot.provider, None);
         assert_eq!(snapshot.model, None);
         assert!(!snapshot.has_api_key);
+    }
+
+    #[test]
+    fn snapshot_lists_every_builtin_provider_with_a_key() {
+        let dir = temp_agent_dir();
+        save_config(dir.path(), "anthropic", "anthropic-key", "claude-opus-4-5").expect("save");
+        save_config(dir.path(), "openai", "openai-key", "gpt-4o").expect("save");
+        add_custom_provider_impl(
+            dir.path(),
+            "Ollama",
+            "http://localhost:11434/v1",
+            "local",
+            &ids(&["llama-3.1"]),
+        )
+        .expect("add custom");
+
+        let snapshot = read_snapshot(dir.path()).expect("read snapshot");
+        assert_eq!(snapshot.provider.as_deref(), Some("openai"));
+        assert_eq!(snapshot.providers_with_key, ids(&["anthropic", "openai"]));
     }
 
     #[test]

@@ -55,6 +55,9 @@ function isLocalBaseUrl(url: string) {
   return /localhost|127\.0\.0\.1/.test(url);
 }
 
+/** Select value for the "add a custom provider" entry; never persisted. */
+const NEW_CUSTOM = "__new_custom__";
+
 export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps) {
   const { t } = useT();
   const {
@@ -81,31 +84,28 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
   const [customModels, setCustomModels] = useState<string[]>([]);
 
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const [showAddForm, setShowAddForm] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
 
-  const [newName, setNewName] = useState("");
-  const [newBaseUrl, setNewBaseUrl] = useState("");
-  const [newApiKey, setNewApiKey] = useState("");
-  const [newModels, setNewModels] = useState<string[]>([]);
-  const [newModel, setNewModel] = useState("");
-
   useEffect(() => {
     if (!active) {
       seededRef.current = false;
-      setShowAddForm(false);
       setDeleteOpen(false);
       setSuccessMessage(null);
       setRefreshError(null);
       return;
     }
     setSuccessMessage(null);
-    setShowAddForm(false);
     setRefreshError(null);
     void load();
   }, [active, load]);
+
+  const fillCustomFields = (name: string, baseUrl: string, models: string[]) => {
+    setCustomName(name);
+    setCustomBaseUrl(baseUrl);
+    setCustomModels(models);
+  };
 
   useEffect(() => {
     if (!active || !snapshot || seededRef.current) return;
@@ -115,24 +115,18 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
     if (isCustomProviderId(currentProvider)) {
       const cp = snapshot.customProviders.find((entry) => entry.id === currentProvider);
       if (cp) {
-        setCustomName(cp.name);
-        setCustomBaseUrl(cp.baseUrl);
-        setCustomModels(cp.models);
+        fillCustomFields(cp.name, cp.baseUrl, cp.models);
         setModel(
           snapshot.model && cp.models.includes(snapshot.model)
             ? snapshot.model
             : (cp.models[0] ?? ""),
         );
       } else {
-        setCustomName("");
-        setCustomBaseUrl("");
-        setCustomModels([]);
+        fillCustomFields("", "", []);
         setModel("");
       }
     } else {
-      setCustomName("");
-      setCustomBaseUrl("");
-      setCustomModels([]);
+      fillCustomFields("", "", []);
       setModel(snapshot.model ?? "");
     }
     seededRef.current = true;
@@ -141,10 +135,11 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
   const selectedCustom = isCustomProviderId(provider)
     ? snapshot?.customProviders.find((entry) => entry.id === provider) ?? null
     : null;
-  const isCustom = selectedCustom !== null;
-  const hasExistingKey = isCustom
+  const isNewCustom = provider === NEW_CUSTOM;
+  const isCustom = selectedCustom !== null || isNewCustom;
+  const hasExistingKey = selectedCustom
     ? selectedCustom.hasApiKey
-    : snapshot?.provider === provider && (snapshot?.hasApiKey ?? false);
+    : !isNewCustom && (snapshot?.providersWithKey.includes(provider) ?? false);
   const apiKeyPlaceholder = hasExistingKey
     ? t("agent.apiKeyKeep")
     : isCustom && isLocalBaseUrl(customBaseUrl)
@@ -166,12 +161,13 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
     setRefreshError(null);
     setProvider(value);
     setApiKey("");
-    if (isCustomProviderId(value)) {
+    if (value === NEW_CUSTOM) {
+      fillCustomFields("", "", []);
+      setModel("");
+    } else if (isCustomProviderId(value)) {
       const cp = snapshot?.customProviders.find((entry) => entry.id === value);
       if (cp) {
-        setCustomName(cp.name);
-        setCustomBaseUrl(cp.baseUrl);
-        setCustomModels(cp.models);
+        fillCustomFields(cp.name, cp.baseUrl, cp.models);
         setModel(
           snapshot?.provider === value && snapshot.model && cp.models.includes(snapshot.model)
             ? snapshot.model
@@ -179,47 +175,28 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
         );
       }
     } else {
-      setCustomName("");
-      setCustomBaseUrl("");
-      setCustomModels([]);
+      fillCustomFields("", "", []);
       setModel(snapshot?.model && snapshot.provider === value ? snapshot.model : "");
     }
   };
 
-  const selectCatalogModel = (
-    id: string,
-    models: string[],
-    setModels: (next: string[]) => void,
-    setCurrent: (next: string) => void,
-  ) => {
-    if (!models.includes(id)) {
-      setModels([...models, id]);
+  const selectCatalogModel = (id: string) => {
+    if (!customModels.includes(id)) {
+      setCustomModels([...customModels, id]);
     }
-    setCurrent(id);
+    setModel(id);
   };
 
-  const handleRefresh = async (opts: {
-    baseUrl: string;
-    draftKey: string;
-    providerId?: string;
-    hasSavedKey: boolean;
-    currentModel: string;
-    setModels: (next: string[]) => void;
-    setCurrent: (next: string) => void;
-  }) => {
-    if (!opts.baseUrl.trim()) return;
-    if (!opts.draftKey.trim() && !opts.hasSavedKey) return;
+  const handleRefresh = async () => {
+    if (!customBaseUrl.trim()) return;
+    if (!apiKey.trim() && !hasExistingKey) return;
     setRefreshing(true);
     setRefreshError(null);
     try {
-      const ids = await listRemoteModels(
-        opts.baseUrl.trim(),
-        opts.draftKey.trim(),
-        opts.providerId,
-      );
-      opts.setModels(ids);
-      if (!ids.includes(opts.currentModel)) {
-        opts.setCurrent(ids[0] ?? "");
+      const ids = await listRemoteModels(customBaseUrl.trim(), apiKey.trim(), selectedCustom?.id);
+      setCustomModels(ids);
+      if (!ids.includes(model)) {
+        setModel(ids[0] ?? "");
       }
     } catch (err) {
       setRefreshError(invokeErrorMessage(err) || t("agent.refreshFailed"));
@@ -232,7 +209,13 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
     if (!canApply) return;
     setSuccessMessage(null);
     try {
-      if (isCustom && selectedCustom) {
+      if (isNewCustom) {
+        const entry = await addCustomProvider(customName, customBaseUrl, apiKey, customModels);
+        // Point at the created entry so a failed switch retries it instead of adding a duplicate.
+        setProvider(entry.id);
+        setApiKey("");
+        await switchProvider(entry.id, model);
+      } else if (selectedCustom) {
         const unchanged =
           customName === selectedCustom.name &&
           customBaseUrl === selectedCustom.baseUrl &&
@@ -272,40 +255,15 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
       setProvider(AGENT_PROVIDERS[0].id);
       setModel("");
       setApiKey("");
-      setCustomName("");
-      setCustomBaseUrl("");
-      setCustomModels([]);
+      fillCustomFields("", "", []);
       setSuccessMessage(t("agent.deletedCustom"));
     } catch {
       // error state is surfaced from the hook
     }
   };
 
-  const handleAddCustom = async () => {
-    if (!newName.trim() || !newBaseUrl.trim() || !newApiKey.trim() || newModels.length === 0) {
-      return;
-    }
-    setSuccessMessage(null);
-    try {
-      await addCustomProvider(newName, newBaseUrl, newApiKey, newModels);
-      setShowAddForm(false);
-      setNewName("");
-      setNewBaseUrl("");
-      setNewApiKey("");
-      setNewModels([]);
-      setNewModel("");
-      setRefreshError(null);
-      setSuccessMessage(t("agent.added"));
-    } catch {
-      // error state is surfaced from the hook
-    }
-  };
-
-  const canRefreshAdd = newBaseUrl.trim() !== "" && newApiKey.trim() !== "";
-  const canRefreshCustom =
-    isCustom &&
-    customBaseUrl.trim() !== "" &&
-    (apiKey.trim() !== "" || selectedCustom.hasApiKey);
+  const canRefresh =
+    isCustom && customBaseUrl.trim() !== "" && (apiKey.trim() !== "" || hasExistingKey);
 
   return (
     <>
@@ -313,230 +271,111 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
         <p className="mb-3 text-xs text-muted-foreground">{t("agent.loading")}</p>
       )}
 
-      {showAddForm ? (
-        <div className="space-y-3 rounded border border-border bg-muted/30 p-3">
-          <p className="text-xs font-medium text-muted-foreground">{t("agent.addCustomTitle")}</p>
-          <Field label={t("agent.name")}>
-            <Input
-              type="text"
-              value={newName}
-              onChange={(event) => setNewName(event.target.value)}
-              placeholder={t("agent.namePlaceholder")}
-              className="w-full"
-            />
-          </Field>
-          <Field label={t("agent.baseUrl")}>
-            <Input
-              type="text"
-              value={newBaseUrl}
-              onChange={(event) => setNewBaseUrl(event.target.value)}
-              placeholder={t("agent.baseUrlPlaceholder")}
-              className="w-full"
-            />
-          </Field>
-          <Field label={t("agent.apiKey")}>
-            <Input
-              type="password"
-              value={newApiKey}
-              onChange={(event) => setNewApiKey(event.target.value)}
-              placeholder={
-                isLocalBaseUrl(newBaseUrl) ? t("agent.localApiKeyHint") : t("agent.enterApiKey")
-              }
-              className="w-full"
-            />
-          </Field>
-          <Field label={t("agent.model")}>
-            <div className="flex items-start gap-2">
-              <div className="min-w-0 flex-1">
-                <ModelCombobox
-                  models={newModels}
-                  value={newModel}
-                  disabled={saving}
-                  onSelect={(id) =>
-                    selectCatalogModel(id, newModels, setNewModels, setNewModel)
-                  }
-                />
-              </div>
-              <RefreshRow
-                disabled={saving || refreshing || !canRefreshAdd}
-                refreshing={refreshing}
-                error={refreshError}
-                onRefresh={() =>
-                  void handleRefresh({
-                    baseUrl: newBaseUrl,
-                    draftKey: newApiKey,
-                    hasSavedKey: false,
-                    currentModel: newModel,
-                    setModels: setNewModels,
-                    setCurrent: setNewModel,
-                  })
-                }
-                t={t}
-              />
-            </div>
-          </Field>
-          <div className="flex justify-end gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => {
-                setShowAddForm(false);
-                setRefreshError(null);
-              }}
-              disabled={saving}
-            >
-              {t("common.cancel")}
-            </Button>
-            <Button
-              size="sm"
-              onClick={() => void handleAddCustom()}
-              disabled={
-                saving ||
-                !newName.trim() ||
-                !newBaseUrl.trim() ||
-                !newApiKey.trim() ||
-                newModels.length === 0
-              }
-            >
-              {saving ? t("agent.adding") : t("agent.add")}
-            </Button>
-          </div>
-        </div>
-      ) : (
-        <div className="space-y-5">
-          <section className="space-y-3">
-            <h3 className="text-xs font-medium text-muted-foreground">{t("agent.currentUse")}</h3>
-            <Field label={t("agent.provider")}>
-              <Select value={provider} onValueChange={handleProviderChange} disabled={saving}>
-                <SelectTrigger className="w-full" disabled={saving}>
-                  <SelectValue placeholder={t("agent.selectProvider")} />
-                </SelectTrigger>
-                <SelectContent>
+      <div className="space-y-3">
+        <Field label={t("agent.provider")}>
+          <Select value={provider} onValueChange={handleProviderChange} disabled={saving}>
+            <SelectTrigger className="w-full" disabled={saving}>
+              <SelectValue placeholder={t("agent.selectProvider")} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                {AGENT_PROVIDERS.map((entry) => (
+                  <SelectItem key={entry.id} value={entry.id}>
+                    {entry.label}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+              {snapshot && snapshot.customProviders.length > 0 && (
+                <>
+                  <SelectSeparator />
                   <SelectGroup>
-                    {AGENT_PROVIDERS.map((entry) => (
+                    <SelectLabel>{t("agent.custom")}</SelectLabel>
+                    {snapshot.customProviders.map((entry) => (
                       <SelectItem key={entry.id} value={entry.id}>
-                        {entry.label}
+                        {t("agent.customSuffix", { name: entry.name })}
                       </SelectItem>
                     ))}
                   </SelectGroup>
-                  {snapshot && snapshot.customProviders.length > 0 && (
-                    <>
-                      <SelectSeparator />
-                      <SelectGroup>
-                        <SelectLabel>{t("agent.custom")}</SelectLabel>
-                        {snapshot.customProviders.map((entry) => (
-                          <SelectItem key={entry.id} value={entry.id}>
-                            {t("agent.customSuffix", { name: entry.name })}
-                          </SelectItem>
-                        ))}
-                      </SelectGroup>
-                    </>
-                  )}
-                </SelectContent>
-              </Select>
-            </Field>
-            <Field label={t("agent.model")}>
-              {isCustom ? (
-                <div className="flex items-start gap-2">
-                  <div className="min-w-0 flex-1">
-                    <ModelCombobox
-                      models={customModels}
-                      value={model}
-                      disabled={saving}
-                      onSelect={(id) =>
-                        selectCatalogModel(id, customModels, setCustomModels, setModel)
-                      }
-                    />
-                  </div>
-                  <RefreshRow
-                    disabled={saving || refreshing || !canRefreshCustom}
-                    refreshing={refreshing}
-                    error={refreshError}
-                    onRefresh={() =>
-                      void handleRefresh({
-                        baseUrl: customBaseUrl,
-                        draftKey: apiKey,
-                        providerId: selectedCustom.id,
-                        hasSavedKey: selectedCustom.hasApiKey,
-                        currentModel: model,
-                        setModels: setCustomModels,
-                        setCurrent: setModel,
-                      })
-                    }
-                    t={t}
-                  />
-                </div>
-              ) : (
-                <Input
-                  type="text"
-                  value={model}
-                  onChange={(event) => setModel(event.target.value)}
-                  placeholder={findProviderExample(provider) || t("agent.enterModelId")}
-                  className="w-full"
-                />
+                </>
               )}
-            </Field>
-          </section>
+              <SelectSeparator />
+              <SelectItem value={NEW_CUSTOM}>
+                <Plus className="size-4" />
+                {t("agent.addCustom")}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+          {isNewCustom && (
+            <p className="mt-1 text-xs text-muted-foreground">{t("agent.addCustomTitle")}</p>
+          )}
+        </Field>
 
-          <section className="space-y-3">
-            <h3 className="text-xs font-medium text-muted-foreground">{t("agent.thisProvider")}</h3>
-            {isCustom && selectedCustom ? (
-              <>
-                <Field label={t("agent.name")}>
-                  <Input
-                    type="text"
-                    value={customName}
-                    onChange={(event) => setCustomName(event.target.value)}
-                    placeholder={t("agent.namePlaceholder")}
-                    className="w-full"
-                  />
-                </Field>
-                <Field label={t("agent.baseUrl")}>
-                  <Input
-                    type="text"
-                    value={customBaseUrl}
-                    onChange={(event) => setCustomBaseUrl(event.target.value)}
-                    placeholder={t("agent.baseUrlPlaceholder")}
-                    className="w-full"
-                  />
-                </Field>
-                <Field label={t("agent.apiKey")}>
-                  <Input
-                    type="password"
-                    value={apiKey}
-                    onChange={(event) => setApiKey(event.target.value)}
-                    placeholder={apiKeyPlaceholder}
-                    className="w-full"
-                  />
-                </Field>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => setDeleteOpen(true)}
+        {isCustom && (
+          <>
+            <Field label={t("agent.name")}>
+              <Input
+                type="text"
+                value={customName}
+                onChange={(event) => setCustomName(event.target.value)}
+                placeholder={t("agent.namePlaceholder")}
+                className="w-full"
+              />
+            </Field>
+            <Field label={t("agent.baseUrl")}>
+              <Input
+                type="text"
+                value={customBaseUrl}
+                onChange={(event) => setCustomBaseUrl(event.target.value)}
+                placeholder={t("agent.baseUrlPlaceholder")}
+                className="w-full"
+              />
+            </Field>
+          </>
+        )}
+
+        <Field label={t("agent.apiKey")}>
+          <Input
+            type="password"
+            value={apiKey}
+            onChange={(event) => setApiKey(event.target.value)}
+            placeholder={apiKeyPlaceholder}
+            className="w-full"
+          />
+          {hasExistingKey && !apiKey && (
+            <p className="mt-1 text-xs text-muted-foreground">{t("agent.apiKeySavedHint")}</p>
+          )}
+        </Field>
+
+        <Field label={t("agent.model")}>
+          {isCustom ? (
+            <div className="flex items-start gap-2">
+              <div className="min-w-0 flex-1">
+                <ModelCombobox
+                  models={customModels}
+                  value={model}
                   disabled={saving}
-                  aria-label={t("agent.deleteCustom")}
-                >
-                  <Trash2 className="mr-1 h-4 w-4" />
-                  {t("common.delete")}
-                </Button>
-              </>
-            ) : (
-              <Field label={t("agent.apiKey")}>
-                <Input
-                  type="password"
-                  value={apiKey}
-                  onChange={(event) => setApiKey(event.target.value)}
-                  placeholder={apiKeyPlaceholder}
-                  className="w-full"
+                  onSelect={selectCatalogModel}
                 />
-                {hasExistingKey && !apiKey && (
-                  <p className="mt-1 text-xs text-muted-foreground">{t("agent.apiKeySavedHint")}</p>
-                )}
-              </Field>
-            )}
-          </section>
-        </div>
-      )}
+              </div>
+              <RefreshRow
+                disabled={saving || refreshing || !canRefresh}
+                refreshing={refreshing}
+                error={refreshError}
+                onRefresh={() => void handleRefresh()}
+                t={t}
+              />
+            </div>
+          ) : (
+            <Input
+              type="text"
+              value={model}
+              onChange={(event) => setModel(event.target.value)}
+              placeholder={findProviderExample(provider) || t("agent.enterModelId")}
+              className="w-full"
+            />
+          )}
+        </Field>
+      </div>
 
       {error && (
         <div className="mt-3 rounded border border-destructive/50 bg-destructive/10 px-2 py-1 text-xs text-destructive">
@@ -549,8 +388,20 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
         </div>
       )}
 
-      {!showAddForm && (
-        <div className="mt-5 flex justify-end gap-2">
+      <div className="mt-5 flex items-center gap-2">
+        {selectedCustom && (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setDeleteOpen(true)}
+            disabled={saving}
+            aria-label={t("agent.deleteCustom")}
+          >
+            <Trash2 className="mr-1 h-4 w-4" />
+            {t("common.delete")}
+          </Button>
+        )}
+        <div className="ml-auto flex gap-2">
           {onClose && (
             <Button size="sm" variant="outline" onClick={onClose} disabled={saving}>
               {t("common.cancel")}
@@ -560,25 +411,7 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
             {saving ? t("agent.saving") : t("agent.apply")}
           </Button>
         </div>
-      )}
-
-      {!showAddForm && (
-        <div className="mt-3">
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => {
-              setShowAddForm(true);
-              setRefreshError(null);
-              setSuccessMessage(null);
-            }}
-            disabled={saving}
-          >
-            <Plus className="mr-1 h-4 w-4" />
-            {t("agent.addCustom")}
-          </Button>
-        </div>
-      )}
+      </div>
 
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <AlertDialogContent>

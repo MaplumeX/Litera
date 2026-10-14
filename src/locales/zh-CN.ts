@@ -378,13 +378,11 @@ export const zhCN = {
   "agent.title": "LLM 设置",
   "agent.description": "配置 LLM 供应商、API Key 与模型。",
   "agent.loading": "加载中…",
-  "agent.currentUse": "当前使用",
-  "agent.thisProvider": "这个提供商",
   "agent.provider": "供应商",
   "agent.selectProvider": "选择供应商",
   "agent.custom": "自定义",
   "agent.customSuffix": "{name} (自定义)",
-  "agent.addCustom": "添加自定义提供商",
+  "agent.addCustom": "添加自定义提供商…",
   "agent.addCustomTitle": "添加自定义 OpenAI 兼容供应商",
   "agent.name": "名称",
   "agent.namePlaceholder": "如：本地 Ollama",
@@ -404,8 +402,6 @@ export const zhCN = {
   "agent.deleteCustom": "删除自定义供应商",
   "agent.deleteConfirmTitle": "删除自定义供应商？",
   "agent.deleteConfirmDescription": "将移除该供应商的名称、地址、密钥和模型列表。此操作不可撤销。",
-  "agent.add": "添加",
-  "agent.adding": "添加中…",
   "agent.modelSearch": "搜索模型…",
   "agent.useModelId": "使用 {id}",
   "agent.modelEmpty": "没有匹配的模型，输入新 id 即可使用",
@@ -417,7 +413,6 @@ export const zhCN = {
   "agent.saving": "保存中…",
   "agent.saved": "保存成功",
   "agent.deletedCustom": "已删除自定义供应商",
-  "agent.added": "已添加。从列表中选择并保存并应用后即可使用。",
 } as const;
 
 export type MessageKey = keyof typeof zhCN;
