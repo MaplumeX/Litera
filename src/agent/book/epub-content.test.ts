@@ -2,7 +2,7 @@ import { DOMParser } from "@xmldom/xmldom";
 import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 import { describe, expect, it } from "vitest";
 import { CHAPTER_PART_CHARS } from "./book-content";
-import { bookToc, buildOwnedChapters, chapterWindows, hrefFragment, locateQuote, markdownText, parseEpub, parseSpineSegments, readChapter, searchBook, stripFragment, type NavNode, type ParsedBook } from "./epub-content";
+import { bookToc, buildOwnedChapters, chapterWindows, hrefFragment, locateQuote, markdownText, parseEpub, parseSpineSegments, readChapter, readImageFile, searchBook, stripFragment, type NavNode, type ParsedBook } from "./epub-content";
 
 type FileMap = Record<string, string>;
 
@@ -526,8 +526,18 @@ describe("markdownText", () => {
     expect(markdownText(source)).toBe("line1\nline2  spaced");
   });
 
-  it("renders img/svg/audio/video as empty and keeps br as an in-paragraph break", () => {
-    expect(markdownText('<html><body><p>a<img src="x"/><svg></svg><br/>b</p></body></html>')).toBe("a\nb");
+  it("renders audio/video and image-free svg as empty and keeps br as an in-paragraph break", () => {
+    expect(markdownText('<html><body><p>a<audio src="x.mp3"/><video src="x.mp4"/><svg><rect/></svg><br/>b</p></body></html>')).toBe("a\nb");
+  });
+
+  it("renders img and svg <image> as Markdown image placeholders", () => {
+    expect(markdownText('<html><body><p>see<img src="x.png" alt="Fig [1]  map"/>here</p></body></html>')).toBe("see![Fig 1 map](x.png)here");
+    expect(markdownText('<html xmlns:xlink="http://www.w3.org/1999/xlink"><body><div><svg><image xlink:href="cover.jpg"/></svg></div></body></html>')).toBe("![](cover.jpg)");
+    expect(markdownText('<html><body><p><img src="my pic (1).png" title="T"/></p></body></html>')).toBe("![T](my%20pic%20%281%29.png)");
+  });
+
+  it("drops images that are not packaged in the book", () => {
+    expect(markdownText('<html><body><p>a<img src="data:image/png;base64,AA"/><img src="https://x.test/a.png"/>b</p></body></html>')).toBe("ab");
   });
 
   it("keeps nested block structure inside div/section wrappers (production shape)", () => {
@@ -786,5 +796,50 @@ describe("bookToc parts", () => {
     expect(toc[0].parts).toBe(1);
     expect(toc[1].parts).toBe(readChapter(book, 1).totalParts);
     expect(toc[1].parts).toBeGreaterThan(1);
+  });
+});
+
+describe("book images", () => {
+  const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
+  function imageBook(): ParsedBook {
+    const files: Record<string, Uint8Array> = Object.fromEntries(
+      Object.entries(
+        baseFiles(
+          `<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+          <item id="one" href="text/one.xhtml" media-type="application/xhtml+xml"/>
+          <item id="fig" href="images/fig%201.png" media-type="image/png"/>
+          <item id="css" href="style.css" media-type="text/css"/>`,
+          '<itemref idref="one"/>',
+          {
+            "nav.xhtml": '<html xmlns:epub="http://www.idpf.org/2007/ops"><body><nav epub:type="toc"><a href="text/one.xhtml">One</a></nav></body></html>',
+            "text/one.xhtml": '<html><body><p>Before the figure.</p><p><img src="../images/fig%201.png" alt="Sales chart"/></p><p>After the figure.</p></body></html>',
+            "style.css": "p {}",
+          },
+        ),
+      ).map(([path, text]) => [path, strToU8(text)]),
+    );
+    files["OPS/images/fig 1.png"] = PNG;
+    const zipped = zipSync(files);
+    return parseEpub(zipped.buffer.slice(zipped.byteOffset, zipped.byteOffset + zipped.byteLength) as ArrayBuffer);
+  }
+
+  it("shows placeholders with package paths in read_chapter but keeps them out of flat text", () => {
+    const book = imageBook();
+    expect(readChapter(book, 0).text).toBe("Before the figure.\n\n![Sales chart](OPS/images/fig%201.png)\n\nAfter the figure.");
+    expect(book.chapters[0].text).toBe("Before the figure.After the figure.");
+    expect(searchBook(book, ["Sales chart"])).toEqual([]);
+    expect(locateQuote(book, 0, "After the figure.")).toMatchObject({ status: "verified", passage: "After the figure." });
+  });
+
+  it("reads a manifest image by its placeholder src", () => {
+    const book = imageBook();
+    expect(readImageFile(book, "OPS/images/fig%201.png")).toEqual({ src: "OPS/images/fig%201.png", mediaType: "image/png", bytes: PNG });
+    expect(readImageFile(book, "OPS/images/fig 1.png").bytes).toEqual(PNG);
+  });
+
+  it("refuses paths that are not manifest images", () => {
+    const book = imageBook();
+    expect(() => readImageFile(book, "OPS/style.css")).toThrow("No image at OPS/style.css");
+    expect(() => readImageFile(book, "OPS/images/missing.png")).toThrow("No image");
   });
 });

@@ -5,6 +5,8 @@ export interface CustomProviderEntry {
   baseUrl: string;
   models: string[];
   hasApiKey: boolean;
+  /** The user declared the provider's models accept image input. */
+  imageInput: boolean;
 }
 
 /** Snapshot of the agent configuration returned by `get_agent_config`. */

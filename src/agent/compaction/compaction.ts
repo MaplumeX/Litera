@@ -1,6 +1,7 @@
 import type { AgentMessage, StreamFn } from "@earendil-works/pi-agent-core";
 import { normalizeContext, type Api, type Model, type SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { isPrunableEntry, type PiSessionEntry } from "@/agent/sessions/pi-session";
+import { imageRefSource } from "@/agent/sessions/image-refs";
 
 /**
  * Context thresholds for one model, all in tokens. Pruning clears re-fetchable
@@ -48,7 +49,8 @@ export function calculateContextTokens(usage: { totalTokens: number; input: numb
   return usage.totalTokens || usage.input + usage.output + usage.cacheRead + usage.cacheWrite;
 }
 
-const ESTIMATED_IMAGE_TOKENS = 1200;
+// Book images are fitted to ~1.15 MP (see model-image), about 1600 tokens.
+const ESTIMATED_IMAGE_TOKENS = 1600;
 // CJK ideographs, kana, hangul and full-width forms: roughly one token each.
 const WIDE_CHARS = /[　-鿿가-힯豈-﫿＀-￯]/g;
 
@@ -68,7 +70,8 @@ function contentTokens(content: unknown): number {
   let tokens = 0;
   for (const block of content) {
     const part = block as { type?: string; text?: string };
-    if (part?.type === "text" && typeof part.text === "string") tokens += textTokens(part.text);
+    // An Image reference is re-sent as the image itself.
+    if (part?.type === "text" && typeof part.text === "string") tokens += imageRefSource(part.text) ? ESTIMATED_IMAGE_TOKENS : textTokens(part.text);
     else if (part?.type === "image") tokens += ESTIMATED_IMAGE_TOKENS;
   }
   return tokens;

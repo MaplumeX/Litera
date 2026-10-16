@@ -144,7 +144,7 @@ export function activeBranch(session: DecodedPiSession): PiSessionEntry[] {
  * Tools whose results are Book content the model can fetch again, so Pruning
  * may clear them from the model context.
  */
-export const PRUNABLE_TOOLS: ReadonlySet<string> = new Set(["read_chapter", "search_in_book", "get_toc"]);
+export const PRUNABLE_TOOLS: ReadonlySet<string> = new Set(["read_chapter", "search_in_book", "get_toc", "view_image"]);
 
 /** A toolResult entry of a prunable tool that the projection has not cleared yet. */
 export function isPrunableEntry(entry: PiSessionEntry): boolean {

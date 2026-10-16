@@ -49,6 +49,8 @@ pub struct CustomProviderEntry {
     pub base_url: String,
     pub models: Vec<String>,
     pub has_api_key: bool,
+    /// The user declared the provider's models accept image input.
+    pub image_input: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -63,6 +65,8 @@ pub struct AgentRuntimeConfig {
     /// Probed context window for custom models; absent for built-in providers.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context_window: Option<u64>,
+    /// Custom models only: declared to accept images (`input` includes "image").
+    pub image_input: bool,
 }
 
 #[tauri::command]
@@ -118,7 +122,9 @@ pub async fn add_custom_provider(
     base_url: String,
     api_key: String,
     models: Vec<String>,
+    image_input: Option<bool>,
 ) -> AppResult<CustomProviderEntry> {
+    let image_input = image_input.unwrap_or(false);
     let name = name.trim().to_string();
     let base_url = base_url.trim().to_string();
     let api_key = api_key.trim().to_string();
@@ -132,7 +138,8 @@ pub async fn add_custom_provider(
     let agent_dir = resolve_agent_dir(&app)?;
     let sync_root = crate::sync::sync_root(&app)?;
     tauri::async_runtime::spawn_blocking(move || {
-        let entry = add_custom_provider_impl(&agent_dir, &name, &base_url, &api_key, &models)?;
+        let entry =
+            add_custom_provider_impl(&agent_dir, &name, &base_url, &api_key, &models, image_input)?;
         crate::sync::note_provider_saved(&sync_root)?;
         Ok(entry)
     })
@@ -166,7 +173,9 @@ pub async fn update_custom_provider(
     base_url: String,
     api_key: String,
     models: Vec<String>,
+    image_input: Option<bool>,
 ) -> AppResult<CustomProviderEntry> {
+    let image_input = image_input.unwrap_or(false);
     let provider_id = provider_id.trim().to_string();
     let name = name.trim().to_string();
     let base_url = base_url.trim().to_string();
@@ -193,6 +202,7 @@ pub async fn update_custom_provider(
             &base_url,
             &api_key,
             &models,
+            image_input,
         )?;
         crate::sync::note_provider_saved(&sync_root)?;
         Ok(entry)
@@ -350,7 +360,7 @@ fn read_runtime_config(agent_dir: &Path) -> AppResult<AgentRuntimeConfig> {
         .filter(|value| !value.is_empty())
         .ok_or_else(|| AppError::invalid_input("Agent API key is not configured"))?
         .to_string();
-    let (api, base_url, context_window) = if provider.starts_with("custom-") {
+    let (api, base_url, context_window, image_input) = if provider.starts_with("custom-") {
         let models = read_json_or_empty(&agent_dir.join("models.json"), "models.json")?;
         let definition = models
             .get("providers")
@@ -374,14 +384,16 @@ fn read_runtime_config(agent_dir: &Path) -> AppResult<AgentRuntimeConfig> {
                 "Configured model is not declared by the custom provider",
             ));
         }
-        let context_window = definition
+        let model_entry = definition
             .get("models")
             .and_then(Value::as_array)
             .into_iter()
             .flatten()
-            .find(|entry| entry.get("id").and_then(Value::as_str) == Some(model.as_str()))
+            .find(|entry| entry.get("id").and_then(Value::as_str) == Some(model.as_str()));
+        let context_window = model_entry
             .and_then(|entry| entry.get("contextWindow"))
             .and_then(Value::as_u64);
+        let image_input = model_entry.is_some_and(accepts_images);
         (
             definition
                 .get("api")
@@ -390,6 +402,7 @@ fn read_runtime_config(agent_dir: &Path) -> AppResult<AgentRuntimeConfig> {
                 .to_string(),
             base.to_string(),
             context_window,
+            image_input,
         )
     } else {
         let pair = match provider.as_str() {
@@ -413,7 +426,7 @@ fn read_runtime_config(agent_dir: &Path) -> AppResult<AgentRuntimeConfig> {
             "fireworks" => ("anthropic-messages", "https://api.fireworks.ai/inference"),
             _ => return Err(AppError::invalid_input("Unsupported built-in provider")),
         };
-        (pair.0.to_string(), pair.1.to_string(), None)
+        (pair.0.to_string(), pair.1.to_string(), None, false)
     };
     let parsed = reqwest::Url::parse(&base_url)
         .map_err(|_| AppError::invalid_input("Provider base URL is invalid"))?;
@@ -431,6 +444,7 @@ fn read_runtime_config(agent_dir: &Path) -> AppResult<AgentRuntimeConfig> {
         api_key,
         thinking_level,
         context_window,
+        image_input,
     })
 }
 
@@ -477,6 +491,10 @@ fn read_custom_providers(
             .unwrap_or("")
             .to_string();
         let models = collect_model_ids(provider.get("models"));
+        let image_input = provider
+            .get("models")
+            .and_then(Value::as_array)
+            .is_some_and(|entries| entries.iter().any(accepts_images));
 
         let has_api_key = auth_has_api_key(auth, id);
 
@@ -486,6 +504,7 @@ fn read_custom_providers(
             base_url,
             models,
             has_api_key,
+            image_input,
         });
     }
 
@@ -529,18 +548,34 @@ fn normalize_model_ids(models: Vec<String>) -> AppResult<Vec<String>> {
     Ok(out)
 }
 
+/// True when a models.json model entry declares image input (pi's `input` list).
+fn accepts_images(entry: &Value) -> bool {
+    entry
+        .get("input")
+        .and_then(Value::as_array)
+        .is_some_and(|input| input.iter().any(|kind| kind.as_str() == Some("image")))
+}
+
 /// Build the models.json model array; stamps a probed `contextWindow` onto
-/// matching ids and omits the field otherwise.
+/// matching ids and omits the field otherwise. `image_input` declares every
+/// model as accepting images via pi's `input` list.
 fn models_json_with_windows(
     models: &[String],
     windows: &std::collections::HashMap<String, u64>,
+    image_input: bool,
 ) -> serde_json::Value {
     serde_json::Value::Array(
         models
             .iter()
-            .map(|id| match windows.get(id) {
-                Some(window) => serde_json::json!({ "id": id, "contextWindow": window }),
-                None => serde_json::json!({ "id": id }),
+            .map(|id| {
+                let mut entry = serde_json::json!({ "id": id });
+                if let Some(window) = windows.get(id) {
+                    entry["contextWindow"] = serde_json::json!(window);
+                }
+                if image_input {
+                    entry["input"] = serde_json::json!(["text", "image"]);
+                }
+                entry
             })
             .collect(),
     )
@@ -772,6 +807,7 @@ fn add_custom_provider_impl(
     base_url: &str,
     api_key: &str,
     models: &[String],
+    image_input: bool,
 ) -> AppResult<CustomProviderEntry> {
     let models = normalize_model_ids(models.to_vec())?;
     let custom_id = generate_custom_id();
@@ -799,7 +835,7 @@ fn add_custom_provider_impl(
             "name": name,
             "baseUrl": base_url,
             "api": "openai-completions",
-            "models": models_json_with_windows(&models, &windows)
+            "models": models_json_with_windows(&models, &windows, image_input)
         }),
     );
     let models_bytes = serde_json::to_vec_pretty(&models_file).map_err(|error| {
@@ -830,6 +866,7 @@ fn add_custom_provider_impl(
         base_url: base_url.to_string(),
         models,
         has_api_key: true,
+        image_input,
     })
 }
 
@@ -894,6 +931,7 @@ fn update_custom_provider_impl(
     base_url: &str,
     api_key: &str,
     models: &[String],
+    image_input: bool,
 ) -> AppResult<CustomProviderEntry> {
     let models = normalize_model_ids(models.to_vec())?;
 
@@ -926,7 +964,7 @@ fn update_custom_provider_impl(
         "name": name,
         "baseUrl": base_url,
         "api": api,
-        "models": models_json_with_windows(&models, &windows)
+        "models": models_json_with_windows(&models, &windows, image_input)
     });
     let models_bytes = serde_json::to_vec_pretty(&models_file).map_err(|error| {
         AppError::storage_io(format!("Failed to serialize models.json: {error}"))
@@ -975,6 +1013,7 @@ fn update_custom_provider_impl(
         base_url: base_url.to_string(),
         models,
         has_api_key,
+        image_input,
     })
 }
 
@@ -1062,6 +1101,7 @@ mod tests {
             "http://localhost:11434/v1",
             "local",
             &ids(&["llama-3.1"]),
+            false,
         )
         .expect("add custom");
 
@@ -1125,6 +1165,7 @@ mod tests {
             "http://localhost:11434/v1",
             "local-secret",
             &ids(&["qwen"]),
+            false,
         )
         .expect("add custom provider");
         switch_provider_impl(dir.path(), &provider.id, "qwen").expect("switch provider");
@@ -1286,6 +1327,7 @@ mod tests {
             "http://localhost:11434/v1",
             "ollama-key",
             &ids(&["llama-3.1"]),
+            false,
         )
         .expect("add custom provider");
 
@@ -1359,6 +1401,7 @@ mod tests {
             "http://localhost:8000/v1",
             "vllm-key",
             &ids(&["qwen-2.5"]),
+            false,
         )
         .expect("add custom provider");
 
@@ -1383,6 +1426,7 @@ mod tests {
             "http://localhost:11434/v1",
             "ollama-key",
             &ids(&["llama-3.1"]),
+            false,
         )
         .expect("add custom provider");
 
@@ -1412,6 +1456,7 @@ mod tests {
             "http://localhost:11434/v1",
             "key",
             &ids(&["llama-3.1"]),
+            false,
         )
         .expect("add custom provider");
 
@@ -1469,6 +1514,7 @@ mod tests {
             "http://localhost:11434/v1",
             "key1",
             &ids(&["llama-3.1"]),
+            false,
         )
         .expect("add first");
 
@@ -1478,6 +1524,7 @@ mod tests {
             "http://localhost:8000/v1",
             "key2",
             &ids(&["qwen-2.5"]),
+            false,
         )
         .expect("add second");
 
@@ -1502,6 +1549,7 @@ mod tests {
             "http://localhost:11434/v1",
             "key",
             &ids(&["llama-3.1"]),
+            false,
         )
         .expect("add custom provider");
 
@@ -1527,6 +1575,7 @@ mod tests {
             "http://localhost:11434/v1",
             "key",
             &ids(&["llama-3.1"]),
+            false,
         )
         .expect("add custom provider");
 
@@ -1605,6 +1654,7 @@ mod tests {
             "http://localhost:11434/v1",
             "ollama-key",
             &ids(&["llama-3.1"]),
+            false,
         )
         .expect("add custom provider");
 
@@ -1615,6 +1665,7 @@ mod tests {
             "http://localhost:11434/v2",
             "",
             &ids(&["llama-3.2", "qwen-2.5"]),
+            false,
         )
         .expect("update custom provider");
 
@@ -1651,6 +1702,7 @@ mod tests {
             "http://localhost:11434/v1",
             "old-key",
             &ids(&["llama-3.1"]),
+            false,
         )
         .expect("add custom provider");
 
@@ -1661,6 +1713,7 @@ mod tests {
             "http://localhost:11434/v1",
             "new-key",
             &ids(&["llama-3.1"]),
+            false,
         )
         .expect("update custom provider");
         assert!(updated.has_api_key);
@@ -1681,6 +1734,7 @@ mod tests {
             "http://localhost:9999/v1",
             "",
             &ids(&["model"]),
+            false,
         );
         assert!(result.is_err());
         let error = result.expect_err("update should fail");
@@ -1697,6 +1751,7 @@ mod tests {
             "http://localhost:11434/v1",
             "key",
             &ids(&["llama-3.1"]),
+            false,
         )
         .expect("add custom provider");
 
@@ -1709,6 +1764,7 @@ mod tests {
             "http://localhost:11434/v1",
             "",
             &ids(&["llama-3.2"]),
+            false,
         )
         .expect("update active provider");
 
@@ -1729,6 +1785,7 @@ mod tests {
             "http://localhost:11434/v1",
             "key",
             &ids(&["llama-3.1"]),
+            false,
         )
         .expect("add custom provider");
 
@@ -1743,6 +1800,7 @@ mod tests {
             "http://localhost:11434/v1",
             "",
             &ids(&["llama-3.2"]),
+            false,
         )
         .expect("update inactive provider");
 
@@ -1763,6 +1821,7 @@ mod tests {
             "http://localhost:11434/v1",
             "key",
             &[],
+            false,
         );
         assert_eq!(add.expect_err("add").code, AppErrorCode::InvalidInput);
 
@@ -1772,6 +1831,7 @@ mod tests {
             "http://localhost:11434/v1",
             "key",
             &ids(&["  "]),
+            false,
         );
         assert_eq!(
             blank.expect_err("add blank").code,
@@ -1784,6 +1844,7 @@ mod tests {
             "http://localhost:11434/v1",
             "key",
             &ids(&["llama-3.1"]),
+            false,
         )
         .expect("add custom provider");
         let update = update_custom_provider_impl(
@@ -1793,6 +1854,7 @@ mod tests {
             "http://localhost:11434/v1",
             "",
             &[],
+            false,
         );
         assert_eq!(update.expect_err("update").code, AppErrorCode::InvalidInput);
     }
@@ -1866,12 +1928,52 @@ mod tests {
     fn models_json_with_windows_stamps_probed_values_only() {
         let mut windows = std::collections::HashMap::new();
         windows.insert("a".to_string(), 1_000_000u64);
-        let models = models_json_with_windows(&ids(&["a", "b"]), &windows);
+        let models = models_json_with_windows(&ids(&["a", "b"]), &windows, false);
         assert_eq!(models[0]["contextWindow"], 1_000_000u64);
         assert!(models[1].get("contextWindow").is_none());
 
-        let no_windows = models_json_with_windows(&ids(&["a"]), &std::collections::HashMap::new());
+        let no_windows = models_json_with_windows(&ids(&["a"]), &std::collections::HashMap::new(), false);
         assert_eq!(no_windows[0], serde_json::json!({ "id": "a" }));
+    }
+
+    #[test]
+    fn image_input_is_declared_per_model_and_read_back() {
+        let dir = temp_agent_dir();
+        let entry = add_custom_provider_impl(
+            dir.path(),
+            "Relay",
+            "http://localhost:11434/v1",
+            "key",
+            &ids(&["vision", "other"]),
+            true,
+        )
+        .expect("add custom provider");
+        assert!(entry.image_input);
+        let models: serde_json::Value = serde_json::from_slice(
+            &fs::read(dir.path().join("models.json")).expect("read models"),
+        )
+        .expect("parse models");
+        assert_eq!(
+            models["providers"][&entry.id]["models"][1],
+            serde_json::json!({ "id": "other", "input": ["text", "image"] })
+        );
+        switch_provider_impl(dir.path(), &entry.id, "vision").expect("switch");
+        assert!(read_runtime_config(dir.path()).expect("runtime config").image_input);
+        let snapshot = read_snapshot(dir.path()).expect("snapshot");
+        assert!(snapshot.custom_providers[0].image_input);
+
+        let updated = update_custom_provider_impl(
+            dir.path(),
+            &entry.id,
+            "Relay",
+            "http://localhost:11434/v1",
+            "",
+            &ids(&["vision"]),
+            false,
+        )
+        .expect("update custom provider");
+        assert!(!updated.image_input);
+        assert!(!read_runtime_config(dir.path()).expect("runtime config").image_input);
     }
 
     #[test]
@@ -1884,6 +1986,7 @@ mod tests {
             "http://127.0.0.1:9/v1",
             "key",
             &ids(&["llama-3.1"]),
+            false,
         )
         .expect("add custom provider with unreachable probe");
         let models: serde_json::Value = serde_json::from_slice(
@@ -1905,6 +2008,7 @@ mod tests {
             "http://localhost:11434/v1",
             "key",
             &ids(&["llama-3.1"]),
+            false,
         )
         .expect("add custom provider");
         switch_provider_impl(dir.path(), &provider.id, "llama-3.1").expect("switch");
@@ -1921,6 +2025,7 @@ mod tests {
             "http://localhost:11434/v1",
             "key",
             &ids(&["llama-3.1"]),
+            false,
         )
         .expect("add custom provider");
         let models_path = dir.path().join("models.json");
@@ -1943,6 +2048,7 @@ mod tests {
             "http://localhost:11434/v1",
             "stored-key",
             &ids(&["llama-3.1"]),
+            false,
         )
         .expect("add");
         let snapshot = read_snapshot(dir.path()).expect("snapshot");
@@ -2046,6 +2152,7 @@ mod tests {
             "http://localhost:11434/v1",
             "key",
             &ids(&["llama-3.1"]),
+            false,
         )
         .expect("add custom provider");
 

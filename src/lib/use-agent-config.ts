@@ -39,7 +39,7 @@ export function useAgentConfig() {
   }, [load]);
 
   const addCustomProvider = useCallback(
-    async (name: string, baseUrl: string, apiKey: string, models: string[]) => {
+    async (name: string, baseUrl: string, apiKey: string, models: string[], imageInput: boolean) => {
       setSaving(true);
       setError(null);
       try {
@@ -48,6 +48,7 @@ export function useAgentConfig() {
           baseUrl,
           apiKey,
           models,
+          imageInput,
         });
         embeddedAgentRuntime.invalidateConfig();
         await load();
@@ -81,7 +82,7 @@ export function useAgentConfig() {
   );
 
   const updateCustomProvider = useCallback(
-    async (id: string, name: string, baseUrl: string, apiKey: string, models: string[]) => {
+    async (id: string, name: string, baseUrl: string, apiKey: string, models: string[], imageInput: boolean) => {
       setSaving(true);
       setError(null);
       try {
@@ -91,6 +92,7 @@ export function useAgentConfig() {
           baseUrl,
           apiKey,
           models,
+          imageInput,
         });
         embeddedAgentRuntime.invalidateConfig();
         await load();

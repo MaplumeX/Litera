@@ -6,6 +6,8 @@ export interface RuntimeModelConfig {
   api: string;
   baseUrl: string;
   contextWindow?: number;
+  /** Custom providers only: the user declared the model accepts images. */
+  imageInput?: boolean;
 }
 
 type ModelCatalog = Record<string, Model<Api>>;
@@ -59,12 +61,15 @@ export async function resolveRuntimeModel(config: RuntimeModelConfig): Promise<M
     throw new Error("不支持的模型提供商");
   }
   const baseUrl = config.baseUrl.replace(/\/+$/, "");
+  // A relay may serve a catalog id from a text-only backend: image input is
+  // the user's declaration, never inherited from the catalog.
+  const input: Model<Api>["input"] = config.imageInput ? ["text", "image"] : ["text"];
   // Catalog hit is only valid when its wire API matches the configured one
   // (a custom OpenAI-compatible relay must not inherit an anthropic-messages
   // stream function just because the model id exists in the pi-ai catalog).
   const catalogModel = (await fullCatalogIndex()).get(config.model);
   if (catalogModel && catalogModel.api === config.api) {
-    return { ...catalogModel, provider: config.provider, baseUrl };
+    return { ...catalogModel, provider: config.provider, baseUrl, input };
   }
   const probed = config.contextWindow;
   if (probed && probed > 0) {
@@ -75,7 +80,7 @@ export async function resolveRuntimeModel(config: RuntimeModelConfig): Promise<M
       provider: config.provider,
       baseUrl,
       reasoning: false,
-      input: ["text"],
+      input,
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
       contextWindow: probed,
       maxTokens: Math.max(256, Math.floor(probed / 8)),
@@ -88,7 +93,7 @@ export async function resolveRuntimeModel(config: RuntimeModelConfig): Promise<M
     provider: config.provider,
     baseUrl,
     reasoning: false,
-    input: ["text"],
+    input,
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: 128_000,
     maxTokens: 8_192,

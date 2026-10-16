@@ -15,6 +15,19 @@ describe("classifyPromptError", () => {
     expect(classifyPromptError(new Error("Request failed with status code 401")).message).toBe("API Key 无效或无权限，请检查模型配置");
   });
 
+  it("classifies a model that rejects image input", () => {
+    for (const message of [
+      "400 Invalid content type. image_url is only supported by certain models.",
+      "400: unknown variant `image_url`, expected `text`",
+      "400 This model does not support image input",
+      "400: Qwen/Qwen3-8B is not a multimodal model",
+      "Vision input is not supported for this model",
+    ]) {
+      expect(classifyPromptError(new Error(message)).code).toBe("image_unsupported");
+    }
+    expect(classifyPromptError(new Error("400 This model does not support image input")).message).toBe("当前模型不接受图片输入，请在模型配置中关闭“支持图片输入”");
+  });
+
   it("classifies rate limiting", () => {
     for (const message of ["429 Too Many Requests", "429: rate limit exceeded", "insufficient_quota: You exceeded your current quota"]) {
       expect(classifyPromptError(new Error(message)).code).toBe("rate_limited");

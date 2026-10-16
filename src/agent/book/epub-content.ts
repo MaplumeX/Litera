@@ -44,6 +44,17 @@ export interface ParsedBook {
   metadata: BookMetadata;
   chapters: Chapter[];
   trigramIndex: Map<string, number[]>;
+  /** The zipped EPUB, kept so images can be inflated on demand. */
+  archive: Uint8Array;
+  /** Package path → media type of every image in the manifest. */
+  images: Map<string, string>;
+}
+
+/** Raw bytes of one packaged image. */
+export interface BookImageFile {
+  src: string;
+  mediaType: string;
+  bytes: Uint8Array;
 }
 
 const parseXml = (source: string, mime = "application/xml") =>
@@ -91,7 +102,53 @@ function firstText(root: ReturnType<typeof parseXml>, names: string[], fallback:
 }
 
 const INLINE_EMPTY_TAGS = new Set(["img", "svg", "audio", "video", "image"]);
+const IMAGE_TAGS = new Set(["img", "svg", "image"]);
 const BLOCK_TAGS = new Set(["p", "div", "section", "header", "footer", "aside"]);
+const IMAGE_ALT_MAX_CHARS = 200;
+/** An image placeholder in the Markdown projection: `![alt](src)`. */
+const IMAGE_PLACEHOLDER = /!\[([^\]\n]*)\]\(([^)\s]+)\)/g;
+
+function imageSource(element: XmlElement): string {
+  const src = element.getAttribute("src") || element.getAttribute("xlink:href") || element.getAttribute("href") || "";
+  // Only images packaged in the EPUB can be viewed; data URIs and remote URLs are dropped.
+  return /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(src) ? "" : src.trim();
+}
+
+function imageAlt(element: XmlElement): string {
+  const alt = element.getAttribute("alt") || element.getAttribute("title") || "";
+  return alt.replace(/[[\]]/g, "").replace(/\s+/g, " ").trim().slice(0, IMAGE_ALT_MAX_CHARS);
+}
+
+/** Percent-encode the characters that would end a Markdown link target early. */
+function escapeImageSource(src: string): string {
+  return src.replace(/[\s()]/g, (char) => (char === "(" ? "%28" : char === ")" ? "%29" : encodeURIComponent(char)));
+}
+
+/**
+ * Markdown placeholders for an image element: one `![alt](src)` per packaged
+ * image (`<img>`, or the `<image>` elements of an `<svg>`), `src` still
+ * relative to its spine file until `resolveImageRefs` rewrites it.
+ */
+function imagePlaceholders(element: XmlElement): string {
+  const tag = elementTag(element);
+  const images = tag === "svg" ? Array.from(element.getElementsByTagName("image")) : [element];
+  return images
+    .map((image) => {
+      const src = imageSource(image);
+      return src ? `![${imageAlt(image)}](${escapeImageSource(src)})` : "";
+    })
+    .join("");
+}
+
+/** Rewrite placeholder sources from spine-file-relative to EPUB package paths. */
+export function resolveImageRefs(markdown: string, fileHref: string): string {
+  return markdown.replace(IMAGE_PLACEHOLDER, (_, alt: string, src: string) => `![${alt}](${resolveHref(fileHref, src)})`);
+}
+
+/** Drop image placeholders; they have no counterpart in the flat text projection. */
+function withoutImages(markdown: string): string {
+  return markdown.replace(IMAGE_PLACEHOLDER, "");
+}
 
 /**
  * Normalize inline text: collapse whitespace runs to a single space and
@@ -227,6 +284,7 @@ function inlineNode(node: XmlNode): string {
   if (type !== 1) return "";
   const element = node as XmlElement;
   const tag = elementTag(element);
+  if (IMAGE_TAGS.has(tag)) return imagePlaceholders(element);
   if (INLINE_EMPTY_TAGS.has(tag)) return "";
   if (tag === "br") return "\n";
   const children = element.childNodes;
@@ -426,6 +484,10 @@ function markdownEvents(root: XmlElement): MarkdownEvent[] {
       flushInline();
       return;
     }
+    if (IMAGE_TAGS.has(tag)) {
+      buffer += imagePlaceholders(element);
+      return;
+    }
     if (INLINE_EMPTY_TAGS.has(tag)) return;
     if (tag === "br") {
       buffer += "\n";
@@ -452,7 +514,7 @@ function dense(text: string): string {
  * text, which is always safe.
  */
 function denseMarkdown(markdown: string): string {
-  const lines = markdown.split("\n").map((line) => {
+  const lines = withoutImages(markdown).split("\n").map((line) => {
     let text = line.replace(/^(\s*)([-+]|\d{1,9}\.)\s+/, "$1");
     text = text.replace(/^(\s*)#{1,6}\s+/, "$1");
     while (/^(\s*)>\s?/.test(text)) text = text.replace(/^(\s*)>\s?/, "$1");
@@ -496,10 +558,12 @@ function markdownSlices(events: readonly MarkdownEvent[], anchorIds: readonly st
  * of the same slice). Anchor ids come from the same document order, so both
  * projections stay slice-aligned; a slice whose markdown would not densely
  * equal its flat text falls back to flat text, keeping the union invariant
- * true for both projections. Malformed markup falls back to the legacy
- * single-segment `htmlText` flat projection.
+ * true for both projections. Images appear only in `markdown`, as `![alt](src)`
+ * placeholders whose `src` is resolved against `fileHref` to a package path.
+ * Malformed markup falls back to the legacy single-segment `htmlText` flat
+ * projection.
  */
-export function parseSpineSegments(source: string): Segment[] {
+export function parseSpineSegments(source: string, fileHref = ""): Segment[] {
   try {
     const parsed = parseXml(source, "text/html");
     const root = parsed.documentElement;
@@ -539,7 +603,7 @@ export function parseSpineSegments(source: string): Segment[] {
       return {
         anchorId: flat.anchorId,
         text: flat.text,
-        markdown: markdown !== undefined && denseMarkdown(markdown) === dense(flat.text) ? markdown : flat.text,
+        markdown: markdown !== undefined && denseMarkdown(markdown) === dense(flat.text) ? resolveImageRefs(markdown, fileHref) : flat.text,
       };
     });
     return segments;
@@ -748,7 +812,8 @@ export function buildOwnedChapters(
 }
 
 export function parseEpub(buffer: ArrayBuffer): ParsedBook {
-  const files = unzipSync(new Uint8Array(buffer));
+  const archive = new Uint8Array(buffer);
+  const files = unzipSync(archive);
   const container = parseXml(fileText(files, "META-INF/container.xml"));
   const opfPath = container.getElementsByTagName("rootfile")[0]?.getAttribute("full-path");
   if (!opfPath) throw new Error("EPUB package document is missing");
@@ -771,7 +836,7 @@ export function parseEpub(buffer: ArrayBuffer): ParsedBook {
   const nav = [...manifest.values()].find((item) => item.properties.split(/\s+/).includes("nav"));
   const ncx = [...manifest.values()].find((item) => item.mediaType === "application/x-dtbncx+xml");
   const toc = nav ? parseNav(files, nav) : ncx ? parseNcx(files, ncx) : [];
-  const spineSegments = spineHrefs.map((href) => parseSpineSegments(fileText(files, href)));
+  const spineSegments = spineHrefs.map((href) => parseSpineSegments(fileText(files, href), href));
   const chapters = buildOwnedChapters(toc, spineHrefs, spineSegments);
   return {
     metadata: {
@@ -782,7 +847,32 @@ export function parseEpub(buffer: ArrayBuffer): ParsedBook {
     },
     chapters,
     trigramIndex: buildTrigramIndex(chapters),
+    archive,
+    images: new Map(
+      [...manifest.values()].filter((item) => item.mediaType.startsWith("image/")).map((item) => [item.href, item.mediaType]),
+    ),
   };
+}
+
+/** Percent-decoded path: hrefs may be encoded where zip entry names are not. */
+function decodedPath(path: string): string {
+  try {
+    return decodeURIComponent(path);
+  } catch {
+    return path;
+  }
+}
+
+/** Inflate one manifest image by its placeholder `src`. */
+export function readImageFile(book: ParsedBook, src: string): BookImageFile {
+  const wanted = decodedPath(stripFragment(src).replace(/^\/+/, ""));
+  const path = [...book.images.keys()].find((key) => decodedPath(key) === wanted);
+  if (!path) throw new Error(`No image at ${src} in this book`);
+  const names = [path, decodedPath(path)];
+  const entries = unzipSync(book.archive, { filter: (file) => names.includes(file.name) });
+  const bytes = names.map((name) => entries[name]).find(Boolean);
+  if (!bytes) throw new Error(`No image at ${src} in this book`);
+  return { src: path, mediaType: book.images.get(path)!, bytes };
 }
 
 function buildTrigramIndex(chapters: readonly Chapter[]): Map<string, number[]> {
@@ -971,7 +1061,7 @@ const QUOTE_MARKS = /^["'“”‘’「」『』《》]+|["'“”‘’「」�
 
 /** Plain text of one Markdown block: structural line prefixes and emphasis delimiters dropped. */
 function plainBlock(markdown: string): string {
-  return markdown
+  return withoutImages(markdown)
     .split("\n")
     .map((line) => {
       let text = line.replace(/^(\s*)([-+]|\d{1,9}\.)\s+/, "$1");
