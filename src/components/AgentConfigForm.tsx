@@ -82,6 +82,7 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
   const [customName, setCustomName] = useState("");
   const [customBaseUrl, setCustomBaseUrl] = useState("");
   const [customModels, setCustomModels] = useState<string[]>([]);
+  const [customImageInput, setCustomImageInput] = useState(false);
 
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -101,10 +102,11 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
     void load();
   }, [active, load]);
 
-  const fillCustomFields = (name: string, baseUrl: string, models: string[]) => {
+  const fillCustomFields = (name: string, baseUrl: string, models: string[], imageInput = false) => {
     setCustomName(name);
     setCustomBaseUrl(baseUrl);
     setCustomModels(models);
+    setCustomImageInput(imageInput);
   };
 
   useEffect(() => {
@@ -115,7 +117,7 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
     if (isCustomProviderId(currentProvider)) {
       const cp = snapshot.customProviders.find((entry) => entry.id === currentProvider);
       if (cp) {
-        fillCustomFields(cp.name, cp.baseUrl, cp.models);
+        fillCustomFields(cp.name, cp.baseUrl, cp.models, cp.imageInput);
         setModel(
           snapshot.model && cp.models.includes(snapshot.model)
             ? snapshot.model
@@ -167,7 +169,7 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
     } else if (isCustomProviderId(value)) {
       const cp = snapshot?.customProviders.find((entry) => entry.id === value);
       if (cp) {
-        fillCustomFields(cp.name, cp.baseUrl, cp.models);
+        fillCustomFields(cp.name, cp.baseUrl, cp.models, cp.imageInput);
         setModel(
           snapshot?.provider === value && snapshot.model && cp.models.includes(snapshot.model)
             ? snapshot.model
@@ -210,7 +212,7 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
     setSuccessMessage(null);
     try {
       if (isNewCustom) {
-        const entry = await addCustomProvider(customName, customBaseUrl, apiKey, customModels);
+        const entry = await addCustomProvider(customName, customBaseUrl, apiKey, customModels, customImageInput);
         // Point at the created entry so a failed switch retries it instead of adding a duplicate.
         setProvider(entry.id);
         setApiKey("");
@@ -220,7 +222,8 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
           customName === selectedCustom.name &&
           customBaseUrl === selectedCustom.baseUrl &&
           apiKey === "" &&
-          sameModels(customModels, selectedCustom.models);
+          sameModels(customModels, selectedCustom.models) &&
+          customImageInput === selectedCustom.imageInput;
         if (!unchanged) {
           await updateCustomProvider(
             selectedCustom.id,
@@ -228,6 +231,7 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
             customBaseUrl,
             apiKey,
             customModels,
+            customImageInput,
           );
         }
         await switchProvider(selectedCustom.id, model);
@@ -375,6 +379,22 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
             />
           )}
         </Field>
+
+        {isCustom && (
+          <label className="flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <div className="text-xs font-medium text-muted-foreground">{t("agent.imageInput")}</div>
+              <div className="text-[11px] text-muted-foreground/80">{t("agent.imageInputHint")}</div>
+            </div>
+            <input
+              type="checkbox"
+              checked={customImageInput}
+              disabled={saving}
+              onChange={(event) => setCustomImageInput(event.target.checked)}
+              className="size-4 shrink-0"
+            />
+          </label>
+        )}
       </div>
 
       {error && (

@@ -1,3 +1,6 @@
+import type { ModelImage } from "./model-image";
+
+export type { ModelImage };
 export const CHAPTER_PART_CHARS = 12_000;
 export interface BookMetadata { title: string; author: string; language: string; totalChapters: number }
 /** `parts`: how many read_chapter windows the chapter splits into. */
@@ -27,6 +30,8 @@ export interface BookContentPort {
   readChapter(chapterIndex: number, part?: number): Promise<{ chapterIndex: number; chapterNumber: number; chapterTitle?: string; part: number; totalParts: number; text: string }>;
   search(queries: string[]): Promise<SearchHit[]>;
   locateQuote(chapterIndex: number, quote: string): Promise<QuoteLocation>;
+  /** A packaged image by its read_chapter placeholder `src`, fitted for vision models. */
+  readImage(src: string): Promise<ModelImage>;
   close(): void;
 }
 
@@ -88,7 +93,7 @@ export function formatBookSnapshot(metadata: BookMetadata, toc: readonly BookToc
   return parts.join("\n");
 }
 
-type Request = { id: string; method: "open" | "metadata" | "toc" | "readChapter" | "search" | "locateQuote"; args: unknown[] };
+type Request = { id: string; method: "open" | "metadata" | "toc" | "readChapter" | "search" | "locateQuote" | "readImage"; args: unknown[] };
 type Response = { id: string; result?: unknown; error?: string };
 
 export class BookWorkerClient implements BookContentPort {
@@ -142,6 +147,7 @@ export class BookWorkerClient implements BookContentPort {
   readChapter(chapterIndex: number, part = 0) { return this.call<Awaited<ReturnType<BookContentPort["readChapter"]>>>("readChapter", [chapterIndex, part]); }
   search(queries: string[]): Promise<SearchHit[]> { return this.call("search", [queries]); }
   locateQuote(chapterIndex: number, quote: string): Promise<QuoteLocation> { return this.call("locateQuote", [chapterIndex, quote]); }
+  readImage(src: string): Promise<ModelImage> { return this.call("readImage", [src]); }
   close(): void { this.generation += 1; this.worker?.terminate(); this.worker = null; this.failAll("电子书上下文已切换"); }
   private failAll(message: string) { for (const pending of this.pending.values()) pending.reject(new Error(message)); this.pending.clear(); }
 }

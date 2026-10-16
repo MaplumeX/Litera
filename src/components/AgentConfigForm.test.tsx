@@ -25,6 +25,7 @@ const hook = {
     baseUrl: "http://localhost:11434/v1",
     models: ["llama-3.1"],
     hasApiKey: true,
+    imageInput: false,
   })),
   updateCustomProvider: vi.fn(async () => ({
     id: "custom-abc12345",
@@ -32,6 +33,7 @@ const hook = {
     baseUrl: "http://localhost:11434/v1",
     models: ["llama-3.1"],
     hasApiKey: true,
+    imageInput: false,
   })),
   deleteCustomProvider: vi.fn(async () => {}),
   switchProvider: vi.fn(async () => {}),
@@ -60,6 +62,7 @@ const builtinSnapshot: AgentConfigSnapshot = {
       baseUrl: "http://localhost:11434/v1",
       models: ["llama-3.1"],
       hasApiKey: true,
+      imageInput: false,
     },
   ],
 };
@@ -180,12 +183,45 @@ describe("AgentConfigForm", () => {
     ).toBe(true);
   });
 
-  it("orders fields provider, name, base url, key, then model", () => {
+  it("orders fields provider, name, base url, key, model, then image input", () => {
     const view = renderForm(customSnapshot);
     const labels = Array.from(view.container.querySelectorAll("label")).map(
       (label) => label.textContent,
     );
-    expect(labels).toEqual(["供应商", "名称", "Base URL", "API Key", "Model"]);
+    expect(labels).toEqual([
+      "供应商",
+      "名称",
+      "Base URL",
+      "API Key",
+      "Model",
+      "支持图片输入开启后 AI 可以查看书中的插图。仅在模型确实支持图片时开启，否则请求会失败。",
+    ]);
+  });
+
+  it("updates a custom provider when image input is toggled", async () => {
+    const view = renderForm(customSnapshot);
+    const toggle = view.getByRole("checkbox", { name: /支持图片输入/ }) as HTMLInputElement;
+    expect(toggle.checked).toBe(false);
+    fireEvent.click(toggle);
+
+    await act(async () => {
+      view.getByRole("button", { name: "保存并应用" }).click();
+    });
+
+    expect(hook.updateCustomProvider).toHaveBeenCalledWith(
+      "custom-abc12345",
+      "Ollama",
+      "http://localhost:11434/v1",
+      "",
+      ["llama-3.1"],
+      true,
+    );
+    expect(hook.switchProvider).toHaveBeenCalledWith("custom-abc12345", "llama-3.1");
+  });
+
+  it("hides the image input toggle for built-in providers", () => {
+    const view = renderForm(builtinSnapshot);
+    expect(view.queryByRole("checkbox", { name: /支持图片输入/ })).toBeNull();
   });
 
   it("applies a built-in provider through save", async () => {
@@ -227,6 +263,7 @@ describe("AgentConfigForm", () => {
       "http://localhost:11434/v1",
       "",
       ["llama-3.1"],
+      false,
     );
     expect(hook.switchProvider).toHaveBeenCalledWith("custom-abc12345", "llama-3.1");
   });
@@ -249,6 +286,7 @@ describe("AgentConfigForm", () => {
       "http://localhost:8000/v1",
       "sk-local",
       ["qwen-2.5"],
+      false,
     );
     expect(hook.switchProvider).toHaveBeenCalledWith("custom-new", "qwen-2.5");
     expect(hook.save).not.toHaveBeenCalled();
@@ -276,6 +314,7 @@ describe("AgentConfigForm", () => {
           baseUrl: "http://localhost:8000/v1",
           models: ["qwen-2.5"],
           hasApiKey: true,
+          imageInput: false,
         },
       ],
     };
@@ -366,6 +405,7 @@ describe("AgentConfigForm", () => {
       "http://localhost:11434/v1",
       "",
       ["qwen-2.5", "qwen-3"],
+      false,
     );
     expect(hook.switchProvider).toHaveBeenCalledWith("custom-abc12345", "qwen-2.5");
   });
@@ -422,6 +462,7 @@ describe("AgentConfigForm", () => {
       "http://localhost:11434/v1",
       "sk-local",
       ["qwen-2.5"],
+      false,
     );
   });
 
@@ -439,6 +480,7 @@ describe("AgentConfigForm", () => {
       "http://localhost:11434/v1",
       "",
       ["llama-3.1", "qwen-2.5"],
+      false,
     );
     expect(hook.switchProvider).toHaveBeenCalledWith("custom-abc12345", "qwen-2.5");
     expect(hook.save).not.toHaveBeenCalled();

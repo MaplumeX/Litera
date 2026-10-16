@@ -12,7 +12,7 @@ export interface ChapterCoverage {
   totalParts: number;
 }
 
-export type SourceLookup = "toc" | "metadata" | "annotations";
+export type SourceLookup = "toc" | "metadata" | "annotations" | "images";
 
 /**
  * What one assistant answer drew on from the Book, derived from its tool
@@ -33,6 +33,7 @@ const LOOKUP_TOOLS: Record<string, SourceLookup> = {
   get_toc: "toc",
   get_book_metadata: "metadata",
   list_annotations: "annotations",
+  view_image: "images",
 };
 
 export function isSourceToolCall(call: AgentToolCall): boolean {

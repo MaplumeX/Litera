@@ -4,9 +4,11 @@ import {
   locateQuote,
   parseEpub,
   readChapter,
+  readImageFile,
   searchBook,
   type ParsedBook,
 } from "./epub-content";
+import { prepareModelImage } from "./model-image";
 
 interface WorkerRequest {
   id: string;
@@ -16,7 +18,7 @@ interface WorkerRequest {
 
 let book: ParsedBook | null = null;
 
-self.onmessage = (event: MessageEvent<WorkerRequest>) => {
+self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
   const { id, method, args } = event.data;
   try {
     let result: unknown;
@@ -33,6 +35,9 @@ self.onmessage = (event: MessageEvent<WorkerRequest>) => {
       result = readChapter(book, Number(args[0]), Number(args[1] ?? 0));
     } else if (method === "search") {
       result = searchBook(book, args[0] as string[]);
+    } else if (method === "readImage") {
+      const file = readImageFile(book, String(args[0] ?? ""));
+      result = await prepareModelImage(file.src, file.bytes, file.mediaType);
     } else if (method === "locateQuote") {
       result = locateQuote(book, Number(args[0]), String(args[1] ?? ""));
     } else {

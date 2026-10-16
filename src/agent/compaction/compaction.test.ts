@@ -12,6 +12,7 @@ import {
   preparePrune,
   serializeConversation,
 } from "./compaction";
+import { imageRefText } from "@/agent/sessions/image-refs";
 
 const now = "2026-08-15T00:00:00Z";
 
@@ -71,6 +72,11 @@ describe("estimateTokens", () => {
 
   it("counts tool result content", () => {
     expect(estimateTokens({ role: "toolResult", toolCallId: "t", toolName: "x", content: [{ type: "text", text: "abcdefgh" }], isError: false, timestamp: 1 } as AgentMessage)).toBe(2);
+  });
+
+  it("counts an Image reference as the image it is re-sent as", () => {
+    const image = estimateTokens({ role: "toolResult", toolCallId: "t", toolName: "view_image", content: [{ type: "image", data: "", mimeType: "image/png" }], isError: false, timestamp: 1 } as AgentMessage);
+    expect(estimateTokens({ role: "toolResult", toolCallId: "t", toolName: "view_image", content: [{ type: "text", text: imageRefText("OPS/a.png") }], isError: false, timestamp: 1 } as AgentMessage)).toBe(image);
   });
 
   it("counts compaction summary length", () => {
@@ -315,6 +321,21 @@ describe("preparePrune", () => {
     const prune = preparePrune(entries, budget);
     expect(prune?.throughEntryId).toBe("a1b");
     expect(prune!.tokensSaved).toBeGreaterThan(1900);
+  });
+
+  it("clears viewed Book images like other Book tool results", () => {
+    const viewed = entry("t1", "a1", "message", {
+      message: { role: "toolResult", toolCallId: "t1", toolName: "view_image", content: [{ type: "text", text: imageRefText("OPS/a.png") }], isError: false, timestamp: 3 },
+    });
+    const entries = [
+      user("u1", null, "q"),
+      assistant("a1", "u1", "looking"),
+      viewed,
+      assistant("a1b", "t1", "answer"),
+      user("u2", "a1b", "c".repeat(4000)),
+      assistant("a2", "u2", "d".repeat(4000)),
+    ];
+    expect(preparePrune(entries, budget)?.throughEntryId).toBe("a1b");
   });
 
   it("does nothing when only kept turns hold tool results", () => {

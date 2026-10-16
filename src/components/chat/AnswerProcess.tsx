@@ -6,6 +6,7 @@ import {
   ChevronRight,
   CircleX,
   Highlighter,
+  ImageIcon,
   Info,
   ListTree,
   Loader2,
@@ -315,7 +316,20 @@ const LOOKUP_STEPS: Record<string, { icon: LucideIcon; title: MessageKey }> = {
   get_toc: { icon: ListTree, title: "chat.process.toc" },
   get_book_metadata: { icon: Info, title: "chat.process.metadata" },
   list_annotations: { icon: Highlighter, title: "chat.process.annotations" },
+  view_image: { icon: ImageIcon, title: "chat.process.image" },
 };
+
+/** The file name of a view_image call's `src`. */
+function imageName(call: AgentToolCall): string | undefined {
+  const src = (call.params as { src?: unknown } | null | undefined)?.src;
+  if (typeof src !== "string" || !src) return undefined;
+  const name = src.split("/").pop() || src;
+  try {
+    return decodeURIComponent(name);
+  } catch {
+    return name;
+  }
+}
 
 function OtherToolStep({ call }: { call: AgentToolCall }) {
   const { t } = useT();
@@ -327,7 +341,7 @@ function OtherToolStep({ call }: { call: AgentToolCall }) {
       calls={[call]}
       icon={lookup.icon}
       title={t(lookup.title)}
-      meta={count === undefined ? undefined : t("chat.process.annotationCount", { count })}
+      meta={call.tool === "view_image" ? imageName(call) : count === undefined ? undefined : t("chat.process.annotationCount", { count })}
     />
   );
 }
