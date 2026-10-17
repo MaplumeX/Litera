@@ -25,6 +25,7 @@ import type { ReaderFlow } from "@/lib/reader-flow";
 import { opensImageViewer, readerImageAt, type ReaderImage } from "@/lib/reader-images";
 import { quoteSearchQueries } from "@/lib/citations";
 import { chapterTicks, sectionIndexAt } from "@/lib/reader-progress";
+import { parseXPointer, rangeFromXPointer, xpointerFromRange } from "@/lib/xpointer";
 import { TTS_HIGHLIGHT_COLOR, TTS_OVERLAY_KEY } from "@/lib/reader-tts";
 import { clampSnap, footnotePopupCss, TYPOGRAPHY_RANGES } from "@/lib/reader-styles";
 import {
@@ -115,6 +116,10 @@ export interface ReaderViewHandle {
   clearSearch: () => void;
   getToc: () => TocItem[];
   getLocation: () => ReaderLocation | null;
+  /** KOReader XPointer of the visible position, for KOReader Sync. */
+  getXPointer: () => string | null;
+  /** Go to a KOReader XPointer; falls back to `fallbackFraction` when it does not resolve. */
+  goToXPointer: (xpointer: string, fallbackFraction: number) => Promise<void>;
   getSelectionCfi: () => SelectionCfi | null;
   addHighlight: (cfi: string) => void;
   removeHighlight: (cfi: string) => void;
@@ -1219,6 +1224,31 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       return view?.book?.toc ?? [];
     }, []);
     const getLocation = useCallback(() => lastLocationRef.current, []);
+    const getXPointer = useCallback((): string | null => {
+      const view = viewRef.current as unknown as FoliateAnnotator | null;
+      const range = view?.lastLocation?.range;
+      if (!view || !range) return null;
+      const doc = range.startContainer.ownerDocument ?? range.startContainer;
+      const index = view.renderer?.getContents?.().find((content) => content.doc === doc)?.index;
+      return index == null ? null : xpointerFromRange(range, index);
+    }, []);
+    const goToXPointer = useCallback(async (xpointer: string, fallbackFraction: number) => {
+      const view = viewRef.current as unknown as (FoliateAnnotator & {
+        book?: { sections?: { createDocument?: () => Promise<Document> }[] };
+      }) | null;
+      if (!view) return;
+      try {
+        const index = parseXPointer(xpointer)?.sectionIndex;
+        const section = index == null ? undefined : view.book?.sections?.[index];
+        const doc = await section?.createDocument?.();
+        const range = doc ? rangeFromXPointer(doc, xpointer) : null;
+        const cfi = range && index != null ? view.getCFI?.(index, range) : undefined;
+        if (cfi && (await view.goTo?.(cfi)) != null) return;
+      } catch (err: unknown) {
+        console.error("goToXPointer error:", err);
+      }
+      await goToFraction(fallbackFraction);
+    }, [goToFraction]);
     const getSelectionCfi = useCallback(() => {
       const view = viewRef.current as unknown as FoliateAnnotator | null;
       return view ? readIframeSelection(view) : null;
@@ -1315,6 +1345,8 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         clearSearch,
         getToc,
         getLocation,
+        getXPointer,
+        goToXPointer,
         getSelectionCfi,
         addHighlight,
         removeHighlight,
@@ -1344,6 +1376,8 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         clearSearch,
         getToc,
         getLocation,
+        getXPointer,
+        goToXPointer,
         getSelectionCfi,
         addHighlight,
         removeHighlight,

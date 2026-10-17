@@ -37,6 +37,13 @@
 - 大书走分片上传；新设备先拉取清单，书文件按需下载
 - 默认关闭。同步的数据以明文形式存储在你选择的存储桶中；LLM API 密钥与 S3 凭据永不离开设备
 
+### KOReader 同步（可选）
+
+- 通过兼容 kosync 协议的进度服务器与 KOReader 交换阅读进度：KOReader 官方服务器（`https://sync.koreader.rocks`）、自建的 `koreader-sync-server`，或 [BookOrbit](https://github.com/bookorbit/bookorbit)（`https://<你的域名>/api/v1/koreader`，使用在 BookOrbit 里创建的 KOReader 凭据）
+- 停止阅读后不久推送进度；打开书时如果别的设备有更新的位置，会先询问再跳转
+- 只同步进度，不同步批注。书籍按 KOReader 的文件指纹匹配，所以各端需要是同一个 EPUB 文件
+- 默认关闭，与 S3 同步互相独立。设置 → 同步 → KOReader 同步
+
 ### 阅读助手
 
 - 两种布局：**阅读模式**（书为主）和 **Agent 模式**（对话为主）。每本书记住上次模式

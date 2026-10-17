@@ -33,6 +33,13 @@ A desktop EPUB reader with a built-in reading assistant. Books stay on your mach
 - Large books upload with multipart; new devices download the Manifest first and fetch book files on demand
 - Off by default. Synced data is stored as-is (plaintext) on the bucket you choose; LLM API keys and S3 credentials never leave the device
 
+### KOReader Sync (opt-in)
+
+- Exchange reading progress with KOReader through any kosync-compatible progress server: KOReader's own (`https://sync.koreader.rocks`), a self-hosted `koreader-sync-server`, or [BookOrbit](https://github.com/bookorbit/bookorbit) (`https://<host>/api/v1/koreader`, using the KOReader credentials created in BookOrbit)
+- Litera pushes your position shortly after you stop reading and asks before jumping to a newer position from another device when you open a book
+- Progress only, not annotations. Books are matched by KOReader's file fingerprint, so every side needs the same EPUB file
+- Off by default; separate from Sync. Settings → Sync → KOReader Sync
+
 ### Reading assistant
 
 - Two layouts: **Reading** (book first) and **Agent** (conversation first). Each book remembers the last mode
