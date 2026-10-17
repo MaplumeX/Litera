@@ -6,6 +6,7 @@ import {
   Library,
   Pause,
   Plus,
+  Settings,
   Star,
   Trash2,
   type LucideIcon,
@@ -44,6 +45,8 @@ interface LibrarySidebarProps {
   autoFocus?: boolean;
   /** Titlebar row on top, when the sidebar runs the window's full height. */
   header?: ReactNode;
+  /** The mobile drawer also leads to Settings; desktop has it in the titlebar. */
+  onOpenSettings?: () => void;
   className?: string;
 }
 
@@ -64,6 +67,7 @@ export function LibrarySidebar({
   busy,
   autoFocus = false,
   header,
+  onOpenSettings,
   className,
 }: LibrarySidebarProps) {
   const { t } = useT();
@@ -152,6 +156,16 @@ export function LibrarySidebar({
             </span>
           )}
         </button>
+        {onOpenSettings && (
+          <button
+            type="button"
+            onClick={onOpenSettings}
+            className={cn(ITEM_CLASS, IDLE_ITEM_CLASS)}
+          >
+            <Settings className="size-4 shrink-0 opacity-70" aria-hidden />
+            <span className="min-w-0 flex-1 truncate text-left">{t("library.settings")}</span>
+          </button>
+        )}
       </div>
     </aside>
   );

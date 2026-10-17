@@ -1,0 +1,47 @@
+import type { ReactNode } from "react";
+import { Dialog as DialogPrimitive } from "radix-ui";
+import { cn } from "@/lib/utils";
+
+/**
+ * A modal bottom sheet. Built on the Radix dialog, so it traps focus and
+ * the system Back closes it like any other dialog.
+ */
+export function MobileSheet({
+  open,
+  onOpenChange,
+  title,
+  hideTitle = false,
+  children,
+  className,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  title: string;
+  /** Keep the title for screen readers only (the content names itself). */
+  hideTitle?: boolean;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
+      <DialogPrimitive.Portal>
+        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/40 data-[state=open]:animate-in data-[state=open]:fade-in-0" />
+        <DialogPrimitive.Content
+          aria-describedby={undefined}
+          className={cn(
+            "fixed inset-x-0 bottom-0 z-50 flex max-h-[85vh] flex-col rounded-t-2xl border-t bg-background pb-[var(--android-inset-bottom,0px)] shadow-float outline-none data-[state=open]:animate-in data-[state=open]:slide-in-from-bottom",
+            className,
+          )}
+        >
+          <div aria-hidden className="mx-auto mt-2 h-1 w-10 shrink-0 rounded-full bg-muted-foreground/30" />
+          <DialogPrimitive.Title
+            className={cn("shrink-0 px-4 pt-2 pb-1 text-sm font-medium", hideTitle && "sr-only")}
+          >
+            {title}
+          </DialogPrimitive.Title>
+          <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
+        </DialogPrimitive.Content>
+      </DialogPrimitive.Portal>
+    </DialogPrimitive.Root>
+  );
+}

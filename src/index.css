@@ -272,3 +272,21 @@
     opacity: 0.55;
   }
 }
+
+/* The phone shell: no tap flash, no rubber-band scroll of the whole page,
+ * and no system callout on long-press (long-press opens Litera's own sheet). */
+.mobile-shell {
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+}
+.mobile-shell [data-shelf],
+.mobile-shell [data-shelf] * {
+  -webkit-touch-callout: none;
+  user-select: none;
+}
+
+/* Mind maps pan and pinch-zoom by touch (d3-zoom); the browser must not
+ * scroll the transcript instead. */
+.mindmap-canvas .markmap {
+  touch-action: none;
+}

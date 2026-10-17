@@ -101,6 +101,7 @@ const readerHandle: ReaderViewHandle = {
   ttsSetMark: vi.fn(),
   clearTtsHighlight: vi.fn(),
   advanceTtsSection: vi.fn(async () => undefined),
+  dismissSelection: () => false,
 };
 
 vi.mock("@/components/ReaderView", async () => {

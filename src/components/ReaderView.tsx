@@ -130,6 +130,11 @@ export interface ReaderViewHandle {
   ttsSetMark: (mark: string) => void;
   clearTtsHighlight: () => void;
   advanceTtsSection: () => Promise<string | undefined>;
+  /**
+   * Close the selection toolbar or the highlight editor, whichever is up;
+   * false when neither was (the mobile shell's Back moves on to the next layer).
+   */
+  dismissSelection: () => boolean;
 }
 
 interface ReaderViewProps {
@@ -173,6 +178,8 @@ interface ReaderViewProps {
   onUserRelocate?: () => void;
   /** Reader CSS (font/theme) to inject into footnote popup inner views. */
   stylesCss?: string;
+  /** A blank tap in the middle third of the page (the mobile shell toggles its chrome). */
+  onMiddleTap?: () => void;
 }
 
 type FoliateOverlayer = {
@@ -316,6 +323,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       keysDisabled = false,
       onUserRelocate,
       stylesCss,
+      onMiddleTap,
     },
     ref,
   ) {
@@ -353,6 +361,8 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
     // Latest reader CSS for footnote inner views (read inside the mount effect).
     const stylesCssRef = useRef(stylesCss);
     stylesCssRef.current = stylesCss;
+    const onMiddleTapRef = useRef(onMiddleTap);
+    onMiddleTapRef.current = onMiddleTap;
     const footnoteInnerViewRef = useRef<FoliateInnerView | null>(null);
     // True while a footnote popup is expected: set on a footnote hit, cleared on
     // close. Guards `before-render` against mounting an inner view for a
@@ -671,7 +681,10 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         () => window.getSelection(),
         tapLeft,
         tapRight,
-        { onIdlePointerUp: () => closeHighlightEditorRef.current() },
+        {
+          onIdlePointerUp: () => closeHighlightEditorRef.current(),
+          onMiddleTap: () => onMiddleTapRef.current?.(),
+        },
       );
       el.addEventListener("wheel", handleWheel, { passive: false });
       window.addEventListener("keydown", handleKeyDown);
@@ -741,6 +754,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
               return false;
             },
             onIdlePointerUp: () => closeHighlightEditorRef.current(),
+            onMiddleTap: () => onMiddleTapRef.current?.(),
           },
         );
         const onSelectionChange = () => handleIframeSelection(doc);
@@ -1325,6 +1339,15 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       }
     }, [clearTtsHighlight, initTts]);
 
+    const selectionOpenRef = useRef(false);
+    selectionOpenRef.current = selectionPos !== null || editor !== null;
+    const dismissSelection = useCallback(() => {
+      if (!selectionOpenRef.current) return false;
+      closeHighlightEditorRef.current();
+      clearIframeSelection();
+      return true;
+    }, [clearIframeSelection]);
+
     useImperativeHandle(
       ref,
       () => ({
@@ -1357,6 +1380,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         ttsSetMark,
         clearTtsHighlight,
         advanceTtsSection,
+        dismissSelection,
       }),
       [
         prev,
@@ -1388,6 +1412,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         ttsSetMark,
         clearTtsHighlight,
         advanceTtsSection,
+        dismissSelection,
       ],
     );
 

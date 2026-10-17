@@ -1,4 +1,11 @@
-import type { ComponentType, ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  type ComponentType,
+  type MouseEvent,
+  type ReactNode,
+} from "react";
+import { Slot } from "radix-ui";
 import { Check, EllipsisVertical } from "lucide-react";
 import type { ReadingStatus } from "@/types/library";
 import { Button } from "@/components/ui/button";
@@ -30,6 +37,8 @@ import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 export interface BookActionHandlers {
+  /** The Book's title, for a host that names it (the mobile action sheet). */
+  title?: string;
   onOpen: () => void;
   onDetails: () => void;
   onDelete: () => void;
@@ -75,6 +84,42 @@ const CONTEXT_PARTS: MenuParts = {
   SubTrigger: ContextMenuSubTrigger,
   SubContent: ContextMenuSubContent,
 };
+
+/** Touch-sized rows for the mobile shell's action sheet. */
+const SHEET_PARTS: MenuParts = {
+  Item: ({ onSelect, variant, disabled, children }) => (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onSelect}
+      className={cn(
+        "flex min-h-12 w-full items-center gap-3 px-4 text-left text-sm transition-colors active:bg-accent disabled:opacity-50",
+        variant === "destructive" && "text-destructive",
+      )}
+    >
+      {children}
+    </button>
+  ),
+  Separator: () => <div role="separator" className="my-1 h-px bg-border" />,
+  Sub: ({ children }) => <div role="group">{children}</div>,
+  SubTrigger: ({ children }) => (
+    <div className="px-4 pt-3 pb-1 text-xs font-medium text-muted-foreground">{children}</div>
+  ),
+  SubContent: ({ children }) => <div className="pl-2">{children}</div>,
+};
+
+/**
+ * Set by the mobile shell: a long-press (the touch context menu) or the ⋮
+ * button hands the Book's actions to it, to show as a bottom sheet, instead
+ * of opening a menu.
+ */
+const BookActionSheetContext = createContext<((actions: BookActionHandlers) => void) | null>(null);
+export const BookActionSheetProvider = BookActionSheetContext.Provider;
+
+/** The actions as sheet rows; the host closes the sheet after a row is picked. */
+export function BookActionSheetItems(handlers: BookActionHandlers) {
+  return <BookActionItems parts={SHEET_PARTS} {...handlers} />;
+}
 
 function BookActionItems({
   parts: { Item, Separator, Sub, SubTrigger, SubContent },
@@ -127,6 +172,24 @@ export function BookActionDropdown({
   ...handlers
 }: BookActionHandlers & { className?: string }) {
   const { t } = useT();
+  const openSheet = useContext(BookActionSheetContext);
+  if (openSheet) {
+    return (
+      <Button
+        type="button"
+        size="icon-xs"
+        variant="ghost"
+        className={cn("text-muted-foreground hover:text-foreground", className)}
+        aria-label={t("library.actions")}
+        onClick={(event) => {
+          event.stopPropagation();
+          openSheet(handlers);
+        }}
+      >
+        <EllipsisVertical />
+      </Button>
+    );
+  }
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -151,6 +214,19 @@ export function BookActionContext({
   children,
   ...handlers
 }: BookActionHandlers & { children: ReactNode }) {
+  const openSheet = useContext(BookActionSheetContext);
+  if (openSheet) {
+    return (
+      <Slot.Root
+        onContextMenu={(event: MouseEvent) => {
+          event.preventDefault();
+          openSheet(handlers);
+        }}
+      >
+        {children}
+      </Slot.Root>
+    );
+  }
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>

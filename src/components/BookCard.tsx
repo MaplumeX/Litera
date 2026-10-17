@@ -95,6 +95,7 @@ function bookActions(
 ): BookActionHandlers {
   const { onToggleStar, onChangeStatus, onEnterSelect } = handlers;
   return {
+    title: book.title,
     onOpen: () => {
       void handlers.onOpen(book.id);
     },
