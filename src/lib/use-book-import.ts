@@ -7,8 +7,10 @@ import {
   type ConfirmRequest,
   type ImportNotice,
   importAbsolutePaths,
+  importIncomingBooks,
   processImportResults,
 } from "@/lib/book-import";
+import { platformBridge, type IncomingBook } from "@/lib/platform-bridge";
 import { t } from "@/lib/i18n";
 
 export interface BookImportNotice extends ImportNotice {
@@ -52,11 +54,44 @@ export function useBookImport() {
     };
   }, [settleConfirm]);
 
+  const runIncoming = useCallback(
+    async (books: IncomingBook[], options?: { suppressDuplicateNotice?: boolean }) => {
+      if (books.length === 0) return [];
+      const ids = await importIncomingBooks(books, {
+        askConfirm,
+        onNotice: pushNotice,
+        suppressDuplicateNotice: options?.suppressDuplicateNotice,
+      });
+      if (ids.length > 0) notifySyncActivity();
+      return ids;
+    },
+    [askConfirm, pushNotice],
+  );
+
+  /**
+   * Books from an "Open with" or a share. They are never dropped while
+   * another import runs: the platform already copied them into the cache.
+   */
+  const importIncoming = useCallback(
+    async (books: IncomingBook[], options?: { suppressDuplicateNotice?: boolean }) => {
+      setImporting(true);
+      try {
+        return await runIncoming(books, options);
+      } finally {
+        setImporting(importingRef.current);
+      }
+    },
+    [runIncoming],
+  );
+
   const importFromPicker = useCallback(async () => {
     if (importingRef.current) return [];
     importingRef.current = true;
     setImporting(true);
     try {
+      if (platformBridge.hasDocumentPicker) {
+        return await runIncoming(await platformBridge.pickBooks());
+      }
       const results = await invoke<ImportBookResult[]>("import_book");
       if (results.length > 0) notifySyncActivity();
       return await processImportResults(results, {
@@ -80,7 +115,7 @@ export function useBookImport() {
       importingRef.current = false;
       setImporting(false);
     }
-  }, [askConfirm, pushNotice]);
+  }, [askConfirm, pushNotice, runIncoming]);
 
   const importFromPaths = useCallback(
     async (paths: string[], options?: { suppressDuplicateNotice?: boolean }) => {
@@ -113,5 +148,6 @@ export function useBookImport() {
     importingRef,
     importFromPicker,
     importFromPaths,
+    importIncoming,
   };
 }

@@ -1,3 +1,5 @@
+import { hrefMatches } from "@/agent/book/book-content";
+
 export interface TocTreeItem {
   href: string;
   label: string;
@@ -104,4 +106,18 @@ export function unionKeys(current: string[], extra: string[]): string[] {
     added = true;
   }
   return added ? out : current;
+}
+
+/**
+ * The TOC href a Citation's "Open in Book" should jump to: the entry whose
+ * fragment matches the quote's location, else the first entry in that file,
+ * else the location itself.
+ */
+export function quoteTargetHref(toc: TocTreeItem[], target: string): string {
+  const fragment = target.split("#")[1] ?? "";
+  const items = flattenToc(toc).filter((item) => hrefMatches(item.href, target));
+  return (
+    (items.find((item) => (item.href.split("#")[1] ?? "") === fragment) ?? items[0])?.href ??
+    target
+  );
 }

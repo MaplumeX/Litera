@@ -628,6 +628,7 @@ pub async fn save_preferences(
     .map_err(|e| AppError::storage_io(format!("Preferences write worker failed: {e}")))?
 }
 
+#[cfg(desktop)]
 fn collect_system_font_families() -> AppResult<Vec<String>> {
     let mut families = font_kit::source::SystemSource::new()
         .all_families()
@@ -636,6 +637,16 @@ fn collect_system_font_families() -> AppResult<Vec<String>> {
     families.sort();
     families.dedup();
     Ok(families)
+}
+
+/// Android exposes no font enumeration API to apps; the picker offers the
+/// CSS generics, which map to the system's own serif / sans / mono faces.
+#[cfg(mobile)]
+fn collect_system_font_families() -> AppResult<Vec<String>> {
+    Ok(crate::library::GENERIC_FONT_FAMILIES
+        .iter()
+        .map(|family| family.to_string())
+        .collect())
 }
 
 #[tauri::command]

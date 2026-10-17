@@ -5,6 +5,7 @@ use tauri_plugin_window_state::{Builder as WindowStateBuilder, StateFlags};
 mod agent_config;
 mod error;
 mod export;
+mod incoming;
 mod kosync;
 mod library;
 mod open_paths;
@@ -39,6 +40,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_litera_platform::init())
         .manage(open_paths::OpenedPaths::default())
         .manage(kosync::KosyncStatusState::default())
         .setup(|app| {
@@ -90,6 +92,7 @@ pub fn run() {
             app.manage(library_store);
             app.manage(preferences_store);
 
+            #[cfg(desktop)]
             open_paths::enqueue_current_process_args(app.handle());
 
             if let Some(window) = app.get_webview_window("main") {
@@ -118,6 +121,7 @@ pub fn run() {
             sync::sync_confirm_bulk_upload,
             sync::sync_upload_book_files,
             sync::sync_download_book_file,
+            sync::sync_book_download_size,
             sync::sync_ensure_cover,
             sync::sync_sessions,
             sync::sync_note_result,
@@ -132,6 +136,7 @@ pub fn run() {
             kosync::kosync_push,
             library::import_book,
             library::import_paths,
+            incoming::import_incoming_books,
             open_paths::take_pending_open_paths,
             library::discard_import,
             library::read_import_bytes,
@@ -174,7 +179,7 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|_app, _event| {
-            #[cfg(any(target_os = "macos", target_os = "ios", target_os = "android"))]
+            #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Opened { urls } = &_event {
                 open_paths::enqueue_opened_urls(_app, urls);
             }

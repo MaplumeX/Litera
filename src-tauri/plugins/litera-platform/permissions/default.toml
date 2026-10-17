@@ -1,0 +1,22 @@
+"$schema" = "schemas/schema.json"
+
+[default]
+description = "Everything the mobile shell uses from the Android platform bridge."
+permissions = ["allow-platform"]
+
+[[permission]]
+identifier = "allow-platform"
+description = "Enables every command of the Android platform bridge."
+commands.allow = [
+  "pickBooks",
+  "takePendingIncomingBooks",
+  "setImmersive",
+  "setKeepScreenOn",
+  "setVolumeKeyPaging",
+  "getNetworkStatus",
+  "exitApp",
+  "register_listener",
+  "registerListener",
+  "remove_listener",
+  "removeListener",
+]

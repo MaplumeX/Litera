@@ -20,6 +20,17 @@ export interface SyncScheduler {
   /** Set when several consecutive syncs failed; dismissable, never modal. */
   persistentFailure: string | null;
   clearPersistentFailure: () => void;
+  /** Run a pass now (the mobile shell does when the app returns to the foreground). */
+  syncNow: () => Promise<void>;
+}
+
+export interface SyncSchedulerOptions {
+  /**
+   * Whether this pass may upload book files. Asked before every pass; the
+   * mobile shell says no on a metered network with "Wi-Fi only" on. The
+   * Manifest and Sessions sync either way.
+   */
+  transferBookFiles?: () => Promise<boolean>;
 }
 
 /**
@@ -27,7 +38,9 @@ export interface SyncScheduler {
  * debounced sync after local changes settle, and re-sync periodically. All
  * runs are silent; only repeated consecutive failures surface to the UI.
  */
-export function useSyncScheduler(): SyncScheduler {
+export function useSyncScheduler(options: SyncSchedulerOptions = {}): SyncScheduler {
+  const transferBookFilesRef = useRef(options.transferBookFiles);
+  transferBookFilesRef.current = options.transferBookFiles;
   const [persistentFailure, setPersistentFailure] = useState<string | null>(null);
   const consecutiveFailuresRef = useRef(0);
   const runningRef = useRef(false);
@@ -39,7 +52,11 @@ export function useSyncScheduler(): SyncScheduler {
     try {
       const config = await invoke<SyncConfigLike | null>("get_sync_config");
       if (!config?.enabled) return;
-      await runSyncOnce({ uploadFiles: true });
+      // Unsure whether the network is metered: keep the book files for later.
+      const uploadFiles = await (transferBookFilesRef.current?.() ?? Promise.resolve(true)).catch(
+        () => false,
+      );
+      await runSyncOnce({ uploadFiles });
       await invoke("sync_note_result", { success: true, error: null });
       consecutiveFailuresRef.current = 0;
       setPersistentFailure(null);
@@ -110,5 +127,5 @@ export function useSyncScheduler(): SyncScheduler {
     setPersistentFailure(null);
   }, []);
 
-  return { persistentFailure, clearPersistentFailure };
+  return { persistentFailure, clearPersistentFailure, syncNow: sync };
 }

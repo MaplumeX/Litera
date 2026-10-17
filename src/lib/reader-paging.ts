@@ -144,6 +144,24 @@ export function readerKeyAction(
   }
 }
 
+export type VolumeKeyDirection = "up" | "down";
+
+export interface VolumeKeyContext {
+  /** The reader turned on volume-key paging in Settings. */
+  enabled: boolean;
+  /** The Reader page is showing; elsewhere the keys change the volume. */
+  readerActive: boolean;
+}
+
+/** Volume down turns forward and volume up back, as in other Android readers. */
+export function volumeKeyAction(
+  direction: VolumeKeyDirection,
+  context: VolumeKeyContext,
+): "prev" | "next" | null {
+  if (!context.enabled || !context.readerActive) return null;
+  return direction === "down" ? "next" : "prev";
+}
+
 /** Actions that also scroll whatever scroll area the reader last clicked. */
 const SCROLL_KEY_ACTIONS: ReadonlySet<ReaderKeyAction> = new Set([
   "prev",
@@ -226,6 +244,8 @@ export interface PointerPagingOptions {
   shouldIgnore?: (event: PointerEvent) => boolean;
   /** Fired on an idle click that did not hit shouldIgnore (blank tap). */
   onIdlePointerUp?: (event: PointerEvent) => void;
+  /** A blank tap in the middle third (the mobile shell toggles its chrome). */
+  onMiddleTap?: (event: PointerEvent) => void;
 }
 
 export function bindPointerPaging(
@@ -268,6 +288,7 @@ export function bindPointerPaging(
     const zone = hitFromClientX(getX(pe), getWidth());
     if (zone === "left") pageLeft();
     else if (zone === "right") pageRight();
+    else options?.onMiddleTap?.(pe);
   };
 
   target.addEventListener("pointerdown", onDown);

@@ -13,6 +13,7 @@ import {
   SEEK_BURST_MS,
   shouldIgnorePagingTarget,
   shouldIgnoreSpaceTarget,
+  volumeKeyAction,
   type WheelPagingState,
 } from "./reader-paging";
 
@@ -210,6 +211,88 @@ describe("bindPointerPaging", () => {
     expect(pageLeft).toHaveBeenCalledOnce();
     expect(pageRight).not.toHaveBeenCalled();
     unbind();
+  });
+
+  function bindTouch(options: Parameters<typeof bindPointerPaging>[6] = {}) {
+    const target = document.createElement("div");
+    const pageLeft = vi.fn();
+    const pageRight = vi.fn();
+    const onMiddleTap = vi.fn();
+    const unbind = bindPointerPaging(
+      target,
+      (event) => event.clientX,
+      () => 300,
+      () => null,
+      pageLeft,
+      pageRight,
+      { onMiddleTap, ...options },
+    );
+    return { target, pageLeft, pageRight, onMiddleTap, unbind };
+  }
+
+  it("reports a tap in the middle third without turning the page", () => {
+    const { target, pageLeft, pageRight, onMiddleTap, unbind } = bindTouch();
+    click(target, 150);
+    expect(onMiddleTap).toHaveBeenCalledOnce();
+    expect(pageLeft).not.toHaveBeenCalled();
+    expect(pageRight).not.toHaveBeenCalled();
+    unbind();
+  });
+
+  it("turns the page on a tap in the right third, not toggling chrome", () => {
+    const { target, pageRight, onMiddleTap, unbind } = bindTouch();
+    click(target, 280);
+    expect(pageRight).toHaveBeenCalledOnce();
+    expect(onMiddleTap).not.toHaveBeenCalled();
+    unbind();
+  });
+
+  it("does not report a middle tap at the end of a swipe", () => {
+    const { target, onMiddleTap, pageLeft, pageRight, unbind } = bindTouch();
+    target.dispatchEvent(
+      new PointerEvent("pointerdown", { button: 0, clientX: 250, clientY: 10, bubbles: true }),
+    );
+    target.dispatchEvent(
+      new PointerEvent("pointerup", { button: 0, clientX: 150, clientY: 12, bubbles: true }),
+    );
+    expect(onMiddleTap).not.toHaveBeenCalled();
+    expect(pageLeft).not.toHaveBeenCalled();
+    expect(pageRight).not.toHaveBeenCalled();
+    unbind();
+  });
+
+  it("does not report a middle tap on an interactive target (highlight, image)", () => {
+    const { target, onMiddleTap, unbind } = bindTouch({ shouldIgnore: () => true });
+    click(target, 150);
+    expect(onMiddleTap).not.toHaveBeenCalled();
+    unbind();
+  });
+
+  it("does not report a middle tap on a link", () => {
+    const { target, onMiddleTap, unbind } = bindTouch();
+    const link = document.createElement("a");
+    link.href = "#note";
+    target.appendChild(link);
+    click(link, 150);
+    expect(onMiddleTap).not.toHaveBeenCalled();
+    unbind();
+  });
+});
+
+describe("volumeKeyAction", () => {
+  const reading = { enabled: true, readerActive: true };
+
+  it("turns forward on volume down and back on volume up", () => {
+    expect(volumeKeyAction("down", reading)).toBe("next");
+    expect(volumeKeyAction("up", reading)).toBe("prev");
+  });
+
+  it("does nothing while the setting is off", () => {
+    expect(volumeKeyAction("down", { ...reading, enabled: false })).toBeNull();
+  });
+
+  it("does nothing outside the Reader page", () => {
+    expect(volumeKeyAction("down", { ...reading, readerActive: false })).toBeNull();
   });
 });
 
