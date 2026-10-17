@@ -82,6 +82,8 @@ const readerHandle: ReaderViewHandle = {
   searchBook: vi.fn(() => null),
   clearSearch: vi.fn(),
   getToc: () => [],
+  getXPointer: () => null,
+  goToXPointer: vi.fn(async () => {}),
   getLocation: () => ({
     cfi: "epubcfi(/6/8!/4/2,/1:0,/1:80)",
     fraction: 0.42,
