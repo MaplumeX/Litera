@@ -5,6 +5,7 @@ use tauri_plugin_window_state::{Builder as WindowStateBuilder, StateFlags};
 mod agent_config;
 mod error;
 mod export;
+mod kosync;
 mod library;
 mod open_paths;
 mod pi_sessions;
@@ -39,6 +40,7 @@ pub fn run() {
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_opener::init())
         .manage(open_paths::OpenedPaths::default())
+        .manage(kosync::KosyncStatusState::default())
         .setup(|app| {
             let root_result = app.path().app_data_dir().map_err(|error| {
                 error::AppError::storage_io(format!("Failed to resolve app data dir: {error}"))
@@ -122,6 +124,12 @@ pub fn run() {
             sync_config::get_sync_config,
             sync_config::save_sync_config,
             sync_config::test_sync_connection,
+            kosync::get_kosync_config,
+            kosync::save_kosync_config,
+            kosync::test_kosync_connection,
+            kosync::get_kosync_status,
+            kosync::kosync_pull,
+            kosync::kosync_push,
             library::import_book,
             library::import_paths,
             open_paths::take_pending_open_paths,

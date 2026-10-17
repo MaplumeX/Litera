@@ -48,6 +48,14 @@ _Avoid_: Backup, cloud storage
 The S3-compatible object store the user configures as the destination for Sync. Litera runs no server of its own.
 _Avoid_: Cloud, server
 
+**KOReader Sync**:
+The opt-in feature that exchanges a Book's reading position with a Progress Server. Progress only, never Annotations; independent of Sync. Litera pushes after reading and, on open, asks before jumping to a newer position from another device.
+_Avoid_: Sync (that is the S3 feature), kosync (the protocol's name, fine in code)
+
+**Progress Server**:
+A kosync-compatible server KOReader Sync talks to: KOReader's own sync server, a self-hosted one, or BookOrbit. Books are matched by KOReader's partial-MD5 file fingerprint; positions travel as CREngine XPointers.
+_Avoid_: Sync Backend (that is the S3 bucket)
+
 **Manifest**:
 The single JSON object on the Sync Backend holding all small sync data: book metadata, reading positions, annotations, tombstones, and per-item timestamps. Book files and covers live as separate objects referenced by it.
 _Avoid_: Index, sync database

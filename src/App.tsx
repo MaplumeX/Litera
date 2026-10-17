@@ -119,6 +119,8 @@ import { loadReaderFlow } from "@/lib/reader-flow";
 import { isFindShortcut } from "@/lib/reader-paging";
 import { useReadingStatus } from "@/lib/use-reading-status";
 import { FinishBookPrompt } from "@/components/FinishBookPrompt";
+import { KosyncPrompt } from "@/components/KosyncPrompt";
+import { useKosync } from "@/lib/use-kosync";
 
 interface FileData {
   bytes: Uint8Array<ArrayBuffer>;
@@ -304,6 +306,13 @@ function App() {
 
   const readingStatus = useReadingStatus({ onError: reportPersistenceError });
 
+  const getLocalFraction = useCallback(() => lastKnownFractionRef.current, []);
+  const kosync = useKosync({
+    bookId: fileData?.bookId ?? null,
+    readerRef,
+    getLocalFraction,
+  });
+
   // Persist reading position (debounced). One invoke for fraction + CFI.
   const persistPosition = useDebouncedCallback(
     async (bookId: string, fraction: number, cfi?: string) => {
@@ -406,9 +415,15 @@ function App() {
         // Push what changed since the last pass (the debounced push may not
         // have fired yet), or the next device opened would start from stale
         // reading positions. Never blocks closing for long.
-        await syncBeforeExit(SYNC_BEFORE_EXIT_TIMEOUT_MS).catch((error: unknown) => {
-          console.warn("Sync before close failed:", error);
-        });
+        await Promise.all([
+          syncBeforeExit(SYNC_BEFORE_EXIT_TIMEOUT_MS).catch((error: unknown) => {
+            console.warn("Sync before close failed:", error);
+          }),
+          Promise.race([
+            kosync.flush(),
+            new Promise((resolve) => setTimeout(resolve, SYNC_BEFORE_EXIT_TIMEOUT_MS)),
+          ]),
+        ]);
         try {
           embeddedAgentRuntime.closeBook();
           await getCurrentWindow().destroy();
@@ -426,7 +441,7 @@ function App() {
       disposed = true;
       unlisten?.();
     };
-  }, [flushReadingState, reportPersistenceError]);
+  }, [flushReadingState, kosync.flush, reportPersistenceError]);
 
   // Apply theme class to <html> so CSS variables cascade to portaled dialogs.
   useEffect(() => {
@@ -620,6 +635,7 @@ function App() {
     } catch {
       return;
     }
+    void kosync.flush();
     tts.stop();
     embeddedAgentRuntime.closeBook();
     readingStatus.end();
@@ -640,19 +656,20 @@ function App() {
     setSessionRailOpen(true);
     setBookCollapsed(false);
     annotationsWritableRef.current = false;
-  }, [flushReadingState, readingStatus.end, tts.stop]);
+  }, [flushReadingState, kosync.flush, readingStatus.end, tts.stop]);
 
   const handleRelocate = useCallback(
     (index: number, fraction: number, label?: string, chapterHref?: string, cfi?: string) => {
       lastKnownFractionRef.current = fraction;
       setProgress({ index, fraction, label, chapterHref });
       readingStatus.onRelocate(fraction);
+      kosync.onRelocate(fraction);
       // Persist reading position. Do not write lastCfi / lastFraction into currentBook.
       if (fileData?.bookId) {
         persistPosition.schedule(fileData.bookId, fraction, cfi);
       }
     },
-    [fileData?.bookId, persistPosition, readingStatus.onRelocate],
+    [fileData?.bookId, kosync.onRelocate, persistPosition, readingStatus.onRelocate],
   );
 
   const handleSelectionCapture = useCallback((capture: SelectionCapture) => {
@@ -704,7 +721,8 @@ function App() {
     readerRef.current?.setStyles(generateStylesCss(styleStateRef.current));
     readerRef.current?.setColumnCount(styleStateRef.current.columnCount);
     readerRef.current?.setFlow(readerFlowRef.current);
-  }, []);
+    void kosync.onBookReady();
+  }, [kosync.onBookReady]);
 
   useEffect(() => {
     if (toc.length === 0) return;
@@ -1418,6 +1436,13 @@ function App() {
                 keysDisabled={bookHidden}
                 onUserRelocate={tts.onUserRelocate}
                 stylesCss={generateStylesCss({ ...styleState, theme: resolvedTheme })}
+              />
+            )}
+            {kosync.prompt && (
+              <KosyncPrompt
+                prompt={kosync.prompt}
+                onJump={kosync.accept}
+                onStay={kosync.dismiss}
               />
             )}
             {readingStatus.finishPromptOpen && (

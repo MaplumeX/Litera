@@ -25,6 +25,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Slider } from "@/components/ui/slider";
 import { AgentConfigForm } from "@/components/AgentConfigForm";
 import { SyncSettingsForm } from "@/components/settings/SyncSettingsForm";
+import { KosyncSettingsForm } from "@/components/settings/KosyncSettingsForm";
 import { TypographyPreview } from "@/components/settings/TypographyPreview";
 import { cn } from "@/lib/utils";
 import { loadReaderFlow, saveReaderFlow, type ReaderFlow } from "@/lib/reader-flow";
@@ -864,8 +865,11 @@ export function SettingsDialog({
               )}
 
               {section === "sync" && (
-                <div className="max-w-md">
+                <div className="max-w-md space-y-8">
                   <SyncSettingsForm />
+                  <div className="border-t border-border pt-6">
+                    <KosyncSettingsForm />
+                  </div>
                 </div>
               )}
 
