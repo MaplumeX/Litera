@@ -1,5 +1,4 @@
 import { invoke } from "@tauri-apps/api/core";
-import { getLocale } from "./i18n";
 import { mergeManifests, type SyncManifest } from "./sync-merge";
 import { hasUnsyncedActivity, takeUnsyncedActivity } from "./sync-activity";
 
@@ -79,9 +78,7 @@ async function runPassSteps(options: { uploadFiles?: boolean }): Promise<void> {
     await invoke("sync_upload_book_files");
   }
   for (let attempt = 0; attempt < MAX_SYNC_ATTEMPTS; attempt += 1) {
-    const local = await invoke<SyncManifest>("sync_export_local_manifest", {
-      locale: getLocale(),
-    });
+    const local = await invoke<SyncManifest>("sync_export_local_manifest");
     const downloaded = await invoke<DownloadedManifest>("sync_download_manifest");
     const merged = mergeManifests(local, downloaded.manifest, new Date().toISOString());
 
@@ -92,19 +89,9 @@ async function runPassSteps(options: { uploadFiles?: boolean }): Promise<void> {
       base: local,
       etag: downloaded.etag,
     });
-    // Tell the app a sync landed: the shelf re-reads the Library, and
-    // synced preferences (plus the UI language riding in the envelope)
-    // apply without a restart.
-    const preferences = merged.preferences;
-    const language = (preferences?.data as { language?: string } | null)?.language;
-    // Only signal a preferences reload when the merged envelope is newer
-    // than what we exported — a mid-sync local edit should not be reverted
-    // by a redundant reload.
-    const preferencesSynced =
-      preferences != null && preferences.updatedAt > (local.preferences?.updatedAt ?? "");
-    window.dispatchEvent(
-      new CustomEvent("litera:sync-applied", { detail: { language, preferencesSynced } }),
-    );
+    // Tell the app a sync landed: the shelf re-reads the Library and an
+    // open book reloads its annotations.
+    window.dispatchEvent(new CustomEvent("litera:sync-applied"));
 
     try {
       await invoke("sync_upload_manifest", {

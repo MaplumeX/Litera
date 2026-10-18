@@ -29,7 +29,7 @@ An EPUB reader for desktop and Android with a built-in reading assistant. Books 
 ### Sync (opt-in)
 
 - Mirror your library across devices via any S3-compatible bucket you own (AWS S3, Cloudflare R2, Backblaze B2, MinIO, ...)
-- Reading positions, bookmarks, highlights and notes, assistant sessions, typography, and app preferences converge automatically; merges are item-level (nothing is clobbered by whole-database overwrites)
+- Reading positions, bookmarks, highlights and notes, and assistant sessions converge automatically (theme, language, and typography stay per device, since desktop and phone screens differ); merges are item-level (nothing is clobbered by whole-database overwrites)
 - Large books upload with multipart; new devices download the Manifest first and fetch book files on demand
 - Off by default. Synced data is stored as-is (plaintext) on the bucket you choose; LLM API keys and S3 credentials never leave the device
 - On Android, **Settings → This device → Transfer book files only on Wi-Fi** (on by default) keeps EPUB uploads and downloads off mobile data; positions, annotations and sessions still sync. Opening a book that isn't on the phone yet over mobile data asks first and shows its size

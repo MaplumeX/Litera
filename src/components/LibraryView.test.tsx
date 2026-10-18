@@ -980,9 +980,7 @@ describe("LibraryView — synced covers on demand", () => {
     };
     listCalls.mockReturnValue([book, syncedBook]);
 
-    window.dispatchEvent(
-      new CustomEvent("litera:sync-applied", { detail: { preferencesSynced: false } }),
-    );
+    window.dispatchEvent(new CustomEvent("litera:sync-applied"));
 
     expect(await findByText("Synced In Book")).toBeTruthy();
   });

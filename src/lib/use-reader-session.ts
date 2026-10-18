@@ -92,7 +92,7 @@ export interface UseReaderSessionOptions {
  * shell's business.
  */
 export function useReaderSession(options: UseReaderSessionOptions = {}) {
-  const { t, setLocale, locale } = useT();
+  const { t } = useT();
   const onOpenedRef = useRef(options.onOpened);
   onOpenedRef.current = options.onOpened;
   const beforeDownloadRef = useRef(options.beforeDownload);
@@ -476,21 +476,6 @@ export function useReaderSession(options: UseReaderSessionOptions = {}) {
       window.removeEventListener("litera:sync-applied", reloadAnnotations);
     };
   }, [fileData?.bookId, reportPersistenceError]);
-
-  // Sync may deliver a new UI language in the preferences envelope; apply it
-  // live (typography/theme refresh via usePreferences' own listener).
-  useEffect(() => {
-    const applySynced = (event: Event) => {
-      const language = (event as CustomEvent<{ language?: string }>).detail?.language;
-      if (language === "en" || language === "zh-CN") {
-        if (language !== locale) setLocale(language);
-      }
-    };
-    window.addEventListener("litera:sync-applied", applySynced);
-    return () => {
-      window.removeEventListener("litera:sync-applied", applySynced);
-    };
-  }, [locale, setLocale]);
 
   const persistBookSnapshot = useCallback(
     (settings: ReadingSettings) => {
