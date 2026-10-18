@@ -17,6 +17,8 @@ pub struct SyncManifestData {
     pub books: std::collections::BTreeMap<String, SyncedBookData>,
     #[serde(default)]
     pub tombstones: Vec<SyncTombstoneData>,
+    /// Written only by older clients: app preferences are per-device now.
+    /// Kept on the wire so those clients still converge among themselves.
     #[serde(default)]
     pub preferences: Option<SyncEnvelopeData>,
     #[serde(default)]
@@ -335,14 +337,6 @@ pub fn rebase_annotations(
     (next, removed)
 }
 
-/// A local preferences edit: marks the local envelope as newest for the merge.
-pub fn note_preferences_saved(root: &Path) -> AppResult<()> {
-    update_sync_state(root, |state| {
-        state.preferences_updated_at = Some(chrono::Utc::now().to_rfc3339());
-        Ok(())
-    })
-}
-
 /// A local provider-settings edit: marks the local envelope as newest.
 pub fn note_provider_saved(root: &Path) -> AppResult<()> {
     update_sync_state(root, |state| {
@@ -351,21 +345,17 @@ pub fn note_provider_saved(root: &Path) -> AppResult<()> {
     })
 }
 
-/// Sync being enabled for the first time: the current local preferences and
-/// provider settings become this device's baseline (timestamps, only when
-/// the device has never recorded an edit).
+/// Sync being enabled for the first time: the current local provider
+/// settings become this device's baseline (timestamp, only when the device
+/// has never recorded an edit).
 pub fn note_sync_enabled(root: &Path) -> AppResult<()> {
     update_sync_state(root, |state| {
         // Epoch baseline, not "now": a device enabling Sync for the first time
         // must lose merges against any envelope another device actually edited,
         // so the new device feels pre-configured rather than clobbering the
         // backend with its untouched defaults.
-        let epoch = EPOCH_BASELINE.to_string();
-        if state.preferences_updated_at.is_none() {
-            state.preferences_updated_at = Some(epoch.clone());
-        }
         if state.provider_updated_at.is_none() {
-            state.provider_updated_at = Some(epoch);
+            state.provider_updated_at = Some(EPOCH_BASELINE.to_string());
         }
         Ok(())
     })
@@ -375,7 +365,7 @@ pub fn note_sync_enabled(root: &Path) -> AppResult<()> {
 /// this device knows about the old backend's objects says nothing about the
 /// new one. Forget it so every book file and session uploads again, and the
 /// first bulk upload asks for confirmation again. Local data — Tombstones,
-/// timestamps, preferences — is kept and merges into the new backend.
+/// timestamps, provider settings — is kept and merges into the new backend.
 pub fn note_sync_backend_changed(root: &Path) -> AppResult<()> {
     update_sync_state(root, |state| {
         state.book_revisions.clear();
@@ -397,7 +387,7 @@ fn validate_sync_id(id: &str) -> AppResult<()> {
 }
 
 /// Export the local Library (books metadata, positions, annotations) as a
-/// Manifest. Local-only view: tombstones and preferences are managed by the
+/// Manifest. Local-only view: tombstones and envelopes are managed by the
 /// caller, which persists its own sync state.
 pub fn export_local_manifest(
     store: &LibraryStore,
@@ -410,6 +400,9 @@ pub fn export_local_manifest(
         schema_version: 1,
         books: std::collections::BTreeMap::new(),
         tombstones: state.tombstones.clone(),
+        // App preferences are per-device and never sync. The last envelope
+        // seen (written by an older client) passes through untouched so
+        // older clients keep converging among themselves.
         preferences: state.preferences.clone(),
         provider: state.provider.clone(),
     };
@@ -1226,7 +1219,7 @@ pub struct SessionRevisionState {
 pub struct SyncState {
     #[serde(rename = "deviceId")]
     pub device_id: String,
-    /// Local manifest overlay: tombstones and preferences the TS merge
+    /// Local manifest overlay: tombstones and envelopes the TS merge
     /// engine needs to see; books are re-exported from the Library each pass.
     #[serde(default)]
     pub tombstones: Vec<SyncTombstoneData>,
@@ -1245,10 +1238,12 @@ pub struct SyncState {
     /// Per-session sync bookkeeping, keyed "<bookId>/<sessionId>".
     #[serde(default)]
     pub session_revisions: std::collections::BTreeMap<String, SessionRevisionState>,
-    /// Explicit recorded timestamps of the last local preferences / provider
-    /// edits (never file mtimes): the merge orders envelopes by these.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Retired: app preferences no longer sync. Still accepted so state
+    /// files written by older versions parse; dropped on the next write.
+    #[serde(default, skip_serializing)]
     pub preferences_updated_at: Option<String>,
+    /// Explicit recorded timestamp of the last local provider edit (never
+    /// file mtimes): the merge orders the provider envelope by it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_updated_at: Option<String>,
     /// Local books whose EPUB is older than the revision on the Sync
@@ -1331,39 +1326,6 @@ fn read_agent_object(root: &Path, file: &str) -> serde_json::Value {
     }
 }
 
-fn build_preferences_envelope(
-    preferences_store: &crate::preferences::PreferencesStore,
-    state: &mut SyncState,
-    locale: Option<&str>,
-) -> AppResult<Option<SyncEnvelopeData>> {
-    let response = preferences_store.get()?;
-    let mut data = serde_json::to_value(&response)
-        .map_err(|error| AppError::storage_io(format!("Failed to serialize preferences: {error}")))?;
-    if let Some(language) = locale {
-        if let Some(last) = &state.preferences {
-            let changed = last
-                .data
-                .get("language")
-                .and_then(|value| value.as_str())
-                != Some(language);
-            if changed {
-                state.preferences_updated_at = Some(chrono::Utc::now().to_rfc3339());
-            }
-        }
-        data.as_object_mut()
-            .expect("preferences response serializes to an object")
-            .insert("language".to_string(), serde_json::Value::String(language.to_string()));
-    }
-    Ok(state
-        .preferences_updated_at
-        .as_ref()
-        .map(|updated_at| SyncEnvelopeData {
-            updated_at: updated_at.clone(),
-            device_id: state.device_id.clone(),
-            data,
-        }))
-}
-
 fn build_provider_envelope(root: &Path, state: &SyncState) -> Option<SyncEnvelopeData> {
     state.provider_updated_at.as_ref().map(|updated_at| {
         SyncEnvelopeData {
@@ -1381,17 +1343,12 @@ fn build_provider_envelope(root: &Path, state: &SyncState) -> Option<SyncEnvelop
 pub async fn sync_export_local_manifest(
     app: tauri::AppHandle,
     store: tauri::State<'_, LibraryStore>,
-    preferences: tauri::State<'_, crate::preferences::PreferencesStore>,
-    locale: Option<String>,
 ) -> AppResult<serde_json::Value> {
     let store = store.inner().clone();
-    let preferences = preferences.inner().clone();
     let root = sync_root(&app)?;
     run_sync_blocking(move || {
         let manifest = update_sync_state(&root, |state| {
             let mut manifest = export_local_manifest(&store, state)?;
-            manifest.preferences =
-                build_preferences_envelope(&preferences, state, locale.as_deref())?;
             manifest.provider = build_provider_envelope(&root, state);
             Ok(manifest)
         })?;
@@ -1436,37 +1393,16 @@ fn envelope_is_newer(envelope: &SyncEnvelopeData, local_dirty: Option<&String>) 
     }
 }
 
-/// Apply the merged preferences and provider envelopes to local storage.
-/// Writes happen only when the merged envelope is strictly newer than any
-/// local edit (mid-sync local changes win and re-propagate next pass);
-/// auth.json is never touched, so API keys stay per-device.
-pub fn apply_preference_envelopes(
+/// Apply the merged provider envelope to local storage. Writes happen only
+/// when the merged envelope is strictly newer than any local edit (mid-sync
+/// local changes win and re-propagate next pass); auth.json is never
+/// touched, so API keys stay per-device. App preferences (theme, language,
+/// typography) are per-device and never applied from the Manifest.
+pub fn apply_provider_envelope(
     root: &Path,
-    preferences: &crate::preferences::PreferencesStore,
     state: &mut SyncState,
     manifest: &SyncManifestData,
 ) -> AppResult<()> {
-    if let Some(envelope) = &manifest.preferences {
-        let is_newer = envelope_is_newer(envelope, state.preferences_updated_at.as_ref());
-        if state.preferences.as_ref() != Some(envelope) && is_newer {
-            // Language is frontend-owned (localStorage); the rest is the
-            // stored preferences record.
-            let mut data = envelope.data.clone();
-            if let Some(object) = data.as_object_mut() {
-                object.remove("language");
-            }
-            let patch: crate::preferences::PreferencesPatch =
-                serde_json::from_value(data).map_err(|error| {
-                    AppError::storage_corrupt(format!("Synced preferences are invalid: {error}"))
-                })?;
-            preferences.apply_synced(patch)?;
-        }
-        state.preferences = Some(envelope.clone());
-        if is_newer {
-            state.preferences_updated_at = Some(envelope.updated_at.clone());
-        }
-    }
-
     if let Some(envelope) = &manifest.provider {
         let is_newer = envelope_is_newer(envelope, state.provider_updated_at.as_ref());
         if state.provider.as_ref() != Some(envelope) && is_newer {
@@ -1489,19 +1425,17 @@ pub fn apply_preference_envelopes(
 pub async fn sync_apply_merged_manifest(
     app: tauri::AppHandle,
     store: tauri::State<'_, LibraryStore>,
-    preferences: tauri::State<'_, crate::preferences::PreferencesStore>,
     manifest: SyncManifestData,
     base: SyncManifestData,
     etag: String,
 ) -> AppResult<()> {
     let store = store.inner().clone();
-    let preferences = preferences.inner().clone();
     let root = sync_root(&app)?;
     run_sync_blocking(move || update_sync_state(&root, |state| {
         let stale_files = apply_merged_manifest(&store, &manifest, &base)?;
         state.stale_files.extend(stale_files);
 
-        apply_preference_envelopes(&root, &preferences, state, &manifest)?;
+        apply_provider_envelope(&root, state, &manifest)?;
         // Deletions recorded while the network round trip was in flight must
         // survive: union by tombstone key with the newest deletedAt winning.
         // Expired book Tombstones are retained until their objects are purged.
@@ -3252,19 +3186,13 @@ async fn delete_prefix(
 }
 
 // ---------------------------------------------------------------------------
-// Ticket 07: preferences and provider settings sync via the Manifest.
+// Ticket 07: provider settings sync via the Manifest; app preferences are
+// per-device and never sync.
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod preference_sync_tests {
     use super::*;
-
-    fn temp() -> (tempfile::TempDir, crate::preferences::PreferencesStore) {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let store = crate::preferences::PreferencesStore::initialize(dir.path().to_path_buf())
-            .expect("preferences store");
-        (dir, store)
-    }
 
     fn envelope(updated_at: &str, data: serde_json::Value) -> SyncEnvelopeData {
         SyncEnvelopeData {
@@ -3278,11 +3206,9 @@ mod preference_sync_tests {
     fn local_edits_bump_the_dirty_timestamp() {
         let dir = tempfile::tempdir().expect("temp dir");
 
-        note_preferences_saved(dir.path()).expect("note");
         note_provider_saved(dir.path()).expect("note");
 
         let state = read_sync_state(dir.path()).expect("state");
-        assert!(state.preferences_updated_at.is_some());
         assert!(state.provider_updated_at.is_some());
     }
 
@@ -3295,83 +3221,80 @@ mod preference_sync_tests {
 
         // The baseline predates every real edit, so an envelope another
         // device actually saved wins the merge and applies locally.
-        let remote = envelope("2026-01-01T00:00:00Z", serde_json::json!({ "theme": "dark" }));
-        let baseline = state.preferences_updated_at.expect("baseline");
+        let remote = envelope("2026-01-01T00:00:00Z", serde_json::json!({ "settings": {} }));
+        let baseline = state.provider_updated_at.expect("baseline");
         assert!(envelope_is_newer(&remote, Some(&baseline)));
     }
 
     #[test]
     fn enabling_sync_baselines_only_missing_timestamps() {
         let dir = tempfile::tempdir().expect("temp dir");
-        note_preferences_saved(dir.path()).expect("existing edit");
-        let before = read_sync_state(dir.path()).expect("state").preferences_updated_at;
+        note_provider_saved(dir.path()).expect("existing edit");
+        let before = read_sync_state(dir.path()).expect("state").provider_updated_at;
 
         note_sync_enabled(dir.path()).expect("enable");
 
         let state = read_sync_state(dir.path()).expect("state");
-        assert_eq!(state.preferences_updated_at, before);
-        assert!(state.provider_updated_at.is_some());
+        assert_eq!(state.provider_updated_at, before);
     }
 
     #[test]
-    fn a_newer_synced_envelope_rewrites_local_preferences() {
-        let (dir, preferences) = temp();
-
-        let manifest = SyncManifestData {
-            schema_version: 1,
-            books: Default::default(),
-            tombstones: Vec::new(),
-            preferences: Some(envelope(
-                "2026-06-01T00:00:00Z",
-                serde_json::json!({ "theme": "dark", "fontSize": 18.0, "language": "zh-CN" }),
-            )),
-            provider: None,
-        };
-        let mut state = SyncState {
-            preferences_updated_at: Some("2026-01-01T00:00:00Z".to_string()),
-            ..SyncState::default()
-        };
-
-        apply_preference_envelopes(dir.path(), &preferences, &mut state, &manifest)
-            .expect("apply");
-
-        let response = preferences.get().expect("preferences");
-        assert_eq!(response.theme, "dark");
-        assert_eq!(response.font_size, 18.0);
-        assert_eq!(
-            state.preferences_updated_at.as_deref(),
-            Some("2026-06-01T00:00:00Z")
+    fn a_synced_preferences_envelope_is_never_applied() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let preferences = crate::preferences::PreferencesStore::initialize(dir.path().to_path_buf())
+            .expect("preferences store");
+        // An older client still uploads its theme, typography, and language.
+        let remote = envelope(
+            "2026-06-01T00:00:00Z",
+            serde_json::json!({ "theme": "dark", "fontSize": 18.0, "language": "zh-CN" }),
         );
-    }
-
-    #[test]
-    fn a_local_edit_newer_than_the_envelope_wins() {
-        let (dir, preferences) = temp();
-
         let manifest = SyncManifestData {
             schema_version: 1,
             books: Default::default(),
             tombstones: Vec::new(),
-            preferences: Some(envelope(
-                "2026-01-01T00:00:00Z",
-                serde_json::json!({ "theme": "dark" }),
-            )),
+            preferences: Some(remote),
             provider: None,
         };
-        let mut state = SyncState {
-            preferences_updated_at: Some("2026-06-01T00:00:00Z".to_string()),
-            ..SyncState::default()
-        };
+        let mut state = SyncState::default();
 
-        apply_preference_envelopes(dir.path(), &preferences, &mut state, &manifest)
-            .expect("apply");
+        apply_provider_envelope(dir.path(), &mut state, &manifest).expect("apply");
 
         let response = preferences.get().expect("preferences");
         assert_eq!(response.theme, "light");
-        assert_eq!(
-            state.preferences_updated_at.as_deref(),
-            Some("2026-06-01T00:00:00Z")
-        );
+        assert_eq!(response.font_size, 16.0);
+    }
+
+    #[test]
+    fn export_passes_an_older_clients_preferences_envelope_through() {
+        let (_dir, store) = temp_library();
+        let remote = envelope("2026-06-01T00:00:00Z", serde_json::json!({ "theme": "dark" }));
+        let state = SyncState {
+            device_id: "device-a".to_string(),
+            preferences: Some(remote.clone()),
+            ..SyncState::default()
+        };
+
+        let manifest = export_local_manifest(&store, &state).expect("export");
+
+        // Untouched, so it never outranks what older clients wrote.
+        assert_eq!(manifest.preferences, Some(remote));
+    }
+
+    #[test]
+    fn a_state_file_with_the_retired_preferences_timestamp_still_parses() {
+        let state: SyncState = serde_json::from_str(
+            r#"{"deviceId":"device-a","preferencesUpdatedAt":"2026-01-01T00:00:00Z"}"#,
+        )
+        .expect("parse");
+
+        let json = serde_json::to_string(&state).expect("serialize");
+        assert!(!json.contains("preferencesUpdatedAt"));
+    }
+
+    fn temp_library() -> (tempfile::TempDir, LibraryStore) {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let store = LibraryStore::initialize(dir.path().to_path_buf()).expect("store");
+        (dir, store)
     }
 
     #[test]
@@ -3414,7 +3337,7 @@ mod preference_sync_tests {
         };
         let mut state = SyncState::default();
 
-        apply_preference_envelopes(dir.path(), &temp().1, &mut state, &manifest).expect("apply");
+        apply_provider_envelope(dir.path(), &mut state, &manifest).expect("apply");
 
         let settings: serde_json::Value = serde_json::from_slice(
             &std::fs::read(dir.path().join("agent").join("settings.json")).expect("settings"),
@@ -3434,11 +3357,10 @@ mod preference_sync_tests {
     }
 
     #[test]
-    fn export_envelopes_carry_language_and_agent_settings() {
-        let (dir, preferences) = temp();
-        let mut state = SyncState {
+    fn export_envelope_carries_agent_settings() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let state = SyncState {
             device_id: "device-a".to_string(),
-            preferences_updated_at: Some("2026-06-01T00:00:00Z".to_string()),
             provider_updated_at: Some("2026-06-01T00:00:00Z".to_string()),
             ..SyncState::default()
         };
@@ -3449,38 +3371,11 @@ mod preference_sync_tests {
         )
         .expect("settings");
 
-        let preferences_envelope =
-            build_preferences_envelope(&preferences, &mut state, Some("zh-CN")).expect("prefs");
         let provider_envelope = build_provider_envelope(dir.path(), &state).expect("provider");
 
-        assert_eq!(preferences_envelope.unwrap().data["language"], "zh-CN");
         assert_eq!(
             provider_envelope.data["settings"]["defaultModel"],
             "claude"
-        );
-    }
-
-    #[test]
-    fn a_locale_change_counts_as_a_preferences_edit() {
-        let (dir, preferences) = temp();
-        let mut state = SyncState {
-            device_id: "device-a".to_string(),
-            preferences_updated_at: Some("2026-01-01T00:00:00Z".to_string()),
-            preferences: Some(SyncEnvelopeData {
-                updated_at: "2026-01-01T00:00:00Z".to_string(),
-                device_id: "device-a".to_string(),
-                data: serde_json::json!({ "language": "en" }),
-            }),
-            ..SyncState::default()
-        };
-
-        build_preferences_envelope(&preferences, &mut state, Some("zh-CN")).expect("build");
-
-        // The recorded language changed → the local envelope is newer than the
-        // old timestamp.
-        assert_ne!(
-            state.preferences_updated_at.as_deref(),
-            Some("2026-01-01T00:00:00Z")
         );
     }
 }
