@@ -236,6 +236,10 @@ describe("generateStylesCss", () => {
       '@namespace epub url("http://www.idpf.org/2007/ops");' +
         "html, body { font-family: serif; font-size: 16px !important; line-height: 2; letter-spacing: 0.02em; max-width: 36em; margin-inline: auto; padding-inline: 1.25rem; text-align: justify; }\n" +
         "p { margin-block-end: 1.1em !important; text-indent: 2em !important; }\n" +
+        ':where(table:not([border="0"], [role="presentation"])) { border-collapse: collapse; margin-block: 1em; }\n' +
+        ':where(table:not([border="0"], [role="presentation"])) :where(th, td) { border: 1px solid color-mix(in srgb, currentColor 25%, transparent); padding: 0.3em 0.6em; }\n' +
+        ':where(table:not([border="0"], [role="presentation"])) :where(th) { background: color-mix(in srgb, currentColor 6%, transparent); }\n' +
+        ":where(td, th) p { text-indent: 0 !important; }\n" +
         "img, svg image { cursor: zoom-in; } a[href] img, a[href] image { cursor: pointer; }\n" +
         'a[epub\\:type~="noteref"], a[epub|type~="noteref"], sup > a[href^="#"] { font-size: 0.83em !important; vertical-align: super !important; line-height: 1 !important; text-decoration: none !important; color: #2563eb !important; }\n' +
         'a[href] > sup { font-size: 0.83em !important; vertical-align: super !important; line-height: 1 !important; color: #2563eb !important; }\n' +
