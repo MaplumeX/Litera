@@ -227,6 +227,20 @@ mod tests {
     }
 
     #[test]
+    fn an_unreachable_backend_fails_the_probe_quickly() {
+        let mut config = sample_config();
+        // Nothing listens on port 1, so every attempt is refused at once and
+        // only the probe's retry budget decides how long the test takes.
+        config.endpoint = "http://127.0.0.1:1".to_string();
+
+        let start = std::time::Instant::now();
+        let result = tauri::async_runtime::block_on(probe_sync_connection(&config));
+
+        assert!(result.is_err());
+        assert!(start.elapsed() < std::time::Duration::from_secs(5));
+    }
+
+    #[test]
     fn secret_key_is_never_in_the_public_view() {
         let config = sample_config();
 
@@ -258,31 +272,92 @@ mod tests {
 
 /// Build an object store client from a stored Sync Backend configuration.
 pub fn build_sync_store(config: &SyncBackendConfig) -> AppResult<object_store::aws::AmazonS3> {
+    build_store(sync_store_builder(config, sync_client_options())?)
+}
+
+/// Like [`build_sync_store`], but every request is tried exactly once. For
+/// requests whose failure the caller handles itself rather than waiting out
+/// object_store's retries of a 5xx answer.
+pub fn build_sync_store_without_retries(
+    config: &SyncBackendConfig,
+) -> AppResult<object_store::aws::AmazonS3> {
+    build_store(
+        sync_store_builder(config, sync_client_options())?.with_retry(object_store::RetryConfig {
+            max_retries: 0,
+            ..object_store::RetryConfig::default()
+        }),
+    )
+}
+
+fn sync_store_builder(
+    config: &SyncBackendConfig,
+    client_options: object_store::ClientOptions,
+) -> AppResult<object_store::aws::AmazonS3Builder> {
     config.validate()?;
-    let mut builder = object_store::aws::AmazonS3Builder::new()
+    let client_options = if config.endpoint.trim().starts_with("http://") {
+        client_options.with_allow_http(true)
+    } else {
+        client_options
+    };
+    Ok(object_store::aws::AmazonS3Builder::new()
         .with_endpoint(config.endpoint.trim())
         .with_region(config.region.trim())
         .with_bucket_name(config.bucket.trim())
         .with_access_key_id(config.access_key.trim())
         .with_secret_access_key(config.secret_key.trim())
-        .with_virtual_hosted_style_request(!config.path_style);
-    if config.endpoint.trim().starts_with("http://") {
-        builder = builder.with_allow_http(true);
-    }
+        .with_virtual_hosted_style_request(!config.path_style)
+        .with_client_options(client_options))
+}
+
+fn build_store(
+    builder: object_store::aws::AmazonS3Builder,
+) -> AppResult<object_store::aws::AmazonS3> {
     builder
         .build()
         .map_err(|error| AppError::invalid_input(format!("Invalid sync configuration: {error}")))
 }
 
+/// The default verifier (rustls-platform-verifier) panics on Android unless
+/// it is initialized over JNI, which would hang every Sync command; verify
+/// against the bundled Mozilla roots there instead.
+#[cfg(target_os = "android")]
+fn sync_client_options() -> object_store::ClientOptions {
+    webpki_root_certs::TLS_SERVER_ROOT_CERTS
+        .iter()
+        .filter_map(|der| object_store::Certificate::from_der(der).ok())
+        .fold(
+            object_store::ClientOptions::new().with_no_system_certificates(true),
+            |options, certificate| options.with_root_certificate(certificate),
+        )
+}
+
+#[cfg(not(target_os = "android"))]
+fn sync_client_options() -> object_store::ClientOptions {
+    object_store::ClientOptions::new()
+}
+
 /// Probe the Sync Backend: perform a lightweight listing to verify the
 /// credentials and addressing actually work before the user relies on Sync.
+/// Unlike a sync pass, the probe gives up quickly so a bad endpoint is
+/// reported in seconds rather than after object_store's minutes of retries.
 pub async fn probe_sync_connection(config: &SyncBackendConfig) -> AppResult<()> {
+    use std::time::Duration;
+
     use futures::TryStreamExt;
 
     use object_store::path::Path;
-    use object_store::ObjectStore;
+    use object_store::{ObjectStore, RetryConfig};
 
-    let store = build_sync_store(config)?;
+    let client_options = sync_client_options()
+        .with_connect_timeout(Duration::from_secs(5))
+        .with_timeout(Duration::from_secs(10));
+    let store = build_store(
+        sync_store_builder(config, client_options)?.with_retry(RetryConfig {
+            max_retries: 1,
+            retry_timeout: Duration::from_secs(15),
+            ..RetryConfig::default()
+        }),
+    )?;
     let prefix = Path::from("litera/");
     let stream = store.list(Some(&prefix));
     futures::stream::StreamExt::take(stream, 1)
@@ -358,7 +433,15 @@ pub async fn save_sync_config(
 }
 
 #[tauri::command]
-pub async fn test_sync_connection(config: SyncBackendConfig) -> AppResult<()> {
+pub async fn test_sync_connection(
+    app: tauri::AppHandle,
+    config: SyncBackendConfig,
+) -> AppResult<()> {
+    // Like save: the form never holds the stored secret, so a blank one
+    // means "test with the stored secret".
+    let root = sync_config_root(&app)?;
+    let previous = run_blocking(move || read_sync_config(&root)).await?;
+    let config = merge_blank_secret(config, previous.as_ref());
     probe_sync_connection(&config).await
 }
 
