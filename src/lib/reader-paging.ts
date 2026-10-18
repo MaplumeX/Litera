@@ -259,6 +259,8 @@ export function bindPointerPaging(
 ): () => void {
   let startX = 0;
   let startY = 0;
+  let startScreenX = 0;
+  let startScreenY = 0;
   let armed = false;
   let hadSelection = false;
 
@@ -267,6 +269,8 @@ export function bindPointerPaging(
     if (pe.button !== 0) return;
     startX = pe.clientX;
     startY = pe.clientY;
+    startScreenX = pe.screenX;
+    startScreenY = pe.screenY;
     armed = true;
     const sel = getSelection();
     hadSelection = Boolean(sel && !sel.isCollapsed);
@@ -278,6 +282,9 @@ export function bindPointerPaging(
     const pe = event as PointerEvent;
     if (pe.button !== 0) return;
     if (Math.hypot(pe.clientX - startX, pe.clientY - startY) >= CLICK_SLOP_PX) return;
+    // A touch drag scrolls the chapter's iframe along with the finger, so in
+    // the chapter's own coordinates a swipe barely moves; on screen it does.
+    if (Math.hypot(pe.screenX - startScreenX, pe.screenY - startScreenY) >= CLICK_SLOP_PX) return;
     if (hasHrefTarget(pe.target)) return;
     // pointerdown typically collapses an existing range; don't page on that click.
     if (hadSelection) return;
@@ -296,6 +303,71 @@ export function bindPointerPaging(
   return () => {
     target.removeEventListener("pointerdown", onDown);
     target.removeEventListener("pointerup", onUp);
+  };
+}
+
+/**
+ * Keeps a tap's touch events away from foliate's paginator, which snaps to
+ * a page on every `touchend`. A tap already turns the page through
+ * `bindPointerPaging`; when that turn crosses into the next section, the
+ * snap starts a second section load that replaces the first one's iframe,
+ * the first load never settles, and the paginator's page-turn lock stays
+ * held, so no later tap or key turns a page. Until a touch moves past the
+ * click slop (or a second finger lands) its `touchmove`s and its `touchend`
+ * stop here, in the capture phase, before the paginator's listeners; a real
+ * drag passes through whole. `active` is false in scrolled flow, where the
+ * paginator neither snaps nor cancels moves and the browser scrolls.
+ */
+export function bindTapTouchGuard(target: EventTarget, active: () => boolean): () => void {
+  let start: { x: number; y: number } | null = null;
+  let dragging = false;
+
+  const onStart = (event: Event) => {
+    const touches = (event as TouchEvent).touches;
+    if (touches.length > 1) {
+      dragging = true;
+      return;
+    }
+    const touch = touches[0];
+    start = touch ? { x: touch.screenX, y: touch.screenY } : null;
+    dragging = false;
+  };
+  const onMove = (event: Event) => {
+    if (dragging || !start || !active()) return;
+    const te = event as TouchEvent;
+    const touch = te.touches[0];
+    if (
+      te.touches.length > 1 ||
+      !touch ||
+      Math.hypot(touch.screenX - start.x, touch.screenY - start.y) >= CLICK_SLOP_PX
+    ) {
+      dragging = true;
+      return;
+    }
+    // The paginator would have cancelled it too; the browser must not take
+    // the gesture over as a scroll.
+    if (te.cancelable) te.preventDefault();
+    event.stopPropagation();
+  };
+  const onEnd = (event: Event) => {
+    if (!dragging && start && active()) event.stopPropagation();
+    if ((event as TouchEvent).touches.length === 0) {
+      start = null;
+      dragging = false;
+    }
+  };
+
+  const capture = { capture: true };
+  const captureActive = { capture: true, passive: false };
+  target.addEventListener("touchstart", onStart, capture);
+  target.addEventListener("touchmove", onMove, captureActive);
+  target.addEventListener("touchend", onEnd, capture);
+  target.addEventListener("touchcancel", onEnd, capture);
+  return () => {
+    target.removeEventListener("touchstart", onStart, capture);
+    target.removeEventListener("touchmove", onMove, captureActive);
+    target.removeEventListener("touchend", onEnd, capture);
+    target.removeEventListener("touchcancel", onEnd, capture);
   };
 }
 

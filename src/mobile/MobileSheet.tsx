@@ -25,11 +25,11 @@ export function MobileSheet({
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/40 data-[state=open]:animate-in data-[state=open]:fade-in-0" />
+        <DialogPrimitive.Overlay className="fixed inset-0 z-50 m-fade bg-black/40" />
         <DialogPrimitive.Content
           aria-describedby={undefined}
           className={cn(
-            "fixed inset-x-0 bottom-0 z-50 flex max-h-[calc(100%-var(--safe-top)-2rem)] flex-col rounded-t-[1.75rem] bg-background pb-[var(--safe-bottom)] shadow-float outline-none data-[state=open]:animate-in data-[state=open]:slide-in-from-bottom",
+            "fixed inset-x-0 bottom-0 z-50 flex max-h-[calc(100%-var(--safe-top)-2rem)] flex-col rounded-t-[1.75rem] bg-background pb-[var(--safe-bottom)] shadow-float outline-none m-sheet",
             className,
           )}
         >

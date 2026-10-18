@@ -190,7 +190,7 @@ export function MobileLibraryPage({
   return (
     <div className="relative flex h-full min-h-0 flex-col">
       {searchOpen ? (
-        <MobileAppBar>
+        <MobileAppBar className="m-enter-fade">
           <AppBarIconButton label={t("mobile.closeSearch")} onClick={closeSearch}>
             <ArrowLeft />
           </AppBarIconButton>
@@ -357,10 +357,10 @@ export function MobileLibraryPage({
 
       <DialogPrimitive.Root open={drawerOpen} onOpenChange={setDrawerOpen}>
         <DialogPrimitive.Portal>
-          <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/40 data-[state=open]:animate-in data-[state=open]:fade-in-0" />
+          <DialogPrimitive.Overlay className="fixed inset-0 z-50 m-fade bg-black/40" />
           <DialogPrimitive.Content
             aria-describedby={undefined}
-            className="fixed inset-y-0 left-0 z-50 flex w-[80%] max-w-xs flex-col rounded-r-2xl bg-background pt-[calc(var(--safe-top)+1rem)] pb-[var(--safe-bottom)] shadow-float outline-none data-[state=open]:animate-in data-[state=open]:slide-in-from-left"
+            className="fixed inset-y-0 left-0 z-50 flex w-[80%] max-w-xs flex-col rounded-r-2xl bg-background pt-[calc(var(--safe-top)+1rem)] pb-[var(--safe-bottom)] shadow-float outline-none m-drawer"
           >
             <DialogPrimitive.Title className="px-6 pb-4 text-xl font-medium">Litera</DialogPrimitive.Title>
             <nav aria-label={t("mobile.drawer")} className="flex flex-col">

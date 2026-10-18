@@ -325,12 +325,19 @@ export function MobileReaderPage({
         )}
       </div>
 
-      {chromeVisible && (
-        <>
+      {/* The toolbars stay mounted and slide off the edges; hidden, they're
+          inert so neither touch nor a screen reader finds them. */}
+      <>
           <div
             role="toolbar"
             aria-label={bookTitle}
-            className="absolute inset-x-0 top-0 z-20 bg-background shadow-soft motion-safe:animate-in motion-safe:slide-in-from-top"
+            aria-hidden={!chromeVisible}
+            inert={!chromeVisible}
+            data-shown={chromeVisible}
+            className={cn(
+              "m-slide absolute inset-x-0 top-0 z-20 bg-background shadow-soft",
+              !chromeVisible && "invisible -translate-y-full",
+            )}
           >
             <MobileAppBar
               navigation={
@@ -354,7 +361,13 @@ export function MobileReaderPage({
           <div
             role="toolbar"
             aria-label={t("reader.progress")}
-            className="absolute inset-x-0 bottom-0 z-20 bg-background pb-[var(--safe-bottom)] shadow-float motion-safe:animate-in motion-safe:slide-in-from-bottom"
+            aria-hidden={!chromeVisible}
+            inert={!chromeVisible}
+            data-shown={chromeVisible}
+            className={cn(
+              "m-slide absolute inset-x-0 bottom-0 z-20 bg-background pb-[var(--safe-bottom)] shadow-float",
+              !chromeVisible && "invisible translate-y-full",
+            )}
           >
             <MobileProgressRow session={session} />
             <nav className="grid grid-cols-5 px-1 pb-1">
@@ -382,8 +395,7 @@ export function MobileReaderPage({
               />
             </nav>
           </div>
-        </>
-      )}
+      </>
 
       <ReaderQuickSettings
         open={quickSettingsOpen}

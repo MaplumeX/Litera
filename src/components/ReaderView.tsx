@@ -14,6 +14,7 @@ import {
   isSeekBurst,
   pageLocalX,
   pageWidthOf,
+  bindTapTouchGuard,
   isScrollKeyAction,
   readerKeyAction,
   scrollAreaAt,
@@ -686,6 +687,9 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
           onMiddleTap: () => onMiddleTapRef.current?.(),
         },
       );
+      // Touches on the page margins reach the paginator through the host;
+      // touches on the text through the chapter's window (bound per load).
+      const unbindHostTouchGuard = bindTapTouchGuard(el, () => !scrolledRef.current);
       el.addEventListener("wheel", handleWheel, { passive: false });
       window.addEventListener("keydown", handleKeyDown);
       window.addEventListener("pointerdown", handleWindowPointerDown, true);
@@ -757,6 +761,10 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
             onMiddleTap: () => onMiddleTapRef.current?.(),
           },
         );
+        const win = doc.defaultView;
+        const unbindTouchGuard = win
+          ? bindTapTouchGuard(win, () => !scrolledRef.current)
+          : undefined;
         const onSelectionChange = () => handleIframeSelection(doc);
         const onDocPointerDown = () => {
           lastScrollArea = null;
@@ -767,6 +775,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         doc.addEventListener("selectionchange", onSelectionChange);
         unbindDoc = () => {
           unbindPointer();
+          unbindTouchGuard?.();
           doc.removeEventListener("keydown", handleDocKeyDown);
           doc.removeEventListener("pointerdown", onDocPointerDown);
           doc.removeEventListener("wheel", handleWheel);
@@ -958,6 +967,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         closeFootnote();
         unbindDoc?.();
         unbindHostPointer();
+        unbindHostTouchGuard();
         el.removeEventListener("wheel", handleWheel);
         window.removeEventListener("keydown", handleKeyDown);
         window.removeEventListener("pointerdown", handleWindowPointerDown, true);

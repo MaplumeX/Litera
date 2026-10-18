@@ -304,3 +304,73 @@
 .mindmap-canvas .markmap {
   touch-action: none;
 }
+
+/* Phone shell motion, after Material 3: emphasized easing, ~300ms in and
+ * ~200ms out. Radix waits for a closing animation before it unmounts, so
+ * sheets and the drawer leave the way they came. Pages only animate in: the
+ * old page is gone at once and the new one arrives over it. */
+:root {
+  --ease-emphasized-decelerate: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --ease-emphasized-accelerate: cubic-bezier(0.3, 0, 0.8, 0.15);
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+}
+@keyframes m-fade-in { from { opacity: 0; } }
+@keyframes m-fade-out { to { opacity: 0; } }
+@keyframes m-sheet-in { from { transform: translateY(100%); } }
+@keyframes m-sheet-out { to { transform: translateY(100%); } }
+@keyframes m-drawer-in { from { transform: translateX(-100%); } }
+@keyframes m-drawer-out { to { transform: translateX(-100%); } }
+@keyframes m-page-push { from { transform: translateX(25%); opacity: 0; } }
+@keyframes m-page-pop { from { transform: translateX(-25%); opacity: 0; } }
+@keyframes m-page-out { to { transform: translateX(25%); opacity: 0; } }
+@keyframes m-page-open { from { transform: scale(0.94); opacity: 0; } }
+@keyframes m-page-return { from { transform: scale(1.04); opacity: 0; } }
+@keyframes m-rise { from { transform: translateY(1rem); opacity: 0; } }
+@keyframes m-dialog-in { from { transform: scale(0.92); opacity: 0; } }
+@keyframes m-dialog-out { to { transform: scale(0.96); opacity: 0; } }
+
+@media (prefers-reduced-motion: no-preference) {
+  .m-fade[data-state="open"] { animation: m-fade-in 250ms var(--ease-standard); }
+  .m-fade[data-state="closed"] { animation: m-fade-out 200ms var(--ease-standard) forwards; }
+  .m-sheet[data-state="open"] { animation: m-sheet-in 350ms var(--ease-emphasized-decelerate); }
+  .m-sheet[data-state="closed"] { animation: m-sheet-out 200ms var(--ease-emphasized-accelerate) forwards; }
+  .m-drawer[data-state="open"] { animation: m-drawer-in 350ms var(--ease-emphasized-decelerate); }
+  .m-drawer[data-state="closed"] { animation: m-drawer-out 200ms var(--ease-emphasized-accelerate) forwards; }
+  /* Centred dialogs on the phone (the shell sets .mobile-ui on <html>). */
+  .mobile-ui :is([data-slot="dialog-overlay"], [data-slot="alert-dialog-overlay"])[data-state="open"] {
+    animation: m-fade-in 250ms var(--ease-standard);
+  }
+  .mobile-ui :is([data-slot="dialog-overlay"], [data-slot="alert-dialog-overlay"])[data-state="closed"] {
+    animation: m-fade-out 150ms var(--ease-standard) forwards;
+  }
+  .mobile-ui :is([data-slot="dialog-content"], [data-slot="alert-dialog-content"])[data-state="open"] {
+    animation: m-dialog-in 300ms var(--ease-emphasized-decelerate);
+  }
+  .mobile-ui :is([data-slot="dialog-content"], [data-slot="alert-dialog-content"])[data-state="closed"] {
+    animation: m-dialog-out 150ms var(--ease-emphasized-accelerate) forwards;
+  }
+  /* A full-screen page in a dialog (Settings): in from the right, out to it. */
+  .mobile-ui .m-page-dialog.m-page-dialog[data-state="open"] {
+    animation: m-page-push 300ms var(--ease-emphasized-decelerate);
+  }
+  .mobile-ui .m-page-dialog.m-page-dialog[data-state="closed"] {
+    animation: m-page-out 200ms var(--ease-emphasized-accelerate) forwards;
+  }
+  .m-page-push { animation: m-page-push 300ms var(--ease-emphasized-decelerate); }
+  .m-page-pop { animation: m-page-pop 300ms var(--ease-emphasized-decelerate); }
+  .m-page-open { animation: m-page-open 300ms var(--ease-emphasized-decelerate); }
+  .m-page-return { animation: m-page-return 300ms var(--ease-emphasized-decelerate); }
+  .m-rise { animation: m-rise 250ms var(--ease-emphasized-decelerate); }
+  .m-enter-fade { animation: m-fade-in 200ms var(--ease-standard); }
+  /* Bars and sheets that stay mounted slide by transition instead. */
+  .m-slide {
+    /* Tailwind's translate-* utilities set `translate`, not `transform`. */
+    transition:
+      translate 250ms var(--ease-emphasized-decelerate),
+      visibility 250ms;
+  }
+  .m-slide[data-shown="false"] {
+    transition-timing-function: var(--ease-emphasized-accelerate);
+    transition-duration: 200ms;
+  }
+}

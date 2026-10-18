@@ -573,6 +573,14 @@ export function SettingsDialog({
   // Page layout only: the section list is showing rather than a section.
   const [listShown, setListShown] = useState(initialSection == null);
   const showingList = page && listShown;
+  // The shown section was picked from the list (rather than opened on).
+  const [fromList, setFromList] = useState(false);
+  // Back from a section: the list slides back in from the left.
+  const [backToList, setBackToList] = useState(false);
+  const showList = () => {
+    setListShown(true);
+    setBackToList(true);
+  };
   const [defaultReaderMode, setDefaultReaderMode] = useState(loadDefaultReaderMode);
   const [readerFlow, setReaderFlow] = useState(loadReaderFlow);
   const [uiFontFamily, setUiFontFamily] = useState(loadUiFontFamily);
@@ -583,6 +591,8 @@ export function SettingsDialog({
     if (!open || !page) return;
     if (initialSection) setSection(initialSection);
     setListShown(initialSection == null);
+    setFromList(false);
+    setBackToList(false);
   }, [open, page, initialSection]);
 
   useEffect(() => {
@@ -626,10 +636,11 @@ export function SettingsDialog({
       <DialogContent
         className={
           page
-            ? "inset-0 top-0 left-0 flex h-full max-h-none w-full max-w-none translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden rounded-none border-0 p-0 pt-[var(--safe-top)] pb-[var(--safe-bottom)] shadow-none data-[state=closed]:zoom-out-100 data-[state=open]:zoom-in-100 sm:max-w-none"
+            ? "m-page-dialog inset-0 top-0 left-0 flex h-full max-h-none w-full max-w-none translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden rounded-none border-0 p-0 pt-[var(--safe-top)] pb-[var(--safe-bottom)] shadow-none data-[state=closed]:zoom-out-100 data-[state=open]:zoom-in-100 sm:max-w-none"
             : "flex h-[40rem] w-[768px] max-h-[85vh] gap-0 overflow-hidden p-0 sm:max-w-[calc(100%-2rem)]"
         }
         showCloseButton={!page}
+        overlayClassName={page ? "bg-transparent" : undefined}
         onEscapeKeyDown={(event) => {
           const target = event.target;
           if (target instanceof HTMLElement && target.closest("[data-typography-stepper]")) {
@@ -639,7 +650,7 @@ export function SettingsDialog({
           // Back on a section page returns to the list, as Android settings do.
           if (page && !listShown) {
             event.preventDefault();
-            setListShown(true);
+            showList();
           }
         }}
       >
@@ -647,7 +658,7 @@ export function SettingsDialog({
           <DialogHeader className="h-14 shrink-0 flex-row items-center gap-1 px-1 text-left">
             <button
               type="button"
-              onClick={showingList ? onClose : () => setListShown(true)}
+              onClick={showingList ? onClose : showList}
               aria-label={t("settings.back")}
               className="inline-flex size-12 shrink-0 items-center justify-center rounded-full text-foreground/80 transition-colors active:bg-foreground/10 [&_svg]:size-6"
             >
@@ -683,7 +694,7 @@ export function SettingsDialog({
         )}
 
         {showingList && (
-          <nav className="min-h-0 flex-1 overflow-y-auto pb-4">
+          <nav className={cn("min-h-0 flex-1 overflow-y-auto pb-4", backToList && "m-page-pop")}>
             {sections.map((item) => {
               const Icon = item.icon;
               return (
@@ -693,6 +704,7 @@ export function SettingsDialog({
                   onClick={() => {
                     setSection(item.id);
                     setListShown(false);
+                    setFromList(true);
                   }}
                   className="flex min-h-14 w-full items-center gap-5 px-6 text-left transition-colors active:bg-foreground/5"
                 >
@@ -707,7 +719,11 @@ export function SettingsDialog({
 
         <div
           hidden={showingList}
-          className="@container flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+          className={cn(
+            "@container flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden",
+            // Slides in when picked from the list, not when Settings opens on it.
+            page && fromList && "m-page-push",
+          )}
         >
           {section === "typography" ? (
             <div className="flex min-h-0 flex-1 flex-row overflow-hidden @max-[519px]:flex-col-reverse">

@@ -2,6 +2,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   bindPointerPaging,
+  bindTapTouchGuard,
   consumeWheelDelta,
   hitFromClientX,
   isFindShortcut,
@@ -261,6 +262,22 @@ describe("bindPointerPaging", () => {
     unbind();
   });
 
+  it("does not turn the page at the end of a swipe that dragged the chapter along", () => {
+    // The iframe followed the finger: the same point in the chapter, 200px
+    // further left on screen.
+    const { target, onMiddleTap, pageLeft, pageRight, unbind } = bindTouch();
+    target.dispatchEvent(
+      new PointerEvent("pointerdown", { button: 0, clientX: 280, clientY: 10, screenX: 300, screenY: 40, bubbles: true }),
+    );
+    target.dispatchEvent(
+      new PointerEvent("pointerup", { button: 0, clientX: 280, clientY: 10, screenX: 100, screenY: 40, bubbles: true }),
+    );
+    expect(pageRight).not.toHaveBeenCalled();
+    expect(pageLeft).not.toHaveBeenCalled();
+    expect(onMiddleTap).not.toHaveBeenCalled();
+    unbind();
+  });
+
   it("does not report a middle tap on an interactive target (highlight, image)", () => {
     const { target, onMiddleTap, unbind } = bindTouch({ shouldIgnore: () => true });
     click(target, 150);
@@ -275,6 +292,68 @@ describe("bindPointerPaging", () => {
     target.appendChild(link);
     click(link, 150);
     expect(onMiddleTap).not.toHaveBeenCalled();
+    unbind();
+  });
+});
+
+describe("bindTapTouchGuard", () => {
+  /** The paginator's listeners sit below the guarded target. */
+  function setup(active = true) {
+    const host = document.createElement("div");
+    const page = document.createElement("div");
+    host.appendChild(page);
+    const seen: string[] = [];
+    for (const type of ["touchstart", "touchmove", "touchend"]) {
+      page.addEventListener(type, () => seen.push(type));
+    }
+    const unbind = bindTapTouchGuard(host, () => active);
+    const touch = (type: string, points: { x: number; y: number }[]) => {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.defineProperty(event, "touches", {
+        value: points.map((p) => ({ screenX: p.x, screenY: p.y })),
+      });
+      page.dispatchEvent(event);
+      return event;
+    };
+    return { seen, touch, unbind };
+  }
+
+  it("keeps a tap's moves and end from the paginator, so it doesn't snap", () => {
+    const { seen, touch, unbind } = setup();
+    touch("touchstart", [{ x: 100, y: 100 }]);
+    const jitter = touch("touchmove", [{ x: 102, y: 101 }]);
+    touch("touchend", []);
+    expect(seen).toEqual(["touchstart"]);
+    expect(jitter.defaultPrevented).toBe(true);
+    unbind();
+  });
+
+  it("lets a drag through whole once it passes the click slop", () => {
+    const { seen, touch, unbind } = setup();
+    touch("touchstart", [{ x: 300, y: 100 }]);
+    touch("touchmove", [{ x: 280, y: 100 }]);
+    touch("touchmove", [{ x: 200, y: 100 }]);
+    touch("touchend", []);
+    expect(seen).toEqual(["touchstart", "touchmove", "touchmove", "touchend"]);
+    unbind();
+  });
+
+  it("lets a two-finger gesture through", () => {
+    const { seen, touch, unbind } = setup();
+    touch("touchstart", [{ x: 100, y: 100 }, { x: 200, y: 200 }]);
+    touch("touchmove", [{ x: 100, y: 100 }, { x: 201, y: 200 }]);
+    touch("touchend", []);
+    expect(seen).toEqual(["touchstart", "touchmove", "touchend"]);
+    unbind();
+  });
+
+  it("stays out of the way in scrolled flow", () => {
+    const { seen, touch, unbind } = setup(false);
+    touch("touchstart", [{ x: 100, y: 100 }]);
+    const move = touch("touchmove", [{ x: 101, y: 100 }]);
+    touch("touchend", []);
+    expect(seen).toEqual(["touchstart", "touchmove", "touchend"]);
+    expect(move.defaultPrevented).toBe(false);
     unbind();
   });
 });

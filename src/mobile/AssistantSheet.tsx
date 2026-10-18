@@ -54,11 +54,15 @@ export const AssistantSheet = forwardRef<ChatPanelHandle, AssistantSheetProps>(
         ref={sheetRef}
         aria-label={t("mobile.assistantSheet")}
         data-snap={snap}
-        hidden={collapsed}
+        // Collapsed, it slides below the edge and goes inert, still mounted.
+        aria-hidden={collapsed}
+        inert={collapsed}
         className={cn(
           "absolute inset-x-0 bottom-0 z-30 flex flex-col border-t bg-card shadow-float",
           snap === "full" ? "rounded-none pt-[var(--safe-top)]" : "rounded-t-2xl",
-          dragOffset === 0 && "transition-[height] duration-200 motion-reduce:transition-none",
+          collapsed && "invisible translate-y-full",
+          dragOffset === 0 &&
+            "transition-[height,translate,visibility] duration-300 ease-[var(--ease-emphasized-decelerate)] motion-reduce:transition-none",
         )}
         style={{
           height: `calc(${snap === "full" ? "100%" : "50%"} - ${dragOffset}px)`,

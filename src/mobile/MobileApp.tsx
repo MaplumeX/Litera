@@ -14,6 +14,7 @@ import { platformBridge } from "@/lib/platform-bridge";
 import { resolveReaderMode } from "@/lib/reader-mode";
 import { volumeKeyAction } from "@/lib/reader-paging";
 import { formatByteSize } from "@/lib/trash";
+import { cn } from "@/lib/utils";
 import { useIncomingBooks } from "@/lib/use-incoming-books";
 import { useLibraryShelf, type LibraryShelf } from "@/lib/use-library-shelf";
 import { usePlatformLifecycle } from "@/lib/use-platform-lifecycle";
@@ -25,6 +26,18 @@ import { MobileReaderPage, type ReaderPanel } from "@/mobile/MobileReaderPage";
 import { MobileTrashPage } from "@/mobile/MobileTrashPage";
 
 type Page = "library" | "reader" | "trash";
+
+/**
+ * How a page arrives, by where it came from: a Book opens out of the shelf
+ * and the shelf comes back from behind it; Trash slides in from the side
+ * like a sub-page and back out. Nothing on the first page.
+ */
+function pageEnterClass(from: Page | null, to: Page): string | undefined {
+  if (from === null || from === to) return undefined;
+  if (to === "reader") return "m-page-open";
+  if (to === "trash") return "m-page-push";
+  return from === "reader" ? "m-page-return" : "m-page-pop";
+}
 
 const OVERLAY_SELECTOR = '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]';
 
@@ -57,7 +70,7 @@ function Banner({ message, onDismiss, alert }: { message: string; onDismiss: () 
   return (
     <div
       role={alert ? "alert" : "status"}
-      className="pointer-events-auto flex items-center gap-2 rounded-lg bg-foreground py-1.5 pr-1.5 pl-4 text-sm text-background shadow-float"
+      className="m-rise pointer-events-auto flex items-center gap-2 rounded-lg bg-foreground py-1.5 pr-1.5 pl-4 text-sm text-background shadow-float"
     >
       <span className="min-w-0 flex-1 py-1.5">{message}</span>
       <Button
@@ -117,6 +130,12 @@ export default function MobileApp() {
   const { t, locale } = useT();
   const [mobileSettings, updateMobileSettings] = useMobileSettings();
   const [page, setPage] = useState<Page>("library");
+  // The page before this one, for the entering animation.
+  const [pageTransition, setPageTransition] = useState<{ from: Page | null; to: Page }>({
+    from: null,
+    to: "library",
+  });
+  if (pageTransition.to !== page) setPageTransition({ from: pageTransition.to, to: page });
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   // Reading settings' "More settings" opens Settings on the typography page.
@@ -254,6 +273,12 @@ export default function MobileApp() {
 
   useSystemInsets();
 
+  // Scopes the phone's dialog motion in index.css (dialogs portal to <body>).
+  useEffect(() => {
+    document.documentElement.classList.add("mobile-ui");
+    return () => document.documentElement.classList.remove("mobile-ui");
+  }, []);
+
   // The status and navigation bar icons follow the app's theme, not the
   // system's: dark icons on a light page, light ones on a dark page.
   const lightBars = session.resolvedTheme !== "dark";
@@ -304,7 +329,7 @@ export default function MobileApp() {
 
   return (
     <main className="mobile-shell fixed inset-0 flex flex-col bg-background text-foreground">
-      <div className="min-h-0 flex-1">
+      <div key={page} className={cn("min-h-0 flex-1", pageEnterClass(pageTransition.from, page))}>
         {page === "reader" ? (
           <MobileReaderPage
             session={session}
