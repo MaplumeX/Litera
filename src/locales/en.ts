@@ -446,7 +446,6 @@ export const en: { [K in MessageKey]: string } = {
   "mobile.sheetClose": "Close assistant",
   "mobile.downloadTitle": "Download “{title}”?",
   "mobile.downloadDesc": "You're on mobile data. This book is {size}.",
-  "mobile.downloadUnknownSize": "You're on mobile data, and this book isn't on this phone yet.",
   "mobile.download": "Download",
   "mobile.device": "This device",
   "mobile.deviceDesc": "Only for this phone; not synced.",

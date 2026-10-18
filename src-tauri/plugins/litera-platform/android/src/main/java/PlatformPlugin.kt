@@ -85,11 +85,13 @@ class PlatformPlugin(private val activity: Activity) : Plugin(activity) {
     handleIntent(intent)
   }
 
-  override fun onResume(activity: AppCompatActivity) {
+  // Stopped, not paused: a pause also comes with multi-window focus changes
+  // and dialogs, which aren't the app leaving the screen.
+  override fun onRestart(activity: AppCompatActivity) {
     trigger(LIFECYCLE_EVENT, JSObject().apply { put("state", "foreground") })
   }
 
-  override fun onPause(activity: AppCompatActivity) {
+  override fun onStop(activity: AppCompatActivity) {
     trigger(LIFECYCLE_EVENT, JSObject().apply { put("state", "background") })
   }
 
@@ -157,11 +159,7 @@ class PlatformPlugin(private val activity: Activity) : Plugin(activity) {
     if (uris.isEmpty()) return
     // Never import the same intent twice (activity recreation re-delivers it).
     intent.putExtra(HANDLED_EXTRA, true)
-    io.execute {
-      val books = JSArray()
-      for (uri in uris) books.put(copyToCache(uri))
-      deliverIncoming(JSObject().apply { put("books", books) })
-    }
+    io.execute { deliverIncoming(copyAllToCache(uris)) }
   }
 
   @Suppress("DEPRECATION")
@@ -201,6 +199,13 @@ class PlatformPlugin(private val activity: Activity) : Plugin(activity) {
       pendingIncoming.clear()
     }
     invoke.resolve(JSObject().apply { put("books", books) })
+  }
+
+  /** `{ books: [...] }`, one entry per URI. Runs on the IO thread. */
+  private fun copyAllToCache(uris: List<Uri>): JSObject {
+    val books = JSArray()
+    for (uri in uris) books.put(copyToCache(uri))
+    return JSObject().apply { put("books", books) }
   }
 
   /** `{ name, path }` on success, `{ name, error }` when the file can't be read. */
@@ -247,7 +252,9 @@ class PlatformPlugin(private val activity: Activity) : Plugin(activity) {
       val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
         addCategory(Intent.CATEGORY_OPENABLE)
         type = "*/*"
-        putExtra(Intent.EXTRA_MIME_TYPES, arrayOf(EPUB_MIME))
+        // Some providers label EPUBs as generic binaries; the import checks
+        // the file itself.
+        putExtra(Intent.EXTRA_MIME_TYPES, arrayOf(EPUB_MIME, "application/octet-stream"))
         putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
       }
       startActivityForResult(invoke, intent, "pickBooksResult")
@@ -271,11 +278,7 @@ class PlatformPlugin(private val activity: Activity) : Plugin(activity) {
     } else {
       data.data?.let { uris.add(it) }
     }
-    io.execute {
-      val books = JSArray()
-      for (uri in uris) books.put(copyToCache(uri))
-      invoke.resolve(JSObject().apply { put("books", books) })
-    }
+    io.execute { invoke.resolve(copyAllToCache(uris)) }
   }
 
   // --- Window --------------------------------------------------------------

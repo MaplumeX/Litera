@@ -45,7 +45,7 @@ const bridge = vi.hoisted(() => {
       const set = listeners.get(event) ?? new Set();
       set.add(handler);
       listeners.set(event, set);
-      return () => set.delete(handler);
+      return Object.assign(() => void set.delete(handler), { ready: Promise.resolve() });
     }),
     pickBooks: vi.fn(async (): Promise<unknown[]> => []),
     takePendingIncomingBooks: vi.fn(async (): Promise<unknown[]> => []),
@@ -156,7 +156,7 @@ let books: BookRecord[];
 let openContext: BookOpenContext;
 let syncEnabled: boolean;
 let downloadSize: number | null;
-let incomingResults: ImportBookResult[];
+let incomingResult: ImportBookResult | undefined;
 
 function setupInvoke() {
   invokeMock.mockImplementation((cmd: string) => {
@@ -184,8 +184,8 @@ function setupInvoke() {
         });
       case "sync_book_download_size":
         return Promise.resolve(downloadSize);
-      case "import_incoming_books":
-        return Promise.resolve(incomingResults);
+      case "import_incoming_book":
+        return Promise.resolve(incomingResult);
       default:
         return Promise.resolve(undefined);
     }
@@ -228,7 +228,7 @@ beforeEach(() => {
   };
   syncEnabled = false;
   downloadSize = null;
-  incomingResults = [];
+  incomingResult = undefined;
   invokeMock.mockReset();
   setupInvoke();
   fillInput.mockClear();
@@ -375,9 +375,7 @@ describe("MobileApp — importing", () => {
 
   it("imports what the system picker returns through the path-less import", async () => {
     bridge.api.pickBooks.mockImplementation(async () => [picked]);
-    incomingResults = [
-      { status: "new", bookId: "book2", title: "Picked.epub", importId: "imp-1", name: "Picked.epub" },
-    ];
+    incomingResult = { status: "new", bookId: "book2", title: "Picked.epub", importId: "imp-1", name: "Picked.epub" };
     const screen = await renderApp();
 
     await act(async () => {
@@ -386,8 +384,8 @@ describe("MobileApp — importing", () => {
 
     await waitFor(() => expect(calls("save_book_metadata")).toHaveLength(1));
     expect(bridge.api.pickBooks).toHaveBeenCalledOnce();
-    expect(calls("import_incoming_books")[0][1]).toEqual({
-      files: [{ path: picked.path, name: "Picked.epub" }],
+    expect(calls("import_incoming_book")[0][1]).toEqual({
+      file: { path: picked.path, name: "Picked.epub" },
     });
     expect(calls("import_book")).toHaveLength(0);
     expect(calls("save_book_metadata")[0][1]).toMatchObject({ bookId: "book2", importId: "imp-1" });
@@ -395,7 +393,7 @@ describe("MobileApp — importing", () => {
 
   it("says so when a picked book is already in the Library", async () => {
     bridge.api.pickBooks.mockImplementation(async () => [picked]);
-    incomingResults = [{ status: "duplicate", bookId: "book1", title: "第一本书", name: "Picked.epub" }];
+    incomingResult = { status: "duplicate", bookId: "book1", title: "第一本书", name: "Picked.epub" };
     const screen = await renderApp();
 
     await act(async () => {
@@ -417,11 +415,11 @@ describe("MobileApp — importing", () => {
     });
 
     await waitFor(() => expect(screen.getByText(/Broken\.epub: Permission denied/)).toBeTruthy());
-    expect(calls("import_incoming_books")).toHaveLength(0);
+    expect(calls("import_incoming_book")).toHaveLength(0);
   });
 
   it("imports and opens a book shared or opened with Litera while running", async () => {
-    incomingResults = [{ status: "duplicate", bookId: "book1", title: "第一本书", name: "Shared.epub" }];
+    incomingResult = { status: "duplicate", bookId: "book1", title: "第一本书", name: "Shared.epub" };
     const screen = await renderApp();
 
     await act(async () => {
@@ -429,8 +427,8 @@ describe("MobileApp — importing", () => {
     });
 
     await waitFor(() => expect(screen.getByTestId("reader-view")).toBeTruthy());
-    expect(calls("import_incoming_books")[0][1]).toEqual({
-      files: [{ path: "/cache/incoming-books/s.epub", name: "Shared.epub" }],
+    expect(calls("import_incoming_book")[0][1]).toEqual({
+      file: { path: "/cache/incoming-books/s.epub", name: "Shared.epub" },
     });
   });
 
@@ -438,12 +436,12 @@ describe("MobileApp — importing", () => {
     bridge.api.takePendingIncomingBooks.mockImplementation(async () => [
       { name: "Cold.epub", path: "/cache/incoming-books/c.epub" },
     ]);
-    incomingResults = [{ status: "duplicate", bookId: "book1", title: "第一本书", name: "Cold.epub" }];
+    incomingResult = { status: "duplicate", bookId: "book1", title: "第一本书", name: "Cold.epub" };
     const screen = render(<MobileApp />);
 
     await waitFor(() => expect(screen.getByTestId("reader-view")).toBeTruthy());
-    expect(calls("import_incoming_books")[0][1]).toEqual({
-      files: [{ path: "/cache/incoming-books/c.epub", name: "Cold.epub" }],
+    expect(calls("import_incoming_book")[0][1]).toEqual({
+      file: { path: "/cache/incoming-books/c.epub", name: "Cold.epub" },
     });
   });
 });
@@ -515,6 +513,17 @@ describe("MobileApp — Sync lifecycle", () => {
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
     expect(calls("sync_download_book_file")).toHaveLength(0);
     expect(screen.queryByTestId("reader-view")).toBeNull();
+  });
+
+  it("opens the copy on the phone and leaves a newer file for Wi-Fi", async () => {
+    bridge.api.isNetworkMetered.mockImplementation(async () => true);
+    downloadSize = 3 * 1024 * 1024; // a newer revision exists remotely
+    const screen = await renderApp();
+
+    await openBook(screen);
+
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(calls("sync_download_book_file")).toHaveLength(0);
   });
 
   it("downloads without asking when Wi-Fi only is off", async () => {

@@ -47,7 +47,7 @@ import { useIncomingBooks } from "@/lib/use-incoming-books";
 import { usePlatformLifecycle } from "@/lib/use-platform-lifecycle";
 import { useReaderSession } from "@/lib/use-reader-session";
 import { useSyncScheduler } from "@/lib/use-sync-scheduler";
-import { syncBeforeExit } from "@/lib/sync-runner";
+import { pushBeforeLeaving } from "@/lib/sync-runner";
 import { useT } from "@/lib/i18n";
 import { shortBookTitle } from "@/lib/book-title";
 import { cn } from "@/lib/utils";
@@ -116,8 +116,6 @@ function SyncFailureBanner({
 
 /** The side panel floats this far in from its cell's edges (Tailwind `2`). */
 const SIDE_PANEL_INSET_PX = 8;
-/** How long closing the window may wait on a final sync push. */
-const SYNC_BEFORE_EXIT_TIMEOUT_MS = 5_000;
 
 function App() {
   const { t } = useT();
@@ -227,15 +225,7 @@ function App() {
         // Push what changed since the last pass (the debounced push may not
         // have fired yet), or the next device opened would start from stale
         // reading positions. Never blocks closing for long.
-        await Promise.all([
-          syncBeforeExit(SYNC_BEFORE_EXIT_TIMEOUT_MS).catch((error: unknown) => {
-            console.warn("Sync before close failed:", error);
-          }),
-          Promise.race([
-            kosync.flush(),
-            new Promise((resolve) => setTimeout(resolve, SYNC_BEFORE_EXIT_TIMEOUT_MS)),
-          ]),
-        ]);
+        await pushBeforeLeaving(kosync.flush);
         try {
           embeddedAgentRuntime.closeBook();
           await getCurrentWindow().destroy();

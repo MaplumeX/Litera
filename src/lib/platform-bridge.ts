@@ -26,6 +26,9 @@ export interface PlatformEvents {
 
 export type PlatformEvent = keyof PlatformEvents;
 
+/** Stops listening. `ready` settles once the native side delivers events to the handler. */
+export type PlatformUnlisten = (() => void) & { ready: Promise<void> };
+
 /**
  * What the WebView can't do on its own. Android implements it with the
  * Litera platform plugin; on desktop every call is a no-op and no event
@@ -34,7 +37,10 @@ export type PlatformEvent = keyof PlatformEvents;
 export interface PlatformBridge {
   /** Imports go through `pickBooks` instead of the Rust file dialog. */
   readonly hasDocumentPicker: boolean;
-  listen<E extends PlatformEvent>(event: E, handler: (payload: PlatformEvents[E]) => void): () => void;
+  listen<E extends PlatformEvent>(
+    event: E,
+    handler: (payload: PlatformEvents[E]) => void,
+  ): PlatformUnlisten;
   /** The system document picker (multi-select EPUB). Cancelling gives `[]`. */
   pickBooks(): Promise<IncomingBook[]>;
   /** Books that arrived before anything listened (a cold-start "Open with"). */
@@ -60,16 +66,19 @@ const androidBridge: PlatformBridge = {
   listen(event, handler) {
     let disposed = false;
     let listener: PluginListener | undefined;
-    void addPluginListener(PLUGIN, event, handler)
+    const ready = addPluginListener(PLUGIN, event, handler)
       .then((registered) => {
         if (disposed) void registered.unregister();
         else listener = registered;
       })
       .catch((error: unknown) => console.error(`Failed to listen for ${event}:`, error));
-    return () => {
-      disposed = true;
-      void listener?.unregister();
-    };
+    return Object.assign(
+      () => {
+        disposed = true;
+        void listener?.unregister();
+      },
+      { ready },
+    );
   },
   pickBooks: async () => (await command<{ books: IncomingBook[] }>("pickBooks")).books,
   takePendingIncomingBooks: async () =>
@@ -83,7 +92,7 @@ const androidBridge: PlatformBridge = {
 
 const desktopBridge: PlatformBridge = {
   hasDocumentPicker: false,
-  listen: () => () => {},
+  listen: () => Object.assign(() => {}, { ready: Promise.resolve() }),
   pickBooks: async () => [],
   takePendingIncomingBooks: async () => [],
   setImmersive: async () => {},

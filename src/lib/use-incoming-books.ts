@@ -31,11 +31,12 @@ export function useIncomingBooks(options: {
         })
         .catch((error: unknown) => console.error("incoming books error:", error));
     };
-    // Listen first, then drain what queued before: the plugin delivers each
-    // batch to exactly one of the two.
+    // Listen first, then drain what queued before: once the listener is
+    // registered natively, the plugin delivers each batch to exactly one of
+    // the two. Draining earlier could miss a batch queued in between.
     const unlisten = platformBridge.listen("incomingBooks", ({ books }) => handle(books));
-    void platformBridge
-      .takePendingIncomingBooks()
+    void unlisten.ready
+      .then(() => (disposed ? [] : platformBridge.takePendingIncomingBooks()))
       .then(handle)
       .catch((error: unknown) => console.error("pending incoming books error:", error));
     return () => {

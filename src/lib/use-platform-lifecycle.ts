@@ -1,9 +1,6 @@
 import { useEffect, useRef } from "react";
 import { platformBridge } from "@/lib/platform-bridge";
-import { syncBeforeExit } from "@/lib/sync-runner";
-
-/** How long going to the background may wait on the final pushes. */
-export const BACKGROUND_PUSH_TIMEOUT_MS = 5_000;
+import { pushBeforeLeaving } from "@/lib/sync-runner";
 
 /**
  * Android never closes the window; the app goes to the background and may
@@ -31,15 +28,7 @@ export function usePlatformLifecycle(options: {
           await flush().catch(() => {
             // Already reported by the session; push whatever did save.
           });
-          await Promise.all([
-            syncBeforeExit(BACKGROUND_PUSH_TIMEOUT_MS).catch((error: unknown) => {
-              console.warn("Sync before background failed:", error);
-            }),
-            Promise.race([
-              flushKosync(),
-              new Promise((resolve) => setTimeout(resolve, BACKGROUND_PUSH_TIMEOUT_MS)),
-            ]),
-          ]);
+          await pushBeforeLeaving(flushKosync);
         })();
       }),
     [],

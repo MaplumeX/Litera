@@ -136,7 +136,7 @@ pub fn run() {
             kosync::kosync_push,
             library::import_book,
             library::import_paths,
-            incoming::import_incoming_books,
+            incoming::import_incoming_book,
             open_paths::take_pending_open_paths,
             library::discard_import,
             library::read_import_bytes,

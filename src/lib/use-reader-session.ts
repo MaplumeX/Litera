@@ -66,6 +66,8 @@ export interface ReaderProgress {
   chapterHref?: string;
 }
 
+export type DownloadDecision = "download" | "skip" | "cancel";
+
 export interface UseReaderSessionOptions {
   /**
    * The shell's own per-Book state (mode, layout) for a Book that just
@@ -73,11 +75,13 @@ export interface UseReaderSessionOptions {
    */
   onOpened?: (context: BookOpenContext) => void;
   /**
-   * Called before a Book that isn't on this device downloads; resolving
-   * false keeps it not cached and cancels the open. The mobile shell asks
-   * before spending mobile data.
+   * Asked before every open whether the Book's file may download now:
+   * "download" (the default), "skip" (open the copy already on this device,
+   * leave a newer one for later) or "cancel" (a Book not on this device
+   * stays not cached and doesn't open). The mobile shell asks before
+   * spending mobile data.
    */
-  confirmDownload?: (bookId: string) => Promise<boolean>;
+  beforeDownload?: (bookId: string) => Promise<DownloadDecision>;
 }
 
 /**
@@ -91,8 +95,8 @@ export function useReaderSession(options: UseReaderSessionOptions = {}) {
   const { t, setLocale, locale } = useT();
   const onOpenedRef = useRef(options.onOpened);
   onOpenedRef.current = options.onOpened;
-  const confirmDownloadRef = useRef(options.confirmDownload);
-  confirmDownloadRef.current = options.confirmDownload;
+  const beforeDownloadRef = useRef(options.beforeDownload);
+  beforeDownloadRef.current = options.beforeDownload;
   const [fileData, setFileData] = useState<FileData | null>(null);
   const [currentBook, setCurrentBook] = useState<BookRecord | null>(null);
   const [progress, setProgress] = useState<ReaderProgress>({ index: 0, fraction: 0 });
@@ -320,11 +324,11 @@ export function useReaderSession(options: UseReaderSessionOptions = {}) {
     // letting two book workers complete out of order.
     const request = openBookControllerRef.current.run(async () => {
       await flushReadingState();
-      const confirmDownload = confirmDownloadRef.current;
-      if (confirmDownload && !(await confirmDownload(bookId))) return null;
+      const decision = (await beforeDownloadRef.current?.(bookId)) ?? "download";
+      if (decision === "cancel") return null;
       // A synced book that isn't cached locally downloads on demand; for
       // cached books this is a cheap no-op.
-      await invoke("sync_download_book_file", { bookId });
+      if (decision === "download") await invoke("sync_download_book_file", { bookId });
       const context = await invoke<BookOpenContext>("get_book_open_context", { bookId });
       const buffer = await invoke<ArrayBuffer>("open_book_bytes", {
         bookId,

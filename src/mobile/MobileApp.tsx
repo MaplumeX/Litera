@@ -17,7 +17,7 @@ import { formatByteSize } from "@/lib/trash";
 import { useIncomingBooks } from "@/lib/use-incoming-books";
 import { useLibraryShelf, type LibraryShelf } from "@/lib/use-library-shelf";
 import { usePlatformLifecycle } from "@/lib/use-platform-lifecycle";
-import { useReaderSession } from "@/lib/use-reader-session";
+import { useReaderSession, type DownloadDecision } from "@/lib/use-reader-session";
 import { useSyncScheduler } from "@/lib/use-sync-scheduler";
 import { MobileLibraryPage } from "@/mobile/MobileLibraryPage";
 import { MobileReaderPage, type ReaderPanel } from "@/mobile/MobileReaderPage";
@@ -122,22 +122,25 @@ export default function MobileApp() {
 
   const syncScheduler = useSyncScheduler({ transferBookFiles: () => bookFilesAllowed() });
 
-  // Opening a Book that isn't on the phone, on mobile data with Wi-Fi only
-  // on: say how big it is and let the reader decide.
-  const confirmDownload = useCallback(
-    async (bookId: string) => {
-      if (await bookFilesAllowed()) return true;
+  // On mobile data with Wi-Fi only on: a Book that isn't on the phone says
+  // how big it is and lets the reader decide; a newer file for a Book that
+  // is waits for Wi-Fi.
+  const beforeDownload = useCallback(
+    async (bookId: string): Promise<DownloadDecision> => {
+      if (await bookFilesAllowed()) return "download";
       const size = await invoke<number | null>("sync_book_download_size", { bookId }).catch(
         () => null,
       );
       const shelf = shelfRef.current;
-      if (size == null || !shelf) return true;
-      const title = shelf.books.find((book) => book.id === bookId)?.title ?? "";
-      return shelf.askConfirm({
-        title: t("mobile.downloadTitle", { title }),
+      if (size == null || !shelf) return "download";
+      const book = shelf.books.find((item) => item.id === bookId);
+      if (book && book.cached !== false) return "skip";
+      const confirmed = await shelf.askConfirm({
+        title: t("mobile.downloadTitle", { title: book?.title ?? "" }),
         description: t("mobile.downloadDesc", { size: formatByteSize(size, locale) }),
         confirmLabel: t("mobile.download"),
       });
+      return confirmed ? "download" : "cancel";
     },
     [locale, t],
   );
@@ -149,7 +152,7 @@ export default function MobileApp() {
       setPanel(null);
       setPage("reader");
     },
-    confirmDownload,
+    beforeDownload,
   });
   const shelf = useLibraryShelf({ openingBookId: session.openingBookId });
   shelfRef.current = shelf;
@@ -182,11 +185,9 @@ export default function MobileApp() {
     setPanel(null);
   }, [session.closeBook]);
 
-  const handleOpenBook = session.openBook;
-
   useIncomingBooks({
     importIncoming: (books) => shelf.importIncoming(books, { suppressDuplicateNotice: true }),
-    openBook: handleOpenBook,
+    openBook: session.openBook,
   });
 
   usePlatformLifecycle({
@@ -304,7 +305,7 @@ export default function MobileApp() {
         ) : (
           <MobileLibraryPage
             shelf={shelf}
-            onOpenBook={handleOpenBook}
+            onOpenBook={session.openBook}
             openingBookId={session.openingBookId}
             onOpenSettings={() => setSettingsOpen(true)}
             onOpenTrash={() => setPage("trash")}

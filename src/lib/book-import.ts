@@ -162,13 +162,13 @@ export async function importIncomingBooks(
       continue;
     }
     try {
-      const results = await invoke<ImportBookResult[]>("import_incoming_books", {
-        files: [{ path: book.path, name: book.name }],
+      const result = await invoke<ImportBookResult>("import_incoming_book", {
+        file: { path: book.path, name: book.name },
       });
-      const ids = await processImportResults(results, deps);
+      const ids = await processImportResults([result], deps);
       successfulBookIds.push(...ids);
     } catch (err) {
-      console.error("import_incoming_books error:", err);
+      console.error("import_incoming_book error:", err);
       deps.onNotice({
         kind: "error",
         message: t("library.importFailed", {

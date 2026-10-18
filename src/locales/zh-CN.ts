@@ -444,7 +444,6 @@ export const zhCN = {
   "mobile.sheetClose": "收起阅读助手",
   "mobile.downloadTitle": "下载《{title}》？",
   "mobile.downloadDesc": "当前使用移动数据，这本书有 {size}。",
-  "mobile.downloadUnknownSize": "当前使用移动数据，这本书还没有下载到本机。",
   "mobile.download": "下载",
   "mobile.device": "本机",
   "mobile.deviceDesc": "只对这台手机生效，不会同步。",

@@ -60,26 +60,22 @@ fn import_incoming_file(
     store.import_bytes_without_source(file.name, bytes)
 }
 
+/// One file per call, so a bad file fails alone and every handle is still
+/// read (and deleted) by its own call.
 #[tauri::command]
-pub async fn import_incoming_books(
+pub async fn import_incoming_book(
     app: tauri::AppHandle,
     store: tauri::State<'_, LibraryStore>,
-    files: Vec<IncomingBookFile>,
-) -> AppResult<Vec<ImportBookResult>> {
+    file: IncomingBookFile,
+) -> AppResult<ImportBookResult> {
     let cache_dir = app
         .path()
         .app_cache_dir()
         .map_err(|error| AppError::storage_io(format!("Failed to resolve cache dir: {error}")))?;
     let store = store.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let mut results = Vec::with_capacity(files.len());
-        for file in files {
-            results.push(import_incoming_file(&store, &cache_dir, file)?);
-        }
-        Ok(results)
-    })
-    .await
-    .map_err(|error| AppError::storage_io(format!("Import worker failed: {error}")))?
+    tauri::async_runtime::spawn_blocking(move || import_incoming_file(&store, &cache_dir, file))
+        .await
+        .map_err(|error| AppError::storage_io(format!("Import worker failed: {error}")))?
 }
 
 #[cfg(test)]

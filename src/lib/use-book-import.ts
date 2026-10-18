@@ -13,6 +13,11 @@ import {
 import { platformBridge, type IncomingBook } from "@/lib/platform-bridge";
 import { t } from "@/lib/i18n";
 
+/** Imports the app started on the reader's behalf ("Open with") open the Book instead of noting a duplicate. */
+interface ImportOptions {
+  suppressDuplicateNotice?: boolean;
+}
+
 export interface BookImportNotice extends ImportNotice {
   id: string;
 }
@@ -55,7 +60,7 @@ export function useBookImport() {
   }, [settleConfirm]);
 
   const runIncoming = useCallback(
-    async (books: IncomingBook[], options?: { suppressDuplicateNotice?: boolean }) => {
+    async (books: IncomingBook[], options?: ImportOptions) => {
       if (books.length === 0) return [];
       const ids = await importIncomingBooks(books, {
         askConfirm,
@@ -73,7 +78,7 @@ export function useBookImport() {
    * another import runs: the platform already copied them into the cache.
    */
   const importIncoming = useCallback(
-    async (books: IncomingBook[], options?: { suppressDuplicateNotice?: boolean }) => {
+    async (books: IncomingBook[], options?: ImportOptions) => {
       setImporting(true);
       try {
         return await runIncoming(books, options);
@@ -118,7 +123,7 @@ export function useBookImport() {
   }, [askConfirm, pushNotice, runIncoming]);
 
   const importFromPaths = useCallback(
-    async (paths: string[], options?: { suppressDuplicateNotice?: boolean }) => {
+    async (paths: string[], options?: ImportOptions) => {
       if (importingRef.current) return [];
       importingRef.current = true;
       setImporting(true);
