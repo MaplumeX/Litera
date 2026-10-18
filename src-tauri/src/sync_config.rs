@@ -51,6 +51,14 @@ impl SyncBackendConfig {
                 "Sync configuration field is too long",
             ));
         }
+        // object_store panics (rather than erroring) on an endpoint without a
+        // scheme, which would leave the calling command hanging forever.
+        let endpoint = self.endpoint.trim();
+        if !endpoint.starts_with("https://") && !endpoint.starts_with("http://") {
+            return Err(AppError::invalid_input(
+                "Endpoint must start with https:// or http://",
+            ));
+        }
         Ok(())
     }
 }
@@ -206,6 +214,16 @@ mod tests {
         let error = write_sync_config(dir.path(), &config).expect_err("expected error");
 
         assert_eq!(error.code, AppErrorCode::InvalidInput);
+    }
+
+    #[test]
+    fn an_endpoint_without_a_scheme_is_rejected() {
+        let mut config = sample_config();
+        config.endpoint = "s3.us-west-004.backblazeb2.com".to_string();
+
+        let error = config.validate().expect_err("expected error");
+        assert_eq!(error.code, AppErrorCode::InvalidInput);
+        assert!(build_sync_store(&config).is_err());
     }
 
     #[test]
