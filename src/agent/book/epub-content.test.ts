@@ -141,6 +141,13 @@ describe("parseSpineSegments", () => {
     ]);
   });
 
+  it("keeps a GFM table in the markdown projection", () => {
+    const source = "<html><body><p>前</p><table><tr><th>年份</th><th>人口</th></tr><tr><td>1990</td><td>a|b</td></tr></table></body></html>";
+    expect(parseSpineSegments(source)).toEqual([
+      { text: "前年份人口1990a|b", markdown: "前\n\n| 年份 | 人口 |\n| --- | --- |\n| 1990 | a\\|b |" },
+    ]);
+  });
+
   it("slices at anchor elements first/middle/last", () => {
     const source =
       '<html><body>intro <h1 id="a">One</h1>first <h2 id="b">Two</h2>second tail</body></html>';
@@ -559,8 +566,15 @@ describe("markdownText", () => {
     expect(markdownText('<html><body><div>lead <p>para</p> tail</div></body></html>')).toBe("lead\n\npara\n\ntail");
   });
 
-  it("keeps unknown elements transparent and tables as plain block text", () => {
+  it("keeps unknown elements transparent and single-column tables as plain block text", () => {
     expect(markdownText('<html><body><article><p>kept</p></article><table><tr><td>cell</td></tr></table></body></html>')).toBe("kept\n\ncell");
+    expect(markdownText("<html><body><table><tr><td><p>a</p></td></tr><tr><td>b|c</td></tr></table></body></html>")).toBe("a\n\nb|c");
+  });
+
+  it("renders multi-column tables as GFM tables with their caption", () => {
+    const html = `<html><body><table><caption>人口</caption><thead><tr><th>年份</th><th>人口</th></tr></thead>
+      <tbody><tr><td>1990</td><td><p>11</p><p>亿</p></td></tr><tr><td colspan="2">a|b</td></tr></tbody></table></body></html>`;
+    expect(markdownText(html)).toBe("人口\n\n| 年份 | 人口 |\n| --- | --- |\n| 1990 | 11 亿 |\n| a\\|b |  |");
   });
 
   it("returns empty for unparsable roots", () => {

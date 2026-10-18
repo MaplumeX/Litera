@@ -200,8 +200,7 @@ function walkElement(element: XmlElement, state: MarkdownWalk): void {
     return;
   }
   if (tag === "table") {
-    const text = collapseInline(inlineOf(element));
-    if (text) state.blocks.push(text);
+    state.blocks.push(...tableBlocks(element));
     return;
   }
   if (tag === "ul" || tag === "ol") {
@@ -316,6 +315,74 @@ function listBlocks(list: XmlElement, ordered: boolean): string[] {
     });
   });
   return lines;
+}
+
+/** One table cell as a single Markdown line: nested blocks joined by spaces, `|` escaped. */
+function tableCell(cell: XmlElement): string {
+  const state: MarkdownWalk = { blocks: [] };
+  walkElement(cell, state);
+  return state.blocks.join(" ").replace(/\s+/g, " ").trim().replace(/\|/g, "\\|");
+}
+
+/** The table's own rows (through row groups, never a nested table's), each `colspan` padded with empty cells. */
+function tableRows(table: XmlElement): string[][] {
+  const rows: string[][] = [];
+  const visit = (parent: XmlElement) => {
+    const children = parent.childNodes;
+    for (let index = 0; index < children.length; index += 1) {
+      const child = children[index];
+      if (child.nodeType !== 1) continue;
+      const element = child as XmlElement;
+      const tag = elementTag(element);
+      if (tag === "thead" || tag === "tbody" || tag === "tfoot") visit(element);
+      else if (tag === "tr") {
+        const cells: string[] = [];
+        const cellNodes = element.childNodes;
+        for (let cellIndex = 0; cellIndex < cellNodes.length; cellIndex += 1) {
+          const cellNode = cellNodes[cellIndex];
+          if (cellNode.nodeType !== 1) continue;
+          const cell = cellNode as XmlElement;
+          const cellTag = elementTag(cell);
+          if (cellTag !== "td" && cellTag !== "th") continue;
+          cells.push(tableCell(cell));
+          const span = Math.min(Number.parseInt(cell.getAttribute("colspan") ?? "", 10) || 1, 100);
+          for (let extra = 1; extra < span; extra += 1) cells.push("");
+        }
+        if (cells.length) rows.push(cells);
+      }
+    }
+  };
+  visit(table);
+  return rows;
+}
+
+/**
+ * Render `<table>` as a GFM table (the first row is the header row GFM
+ * requires), preceded by its `<caption>`. A single-column table is usually
+ * layout, so its cells become plain paragraphs instead.
+ */
+function tableBlocks(table: XmlElement): string[] {
+  const blocks: string[] = [];
+  const children = table.childNodes;
+  for (let index = 0; index < children.length; index += 1) {
+    const child = children[index];
+    if (child.nodeType === 1 && elementTag(child) === "caption") {
+      const text = collapseInline(inlineOf(child as XmlElement));
+      if (text) blocks.push(text);
+    }
+  }
+  const rows = tableRows(table);
+  const columns = Math.max(0, ...rows.map((row) => row.length));
+  if (columns <= 1) {
+    for (const [cell] of rows) if (cell) blocks.push(cell.replace(/\\\|/g, "|"));
+    return blocks;
+  }
+  const line = (cells: string[]) =>
+    `| ${Array.from({ length: columns }, (_, column) => cells[column] ?? "").join(" | ")} |`;
+  const lines = rows.map(line);
+  lines.splice(1, 0, `|${" --- |".repeat(columns)}`);
+  blocks.push(lines.join("\n"));
+  return blocks;
 }
 
 function listItem(li: XmlElement): MarkdownItem {
@@ -518,6 +585,9 @@ function denseMarkdown(markdown: string): string {
     let text = line.replace(/^(\s*)([-+]|\d{1,9}\.)\s+/, "$1");
     text = text.replace(/^(\s*)#{1,6}\s+/, "$1");
     while (/^(\s*)>\s?/.test(text)) text = text.replace(/^(\s*)>\s?/, "$1");
+    // Table rows: drop the delimiter row and cell pipes, unescape literal `\|`.
+    if (/^\s*\|(?:\s*-{3,}\s*\|)+\s*$/.test(text)) return "";
+    if (/^\s*\|/.test(text)) text = text.replace(/\\\||\|/g, (pipe) => (pipe === "|" ? "" : "|"));
     return text;
   });
   return dense(lines.join("\n"))
