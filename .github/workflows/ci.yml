@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xdg-utils \
+            libfontconfig1-dev libfreetype6-dev # font-kit (system font picker)
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      - name: Check version lockstep
+        run: node scripts/bump-version.mjs --check
+
+      - name: Check Tauri npm/cargo pairing
+        run: node scripts/check-tauri-pairing.mjs
+
+      - name: Test
+        run: |
+          npm test -- --run
+          npx tsc --noEmit
+          npx vite build
+          cargo test --locked --manifest-path src-tauri/Cargo.toml
+
+  # Desktop changes must not silently break the Android build: everything
+  # target-gated (`cfg(desktop)` / `cfg(mobile)`) has to compile on both sides.
+  android-check:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+          key: android
+
+      - name: Check the Rust crate for Android
+        run: |
+          # ring and friends compile C for the target: use the runner's NDK.
+          TOOLCHAIN="$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          export CC_aarch64_linux_android="$TOOLCHAIN/aarch64-linux-android24-clang"
+          export AR_aarch64_linux_android="$TOOLCHAIN/llvm-ar"
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$TOOLCHAIN/aarch64-linux-android24-clang"
+          cargo check --locked --target aarch64-linux-android --manifest-path src-tauri/Cargo.toml

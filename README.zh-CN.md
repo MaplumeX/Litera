@@ -2,7 +2,7 @@
 
 [English](README.md) | **简体中文**
 
-带阅读助手的桌面 EPUB 阅读器。开启同步前，书籍始终留在本机；助手只请求你配置的 LLM 供应商。
+带阅读助手的 EPUB 阅读器，支持桌面与 Android。开启同步前，书籍始终留在本机；助手只请求你配置的 LLM 供应商。
 
 ![书库](docs/photos/1.png)
 
@@ -36,6 +36,7 @@
 - 阅读进度、书签、高亮与笔记、助手会话、排版与应用偏好自动一致；合并按条目进行（不会整库互相覆盖）
 - 大书走分片上传；新设备先拉取清单，书文件按需下载
 - 默认关闭。同步的数据以明文形式存储在你选择的存储桶中；LLM API 密钥与 S3 凭据永不离开设备
+- Android 上的 **设置 → 本机 → 仅在 Wi-Fi 下传输书籍文件**（默认开启）让 EPUB 的上传和下载不走移动数据；进度、标注和会话照常同步。用移动数据打开尚未下载到手机的书时，会先显示大小并询问
 
 ### KOReader 同步（可选）
 
@@ -59,7 +60,7 @@
 
 - 简体中文与 English
 - 关闭后再开，窗口位置和大小会恢复
-- macOS、Windows、Linux
+- macOS、Windows、Linux 与 Android（手机使用触控布局：点按或滑动翻页，助手为底部面板；平板沿用桌面布局）
 
 ## 安装
 
@@ -70,10 +71,13 @@
 | Linux | `.AppImage`、`.deb` |
 | macOS | `.dmg`（Apple Silicon） |
 | Windows | NSIS 安装包 |
+| Android 7.0+（64 位 ARM） | `.apk`：允许浏览器或文件管理器安装应用后打开即可。之后的 APK 可直接覆盖安装，书库保留 |
+
+Android 上导入的书保存在应用私有目录，**卸载 Litera 会一并删除**（已同步的书可重新下载）。Litera 关闭了 Android 备份，API 密钥和 S3 凭据只留在手机上。
 
 ## 快速开始
 
-1. 把 EPUB 导入书库（或从文件管理器打开）。
+1. 把 EPUB 导入书库（或从文件管理器打开；Android 上也可以用「打开方式」或分享给 Litera）。
 2. 打开一本书开始读。进度、排版和标注会自动保存。
 3. 要用助手：打开 **设置 → AI**，选供应商，填 API Key 和模型，再 **保存并应用**。
 4. 在阅读页打开对话栏，或切到 Agent 模式。选中文字再问，或直接提问。
@@ -114,6 +118,17 @@ npm run tauri build       # 生产构建
 ```
 
 EPUB 渲染来自 [foliate-js](https://github.com/johnfactotum/foliate-js)（`src/foliate-js`）。阅读助手是 WebView 内嵌的 [Pi](https://github.com/badlogic/pi-mono) 运行时，没有外部 sidecar。
+
+### Android
+
+需要 Android SDK 与 NDK（`ANDROID_HOME`、`NDK_HOME`）、JDK 17+，以及 Rust 目标 `aarch64-linux-android`（见 [Tauri Android 前置条件](https://v2.tauri.app/start/prerequisites/#android)）。
+
+```bash
+npm run tauri android dev                              # 在连接的手机或模拟器上运行
+npm run tauri android build -- --apk --target aarch64  # 发布用 APK
+```
+
+APK 的版本名和版本号取自 `tauri.conf.json`，`npm run version:bump` 会一并更新。发布 CI 用 `ANDROID_KEYSTORE_BASE64`、`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD` 三个 secret 中的密钥库签名。请备份该密钥库：用别的密钥签名的 APK 无法覆盖安装旧版本。
 
 ## 更新日志
 

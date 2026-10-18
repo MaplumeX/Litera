@@ -90,3 +90,91 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
+
+  # The signed arm64 APK, attached to the draft Release the desktop jobs
+  # created. The keystore is the maintainer's: losing it breaks in-place
+  # upgrades for every Android user, so it lives (base64) in repository
+  # secrets and in the maintainer's own backup.
+  android:
+    needs: release
+    permissions:
+      contents: write
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Setup Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install the Android NDK
+        run: |
+          sdkmanager --install "ndk;29.0.14206865"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >> "$GITHUB_ENV"
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+          key: android-release
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      - name: Check version lockstep
+        id: version
+        run: node scripts/bump-version.mjs --check
+
+      - name: Write the signing keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "$ANDROID_KEYSTORE_BASE64" ] || [ -z "$ANDROID_KEY_ALIAS" ] || [ -z "$ANDROID_KEY_PASSWORD" ]; then
+            echo "::error::ANDROID_KEYSTORE_BASE64, ANDROID_KEY_ALIAS and ANDROID_KEY_PASSWORD secrets are required to sign the APK"
+            exit 1
+          fi
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/litera-release.jks"
+          {
+            echo "keyAlias=$ANDROID_KEY_ALIAS"
+            echo "password=$ANDROID_KEY_PASSWORD"
+            echo "storeFile=$RUNNER_TEMP/litera-release.jks"
+          } > src-tauri/gen/android/keystore.properties
+
+      - name: Build the APK
+        # versionName / versionCode come from tauri.conf.json's version.
+        run: npx tauri android build --apk --target aarch64
+
+      - name: Attach the APK to the Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v{0}', steps.version.outputs.version) }}
+        run: |
+          apk=$(find src-tauri/gen/android/app/build/outputs/apk -name '*-release.apk' | head -n 1)
+          if [ -z "$apk" ]; then
+            echo "::error::No release APK was built"
+            exit 1
+          fi
+          out="Litera_${{ steps.version.outputs.version }}_android_arm64.apk"
+          cp "$apk" "$out"
+          gh release upload "$TAG" "$out" --clobber
