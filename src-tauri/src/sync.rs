@@ -943,7 +943,121 @@ pub async fn upload_manifest(
     etag: &str,
 ) -> AppResult<()> {
     let store = crate::sync_config::build_sync_store(config)?;
-    upload_manifest_to(&store, manifest, etag).await
+    if etag.is_empty() {
+        return upload_manifest_to(&store, manifest, etag)
+            .await
+            .map_err(UploadError::into_app_error);
+    }
+    let backend = backend_key(config);
+    if !conditional_put_unsupported(&backend) {
+        // The conditional PUT goes out once: a backend that rejects If-Match
+        // answers 501, which object_store would otherwise retry for minutes.
+        let single_shot = crate::sync_config::build_sync_store_without_retries(config)?;
+        match upload_manifest_to(&single_shot, manifest, etag).await {
+            Err(UploadError::Unsupported(_)) => mark_conditional_put_unsupported(backend),
+            result => return result.map_err(UploadError::into_app_error),
+        }
+    }
+    upload_manifest_checked(&store, manifest, etag)
+        .await
+        .map_err(UploadError::into_app_error)
+}
+
+/// Backends (Backblaze B2, for one) that answered a conditional PUT with
+/// 501 Not Implemented during this run of the app.
+static CONDITIONAL_PUT_UNSUPPORTED: std::sync::Mutex<Vec<String>> =
+    std::sync::Mutex::new(Vec::new());
+
+fn backend_key(config: &crate::sync_config::SyncBackendConfig) -> String {
+    format!(
+        "{}|{}",
+        config.endpoint.trim().trim_end_matches('/'),
+        config.bucket.trim()
+    )
+}
+
+fn conditional_put_unsupported(backend: &str) -> bool {
+    CONDITIONAL_PUT_UNSUPPORTED
+        .lock()
+        .is_ok_and(|backends| backends.iter().any(|known| known == backend))
+}
+
+fn mark_conditional_put_unsupported(backend: String) {
+    if let Ok(mut backends) = CONDITIONAL_PUT_UNSUPPORTED.lock() {
+        if !backends.contains(&backend) {
+            backends.push(backend);
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum UploadError {
+    /// The backend does not implement conditional PUT (`If-Match`).
+    Unsupported(ObjectStoreError),
+    Other(AppError),
+}
+
+impl UploadError {
+    fn into_app_error(self) -> AppError {
+        match self {
+            Self::Unsupported(error) => map_object_store_error(error),
+            Self::Other(error) => error,
+        }
+    }
+}
+
+impl From<AppError> for UploadError {
+    fn from(error: AppError) -> Self {
+        Self::Other(error)
+    }
+}
+
+fn is_not_implemented(error: &ObjectStoreError) -> bool {
+    match error {
+        ObjectStoreError::NotImplemented { .. } => true,
+        ObjectStoreError::Generic { .. } => {
+            let message = error.to_string();
+            message.contains("501 Not Implemented")
+                || message.contains("<Code>NotImplemented</Code>")
+        }
+        _ => false,
+    }
+}
+
+/// Fallback for backends without conditional PUT: compare the etag with a
+/// HEAD just before a plain PUT. This narrows, but cannot close, the window
+/// in which another device's upload could be overwritten.
+pub async fn upload_manifest_checked(
+    store: &impl ObjectStore,
+    manifest: &SyncManifestData,
+    etag: &str,
+) -> Result<(), UploadError> {
+    let current = match store.head(&manifest_path()).await {
+        Ok(meta) => meta.e_tag.unwrap_or_default(),
+        Err(ObjectStoreError::NotFound { .. }) => String::new(),
+        Err(error) => return Err(map_object_store_error(error).into()),
+    };
+    if current != etag {
+        // Worded so the sync runner treats it as a precondition conflict and
+        // re-downloads, re-merges, and retries.
+        return Err(AppError::storage_io(
+            "Sync backend error: precondition failed, the remote manifest changed",
+        )
+        .into());
+    }
+    store
+        .put(
+            &manifest_path(),
+            PutPayload::from(manifest_bytes(manifest)?),
+        )
+        .await
+        .map_err(|error| map_object_store_error(error).into())
+        .map(|_| ())
+}
+
+fn manifest_bytes(manifest: &SyncManifestData) -> AppResult<Vec<u8>> {
+    serde_json::to_vec(manifest)
+        .map_err(|error| AppError::storage_io(format!("Failed to serialize manifest: {error}")))
 }
 
 /// Store-generic core of [`upload_manifest`], so the create-vs-update
@@ -952,17 +1066,15 @@ pub async fn upload_manifest_to(
     store: &impl ObjectStore,
     manifest: &SyncManifestData,
     etag: &str,
-) -> AppResult<()> {
-    let bytes = serde_json::to_vec(manifest).map_err(|error| {
-        AppError::storage_io(format!("Failed to serialize manifest: {error}"))
-    })?;
+) -> Result<(), UploadError> {
+    let bytes = manifest_bytes(manifest)?;
     if etag.is_empty() {
         // No remote Manifest existed when we downloaded: a plain PUT
         // creates it (an If-Match on a missing object cannot succeed).
         store
             .put(&manifest_path(), PutPayload::from(bytes))
             .await
-            .map_err(map_object_store_error)?;
+            .map_err(|error| map_object_store_error(error))?;
         return Ok(());
     }
     let version = UpdateVersion {
@@ -970,11 +1082,14 @@ pub async fn upload_manifest_to(
         version: None,
     };
     let options = PutOptions::from(PutMode::Update(version));
-    store
+    match store
         .put_opts(&manifest_path(), PutPayload::from(bytes), options)
         .await
-        .map_err(map_object_store_error)?;
-    Ok(())
+    {
+        Ok(_) => Ok(()),
+        Err(error) if is_not_implemented(&error) => Err(UploadError::Unsupported(error)),
+        Err(error) => Err(map_object_store_error(error).into()),
+    }
 }
 
 pub fn map_object_store_error(error: ObjectStoreError) -> AppError {
@@ -1012,6 +1127,50 @@ mod transport_tests {
             // The created Manifest downloads back intact.
             let reread = download_manifest_from(&store).await.expect("re-download");
             assert_eq!(reread.manifest, manifest);
+        });
+    }
+
+    #[test]
+    fn a_501_answer_to_if_match_counts_as_unsupported() {
+        // Backblaze B2's answer to a conditional PUT, as object_store reports it.
+        let b2 = ObjectStoreError::Generic {
+            store: "S3",
+            source: "Server returned non-2xx status code: 501 Not Implemented: \
+                     <Error><Code>NotImplemented</Code><Header>If-Match</Header></Error>"
+                .into(),
+        };
+        let outage = ObjectStoreError::Generic {
+            store: "S3",
+            source: "Server returned non-2xx status code: 503 Service Unavailable".into(),
+        };
+
+        assert!(is_not_implemented(&b2));
+        assert!(!is_not_implemented(&outage));
+    }
+
+    #[test]
+    fn the_fallback_upload_writes_only_over_the_downloaded_manifest() {
+        tauri::async_runtime::block_on(async {
+            let store = object_store::memory::InMemory::new();
+            let first = SyncManifestData {
+                schema_version: 1,
+                ..SyncManifestData::default()
+            };
+            upload_manifest_to(&store, &first, "").await.expect("create");
+            let downloaded = download_manifest_from(&store).await.expect("download");
+
+            // Unchanged since our download: the plain PUT goes through.
+            upload_manifest_checked(&store, &first, &downloaded.etag)
+                .await
+                .expect("upload over the downloaded manifest");
+
+            // Another device uploaded since: report a precondition conflict
+            // so the runner re-merges, and leave the remote alone.
+            let error = upload_manifest_checked(&store, &first, &downloaded.etag)
+                .await
+                .expect_err("stale etag")
+                .into_app_error();
+            assert!(error.message.contains("precondition"));
         });
     }
 

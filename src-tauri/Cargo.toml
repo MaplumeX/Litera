@@ -46,3 +46,8 @@ tauri-plugin-litera-platform = { path = "plugins/litera-platform" }
 font-kit = "0.14"
 tauri-plugin-single-instance = "2.4.3"
 tauri-plugin-window-state = "2.4.1"
+
+[target.'cfg(target_os = "android")'.dependencies]
+# object_store's default TLS verifier (rustls-platform-verifier) needs JNI
+# initialization on Android; Sync uses these bundled roots there instead.
+webpki-root-certs = "1"
