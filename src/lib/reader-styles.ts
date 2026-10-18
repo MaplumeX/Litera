@@ -336,10 +336,22 @@ img { filter: brightness(0.8) !important; }`,
 /** Pictures open in the viewer on click (see `opensImageViewer`); links keep their pointer. */
 const IMAGE_CURSOR_CSS = "img, svg image { cursor: zoom-in; } a[href] img, a[href] image { cursor: pointer; }";
 
+/** Fallback grid for data tables: browsers draw none, so unstyled books show bare
+ *  floating text. Wrapped in `:where()` (zero specificity) so any table styling
+ *  the book ships wins; `border="0"` / `role="presentation"` layout tables stay
+ *  borderless. Lines derive from `currentColor`, so both themes work. Cell
+ *  paragraphs drop the first-line indent, which only makes sense in body text. */
+const TABLE_SELECTOR = ':where(table:not([border="0"], [role="presentation"]))';
+const TABLE_CSS = `${TABLE_SELECTOR} { border-collapse: collapse; margin-block: 1em; }
+${TABLE_SELECTOR} :where(th, td) { border: 1px solid color-mix(in srgb, currentColor 25%, transparent); padding: 0.3em 0.6em; }
+${TABLE_SELECTOR} :where(th) { background: color-mix(in srgb, currentColor 6%, transparent); }
+:where(td, th) p { text-indent: 0 !important; }`;
+
 /** Combine font + typography + theme into a single CSS string for `view.renderer.setStyles`. */
 export function generateStylesCss(state: ReaderStyleState): string {
   let fontCss = `html, body { font-family: ${cssFontFamily(state.fontFamily)}; font-size: ${state.fontSize}px !important; line-height: ${state.lineHeight}; letter-spacing: ${state.letterSpacing}em; max-width: ${state.contentWidth}em; margin-inline: auto; padding-inline: ${state.pagePadding}rem; text-align: ${state.textAlign}; }
 p { margin-block-end: ${state.paragraphSpacing}em !important; text-indent: ${state.firstLineIndent}em !important; }
+${TABLE_CSS}
 ${IMAGE_CURSOR_CSS}`;
   if (state.overrideFont) {
     fontCss += `\nhtml, body, p, div, span, li, blockquote, td, th, a, h1, h2, h3, h4, h5, h6 { font-family: ${cssFontFamily(state.fontFamily)} !important; }
