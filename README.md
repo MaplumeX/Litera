@@ -2,7 +2,7 @@
 
 **English** | [简体中文](README.zh-CN.md)
 
-A desktop EPUB reader with a built-in reading assistant. Books stay on your machine until you enable Sync; the assistant only talks to the LLM provider you configure.
+An EPUB reader for desktop and Android with a built-in reading assistant. Books stay on your machine until you enable Sync; the assistant only talks to the LLM provider you configure.
 
 ## Features
 
@@ -32,6 +32,7 @@ A desktop EPUB reader with a built-in reading assistant. Books stay on your mach
 - Reading positions, bookmarks, highlights and notes, assistant sessions, typography, and app preferences converge automatically; merges are item-level (nothing is clobbered by whole-database overwrites)
 - Large books upload with multipart; new devices download the Manifest first and fetch book files on demand
 - Off by default. Synced data is stored as-is (plaintext) on the bucket you choose; LLM API keys and S3 credentials never leave the device
+- On Android, **Settings → This device → Transfer book files only on Wi-Fi** (on by default) keeps EPUB uploads and downloads off mobile data; positions, annotations and sessions still sync. Opening a book that isn't on the phone yet over mobile data asks first and shows its size
 
 ### KOReader Sync (opt-in)
 
@@ -55,7 +56,7 @@ A desktop EPUB reader with a built-in reading assistant. Books stay on your mach
 
 - English and Simplified Chinese
 - Window size and position restore on launch
-- macOS, Windows, and Linux
+- macOS, Windows, Linux, and Android (phones get a touch layout: tap or swipe to turn pages, the assistant as a bottom sheet; tablets keep the desktop layout)
 
 ## Install
 
@@ -66,10 +67,13 @@ Download the latest build from [Releases](https://github.com/MaplumeX/Litera/rel
 | Linux | `.AppImage`, `.deb` |
 | macOS | `.dmg` (Apple Silicon) |
 | Windows | NSIS installer |
+| Android 7.0+ (64-bit ARM) | `.apk` — allow installing from your browser or file manager, then open it. Later APKs install over the previous one and keep your Library |
+
+On Android, imported books are stored privately inside the app, so **uninstalling Litera deletes them** (synced books can be downloaded again). Android backup is disabled for Litera, so API keys and S3 credentials stay on the phone.
 
 ## Quick start
 
-1. Import an EPUB into the library (or open one from the file manager).
+1. Import an EPUB into the library (or open one from the file manager; on Android, "Open with" or share it to Litera).
 2. Open a book and read. Progress, layout, and annotations are saved automatically.
 3. To use the assistant: **Settings → AI**, pick a provider, enter an API key and model, then **Save and apply**.
 4. In the reader, show the chat panel or switch to Agent mode. Select text and ask, or type freely.
@@ -110,6 +114,17 @@ npm run tauri build       # production bundle
 ```
 
 EPUB rendering comes from [foliate-js](https://github.com/johnfactotum/foliate-js) (`src/foliate-js`). The assistant runtime is [Pi](https://github.com/badlogic/pi-mono) running inside the WebView — there is no sidecar process.
+
+### Android
+
+Needs the Android SDK and NDK (`ANDROID_HOME`, `NDK_HOME`), JDK 17+ and the Rust target `aarch64-linux-android` (see the [Tauri Android prerequisites](https://v2.tauri.app/start/prerequisites/#android)).
+
+```bash
+npm run tauri android dev                              # run on a connected phone or emulator
+npm run tauri android build -- --apk --target aarch64  # release APK
+```
+
+The APK's version name and code come from `tauri.conf.json`, so `npm run version:bump` covers Android too. Release CI signs the APK with the keystore in the `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD` secrets. Keep a backup of that keystore: an APK signed with a different key cannot install over the old one.
 
 ## Changelog
 

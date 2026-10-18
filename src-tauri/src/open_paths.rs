@@ -1,3 +1,6 @@
+// Desktop-only "Open with" plumbing; mobile builds keep the command but never queue paths.
+#![cfg_attr(mobile, allow(dead_code))]
+
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -87,10 +90,7 @@ where
         .collect()
 }
 
-#[cfg_attr(
-    not(any(target_os = "macos", target_os = "ios", target_os = "android")),
-    allow(dead_code)
-)]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn parse_opened_urls(urls: &[tauri::Url]) -> Vec<PathBuf> {
     urls.iter()
         .filter_map(|url| {
@@ -131,19 +131,20 @@ pub fn enqueue_paths(app: &AppHandle, paths: Vec<PathBuf>) {
     let _ = app.emit(OPEN_PATHS_EVENT, ());
 }
 
-#[cfg_attr(
-    not(any(target_os = "macos", target_os = "ios", target_os = "android")),
-    allow(dead_code)
-)]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn enqueue_opened_urls(app: &AppHandle, urls: &[tauri::Url]) {
     enqueue_paths(app, parse_opened_urls(urls));
 }
 
+// Path-based "Open with" is desktop-only. Android hands the app content
+// URIs instead, which the platform plugin turns into incoming books.
+#[cfg(desktop)]
 pub fn enqueue_current_process_args(app: &AppHandle) {
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     enqueue_paths(app, parse_open_args(std::env::args(), &cwd));
 }
 
+#[cfg(desktop)]
 pub fn handle_second_instance(app: &AppHandle, args: Vec<String>, cwd: impl AsRef<Path>) {
     enqueue_paths(app, parse_open_args(args, cwd.as_ref()));
     if let Some(window) = app.get_webview_window("main") {

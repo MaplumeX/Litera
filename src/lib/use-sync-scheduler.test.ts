@@ -57,6 +57,39 @@ afterEach(() => {
 });
 
 describe("useSyncScheduler", () => {
+  it("uploads book files when nothing restricts the transfer", async () => {
+    setupSync({ enabled: true });
+
+    renderHook(() => useSyncScheduler());
+    await flush();
+
+    expect(invokeMock.mock.calls.some(([cmd]) => cmd === "sync_upload_book_files")).toBe(true);
+  });
+
+  it("syncs without book files when the transfer rule says no", async () => {
+    setupSync({ enabled: true });
+
+    renderHook(() => useSyncScheduler({ transferBookFiles: async () => false }));
+    await flush();
+    await flush();
+
+    expect(syncRuns()).toBe(1);
+    expect(invokeMock.mock.calls.some(([cmd]) => cmd === "sync_upload_book_files")).toBe(false);
+  });
+
+  it("runs a pass on demand", async () => {
+    setupSync({ enabled: true });
+    const { result } = renderHook(() => useSyncScheduler());
+    await flush();
+    expect(syncRuns()).toBe(1);
+
+    await act(async () => {
+      await result.current.syncNow();
+    });
+
+    expect(syncRuns()).toBe(2);
+  });
+
   it("syncs automatically at startup when Sync is enabled", async () => {
     setupSync({ enabled: true });
 

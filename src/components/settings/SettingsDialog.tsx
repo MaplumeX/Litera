@@ -2,7 +2,19 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { CheckIcon, ChevronsUpDown } from "lucide-react";
+import {
+  ArrowLeft,
+  CheckIcon,
+  ChevronRight,
+  ChevronsUpDown,
+  Cloud,
+  Info,
+  Palette,
+  Smartphone,
+  Sparkles,
+  Type,
+  type LucideIcon,
+} from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -58,14 +70,15 @@ import {
   saveUiFontSize,
 } from "@/lib/ui-chrome-font";
 
-type SettingsSection = "typography" | "appearance" | "ai" | "sync" | "about";
+export type SettingsSection = "typography" | "appearance" | "device" | "ai" | "sync" | "about";
 
-const SECTIONS: { id: SettingsSection; labelKey: MessageKey }[] = [
-  { id: "typography", labelKey: "settings.typography" },
-  { id: "appearance", labelKey: "settings.appearance" },
-  { id: "ai", labelKey: "settings.ai" },
-  { id: "sync", labelKey: "settings.sync" },
-  { id: "about", labelKey: "settings.about" },
+const SECTIONS: { id: SettingsSection; labelKey: MessageKey; icon: LucideIcon }[] = [
+  { id: "typography", labelKey: "settings.typography", icon: Type },
+  { id: "appearance", labelKey: "settings.appearance", icon: Palette },
+  { id: "device", labelKey: "mobile.device", icon: Smartphone },
+  { id: "ai", labelKey: "settings.ai", icon: Sparkles },
+  { id: "sync", labelKey: "settings.sync", icon: Cloud },
+  { id: "about", labelKey: "settings.about", icon: Info },
 ];
 
 const ABOUT_REPO_URL = "https://github.com/MaplumeX/Litera";
@@ -130,6 +143,16 @@ export interface SettingsDialogProps {
   onThemeChange: (theme: string) => void;
   /** Told when the page layout (paginated / scrolled) changes, so an open Book follows. */
   onReaderFlowChange?: (flow: ReaderFlow) => void;
+  /**
+   * "page" fills the screen as an Android settings screen: a list of the
+   * sections, each opening as its own page (the mobile shell); "dialog" is
+   * the desktop's two-pane dialog.
+   */
+  layout?: "dialog" | "page";
+  /** Page layout: open straight on this section instead of the list. */
+  initialSection?: SettingsSection;
+  /** Settings that only this device has, as their own section (the phone's). */
+  deviceSettings?: ReactNode;
 }
 
 function RestoreButton({
@@ -537,14 +560,40 @@ export function SettingsDialog({
   theme,
   onThemeChange,
   onReaderFlowChange,
+  layout = "dialog",
+  initialSection,
+  deviceSettings,
 }: SettingsDialogProps) {
   const { t, locale, setLocale } = useT();
-  const [section, setSection] = useState<SettingsSection>("typography");
+  const page = layout === "page";
+  const sections = deviceSettings
+    ? SECTIONS
+    : SECTIONS.filter((item) => item.id !== "device");
+  const [section, setSection] = useState<SettingsSection>(initialSection ?? "typography");
+  // Page layout only: the section list is showing rather than a section.
+  const [listShown, setListShown] = useState(initialSection == null);
+  const showingList = page && listShown;
+  // The shown section was picked from the list (rather than opened on).
+  const [fromList, setFromList] = useState(false);
+  // Back from a section: the list slides back in from the left.
+  const [backToList, setBackToList] = useState(false);
+  const showList = () => {
+    setListShown(true);
+    setBackToList(true);
+  };
   const [defaultReaderMode, setDefaultReaderMode] = useState(loadDefaultReaderMode);
   const [readerFlow, setReaderFlow] = useState(loadReaderFlow);
   const [uiFontFamily, setUiFontFamily] = useState(loadUiFontFamily);
   const [uiFontSize, setUiFontSize] = useState(loadUiFontSize);
   const [version, setVersion] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open || !page) return;
+    if (initialSection) setSection(initialSection);
+    setListShown(initialSection == null);
+    setFromList(false);
+    setBackToList(false);
+  }, [open, page, initialSection]);
 
   useEffect(() => {
     if (!open) return;
@@ -585,40 +634,99 @@ export function SettingsDialog({
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
       <DialogContent
-        className="flex h-[40rem] w-[768px] max-h-[85vh] gap-0 overflow-hidden p-0 sm:max-w-[calc(100%-2rem)]"
+        className={
+          page
+            ? "m-page-dialog inset-0 top-0 left-0 flex h-full max-h-none w-full max-w-none translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden rounded-none border-0 p-0 pt-[var(--safe-top)] pb-[var(--safe-bottom)] shadow-none data-[state=closed]:zoom-out-100 data-[state=open]:zoom-in-100 sm:max-w-none"
+            : "flex h-[40rem] w-[768px] max-h-[85vh] gap-0 overflow-hidden p-0 sm:max-w-[calc(100%-2rem)]"
+        }
+        showCloseButton={!page}
+        // An opaque backdrop that is there at once: the page underneath (and
+        // the drawer still sliding away) must not show through the fade-in.
+        overlayClassName={page ? "m-page-backdrop bg-background" : undefined}
         onEscapeKeyDown={(event) => {
           const target = event.target;
           if (target instanceof HTMLElement && target.closest("[data-typography-stepper]")) {
             event.preventDefault();
+            return;
+          }
+          // Back on a section page returns to the list, as Android settings do.
+          if (page && !listShown) {
+            event.preventDefault();
+            showList();
           }
         }}
       >
-        <aside className="flex w-48 shrink-0 flex-col border-r">
-          <DialogHeader className="gap-0 p-0 text-left">
-            <DialogTitle className="px-4 py-3 text-sm font-semibold">
-              {t("settings.title")}
+        {page ? (
+          <DialogHeader className="h-14 shrink-0 flex-row items-center gap-1 px-1 text-left">
+            <button
+              type="button"
+              onClick={showingList ? onClose : showList}
+              aria-label={t("settings.back")}
+              className="inline-flex size-12 shrink-0 items-center justify-center rounded-full text-foreground/80 transition-colors active:bg-foreground/10 [&_svg]:size-6"
+            >
+              <ArrowLeft />
+            </button>
+            <DialogTitle className="min-w-0 flex-1 truncate pl-1 text-[1.375rem] leading-7 font-normal">
+              {showingList
+                ? t("settings.title")
+                : t(sections.find((item) => item.id === section)?.labelKey ?? "settings.title")}
             </DialogTitle>
           </DialogHeader>
-          <nav className="flex flex-col gap-1 px-2">
-            {SECTIONS.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => setSection(item.id)}
-                className={cn(
-                  "rounded-md px-3 py-1.5 text-left text-sm transition-colors",
-                  section === item.id
-                    ? "bg-secondary text-secondary-foreground"
-                    : "hover:bg-accent",
-                )}
-              >
-                {t(item.labelKey)}
-              </button>
-            ))}
-          </nav>
-        </aside>
+        ) : (
+          <aside className="flex w-48 shrink-0 flex-col border-r">
+            <DialogHeader className="gap-0 p-0 text-left">
+              <DialogTitle className="px-4 py-3 text-sm font-semibold">{t("settings.title")}</DialogTitle>
+            </DialogHeader>
+            <nav className="flex flex-col gap-1 px-2">
+              {sections.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => setSection(item.id)}
+                  className={cn(
+                    "rounded-md px-3 py-1.5 text-left text-sm transition-colors",
+                    section === item.id ? "bg-secondary text-secondary-foreground" : "hover:bg-accent",
+                  )}
+                >
+                  {t(item.labelKey)}
+                </button>
+              ))}
+            </nav>
+          </aside>
+        )}
 
-        <div className="@container flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+        {showingList && (
+          <nav className={cn("min-h-0 flex-1 overflow-y-auto pb-4", backToList && "m-page-pop")}>
+            {sections.map((item) => {
+              const Icon = item.icon;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => {
+                    setSection(item.id);
+                    setListShown(false);
+                    setFromList(true);
+                  }}
+                  className="flex min-h-14 w-full items-center gap-5 px-6 text-left transition-colors active:bg-foreground/5"
+                >
+                  <Icon className="size-5 shrink-0 text-muted-foreground" aria-hidden />
+                  <span className="min-w-0 flex-1 truncate text-base">{t(item.labelKey)}</span>
+                  <ChevronRight className="size-5 shrink-0 text-muted-foreground/70" aria-hidden />
+                </button>
+              );
+            })}
+          </nav>
+        )}
+
+        <div
+          hidden={showingList}
+          className={cn(
+            "@container flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden",
+            // Slides in when picked from the list, not when Settings opens on it.
+            page && fromList && "m-page-push",
+          )}
+        >
           {section === "typography" ? (
             <div className="flex min-h-0 flex-1 flex-row overflow-hidden @max-[519px]:flex-col-reverse">
               <div className="min-h-0 w-64 shrink-0 overflow-y-auto p-6 @max-[519px]:w-auto @max-[519px]:flex-1">
@@ -766,8 +874,11 @@ export function SettingsDialog({
                   ? t("settings.about.description")
                   : section === "sync"
                     ? t("settings.sync.description")
-                    : scopeCopy}
+                    : section === "device"
+                      ? t("mobile.deviceDesc")
+                      : scopeCopy}
               </DialogDescription>
+              {section === "device" && <div className="max-w-md space-y-5">{deviceSettings}</div>}
               {section === "appearance" && (
                 <div className="max-w-md space-y-5">
                   <PresetRow label={t("settings.theme")}>

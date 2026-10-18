@@ -40,7 +40,7 @@ const LETTER_SPACING_RANGE: (f64, f64) = (-0.05, 0.2);
 const PARAGRAPH_SPACING_RANGE: (f64, f64) = (0.0, 2.0);
 const FIRST_LINE_INDENT_RANGE: (f64, f64) = (0.0, 3.0);
 const COLUMN_COUNT_RANGE: (i64, i64) = (1, 3);
-const GENERIC_FONT_FAMILIES: [&str; 3] = ["serif", "sans-serif", "monospace"];
+pub(crate) const GENERIC_FONT_FAMILIES: [&str; 3] = ["serif", "sans-serif", "monospace"];
 const MAX_FONT_FAMILY_CHARS: usize = 128;
 const VALID_THEMES: [&str; 3] = ["light", "dark", "sepia"];
 const VALID_PAGE_MARGINS: [&str; 3] = ["narrow", "normal", "wide"];
@@ -978,7 +978,26 @@ impl LibraryStore {
         display_name: String,
         bytes: Vec<u8>,
     ) -> AppResult<ImportBookResult> {
-        let source_key = source_key_for_path(source_path);
+        self.import_from_source(Some(source_key_for_path(source_path)), display_name, bytes)
+    }
+
+    /// Import bytes that have no stable source path (the Android picker, an
+    /// "Open with" or a share). Without a `source_key` nothing is overwritten
+    /// in place: the content-derived id alone finds an existing copy.
+    pub fn import_bytes_without_source(
+        &self,
+        display_name: String,
+        bytes: Vec<u8>,
+    ) -> AppResult<ImportBookResult> {
+        self.import_from_source(None, display_name, bytes)
+    }
+
+    fn import_from_source(
+        &self,
+        source_key: Option<String>,
+        display_name: String,
+        bytes: Vec<u8>,
+    ) -> AppResult<ImportBookResult> {
         if bytes.is_empty() {
             return Err(AppError::invalid_input("EPUB file is empty"));
         }
@@ -1008,10 +1027,12 @@ impl LibraryStore {
         // Re-importing the same source overwrites that book in place; any
         // other import is a new book, identified by its content so the same
         // EPUB gets the same id on every device.
-        let overwritten = library
-            .books
-            .iter()
-            .find(|book| book.source_key.as_deref().unwrap_or(&book.id) == source_key);
+        let overwritten = source_key.as_deref().and_then(|source_key| {
+            library
+                .books
+                .iter()
+                .find(|book| book.source_key.as_deref().unwrap_or(&book.id) == source_key)
+        });
         let existed = overwritten.is_some();
         let existing_title = overwritten.map(|book| book.title.clone());
         let book_id = match overwritten {
@@ -1089,7 +1110,7 @@ impl LibraryStore {
                 cached: true,
                 updated_at: None,
                 position_updated_at: None,
-                source_key: Some(source_key),
+                source_key,
                 reading_status: Some("unread".to_string()),
                 status_updated_at: None,
                 starred: None,
@@ -5693,6 +5714,85 @@ mod tests {
         let books = store.list_books().expect("books");
         assert_eq!(books.len(), 1);
         assert!(books[0].cached);
+    }
+
+    #[test]
+    fn a_pathless_import_creates_a_book_without_a_source_key() {
+        let (_directory, store) = test_store();
+
+        let result = store
+            .import_bytes_without_source("Shared.epub".to_string(), b"picked-book".to_vec())
+            .expect("pathless import");
+
+        assert_eq!(result.status, ImportStatus::New);
+        assert_eq!(result.name, "Shared.epub");
+        assert_eq!(
+            result.book_id,
+            sha256_hex(b"picked-book")[..CONTENT_ID_HEX_CHARS].to_string()
+        );
+        let library = store.read_library_public().expect("library");
+        assert_eq!(library.books.len(), 1);
+        assert_eq!(library.books[0].source_key, None);
+    }
+
+    #[test]
+    fn a_pathless_reimport_of_the_same_bytes_is_the_same_book() {
+        let (_directory, store) = test_store();
+        let first = store
+            .import_bytes_without_source("first.epub".to_string(), b"picked-book".to_vec())
+            .expect("first import");
+        store
+            .save_book_metadata(
+                &first.book_id,
+                "Picked".to_string(),
+                "Author".to_string(),
+                String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
+                None,
+                staged_import_id(&first),
+            )
+            .expect("metadata");
+
+        let second = store
+            .import_bytes_without_source("renamed copy.epub".to_string(), b"picked-book".to_vec())
+            .expect("second import");
+
+        assert_eq!(second.status, ImportStatus::Duplicate);
+        assert_eq!(second.book_id, first.book_id);
+        assert_eq!(second.title, "Picked");
+        assert!(second.import_id.is_none());
+        assert_eq!(store.list_books().expect("list").len(), 1);
+    }
+
+    #[test]
+    fn a_pathless_import_of_new_bytes_never_overwrites_an_existing_book() {
+        let (_directory, store) = test_store();
+        let first = store
+            .import_bytes_without_source("book.epub".to_string(), b"edition-one".to_vec())
+            .expect("first import");
+
+        let second = store
+            .import_bytes_without_source("book.epub".to_string(), b"edition-two".to_vec())
+            .expect("second import");
+
+        assert_eq!(second.status, ImportStatus::New);
+        assert_ne!(second.book_id, first.book_id);
+        assert_eq!(store.list_books().expect("list").len(), 2);
+    }
+
+    #[test]
+    fn a_path_import_still_records_its_source_key() {
+        let (_directory, store) = test_store();
+        let source = Path::new("/home/me/book.epub");
+
+        store
+            .import_bytes(source, "book.epub".to_string(), b"desktop-book".to_vec())
+            .expect("path import");
+
+        let library = store.read_library_public().expect("library");
+        assert_eq!(library.books[0].source_key, Some(source_key_for_path(source)));
     }
 
     #[test]

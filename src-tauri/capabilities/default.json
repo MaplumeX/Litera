@@ -10,6 +10,7 @@
     "core:window:allow-minimize",
     "core:window:allow-toggle-maximize",
     "core:window:allow-close",
+    "litera-platform:default",
     {
       "identifier": "http:default",
       "allow": [

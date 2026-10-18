@@ -4,6 +4,7 @@ import { extractEpubMetadata } from "@/lib/book-utils";
 import { invokeErrorMessage } from "@/lib/app-error";
 import { epubBytesFromIpc } from "@/lib/ipc-bytes";
 import { t } from "@/lib/i18n";
+import type { IncomingBook } from "@/lib/platform-bridge";
 
 export interface ImportNotice {
   kind: "error" | "info";
@@ -135,6 +136,44 @@ export async function importAbsolutePaths(
       deps.onNotice({
         kind: "error",
         message: t("library.importFailed", { message: invokeErrorMessage(err) }),
+      });
+    }
+  }
+  return successfulBookIds;
+}
+
+/**
+ * Import books the platform handed over (picker, "Open with", share) one at
+ * a time, so one bad file reports itself without failing the rest.
+ */
+export async function importIncomingBooks(
+  books: IncomingBook[],
+  deps: ProcessImportDeps,
+): Promise<string[]> {
+  const successfulBookIds: string[] = [];
+  for (const book of books) {
+    if (!book.path) {
+      deps.onNotice({
+        kind: "error",
+        message: t("library.importFailed", {
+          message: `${book.name}: ${book.error ?? ""}`.trim(),
+        }),
+      });
+      continue;
+    }
+    try {
+      const result = await invoke<ImportBookResult>("import_incoming_book", {
+        file: { path: book.path, name: book.name },
+      });
+      const ids = await processImportResults([result], deps);
+      successfulBookIds.push(...ids);
+    } catch (err) {
+      console.error("import_incoming_book error:", err);
+      deps.onNotice({
+        kind: "error",
+        message: t("library.importFailed", {
+          message: `${book.name}: ${invokeErrorMessage(err)}`,
+        }),
       });
     }
   }

@@ -102,6 +102,7 @@ const readerHandle: ReaderViewHandle = {
   ttsSetMark: vi.fn(),
   clearTtsHighlight: vi.fn(),
   advanceTtsSection: vi.fn(async () => undefined),
+  dismissSelection: () => false,
 };
 
 let mockToc: { label: string; href: string; subitems?: unknown[] }[] = [];

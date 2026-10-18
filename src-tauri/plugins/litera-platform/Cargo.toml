@@ -1,0 +1,13 @@
+[package]
+name = "tauri-plugin-litera-platform"
+version = "0.1.0"
+description = "Litera's Android platform bridge: back, volume keys, lifecycle, incoming books, picker, immersive mode."
+edition = "2021"
+publish = false
+links = "tauri-plugin-litera-platform"
+
+[build-dependencies]
+tauri-plugin = { version = "2", features = ["build"] }
+
+[dependencies]
+tauri = { version = "~2.12.1" }

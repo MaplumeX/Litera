@@ -81,6 +81,8 @@ function setupStore(): Store {
         return Promise.resolve(null);
       case "sync_sessions":
         return Promise.resolve({ uploaded: 0, downloaded: 0 });
+      case "sync_upload_book_files":
+        return Promise.resolve({ books: 0, covers: 0, bytes: 0 });
       case "sync_upload_manifest": {
         const upload = {
           etag: args?.etag as string,
@@ -106,6 +108,28 @@ afterEach(() => {
 });
 
 describe("runSyncOnce", () => {
+  it("uploads pending book files first when asked to transfer them", async () => {
+    setupStore();
+
+    await runSyncOnce({ uploadFiles: true });
+
+    const commands = invokeMock.mock.calls.map(([cmd]) => cmd);
+    expect(commands[0]).toBe("sync_upload_book_files");
+    expect(commands).toContain("sync_upload_manifest");
+  });
+
+  it("syncs the Manifest and Sessions without transferring book files", async () => {
+    setupStore();
+
+    await runSyncOnce({ uploadFiles: false });
+
+    const commands = invokeMock.mock.calls.map(([cmd]) => cmd);
+    expect(commands).not.toContain("sync_upload_book_files");
+    expect(commands).not.toContain("sync_download_book_file");
+    expect(commands).toContain("sync_upload_manifest");
+    expect(commands).toContain("sync_sessions");
+  });
+
   it("downloads, merges, applies, and uploads with the downloaded etag", async () => {
     const store = setupStore();
 

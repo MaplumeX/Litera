@@ -2454,6 +2454,52 @@ pub async fn sync_download_book_file(
     run_sync_blocking(move || store.install_synced_book(&book_id, bytes)).await
 }
 
+/// How many bytes opening this book would download, or `None` when it would
+/// download nothing (the book is local and current, or Sync is off). The
+/// mobile shell asks before spending mobile data on a large EPUB.
+#[tauri::command]
+pub async fn sync_book_download_size(
+    app: tauri::AppHandle,
+    store: tauri::State<'_, LibraryStore>,
+    book_id: String,
+) -> AppResult<Option<u64>> {
+    let store = store.inner().clone();
+    let root = sync_root(&app)?;
+    let lookup = run_sync_blocking({
+        let root = root.clone();
+        let book_id = book_id.clone();
+        move || {
+            let already_local = store
+                .read_library_public()?
+                .books
+                .iter()
+                .any(|book| book.id == book_id);
+            let state = read_sync_state(&root)?;
+            if already_local && !state.stale_files.contains(&book_id) {
+                return Ok(None);
+            }
+            let Some(config) = crate::sync_config::read_sync_config(&root)? else {
+                return Ok(None);
+            };
+            let revision = state
+                .book_revisions
+                .get(&book_id)
+                .and_then(|entry| entry.file_revision.clone());
+            Ok(revision.map(|revision| (config, revision)))
+        }
+    })
+    .await?;
+    let Some((config, revision)) = lookup else {
+        return Ok(None);
+    };
+    let object_store = crate::sync_config::build_sync_store(&config)?;
+    let meta = object_store
+        .head(&epub_object_key(&book_id, &revision))
+        .await
+        .map_err(map_object_store_error)?;
+    Ok(Some(meta.size))
+}
+
 /// Fetch a book's EPUB at the revision the Manifest last named.
 async fn download_book_file(root: &Path, book_id: &str) -> AppResult<Vec<u8>> {
     let config = crate::sync_config::read_sync_config(root)?

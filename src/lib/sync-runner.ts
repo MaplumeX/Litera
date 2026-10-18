@@ -124,3 +124,22 @@ async function runPassSteps(options: { uploadFiles?: boolean }): Promise<void> {
     }
   }
 }
+
+/** How long leaving (closing the window, going to the background) may wait on the final pushes. */
+export const PUSH_BEFORE_LEAVING_TIMEOUT_MS = 5_000;
+
+/**
+ * The last pushes before the app goes away: pending Sync changes and the
+ * KOReader position, side by side, each bounded so leaving never hangs.
+ */
+export async function pushBeforeLeaving(flushKosync: () => Promise<void>): Promise<void> {
+  await Promise.all([
+    syncBeforeExit(PUSH_BEFORE_LEAVING_TIMEOUT_MS).catch((error: unknown) => {
+      console.warn("Sync before leaving failed:", error);
+    }),
+    Promise.race([
+      flushKosync(),
+      new Promise((resolve) => setTimeout(resolve, PUSH_BEFORE_LEAVING_TIMEOUT_MS)),
+    ]),
+  ]);
+}

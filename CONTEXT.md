@@ -1,6 +1,6 @@
 # Litera
 
-A desktop EPUB reader with a built-in reading assistant. This glossary defines the language of the app's domain.
+An EPUB reader for desktop and Android with a built-in reading assistant. Each platform is a full, standalone reader; Sync between them is optional. This glossary defines the language of the app's domain.
 
 ## Language
 
