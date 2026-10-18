@@ -119,12 +119,15 @@ jobs:
           java-version: "17"
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+        # v4 defaults `packages` to `platform-tools` only; v3 asked sdkmanager
+        # for the legacy `tools` package, which Google no longer serves.
+        uses: android-actions/setup-android@v4
 
       - name: Install the Android NDK
         run: |
           sdkmanager --install "ndk;29.0.14206865"
           echo "NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >> "$GITHUB_ENV"
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
