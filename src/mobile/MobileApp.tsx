@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Button } from "@/components/ui/button";
 import { BookImportConfirmDialog } from "@/components/BookImportFeedback";
-import { SettingsDialog } from "@/components/settings/SettingsDialog";
+import { SettingsDialog, type SettingsSection } from "@/components/settings/SettingsDialog";
 import {
   readerModeForSnap,
   snapForReaderMode,
@@ -19,6 +19,7 @@ import { useLibraryShelf, type LibraryShelf } from "@/lib/use-library-shelf";
 import { usePlatformLifecycle } from "@/lib/use-platform-lifecycle";
 import { useReaderSession, type DownloadDecision } from "@/lib/use-reader-session";
 import { useSyncScheduler } from "@/lib/use-sync-scheduler";
+import { useSystemInsets } from "@/lib/use-system-insets";
 import { MobileLibraryPage } from "@/mobile/MobileLibraryPage";
 import { MobileReaderPage, type ReaderPanel } from "@/mobile/MobileReaderPage";
 import { MobileTrashPage } from "@/mobile/MobileTrashPage";
@@ -50,19 +51,21 @@ async function bookFilesAllowed(settings: MobileSettings = loadMobileSettings())
   return !(await platformBridge.isNetworkMetered());
 }
 
+/** A snackbar: problems that outlive a page, at the bottom where Android puts them. */
 function Banner({ message, onDismiss, alert }: { message: string; onDismiss: () => void; alert?: boolean }) {
   const { t } = useT();
   return (
     <div
       role={alert ? "alert" : "status"}
-      className={
-        alert
-          ? "flex items-center gap-3 border-b border-destructive/40 bg-destructive/10 px-4 py-2 text-sm text-destructive"
-          : "flex items-center gap-3 border-b border-border bg-muted px-4 py-2 text-sm text-muted-foreground"
-      }
+      className="pointer-events-auto flex items-center gap-2 rounded-lg bg-foreground py-1.5 pr-1.5 pl-4 text-sm text-background shadow-float"
     >
-      <span className="min-w-0 flex-1">{message}</span>
-      <Button size="sm" variant="ghost" onClick={onDismiss}>
+      <span className="min-w-0 flex-1 py-1.5">{message}</span>
+      <Button
+        size="sm"
+        variant="ghost"
+        className="text-background hover:bg-background/10 hover:text-background"
+        onClick={onDismiss}
+      >
         {t("common.close")}
       </Button>
     </div>
@@ -115,6 +118,9 @@ export default function MobileApp() {
   const [mobileSettings, updateMobileSettings] = useMobileSettings();
   const [page, setPage] = useState<Page>("library");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  // Reading settings' "More settings" opens Settings on the typography page.
+  const [settingsSection, setSettingsSection] = useState<SettingsSection | undefined>(undefined);
   const [chromeVisible, setChromeVisible] = useState(false);
   const [snap, setSnap] = useState<SheetSnap>("collapsed");
   const [panel, setPanel] = useState<ReaderPanel | null>(null);
@@ -156,7 +162,16 @@ export default function MobileApp() {
   });
   const shelf = useLibraryShelf({ openingBookId: session.openingBookId });
   shelfRef.current = shelf;
-  const { refreshBooks } = shelf;
+  const { refreshBooks, setSearch } = shelf;
+
+  // Closing the search clears it, so the whole shelf comes back.
+  const handleSearchOpenChange = useCallback(
+    (open: boolean) => {
+      if (!open) setSearch("");
+      setSearchOpen(open);
+    },
+    [setSearch],
+  );
 
   // The shelf stays mounted while reading; coming back shows fresh progress
   // and "recently opened" order.
@@ -207,7 +222,7 @@ export default function MobileApp() {
 
   // Back closes the innermost layer: a dialog or the selection, then the
   // assistant sheet, then the reader toolbars, then the Reader itself. On
-  // the Library it leaves the app.
+  // the Library it closes the search, then leaves the app.
   const handleBack = () => {
     if (closeTopOverlay()) return;
     if (page === "reader") {
@@ -227,11 +242,26 @@ export default function MobileApp() {
       setPage("library");
       return;
     }
+    if (searchOpen) {
+      handleSearchOpenChange(false);
+      return;
+    }
     void platformBridge.exitApp();
   };
   const handleBackRef = useRef(handleBack);
   handleBackRef.current = handleBack;
   useEffect(() => platformBridge.listen("back", () => handleBackRef.current()), []);
+
+  useSystemInsets();
+
+  // The status and navigation bar icons follow the app's theme, not the
+  // system's: dark icons on a light page, light ones on a dark page.
+  const lightBars = session.resolvedTheme !== "dark";
+  useEffect(() => {
+    void platformBridge.setSystemBarsLight(lightBars).catch((error: unknown) => {
+      console.error("setSystemBarsLight failed:", error);
+    });
+  }, [lightBars]);
 
   // Chrome-free reading is immersive: no status or navigation bar.
   const immersive = page === "reader" && !chromeVisible;
@@ -274,19 +304,6 @@ export default function MobileApp() {
 
   return (
     <main className="mobile-shell fixed inset-0 flex flex-col bg-background text-foreground">
-      {session.persistenceError && (
-        <Banner
-          alert
-          message={t("reader.persistFailed", { message: session.persistenceError })}
-          onDismiss={session.clearPersistenceError}
-        />
-      )}
-      {syncScheduler.persistentFailure && (
-        <Banner
-          message={t("sync.failureNotice", { message: syncScheduler.persistentFailure })}
-          onDismiss={syncScheduler.clearPersistentFailure}
-        />
-      )}
       <div className="min-h-0 flex-1">
         {page === "reader" ? (
           <MobileReaderPage
@@ -298,7 +315,10 @@ export default function MobileApp() {
             panel={panel}
             onPanelChange={setPanel}
             onBack={() => void closeReader()}
-            onOpenTypography={() => setSettingsOpen(true)}
+            onOpenTypography={() => {
+              setSettingsSection("typography");
+              setSettingsOpen(true);
+            }}
           />
         ) : page === "trash" ? (
           <MobileTrashPage shelf={shelf} onBack={() => setPage("library")} />
@@ -307,13 +327,36 @@ export default function MobileApp() {
             shelf={shelf}
             onOpenBook={session.openBook}
             openingBookId={session.openingBookId}
-            onOpenSettings={() => setSettingsOpen(true)}
+            onOpenSettings={() => {
+              setSettingsSection(undefined);
+              setSettingsOpen(true);
+            }}
             onOpenTrash={() => setPage("trash")}
+            searchOpen={searchOpen}
+            onSearchOpenChange={handleSearchOpenChange}
           />
         )}
       </div>
+      {(session.persistenceError || syncScheduler.persistentFailure) && (
+        <div className="pointer-events-none fixed inset-x-0 bottom-[calc(var(--safe-bottom)+5.5rem)] z-40 flex flex-col gap-2 px-4">
+          {session.persistenceError && (
+            <Banner
+              alert
+              message={t("reader.persistFailed", { message: session.persistenceError })}
+              onDismiss={session.clearPersistenceError}
+            />
+          )}
+          {syncScheduler.persistentFailure && (
+            <Banner
+              message={t("sync.failureNotice", { message: syncScheduler.persistentFailure })}
+              onDismiss={syncScheduler.clearPersistentFailure}
+            />
+          )}
+        </div>
+      )}
       <SettingsDialog
         layout="page"
+        initialSection={settingsSection}
         open={settingsOpen}
         onClose={() => void handleCloseSettings()}
         bookTitle={editingBook ? session.bookTitle || null : null}

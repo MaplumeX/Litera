@@ -41,7 +41,7 @@ function coverUrl(path: string, coverRev?: number): string {
   return withCoverRevision(convertFileSrc(path), coverRev);
 }
 
-function BookCoverImage({
+export function BookCoverImage({
   book,
   coverRev,
   small = false,
@@ -81,7 +81,7 @@ function BookCoverImage({
 }
 
 /** Bind the shelf's per-book callbacks to one book for its menus. */
-function bookActions(
+export function bookActions(
   book: BookRecord,
   handlers: {
     onOpen: (bookId: string) => void | Promise<void>;

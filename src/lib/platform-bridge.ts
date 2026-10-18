@@ -14,6 +14,20 @@ export interface IncomingBook {
 
 export type LifecycleState = "foreground" | "background";
 
+/**
+ * Where the system bars, the display cutout and the keyboard cover the
+ * WebView, in CSS px. Hidden bars count as zero; the cutout is reported on
+ * its own because it stays when the bars hide.
+ */
+export interface SystemInsets {
+  top: number;
+  bottom: number;
+  left: number;
+  right: number;
+  cutoutTop: number;
+  cutoutBottom: number;
+}
+
 export interface PlatformEvents {
   /** The system Back gesture or button. */
   back: Record<string, never>;
@@ -22,6 +36,8 @@ export interface PlatformEvents {
   lifecycle: { state: LifecycleState };
   /** Books from an "Open with" or a share while the app is running. */
   incomingBooks: { books: IncomingBook[] };
+  /** The system bars, cutout or keyboard moved. */
+  insets: SystemInsets;
 }
 
 export type PlatformEvent = keyof PlatformEvents;
@@ -45,7 +61,11 @@ export interface PlatformBridge {
   pickBooks(): Promise<IncomingBook[]>;
   /** Books that arrived before anything listened (a cold-start "Open with"). */
   takePendingIncomingBooks(): Promise<IncomingBook[]>;
+  /** The latest insets, or null before the first layout pass (the event follows). */
+  getInsets(): Promise<SystemInsets | null>;
   setImmersive(enabled: boolean): Promise<void>;
+  /** Dark system bar icons for a light page (true), light icons for a dark one. */
+  setSystemBarsLight(light: boolean): Promise<void>;
   setKeepScreenOn(enabled: boolean): Promise<void>;
   /** Intercept the volume keys for paging; otherwise they change the volume. */
   setVolumeKeyPaging(enabled: boolean): Promise<void>;
@@ -83,7 +103,12 @@ const androidBridge: PlatformBridge = {
   pickBooks: async () => (await command<{ books: IncomingBook[] }>("pickBooks")).books,
   takePendingIncomingBooks: async () =>
     (await command<{ books: IncomingBook[] }>("takePendingIncomingBooks")).books,
+  getInsets: async () => {
+    const insets = await command<Partial<SystemInsets>>("getInsets");
+    return typeof insets.top === "number" ? (insets as SystemInsets) : null;
+  },
   setImmersive: (enabled) => command("setImmersive", { enabled }),
+  setSystemBarsLight: (enabled) => command("setSystemBarsLight", { enabled }),
   setKeepScreenOn: (enabled) => command("setKeepScreenOn", { enabled }),
   setVolumeKeyPaging: (enabled) => command("setVolumeKeyPaging", { enabled }),
   isNetworkMetered: async () => (await command<{ metered: boolean }>("getNetworkStatus")).metered,
@@ -95,7 +120,9 @@ const desktopBridge: PlatformBridge = {
   listen: () => Object.assign(() => {}, { ready: Promise.resolve() }),
   pickBooks: async () => [],
   takePendingIncomingBooks: async () => [],
+  getInsets: async () => null,
   setImmersive: async () => {},
+  setSystemBarsLight: async () => {},
   setKeepScreenOn: async () => {},
   setVolumeKeyPaging: async () => {},
   // Desktops don't ration book-file transfers.

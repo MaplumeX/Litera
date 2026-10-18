@@ -41,9 +41,9 @@ class FlagArgs {
 
 /**
  * The platform event bridge the mobile shell talks to. Events: `back`,
- * `volumeKey`, `lifecycle`, `incomingBooks`. Commands: the document picker,
- * immersive mode, keep-screen-on, volume-key interception, network type and
- * leaving the app.
+ * `volumeKey`, `lifecycle`, `incomingBooks`, `insets`. Commands: the document
+ * picker, the current insets, immersive mode, the system bar icon colour,
+ * keep-screen-on, volume-key interception, network type and leaving the app.
  *
  * Picked and shared EPUBs are copied into `cacheDir/incoming-books/` and
  * handed to the WebView as `{ name, path }`; the Rust import command reads
@@ -57,6 +57,8 @@ class PlatformPlugin(private val activity: Activity) : Plugin(activity) {
   // Books that arrived before the WebView listened (a cold start "Open with").
   private val pendingIncoming = mutableListOf<JSObject>()
   @Volatile private var volumeKeyPaging = false
+  private val insetsLock = Any()
+  private var lastInsets: JSObject? = null
   private var webView: WebView? = null
 
   private val backCallback = object : OnBackPressedCallback(true) {
@@ -125,8 +127,11 @@ class PlatformPlugin(private val activity: Activity) : Plugin(activity) {
 
   /**
    * Edge-to-edge WebViews don't resize for system bars or the keyboard, so
-   * the visible insets are published as CSS variables (in CSS px). Hidden
-   * bars (immersive mode) report zero.
+   * the visible insets (in CSS px) go to the WebView as the `insets` event
+   * and the `getInsets` command. Pushing a script into the page instead
+   * loses the values whenever the page (re)loads after the last change,
+   * which on a cold start is always. Hidden bars (immersive mode) report
+   * zero; `cutout*` stays put either way so the reader can avoid a notch.
    */
   private fun publishInsets(webView: WebView) {
     ViewCompat.setOnApplyWindowInsetsListener(webView) { view, insets ->
@@ -134,21 +139,33 @@ class PlatformPlugin(private val activity: Activity) : Plugin(activity) {
       val bars = insets.getInsets(
         WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
       )
+      val cutout = insets.getInsets(WindowInsetsCompat.Type.displayCutout())
       val ime = insets.getInsets(WindowInsetsCompat.Type.ime())
-      val top = bars.top / density
-      val bottom = maxOf(bars.bottom, ime.bottom) / density
-      val left = bars.left / density
-      val right = bars.right / density
-      val script = "(function(s){" +
-        "s.setProperty('--android-inset-top','${top}px');" +
-        "s.setProperty('--android-inset-bottom','${bottom}px');" +
-        "s.setProperty('--android-inset-left','${left}px');" +
-        "s.setProperty('--android-inset-right','${right}px');" +
-        "})(document.documentElement.style)"
-      view.post { (view as WebView).evaluateJavascript(script, null) }
+      val payload = JSObject().apply {
+        put("top", bars.top / density)
+        put("bottom", maxOf(bars.bottom, ime.bottom) / density)
+        put("left", bars.left / density)
+        put("right", bars.right / density)
+        put("cutoutTop", cutout.top / density)
+        put("cutoutBottom", cutout.bottom / density)
+      }
+      synchronized(insetsLock) { lastInsets = payload }
+      trigger(INSETS_EVENT, payload)
       ViewCompat.onApplyWindowInsets(view, insets)
     }
     ViewCompat.requestApplyInsets(webView)
+  }
+
+  @Command
+  fun getInsets(invoke: Invoke) {
+    val insets = synchronized(insetsLock) { lastInsets }
+    if (insets != null) {
+      invoke.resolve(insets)
+      return
+    }
+    // Not laid out yet: ask for a pass; the event follows.
+    activity.runOnUiThread { webView?.let { ViewCompat.requestApplyInsets(it) } }
+    invoke.resolve(JSObject())
   }
 
   // --- Incoming books ------------------------------------------------------
@@ -300,6 +317,19 @@ class PlatformPlugin(private val activity: Activity) : Plugin(activity) {
     }
   }
 
+  /** Dark status/navigation bar icons on a light page, light ones on a dark page. */
+  @Command
+  fun setSystemBarsLight(invoke: Invoke) {
+    val args = invoke.parseArgs(FlagArgs::class.java)
+    activity.runOnUiThread {
+      val window = activity.window
+      val controller = WindowCompat.getInsetsController(window, window.decorView)
+      controller.isAppearanceLightStatusBars = args.enabled
+      controller.isAppearanceLightNavigationBars = args.enabled
+      invoke.resolve()
+    }
+  }
+
   @Command
   fun setKeepScreenOn(invoke: Invoke) {
     val args = invoke.parseArgs(FlagArgs::class.java)
@@ -339,6 +369,7 @@ class PlatformPlugin(private val activity: Activity) : Plugin(activity) {
     private const val VOLUME_KEY_EVENT = "volumeKey"
     private const val LIFECYCLE_EVENT = "lifecycle"
     private const val INCOMING_EVENT = "incomingBooks"
+    private const val INSETS_EVENT = "insets"
     private const val INCOMING_DIR = "incoming-books"
     private const val HANDLED_EXTRA = "com.maplume.litera.platform.HANDLED"
     private const val EPUB_MIME = "application/epub+zip"

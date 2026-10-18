@@ -28,7 +28,7 @@ import {
 import type { LibraryViewMode } from "@/lib/library-shelf-prefs";
 import type { ReadingStatus } from "@/types/library";
 
-const SORT_OPTIONS: { value: LibrarySortKey; labelKey: MessageKey }[] = [
+export const SORT_OPTIONS: { value: LibrarySortKey; labelKey: MessageKey }[] = [
   { value: "recent", labelKey: "library.sort.recent" },
   { value: "title", labelKey: "library.sort.title" },
   { value: "author", labelKey: "library.sort.author" },

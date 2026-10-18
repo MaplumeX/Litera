@@ -452,6 +452,22 @@ export const zhCN = {
   "mobile.wifiOnly": "仅在 Wi-Fi 下传输书籍文件",
   "mobile.wifiOnlyHint": "使用移动数据时，书库、进度和会话照常同步，EPUB 文件的上传和下载等到连上 Wi-Fi。",
   "mobile.uninstallNote": "导入的书保存在应用内部，卸载 Litera 会一并删除。",
+  "mobile.shelf": "书架",
+  "mobile.searchLibrary": "搜索书架",
+  "mobile.closeSearch": "关闭搜索",
+  "mobile.sortAndView": "排序与显示",
+  "mobile.view": "显示方式",
+  "mobile.order": "顺序",
+  "mobile.readPct": "已读 {pct}%",
+  "mobile.notStarted": "未开始",
+  "mobile.readingSettings": "阅读设置",
+  "mobile.moreSettings": "更多设置",
+  "mobile.night": "夜间",
+  "mobile.day": "白天",
+  "mobile.textSize": "字号",
+  "mobile.spacing": "行距",
+  "mobile.margins": "边距",
+  "mobile.pageTurn": "翻页",
 } as const;
 
 export type MessageKey = keyof typeof zhCN;

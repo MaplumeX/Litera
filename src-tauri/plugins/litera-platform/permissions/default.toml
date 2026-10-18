@@ -10,7 +10,9 @@ description = "Enables every command of the Android platform bridge."
 commands.allow = [
   "pickBooks",
   "takePendingIncomingBooks",
+  "getInsets",
   "setImmersive",
+  "setSystemBarsLight",
   "setKeepScreenOn",
   "setVolumeKeyPaging",
   "getNetworkStatus",

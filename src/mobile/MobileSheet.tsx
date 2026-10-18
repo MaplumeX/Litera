@@ -29,13 +29,13 @@ export function MobileSheet({
         <DialogPrimitive.Content
           aria-describedby={undefined}
           className={cn(
-            "fixed inset-x-0 bottom-0 z-50 flex max-h-[85vh] flex-col rounded-t-2xl border-t bg-background pb-[var(--android-inset-bottom,0px)] shadow-float outline-none data-[state=open]:animate-in data-[state=open]:slide-in-from-bottom",
+            "fixed inset-x-0 bottom-0 z-50 flex max-h-[calc(100%-var(--safe-top)-2rem)] flex-col rounded-t-[1.75rem] bg-background pb-[var(--safe-bottom)] shadow-float outline-none data-[state=open]:animate-in data-[state=open]:slide-in-from-bottom",
             className,
           )}
         >
-          <div aria-hidden className="mx-auto mt-2 h-1 w-10 shrink-0 rounded-full bg-muted-foreground/30" />
+          <div aria-hidden className="mx-auto mt-3 h-1 w-8 shrink-0 rounded-full bg-muted-foreground/30" />
           <DialogPrimitive.Title
-            className={cn("shrink-0 px-4 pt-2 pb-1 text-sm font-medium", hideTitle && "sr-only")}
+            className={cn("shrink-0 truncate px-6 pt-3 pb-2 text-base font-medium", hideTitle && "sr-only")}
           >
             {title}
           </DialogPrimitive.Title>

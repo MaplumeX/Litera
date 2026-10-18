@@ -273,11 +273,25 @@
   }
 }
 
+/* What the system bars, cutout and keyboard cover, as one set of variables.
+ * The Android plugin publishes --android-inset-* (use-system-insets.ts);
+ * env() covers a WebView that reports safe areas itself. max(), so a WebView
+ * that does both never pads twice. */
+:root {
+  --safe-top: max(env(safe-area-inset-top, 0px), var(--android-inset-top, 0px));
+  --safe-bottom: max(env(safe-area-inset-bottom, 0px), var(--android-inset-bottom, 0px));
+  --safe-left: max(env(safe-area-inset-left, 0px), var(--android-inset-left, 0px));
+  --safe-right: max(env(safe-area-inset-right, 0px), var(--android-inset-right, 0px));
+}
+
 /* The phone shell: no tap flash, no rubber-band scroll of the whole page,
  * and no system callout on long-press (long-press opens Litera's own sheet). */
 .mobile-shell {
   -webkit-tap-highlight-color: transparent;
   overscroll-behavior: none;
+  /* Landscape: the navigation bar or a cutout sits on a side. */
+  padding-left: var(--safe-left);
+  padding-right: var(--safe-right);
 }
 .mobile-shell [data-shelf],
 .mobile-shell [data-shelf] * {

@@ -57,12 +57,12 @@ export const AssistantSheet = forwardRef<ChatPanelHandle, AssistantSheetProps>(
         hidden={collapsed}
         className={cn(
           "absolute inset-x-0 bottom-0 z-30 flex flex-col border-t bg-card shadow-float",
-          snap === "full" ? "rounded-none pt-[var(--android-inset-top,0px)]" : "rounded-t-2xl",
+          snap === "full" ? "rounded-none pt-[var(--safe-top)]" : "rounded-t-2xl",
           dragOffset === 0 && "transition-[height] duration-200 motion-reduce:transition-none",
         )}
         style={{
           height: `calc(${snap === "full" ? "100%" : "50%"} - ${dragOffset}px)`,
-          paddingBottom: "var(--android-inset-bottom, 0px)",
+          paddingBottom: "var(--safe-bottom)",
         }}
       >
         <div className="flex shrink-0 items-center gap-1 px-2">

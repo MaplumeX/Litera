@@ -49,7 +49,9 @@ const bridge = vi.hoisted(() => {
     }),
     pickBooks: vi.fn(async (): Promise<unknown[]> => []),
     takePendingIncomingBooks: vi.fn(async (): Promise<unknown[]> => []),
+    getInsets: vi.fn(async () => null),
     setImmersive: vi.fn(async (_enabled: boolean) => {}),
+    setSystemBarsLight: vi.fn(async (_light: boolean) => {}),
     setKeepScreenOn: vi.fn(async (_enabled: boolean) => {}),
     setVolumeKeyPaging: vi.fn(async (_enabled: boolean) => {}),
     isNetworkMetered: vi.fn(async () => false),
@@ -257,6 +259,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  document.documentElement.removeAttribute("style");
   vi.unstubAllGlobals();
 });
 
@@ -264,11 +267,29 @@ describe("MobileApp — navigation", () => {
   it("opens a Book from the Library and Back returns to the Library, then leaves the app", async () => {
     const screen = await renderApp();
     await openBook(screen);
-    expect(screen.queryByPlaceholderText(t("library.searchPlaceholder"))).toBeNull();
+    expect(screen.queryByRole("button", { name: t("mobile.searchLibrary") })).toBeNull();
 
     await back();
     await waitFor(() => expect(screen.queryByTestId("reader-view")).toBeNull());
-    expect(screen.getByPlaceholderText(t("library.searchPlaceholder"))).toBeTruthy();
+    expect(screen.getByRole("button", { name: t("mobile.searchLibrary") })).toBeTruthy();
+    expect(bridge.api.exitApp).not.toHaveBeenCalled();
+
+    await back();
+    expect(bridge.api.exitApp).toHaveBeenCalledOnce();
+  });
+
+  it("closes the Library search on Back before leaving the app", async () => {
+    books = [book(), book({ id: "book2", title: "另一本书" })];
+    const screen = await renderApp();
+    fireEvent.click(screen.getByRole("button", { name: t("mobile.searchLibrary") }));
+    fireEvent.change(screen.getByRole("searchbox", { name: t("mobile.searchLibrary") }), {
+      target: { value: "另一" },
+    });
+    await waitFor(() => expect(screen.queryAllByTitle("第一本书")).toHaveLength(0));
+
+    await back();
+    expect(screen.queryByRole("searchbox")).toBeNull();
+    await waitFor(() => expect(screen.getAllByTitle("第一本书").length).toBeGreaterThan(0));
     expect(bridge.api.exitApp).not.toHaveBeenCalled();
 
     await back();
@@ -325,6 +346,69 @@ describe("MobileApp — navigation", () => {
     fireEvent.click(screen.getByText("middle-tap"));
     expect(screen.queryByRole("button", { name: t("reader.backToLibrary") })).toBeNull();
     expect(bridge.api.setImmersive).toHaveBeenLastCalledWith(true);
+  });
+});
+
+describe("MobileApp — system bars", () => {
+  const inset = (name: string) => document.documentElement.style.getPropertyValue(name);
+  const insets = { top: 24, bottom: 16, left: 0, right: 0, cutoutTop: 24, cutoutBottom: 0 };
+
+  it("keeps the page clear of the system bars: asks for the insets, then follows them", async () => {
+    bridge.api.getInsets.mockImplementationOnce(async () => insets as never);
+    await renderApp();
+    await waitFor(() => expect(inset("--android-inset-top")).toBe("24px"));
+    expect(inset("--android-inset-bottom")).toBe("16px");
+    expect(inset("--android-cutout-top")).toBe("24px");
+
+    act(() => emit("insets", { ...insets, top: 0, bottom: 0 }));
+    expect(inset("--android-inset-top")).toBe("0px");
+    expect(inset("--android-cutout-top")).toBe("24px");
+  });
+
+  it("matches the status bar icons to the app's theme", async () => {
+    const screen = await renderApp();
+    expect(bridge.api.setSystemBarsLight).toHaveBeenLastCalledWith(true);
+    await openBook(screen);
+
+    fireEvent.click(screen.getByText("middle-tap"));
+    fireEvent.click(screen.getByRole("button", { name: t("mobile.night") }));
+    await waitFor(() => expect(bridge.api.setSystemBarsLight).toHaveBeenLastCalledWith(false));
+    expect(screen.getByRole("button", { name: t("mobile.day") })).toBeTruthy();
+  });
+});
+
+describe("MobileApp — reading settings", () => {
+  it("changes the text size from the reader's settings sheet", async () => {
+    const screen = await renderApp();
+    await openBook(screen);
+    fireEvent.click(screen.getByText("middle-tap"));
+    fireEvent.click(screen.getByRole("button", { name: t("mobile.readingSettings") }));
+    const sheet = await screen.findByRole("dialog", { name: t("mobile.readingSettings") });
+
+    readerHandle.setStyles.mockClear();
+    fireEvent.click(
+      within(sheet).getByRole("button", {
+        name: t("settings.stepper.increase", { label: t("mobile.textSize") }),
+      }),
+    );
+    await waitFor(() =>
+      expect(readerHandle.setStyles).toHaveBeenLastCalledWith(expect.stringContaining("font-size: 17px")),
+    );
+  });
+
+  it("opens Settings on the typography page from “More settings”, and Back returns to the list", async () => {
+    const screen = await renderApp();
+    await openBook(screen);
+    fireEvent.click(screen.getByText("middle-tap"));
+    fireEvent.click(screen.getByRole("button", { name: t("mobile.readingSettings") }));
+    fireEvent.click(await screen.findByRole("button", { name: t("mobile.moreSettings") }));
+
+    expect(await screen.findByRole("dialog", { name: t("settings.typography") })).toBeTruthy();
+    await back();
+    expect(await screen.findByRole("dialog", { name: t("settings.title") })).toBeTruthy();
+    expect(screen.getByRole("button", { name: t("mobile.device") })).toBeTruthy();
+    await back();
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: t("settings.title") })).toBeNull());
   });
 });
 
