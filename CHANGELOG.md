@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-10-18
+
+### Fixed
+
+- **Backblaze B2 上的同步**：后端不支持条件写入（`If-Match` 返回 501）时，Manifest 改为先 HEAD 检查再普通 PUT，同步不再在几分钟的重试之后失败。
+- **Android 上的同步**：S3 同步在 Android 上改用内置的 Mozilla 根证书校验 TLS，不再因为缺少 JNI 初始化而卡住或崩溃。
+- **同步地址校验**：端点缺少 `http://` 或 `https://` 前缀时保存即报错，不再让连接测试或同步命令一直挂着。
+- **连接测试快速失败**：连接测试改用较短的超时并且只重试一次，地址填错时几秒内就能看到失败；表单里没有重新输入密钥时，用已保存的密钥进行测试。
+
 ## [0.5.0] - 2026-10-18
 
 ### Added
