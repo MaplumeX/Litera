@@ -356,6 +356,14 @@
   .mobile-ui .m-page-dialog.m-page-dialog[data-state="closed"] {
     animation: m-page-out 200ms var(--ease-emphasized-accelerate) forwards;
   }
+  /* Its backdrop hides the page underneath at once, as a page change does,
+   * and fades out with the page on the way back. */
+  .mobile-ui .m-page-backdrop.m-page-backdrop[data-state="open"] {
+    animation: none;
+  }
+  .mobile-ui .m-page-backdrop.m-page-backdrop[data-state="closed"] {
+    animation: m-fade-out 200ms var(--ease-emphasized-accelerate) forwards;
+  }
   .m-page-push { animation: m-page-push 300ms var(--ease-emphasized-decelerate); }
   .m-page-pop { animation: m-page-pop 300ms var(--ease-emphasized-decelerate); }
   .m-page-open { animation: m-page-open 300ms var(--ease-emphasized-decelerate); }

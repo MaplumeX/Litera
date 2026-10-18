@@ -640,7 +640,9 @@ export function SettingsDialog({
             : "flex h-[40rem] w-[768px] max-h-[85vh] gap-0 overflow-hidden p-0 sm:max-w-[calc(100%-2rem)]"
         }
         showCloseButton={!page}
-        overlayClassName={page ? "bg-transparent" : undefined}
+        // An opaque backdrop that is there at once: the page underneath (and
+        // the drawer still sliding away) must not show through the fade-in.
+        overlayClassName={page ? "m-page-backdrop bg-background" : undefined}
         onEscapeKeyDown={(event) => {
           const target = event.target;
           if (target instanceof HTMLElement && target.closest("[data-typography-stepper]")) {
