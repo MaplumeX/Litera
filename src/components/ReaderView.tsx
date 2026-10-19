@@ -1103,6 +1103,12 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       clearIframeSelection();
     }, [selectionPos, onSelectionCapture, clearIframeSelection]);
 
+    const handleCopySelection = useCallback(() => {
+      if (!selectionPos) return;
+      void navigator.clipboard.writeText(selectionPos.text);
+      clearIframeSelection();
+    }, [selectionPos, clearIframeSelection]);
+
     const handleHighlightSelection = useCallback((color: HighlightColor) => {
       const view = viewRef.current as unknown as FoliateAnnotator | null;
       if (!view) return;
@@ -1441,6 +1447,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
             y={selectionPos.y}
             lastColor={getLastUsedHighlightColor()}
             onHighlight={handleHighlightSelection}
+            onCopy={handleCopySelection}
             onAskAgent={handleAskAgent}
           />
         )}
