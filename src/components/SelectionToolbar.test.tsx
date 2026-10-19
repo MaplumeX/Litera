@@ -10,8 +10,9 @@ afterEach(() => {
 });
 
 describe("SelectionToolbar", () => {
-  it("offers one-click color highlights then ask-agent", () => {
+  it("offers one-click color highlights, copy, then ask-agent", () => {
     const onHighlight = vi.fn();
+    const onCopy = vi.fn();
     const onAskAgent = vi.fn();
     const { getByLabelText, getByText, getAllByRole } = render(
       <SelectionToolbar
@@ -19,6 +20,7 @@ describe("SelectionToolbar", () => {
         y={20}
         lastColor="yellow"
         onHighlight={onHighlight}
+        onCopy={onCopy}
         onAskAgent={onAskAgent}
       />,
     );
@@ -29,11 +31,14 @@ describe("SelectionToolbar", () => {
       "用蓝色高亮",
       "用粉色高亮",
       "用橙色高亮",
+      "复制",
       "问 agent",
     ]);
     fireEvent.click(getByLabelText("用蓝色高亮"));
+    fireEvent.click(getByLabelText("复制"));
     fireEvent.click(getByText("问 agent"));
     expect(onHighlight).toHaveBeenCalledWith("blue");
+    expect(onCopy).toHaveBeenCalledOnce();
     expect(onAskAgent).toHaveBeenCalledOnce();
   });
 });
