@@ -2437,6 +2437,11 @@ fn stage_orphaned_book_directories(root: &Path, data: &LibraryData) -> AppResult
                 entry.path().display()
             )));
         }
+        // Sync placeholders never have a library.json record by design; they
+        // are books-in-waiting, not interrupted imports.
+        if is_placeholder_dir(&entry.path()) {
+            continue;
+        }
         let safe_name = name
             .to_str()
             .filter(|name| !name.is_empty())
@@ -4316,6 +4321,30 @@ mod tests {
                 .is_some_and(|name| name.starts_with("orphan-deadbeef-"))
         }));
         assert!(recovered.list_books().expect("list").is_empty());
+    }
+
+    #[test]
+    fn sync_placeholders_survive_a_restart() {
+        let (directory, store) = test_store();
+        store
+            .save_placeholder("cafebabe", "Synced", "Elsewhere", Some(0.4), None, None, None)
+            .expect("placeholder");
+        drop(store);
+
+        let recovered =
+            LibraryStore::initialize(directory.path().to_path_buf()).expect("recover store");
+
+        assert!(directory
+            .path()
+            .join("books")
+            .join("cafebabe")
+            .join(PLACEHOLDER_FILE)
+            .is_file());
+        let books = recovered.list_books().expect("list");
+        assert_eq!(books.len(), 1);
+        assert_eq!(books[0].title, "Synced");
+        let trash = directory.path().join("books").join(".trash");
+        assert!(fs::read_dir(&trash).map_or(true, |mut entries| entries.next().is_none()));
     }
 
     #[test]
