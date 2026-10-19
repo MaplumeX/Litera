@@ -37,9 +37,11 @@ import { invokeErrorMessage } from "@/lib/app-error";
 import { cn } from "@/lib/utils";
 import {
   AGENT_PROVIDERS,
+  CHATGPT_PROVIDER_ID,
   findProviderExample,
   isCustomProviderId,
 } from "@/types/agent-config";
+import { listBuiltinModelIds } from "@/agent/runtime/model-resolution";
 import { useT, type MessageKey } from "@/lib/i18n";
 
 export interface AgentConfigFormProps {
@@ -69,8 +71,12 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
     deleteCustomProvider,
     switchProvider,
     listRemoteModels,
+    chatgptLogin,
+    chatgptCancelLogin,
+    chatgptLogout,
     loading,
     saving,
+    signingIn,
     error,
   } = useAgentConfig();
 
@@ -88,6 +94,7 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [catalogModels, setCatalogModels] = useState<string[]>([]);
 
   useEffect(() => {
     if (!active) {
@@ -139,9 +146,26 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
     : null;
   const isNewCustom = provider === NEW_CUSTOM;
   const isCustom = selectedCustom !== null || isNewCustom;
+  const isChatgpt = provider === CHATGPT_PROVIDER_ID;
+  const chatgptAccount = snapshot?.chatgptAccount ?? null;
+  // The plan's own listing when sign-in fetched one, else the OpenAI catalog.
+  const chatgptModels = chatgptAccount?.models.length ? chatgptAccount.models : catalogModels;
   const hasExistingKey = selectedCustom
     ? selectedCustom.hasApiKey
-    : !isNewCustom && (snapshot?.providersWithKey.includes(provider) ?? false);
+    : isChatgpt
+      ? chatgptAccount !== null
+      : !isNewCustom && (snapshot?.providersWithKey.includes(provider) ?? false);
+
+  useEffect(() => {
+    if (!isChatgpt) return;
+    let cancelled = false;
+    void listBuiltinModelIds(CHATGPT_PROVIDER_ID).then((ids) => {
+      if (!cancelled) setCatalogModels(ids);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isChatgpt]);
   const apiKeyPlaceholder = hasExistingKey
     ? t("agent.apiKeyKeep")
     : isCustom && isLocalBaseUrl(customBaseUrl)
@@ -211,7 +235,9 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
     if (!canApply) return;
     setSuccessMessage(null);
     try {
-      if (isNewCustom) {
+      if (isChatgpt) {
+        await switchProvider(CHATGPT_PROVIDER_ID, model);
+      } else if (isNewCustom) {
         const entry = await addCustomProvider(customName, customBaseUrl, apiKey, customModels, customImageInput);
         // Point at the created entry so a failed switch retries it instead of adding a duplicate.
         setProvider(entry.id);
@@ -261,6 +287,25 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
       setApiKey("");
       fillCustomFields("", "", []);
       setSuccessMessage(t("agent.deletedCustom"));
+    } catch {
+      // error state is surfaced from the hook
+    }
+  };
+
+  const handleChatgptLogin = async () => {
+    setSuccessMessage(null);
+    try {
+      const account = await chatgptLogin();
+      if (!model) setModel(account.models[0] ?? "");
+    } catch {
+      // error state is surfaced from the hook; cancelling is silent
+    }
+  };
+
+  const handleChatgptLogout = async () => {
+    setSuccessMessage(null);
+    try {
+      await chatgptLogout();
     } catch {
       // error state is surfaced from the hook
     }
@@ -337,18 +382,66 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
           </>
         )}
 
-        <Field label={t("agent.apiKey")}>
-          <Input
-            type="password"
-            value={apiKey}
-            onChange={(event) => setApiKey(event.target.value)}
-            placeholder={apiKeyPlaceholder}
-            className="w-full"
-          />
-          {hasExistingKey && !apiKey && (
-            <p className="mt-1 text-xs text-muted-foreground">{t("agent.apiKeySavedHint")}</p>
-          )}
-        </Field>
+        {isChatgpt ? (
+          <Field label={t("agent.chatgptAccount")}>
+            {chatgptAccount ? (
+              <div className="flex items-center gap-2">
+                <p className="min-w-0 flex-1 truncate text-sm">
+                  {chatgptAccount.email
+                    ? t("agent.chatgptSignedIn", { email: chatgptAccount.email })
+                    : t("agent.chatgptSignedInNoEmail")}
+                </p>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => void handleChatgptLogout()}
+                  disabled={saving || signingIn}
+                >
+                  {t("agent.chatgptSignOut")}
+                </Button>
+              </div>
+            ) : signingIn ? (
+              <div className="flex items-center gap-2">
+                <p className="min-w-0 flex-1 text-sm text-muted-foreground">
+                  {t("agent.chatgptSigningIn")}
+                </p>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => void chatgptCancelLogin()}
+                >
+                  {t("common.cancel")}
+                </Button>
+              </div>
+            ) : (
+              <Button
+                type="button"
+                size="sm"
+                className="w-full"
+                onClick={() => void handleChatgptLogin()}
+                disabled={saving}
+              >
+                {t("agent.chatgptSignIn")}
+              </Button>
+            )}
+            <p className="mt-1 text-xs text-muted-foreground">{t("agent.chatgptHint")}</p>
+          </Field>
+        ) : (
+          <Field label={t("agent.apiKey")}>
+            <Input
+              type="password"
+              value={apiKey}
+              onChange={(event) => setApiKey(event.target.value)}
+              placeholder={apiKeyPlaceholder}
+              className="w-full"
+            />
+            {hasExistingKey && !apiKey && (
+              <p className="mt-1 text-xs text-muted-foreground">{t("agent.apiKeySavedHint")}</p>
+            )}
+          </Field>
+        )}
 
         <Field label={t("agent.model")}>
           {isCustom ? (
@@ -369,6 +462,13 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
                 t={t}
               />
             </div>
+          ) : isChatgpt ? (
+            <ModelCombobox
+              models={chatgptModels}
+              value={model}
+              disabled={saving || !chatgptAccount}
+              onSelect={setModel}
+            />
           ) : (
             <Input
               type="text"

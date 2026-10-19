@@ -1,7 +1,7 @@
 import { useCallback, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { AgentConfigSnapshot, CustomProviderEntry } from "@/types/agent-config";
-import { invokeErrorMessage } from "@/lib/app-error";
+import type { AgentConfigSnapshot, ChatgptAccount, CustomProviderEntry } from "@/types/agent-config";
+import { invokeErrorMessage, isInvokeAppError } from "@/lib/app-error";
 import { embeddedAgentRuntime } from "@/agent/runtime/embedded-runtime";
 
 export function useAgentConfig() {
@@ -125,6 +125,44 @@ export function useAgentConfig() {
     [load],
   );
 
+  const [signingIn, setSigningIn] = useState(false);
+
+  /** Opens the browser for Sign in with ChatGPT and resolves once tokens are saved. */
+  const chatgptLogin = useCallback(async () => {
+    setSigningIn(true);
+    setError(null);
+    try {
+      const account = await invoke<ChatgptAccount>("chatgpt_login");
+      embeddedAgentRuntime.invalidateConfig();
+      await load();
+      return account;
+    } catch (err) {
+      if (!(isInvokeAppError(err) && err.code === "Cancelled")) setError(invokeErrorMessage(err));
+      throw err;
+    } finally {
+      setSigningIn(false);
+    }
+  }, [load]);
+
+  const chatgptCancelLogin = useCallback(async () => {
+    await invoke("chatgpt_cancel_login");
+  }, []);
+
+  const chatgptLogout = useCallback(async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      await invoke("chatgpt_logout");
+      embeddedAgentRuntime.invalidateConfig();
+      await load();
+    } catch (err) {
+      setError(invokeErrorMessage(err));
+      throw err;
+    } finally {
+      setSaving(false);
+    }
+  }, [load]);
+
   const listRemoteModels = useCallback(
     async (baseUrl: string, apiKey: string, providerId?: string) => {
       return invoke<string[]>("list_remote_models", {
@@ -145,8 +183,12 @@ export function useAgentConfig() {
     deleteCustomProvider,
     switchProvider,
     listRemoteModels,
+    chatgptLogin,
+    chatgptCancelLogin,
+    chatgptLogout,
     loading,
     saving,
+    signingIn,
     error,
   };
 }

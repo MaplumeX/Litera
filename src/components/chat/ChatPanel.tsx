@@ -17,7 +17,7 @@ import { useAgentConfig } from "@/lib/use-agent-config";
 import { invokeErrorMessage } from "@/lib/app-error";
 import { embeddedAgentRuntime } from "@/agent/runtime/embedded-runtime";
 import type { QuoteLocation } from "@/agent/book/book-content";
-import { isCustomProviderId } from "@/types/agent-config";
+import { CHATGPT_PROVIDER_ID, isCustomProviderId } from "@/types/agent-config";
 import { AgentConfigDialog } from "@/components/AgentConfigDialog";
 import { MessageBubble } from "./MessageBubble";
 import { BranchSwitcher } from "./BranchSwitcher";
@@ -706,7 +706,9 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                     ? (configSnapshot.customProviders.find(
                         (entry) => entry.id === configSnapshot.provider,
                       )?.models ?? [])
-                    : []
+                    : configSnapshot?.provider === CHATGPT_PROVIDER_ID
+                      ? (configSnapshot.chatgptAccount?.models ?? [])
+                      : []
                 }
                 isStreaming={isStreaming}
                 onModelSelect={(model) => void handleModelSelect(model)}

@@ -20,6 +20,7 @@ fn read_thinking_level(settings: &Value) -> String {
     }
 }
 
+use crate::chatgpt_auth;
 use crate::error::{AppError, AppResult};
 use crate::library;
 
@@ -38,6 +39,8 @@ pub struct AgentConfigSnapshot {
     pub providers_with_key: Vec<String>,
     pub custom_providers: Vec<CustomProviderEntry>,
     pub thinking_level: String,
+    /// The ChatGPT account signed in on this device, if any.
+    pub chatgpt_account: Option<chatgpt_auth::ChatgptAccount>,
 }
 
 /// A custom OpenAI-compatible provider entry listed in the settings dialog.
@@ -72,6 +75,10 @@ pub struct AgentRuntimeConfig {
 #[tauri::command]
 pub async fn get_agent_runtime_config(app: tauri::AppHandle) -> AppResult<AgentRuntimeConfig> {
     let agent_dir = resolve_agent_dir(&app)?;
+    let settings = read_json_or_empty(&agent_dir.join("settings.json"), "settings.json")?;
+    if settings.get("defaultProvider").and_then(Value::as_str) == Some(chatgpt_auth::PROVIDER_ID) {
+        chatgpt_auth::ensure_fresh_token(&agent_dir).await?;
+    }
     tauri::async_runtime::spawn_blocking(move || read_runtime_config(&agent_dir))
         .await
         .map_err(|error| {
@@ -103,6 +110,10 @@ pub async fn save_agent_config(
         return Err(AppError::invalid_input(
             "provider and model are both required",
         ));
+    }
+    if provider == chatgpt_auth::PROVIDER_ID {
+        // ChatGPT credentials come only from signing in, never from a pasted key.
+        return Err(AppError::invalid_input("Sign in with ChatGPT instead of entering a key"));
     }
 
     let agent_dir = resolve_agent_dir(&app)?;
@@ -277,14 +288,14 @@ pub async fn set_thinking_level(app: tauri::AppHandle, level: String) -> AppResu
         .map_err(|error| AppError::storage_io(format!("Agent config write worker failed: {error}")))?
 }
 
-fn resolve_agent_dir(app: &tauri::AppHandle) -> AppResult<std::path::PathBuf> {
+pub(crate) fn resolve_agent_dir(app: &tauri::AppHandle) -> AppResult<std::path::PathBuf> {
     app.path()
         .app_data_dir()
         .map(|dir| dir.join("agent"))
         .map_err(|error| AppError::storage_io(format!("Failed to resolve app data dir: {error}")))
 }
 
-fn read_json_or_empty(path: &Path, label: &str) -> AppResult<serde_json::Value> {
+pub(crate) fn read_json_or_empty(path: &Path, label: &str) -> AppResult<serde_json::Value> {
     match fs::read(path) {
         Ok(bytes) => serde_json::from_slice(&bytes).map_err(|error| {
             AppError::storage_corrupt(format!("Failed to parse {label}: {error}"))
@@ -309,9 +320,14 @@ fn read_snapshot(agent_dir: &Path) -> AppResult<AgentConfigSnapshot> {
         .and_then(|value| value.as_str())
         .map(|string| string.to_string());
 
-    let has_api_key = provider
-        .as_deref()
-        .is_some_and(|provider_id| auth_has_api_key(&auth, provider_id));
+    let chatgpt_account = chatgpt_auth::account(&auth);
+    let has_api_key = provider.as_deref().is_some_and(|provider_id| {
+        if provider_id == chatgpt_auth::PROVIDER_ID {
+            chatgpt_account.is_some()
+        } else {
+            auth_has_api_key(&auth, provider_id)
+        }
+    });
 
     let configured = provider.is_some() && model.is_some() && has_api_key;
     let custom_providers = read_custom_providers(agent_dir, &auth)?;
@@ -335,6 +351,7 @@ fn read_snapshot(agent_dir: &Path) -> AppResult<AgentConfigSnapshot> {
         providers_with_key,
         custom_providers,
         thinking_level,
+        chatgpt_account,
     })
 }
 
@@ -353,13 +370,16 @@ fn read_runtime_config(agent_dir: &Path) -> AppResult<AgentRuntimeConfig> {
         .filter(|value| !value.is_empty())
         .ok_or_else(|| AppError::invalid_input("Agent model is not configured"))?
         .to_string();
-    let api_key = auth
-        .get(&provider)
-        .and_then(|entry| entry.get("key"))
-        .and_then(Value::as_str)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| AppError::invalid_input("Agent API key is not configured"))?
-        .to_string();
+    let api_key = if provider == chatgpt_auth::PROVIDER_ID {
+        chatgpt_auth::access_token(&auth)?
+    } else {
+        auth.get(&provider)
+            .and_then(|entry| entry.get("key"))
+            .and_then(Value::as_str)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| AppError::invalid_input("Agent API key is not configured"))?
+            .to_string()
+    };
     let (api, base_url, context_window, image_input) = if provider.starts_with("custom-") {
         let models = read_json_or_empty(&agent_dir.join("models.json"), "models.json")?;
         let definition = models
@@ -408,6 +428,7 @@ fn read_runtime_config(agent_dir: &Path) -> AppResult<AgentRuntimeConfig> {
         let pair = match provider.as_str() {
             "anthropic" => ("anthropic-messages", "https://api.anthropic.com"),
             "openai" => ("openai-responses", "https://api.openai.com/v1"),
+            chatgpt_auth::PROVIDER_ID => ("openai-responses", chatgpt_auth::API_BASE_URL),
             "deepseek" => ("openai-completions", "https://api.deepseek.com"),
             "google" => (
                 "google-generative-ai",
@@ -651,7 +672,7 @@ fn parse_openai_model_ids(body: &[u8]) -> AppResult<Vec<String>> {
 
 const MAX_MODELS_BODY: usize = 1024 * 1024;
 
-async fn fetch_models_body(url: &str, api_key: &str) -> AppResult<Vec<u8>> {
+pub(crate) async fn fetch_models_body(url: &str, api_key: &str) -> AppResult<Vec<u8>> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .build()
@@ -1136,6 +1157,42 @@ mod tests {
         save_config(dir.path(), "unsupported", "do-not-leak", "model").expect("save invalid");
         let error = read_runtime_config(dir.path()).expect_err("unsupported provider");
         assert!(!error.message.contains("do-not-leak"));
+    }
+
+    #[test]
+    fn chatgpt_sign_in_configures_the_provider_and_supplies_the_access_token() {
+        let dir = temp_agent_dir();
+        save_config(dir.path(), "openai", "sk-openai", "gpt-5").expect("save openai");
+        fs::write(
+            dir.path().join("auth.json"),
+            r#"{"openai":{"type":"api_key","key":"sk-openai"},"chatgpt":{"type":"oauth","access":"chatgpt-access","refresh":"rt","email":"reader@example.com","models":["gpt-6.1-sol"]}}"#,
+        )
+        .expect("write auth");
+        switch_provider_impl(dir.path(), "chatgpt", "gpt-6.1-sol").expect("switch");
+
+        let snapshot = read_snapshot(dir.path()).expect("snapshot");
+        assert!(snapshot.configured);
+        assert_eq!(snapshot.providers_with_key, ids(&["openai"]));
+        let account = snapshot.chatgpt_account.expect("account");
+        assert_eq!(account.email.as_deref(), Some("reader@example.com"));
+        assert_eq!(account.models, ids(&["gpt-6.1-sol"]));
+
+        let runtime = read_runtime_config(dir.path()).expect("runtime");
+        assert_eq!(runtime.api, "openai-responses");
+        assert_eq!(runtime.base_url, "https://api.openai.com/v1");
+        assert_eq!(runtime.api_key, "chatgpt-access");
+    }
+
+    #[test]
+    fn chatgpt_without_tokens_is_not_configured() {
+        let dir = temp_agent_dir();
+        fs::write(dir.path().join("auth.json"), r#"{"chatgpt":{"type":"oauth","clientId":"app_1"}}"#)
+            .expect("write auth");
+        switch_provider_impl(dir.path(), "chatgpt", "gpt-6.1-sol").expect("switch");
+        let snapshot = read_snapshot(dir.path()).expect("snapshot");
+        assert!(!snapshot.configured);
+        assert!(snapshot.chatgpt_account.is_none());
+        assert!(read_runtime_config(dir.path()).is_err());
     }
 
     #[test]

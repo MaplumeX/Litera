@@ -442,6 +442,13 @@ export const en: { [K in MessageKey]: string } = {
   "agent.saving": "Saving…",
   "agent.saved": "Saved",
   "agent.deletedCustom": "Custom provider deleted",
+  "agent.chatgptAccount": "ChatGPT account",
+  "agent.chatgptHint": "Uses your ChatGPT plan. No API key needed.",
+  "agent.chatgptSignIn": "Continue with ChatGPT",
+  "agent.chatgptSigningIn": "Finish signing in in your browser…",
+  "agent.chatgptSignedIn": "Signed in as {email}",
+  "agent.chatgptSignedInNoEmail": "Signed in",
+  "agent.chatgptSignOut": "Sign out",
 
   "mobile.menu": "Menu",
   "mobile.drawer": "Library menu",

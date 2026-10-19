@@ -440,6 +440,13 @@ export const zhCN = {
   "agent.saving": "保存中…",
   "agent.saved": "保存成功",
   "agent.deletedCustom": "已删除自定义供应商",
+  "agent.chatgptAccount": "ChatGPT 账户",
+  "agent.chatgptHint": "使用你的 ChatGPT 订阅额度，无需 API Key。",
+  "agent.chatgptSignIn": "使用 ChatGPT 登录",
+  "agent.chatgptSigningIn": "请在浏览器中完成登录…",
+  "agent.chatgptSignedIn": "已登录：{email}",
+  "agent.chatgptSignedInNoEmail": "已登录",
+  "agent.chatgptSignOut": "退出登录",
 
   "mobile.menu": "菜单",
   "mobile.drawer": "书库菜单",
