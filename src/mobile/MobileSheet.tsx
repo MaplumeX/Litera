@@ -1,10 +1,12 @@
-import type { ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
 import { Dialog as DialogPrimitive } from "radix-ui";
 import { cn } from "@/lib/utils";
+import { useSwipeDismiss } from "@/mobile/swipe-dismiss";
 
 /**
  * A modal bottom sheet. Built on the Radix dialog, so it traps focus and
- * the system Back closes it like any other dialog.
+ * the system Back closes it like any other dialog. Swiping it down closes
+ * it too.
  */
 export function MobileSheet({
   open,
@@ -22,11 +24,18 @@ export function MobileSheet({
   children: ReactNode;
   className?: string;
 }) {
+  const scrimRef = useRef<HTMLDivElement>(null);
+  const swipeRef = useSwipeDismiss<HTMLDivElement>({
+    direction: "down",
+    onDismiss: () => onOpenChange(false),
+    scrimRef,
+  });
   return (
     <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
       <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay className="fixed inset-0 z-50 m-fade bg-black/40" />
+        <DialogPrimitive.Overlay ref={scrimRef} className="fixed inset-0 z-50 m-fade bg-black/40" />
         <DialogPrimitive.Content
+          ref={swipeRef}
           aria-describedby={undefined}
           className={cn(
             "fixed inset-x-0 bottom-0 z-50 flex max-h-[calc(100%-var(--safe-top)-2rem)] flex-col rounded-t-[1.75rem] bg-background pb-[var(--safe-bottom)] shadow-float outline-none m-sheet",

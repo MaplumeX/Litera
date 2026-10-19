@@ -382,3 +382,93 @@
     transition-duration: 200ms;
   }
 }
+
+/* Page changes through the View Transitions API (src/mobile/page-transition.ts
+ * sets data-page-motion on <html> for the length of one). Material 3's
+ * shared X axis, container transform and fade through: the old page leaves
+ * in the first ~90ms, the new one arrives over the rest. The API only runs
+ * without reduced motion, so nothing here needs the media query. */
+@keyframes m-axis-out-start { to { transform: translateX(-30px); } }
+@keyframes m-axis-out-end { to { transform: translateX(30px); } }
+@keyframes m-axis-in-start { from { transform: translateX(-30px); } }
+@keyframes m-axis-in-end { from { transform: translateX(30px); } }
+@keyframes m-grow-in { from { transform: scale(0.92); } }
+@keyframes m-settle-in { from { transform: scale(0.96); } }
+html[data-page-motion]::view-transition-old(*),
+html[data-page-motion]::view-transition-new(*) {
+  mix-blend-mode: normal;
+}
+html[data-page-motion="push"]::view-transition-old(root) {
+  animation:
+    m-axis-out-start 300ms var(--ease-standard) both,
+    m-fade-out 90ms var(--ease-emphasized-accelerate) both;
+}
+html[data-page-motion="push"]::view-transition-new(root) {
+  animation:
+    m-axis-in-end 300ms var(--ease-standard) both,
+    m-fade-in 210ms var(--ease-emphasized-decelerate) 90ms both;
+}
+html[data-page-motion="pop"]::view-transition-old(root) {
+  animation:
+    m-axis-out-end 300ms var(--ease-standard) both,
+    m-fade-out 90ms var(--ease-emphasized-accelerate) both;
+}
+html[data-page-motion="pop"]::view-transition-new(root) {
+  animation:
+    m-axis-in-start 300ms var(--ease-standard) both,
+    m-fade-in 210ms var(--ease-emphasized-decelerate) 90ms both;
+}
+html[data-page-motion="fade"]::view-transition-old(*) {
+  animation: m-fade-out 90ms var(--ease-emphasized-accelerate) both;
+}
+html[data-page-motion="fade"]::view-transition-new(*) {
+  animation:
+    m-grow-in 210ms var(--ease-emphasized-decelerate) 90ms both,
+    m-fade-in 210ms var(--ease-emphasized-decelerate) 90ms both;
+}
+/* The container transform: the shared element's box moves and resizes
+ * between its two ends while its old picture gives way to the new one. Both
+ * pictures fill the box, cropped, rather than stretch. */
+html[data-page-motion="open"]::view-transition-group(m-shared) {
+  animation-duration: 350ms;
+  animation-timing-function: var(--ease-standard);
+}
+html[data-page-motion="close"]::view-transition-group(m-shared) {
+  animation-duration: 300ms;
+  animation-timing-function: var(--ease-standard);
+}
+html:is([data-page-motion="open"], [data-page-motion="close"])::view-transition-old(m-shared),
+html:is([data-page-motion="open"], [data-page-motion="close"])::view-transition-new(m-shared) {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+html[data-page-motion="open"]::view-transition-old(m-shared) {
+  animation: m-fade-out 100ms var(--ease-emphasized-accelerate) both;
+}
+html[data-page-motion="open"]::view-transition-new(m-shared) {
+  animation: m-fade-in 250ms var(--ease-emphasized-decelerate) 60ms both;
+}
+/* The new page's picture is drawn over the old one: here it's the Book's
+ * empty backdrop, fading in over the shelf as the cover grows. */
+html[data-page-motion="open"]::view-transition-old(root) {
+  animation: none;
+}
+html[data-page-motion="open"]::view-transition-new(root) {
+  animation: m-fade-in 200ms var(--ease-standard) both;
+}
+html[data-page-motion="close"]::view-transition-old(m-shared) {
+  animation: m-fade-out 120ms var(--ease-emphasized-accelerate) 30ms both;
+}
+html[data-page-motion="close"]::view-transition-new(m-shared) {
+  animation: m-fade-in 150ms var(--ease-emphasized-decelerate) 90ms both;
+}
+html[data-page-motion="close"]::view-transition-old(root) {
+  animation: none;
+  opacity: 0;
+}
+html[data-page-motion="close"]::view-transition-new(root) {
+  animation:
+    m-settle-in 300ms var(--ease-standard) both,
+    m-fade-in 250ms var(--ease-standard) both;
+}

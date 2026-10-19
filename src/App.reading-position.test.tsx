@@ -91,6 +91,7 @@ const readerHandle: ReaderViewHandle = {
   clearTtsHighlight: vi.fn(),
   advanceTtsSection: vi.fn(async () => undefined),
   dismissSelection: () => false,
+  hasSelection: () => false,
 };
 
 vi.mock("@/components/ReaderView", async () => {

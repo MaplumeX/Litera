@@ -9,6 +9,7 @@ import {
 import { progressPercent } from "@/lib/library-shelf";
 import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { rememberCoverOrigin } from "@/mobile/page-transition";
 
 interface MobileBookItemProps {
   book: BookRecord;
@@ -73,10 +74,16 @@ export function MobileBookTile({ book, actions, opening, disabled, coverRev }: M
         type="button"
         title={book.title}
         className="flex w-full min-w-0 flex-col gap-1.5 text-left disabled:opacity-60"
-        onClick={actions.onOpen}
+        onClick={(event) => {
+          rememberCoverOrigin(event.currentTarget);
+          actions.onOpen();
+        }}
         disabled={opening || disabled}
       >
-        <span className="relative block aspect-[2/3] w-full overflow-hidden rounded-cover bg-muted shadow-cover transition-transform duration-150 active:scale-[0.97] motion-reduce:transition-none">
+        <span
+          data-book-cover={book.id}
+          className="relative block aspect-[2/3] w-full overflow-hidden rounded-cover bg-muted shadow-cover transition-transform duration-150 active:scale-[0.97] motion-reduce:transition-none"
+        >
           <BookCoverImage book={book} coverRev={coverRev} />
           {book.cached === false && <NotCachedBadge />}
           {book.starred && <StarBadge />}
@@ -104,10 +111,16 @@ export function MobileBookRow({ book, actions, opening, disabled, coverRev }: Mo
           type="button"
           title={book.title}
           className="flex min-w-0 flex-1 items-center gap-4 py-2.5 pl-4 text-left disabled:opacity-60"
-          onClick={actions.onOpen}
+          onClick={(event) => {
+            rememberCoverOrigin(event.currentTarget);
+            actions.onOpen();
+          }}
           disabled={opening || disabled}
         >
-          <span className="relative block h-[4.5rem] w-12 shrink-0 overflow-hidden rounded-cover bg-muted shadow-cover">
+          <span
+            data-book-cover={book.id}
+            className="relative block h-[4.5rem] w-12 shrink-0 overflow-hidden rounded-cover bg-muted shadow-cover"
+          >
             <BookCoverImage book={book} coverRev={coverRev} small />
           </span>
           <span className="min-w-0 flex-1">
@@ -146,10 +159,16 @@ export function MobileResumeCard({ book, actions, opening, disabled, coverRev }:
         type="button"
         title={book.title}
         className="flex w-full items-center gap-4 rounded-2xl bg-card p-3 text-left shadow-soft transition-transform duration-150 active:scale-[0.99] disabled:opacity-60 motion-reduce:transition-none"
-        onClick={actions.onOpen}
+        onClick={(event) => {
+          rememberCoverOrigin(event.currentTarget);
+          actions.onOpen();
+        }}
         disabled={opening || disabled}
       >
-        <span className="relative block h-24 w-16 shrink-0 overflow-hidden rounded-cover bg-muted shadow-cover">
+        <span
+          data-book-cover={book.id}
+          className="relative block h-24 w-16 shrink-0 overflow-hidden rounded-cover bg-muted shadow-cover"
+        >
           <BookCoverImage book={book} coverRev={coverRev} small />
         </span>
         <span className="flex min-w-0 flex-1 flex-col self-stretch py-0.5">

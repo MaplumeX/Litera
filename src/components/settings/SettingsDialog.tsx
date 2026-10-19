@@ -668,6 +668,8 @@ export function SettingsDialog({
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
       <DialogContent
+        // On a section page Back goes to the list, not out: nothing to preview.
+        data-back-preview={page && !listShown ? "none" : undefined}
         className={
           page
             ? "m-page-dialog inset-0 top-0 left-0 flex h-full max-h-none w-full max-w-none translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden rounded-none border-0 p-0 pt-[var(--safe-top)] pb-[var(--safe-bottom)] shadow-none data-[state=closed]:zoom-out-100 data-[state=open]:zoom-in-100 sm:max-w-none"

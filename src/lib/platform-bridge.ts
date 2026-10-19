@@ -28,9 +28,19 @@ export interface SystemInsets {
   cutoutBottom: number;
 }
 
+/**
+ * The predictive Back gesture (Android 14+) as it happens: `start`, then
+ * `progress` (0 to 1) as the finger moves, then either `back` commits it or
+ * `cancel` here takes it back. `edge` is the side the swipe came from.
+ */
+export type BackProgress =
+  | { phase: "start" | "progress"; progress: number; edge: "left" | "right" }
+  | { phase: "cancel" };
+
 export interface PlatformEvents {
   /** The system Back gesture or button. */
   back: Record<string, never>;
+  backProgress: BackProgress;
   /** A volume key, only while volume-key paging is switched on. */
   volumeKey: { direction: VolumeKeyDirection };
   lifecycle: { state: LifecycleState };
