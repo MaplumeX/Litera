@@ -36,9 +36,87 @@ function fixFoliateGlob(): Plugin {
   };
 }
 
+/**
+ * Source patches to foliate-js's paginator, which is an upstream submodule.
+ *
+ * - Paginated layout works in whole pixels. A phone's page width is
+ *   fractional (e.g. 365.5px), and the column pitch Chromium lays out then
+ *   differs from the scroll step by a subpixel, so each page turn shifts the
+ *   text a little further sideways until the next page's text shows at the
+ *   edge. An even gap keeps both half-gap paddings whole too.
+ * - A cancelled touch (e.g. Android's edge Back gesture taking a swipe over)
+ *   snaps like a lifted one, instead of leaving the page half turned.
+ *
+ * Each patch must match exactly once, so a submodule bump that changes the
+ * code fails the build instead of dropping the fix.
+ */
+const PAGINATOR_PATCHES: [string, string][] = [
+  [
+    `        const { width, height } = this.#container.getBoundingClientRect()
+        const size = vertical ? height : width
+`,
+    `        const rect = this.#container.getBoundingClientRect()
+        const flow = this.getAttribute('flow')
+        const width = flow === 'scrolled' || vertical ? rect.width : Math.floor(rect.width)
+        const height = flow === 'scrolled' || !vertical ? rect.height : Math.floor(rect.height)
+        const size = vertical ? height : width
+`,
+  ],
+  [
+    `        const gap = -g / (g - 1) * size
+
+        const flow = this.getAttribute('flow')
+`,
+    `        const gap = Math.round(-g / (g - 1) * size / 2) * 2
+
+`,
+  ],
+  [
+    `    get size() {
+        return this.#container.getBoundingClientRect()[this.sideProp]
+    }`,
+    `    get size() {
+        const size = this.#container.getBoundingClientRect()[this.sideProp]
+        return this.scrolled ? size : Math.floor(size)
+    }`,
+  ],
+  [
+    `        this.addEventListener('touchend', this.#onTouchEnd.bind(this))
+`,
+    `        this.addEventListener('touchend', this.#onTouchEnd.bind(this))
+        this.addEventListener('touchcancel', this.#onTouchEnd.bind(this))
+`,
+  ],
+  [
+    `            doc.addEventListener('touchend', this.#onTouchEnd.bind(this))
+`,
+    `            doc.addEventListener('touchend', this.#onTouchEnd.bind(this))
+            doc.addEventListener('touchcancel', this.#onTouchEnd.bind(this))
+`,
+  ],
+];
+
+function patchFoliatePaginator(): Plugin {
+  return {
+    name: "patch-foliate-paginator",
+    enforce: "pre",
+    transform(code, id) {
+      if (!id.split("?")[0].endsWith("/src/foliate-js/paginator.js")) return;
+      let patched = code;
+      for (const [search, replace] of PAGINATOR_PATCHES) {
+        if (patched.split(search).length !== 2) {
+          throw new Error(`foliate-js paginator patch no longer applies:\n${search}`);
+        }
+        patched = patched.replace(search, () => replace);
+      }
+      return { code: patched, map: null };
+    },
+  };
+}
+
 // https://vite.dev/config/
 export default defineConfig(async () => ({
-  plugins: [fixFoliateGlob(), react(), tailwindcss()],
+  plugins: [patchFoliatePaginator(), fixFoliateGlob(), react(), tailwindcss()],
 
   resolve: {
     alias: {
