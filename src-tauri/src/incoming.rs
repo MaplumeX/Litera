@@ -23,12 +23,12 @@ pub struct IncomingBookFile {
     pub name: String,
 }
 
-/// The handle as a real file inside `<cache>/incoming-books/`. Anything else
+/// The handle as a real file directly inside `<cache>/<dir>/`. Anything else
 /// (another directory, `..`, a symlink out) is refused, so the WebView can't
-/// use this command to read arbitrary files.
-fn resolve_incoming_path(cache_dir: &Path, path: &str) -> AppResult<PathBuf> {
-    let refused = || AppError::invalid_input("Not an incoming book handle");
-    let root = cache_dir.join(INCOMING_DIR).canonicalize().map_err(|_| refused())?;
+/// use an import command to read arbitrary files.
+pub(crate) fn resolve_incoming_path(cache_dir: &Path, dir: &str, path: &str) -> AppResult<PathBuf> {
+    let refused = || AppError::invalid_input("Not an incoming file handle");
+    let root = cache_dir.join(dir).canonicalize().map_err(|_| refused())?;
     let candidate = PathBuf::from(path);
     let metadata = fs::symlink_metadata(&candidate).map_err(|_| refused())?;
     if !metadata.file_type().is_file() {
@@ -47,7 +47,7 @@ fn import_incoming_file(
     cache_dir: &Path,
     file: IncomingBookFile,
 ) -> AppResult<ImportBookResult> {
-    let path = resolve_incoming_path(cache_dir, &file.path)?;
+    let path = resolve_incoming_path(cache_dir, INCOMING_DIR, &file.path)?;
     let bytes = fs::read(&path);
     let _ = fs::remove_file(&path);
     let bytes =

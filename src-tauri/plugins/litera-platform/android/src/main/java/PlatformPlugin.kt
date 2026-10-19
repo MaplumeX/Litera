@@ -42,12 +42,13 @@ class FlagArgs {
 /**
  * The platform event bridge the mobile shell talks to. Events: `back`,
  * `volumeKey`, `lifecycle`, `incomingBooks`, `insets`. Commands: the document
- * picker, the current insets, immersive mode, the system bar icon colour,
+ * pickers (books and fonts), the current insets, immersive mode, the system bar icon colour,
  * keep-screen-on, volume-key interception, network type and leaving the app.
  *
  * Picked and shared EPUBs are copied into `cacheDir/incoming-books/` and
  * handed to the WebView as `{ name, path }`; the Rust import command reads
- * and deletes them. Bytes never cross the JSON bridge.
+ * and deletes them. Picked fonts take the same route through
+ * `cacheDir/incoming-fonts/`. Bytes never cross the JSON bridge.
  */
 @TauriPlugin
 class PlatformPlugin(private val activity: Activity) : Plugin(activity) {
@@ -221,17 +222,17 @@ class PlatformPlugin(private val activity: Activity) : Plugin(activity) {
   /** `{ books: [...] }`, one entry per URI. Runs on the IO thread. */
   private fun copyAllToCache(uris: List<Uri>): JSObject {
     val books = JSArray()
-    for (uri in uris) books.put(copyToCache(uri))
+    for (uri in uris) books.put(copyToCache(uri, INCOMING_DIR, "book.epub"))
     return JSObject().apply { put("books", books) }
   }
 
   /** `{ name, path }` on success, `{ name, error }` when the file can't be read. */
-  private fun copyToCache(uri: Uri): JSObject {
-    val name = displayName(uri) ?: uri.lastPathSegment?.substringAfterLast('/') ?: "book.epub"
+  private fun copyToCache(uri: Uri, dirName: String, fallbackName: String): JSObject {
+    val name = displayName(uri) ?: uri.lastPathSegment?.substringAfterLast('/') ?: fallbackName
     return try {
-      val dir = File(activity.cacheDir, INCOMING_DIR)
+      val dir = File(activity.cacheDir, dirName)
       if (!dir.isDirectory && !dir.mkdirs()) throw IOException("Cannot create $dir")
-      val file = File(dir, UUID.randomUUID().toString() + ".epub")
+      val file = File(dir, UUID.randomUUID().toString() + "." + fallbackName.substringAfterLast('.'))
       val input = activity.contentResolver.openInputStream(uri)
         ?: throw IOException("Cannot open $uri")
       input.use { stream -> file.outputStream().use { stream.copyTo(it) } }
@@ -240,7 +241,7 @@ class PlatformPlugin(private val activity: Activity) : Plugin(activity) {
         put("path", file.absolutePath)
       }
     } catch (ex: Exception) {
-      Logger.error("Failed to read incoming book: ${ex.message}")
+      Logger.error("Failed to read incoming file: ${ex.message}")
       JSObject().apply {
         put("name", name)
         put("error", ex.message ?: "Failed to read file")
@@ -282,12 +283,40 @@ class PlatformPlugin(private val activity: Activity) : Plugin(activity) {
 
   @ActivityCallback
   fun pickBooksResult(invoke: Invoke, result: ActivityResult) {
-    val data = result.data
-    if (result.resultCode != Activity.RESULT_OK || data == null) {
-      // Cancelling the picker is not an error.
-      invoke.resolve(JSObject().apply { put("books", JSArray()) })
-      return
+    val uris = pickedUris(result)
+    io.execute { invoke.resolve(copyAllToCache(uris)) }
+  }
+
+  @Command
+  fun pickFonts(invoke: Invoke) {
+    try {
+      val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+        addCategory(Intent.CATEGORY_OPENABLE)
+        type = "*/*"
+        // Font MIME types vary by provider; the import checks the file itself.
+        putExtra(Intent.EXTRA_MIME_TYPES, FONT_MIMES)
+        putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+      }
+      startActivityForResult(invoke, intent, "pickFontsResult")
+    } catch (ex: Exception) {
+      invoke.reject(ex.message ?: "Failed to open the file picker")
     }
+  }
+
+  @ActivityCallback
+  fun pickFontsResult(invoke: Invoke, result: ActivityResult) {
+    val uris = pickedUris(result)
+    io.execute {
+      val fonts = JSArray()
+      for (uri in uris) fonts.put(copyToCache(uri, INCOMING_FONTS_DIR, "font.ttf"))
+      invoke.resolve(JSObject().apply { put("fonts", fonts) })
+    }
+  }
+
+  /** Cancelling the picker is not an error: it picks nothing. */
+  private fun pickedUris(result: ActivityResult): List<Uri> {
+    val data = result.data
+    if (result.resultCode != Activity.RESULT_OK || data == null) return emptyList()
     val uris = mutableListOf<Uri>()
     val clip = data.clipData
     if (clip != null) {
@@ -295,7 +324,7 @@ class PlatformPlugin(private val activity: Activity) : Plugin(activity) {
     } else {
       data.data?.let { uris.add(it) }
     }
-    io.execute { invoke.resolve(copyAllToCache(uris)) }
+    return uris
   }
 
   // --- Window --------------------------------------------------------------
@@ -371,7 +400,18 @@ class PlatformPlugin(private val activity: Activity) : Plugin(activity) {
     private const val INCOMING_EVENT = "incomingBooks"
     private const val INSETS_EVENT = "insets"
     private const val INCOMING_DIR = "incoming-books"
+    private const val INCOMING_FONTS_DIR = "incoming-fonts"
     private const val HANDLED_EXTRA = "com.maplume.litera.platform.HANDLED"
     private const val EPUB_MIME = "application/epub+zip"
+    private val FONT_MIMES = arrayOf(
+      "font/ttf",
+      "font/otf",
+      "font/sfnt",
+      "application/x-font-ttf",
+      "application/x-font-otf",
+      "application/font-sfnt",
+      "application/vnd.ms-opentype",
+      "application/octet-stream",
+    )
   }
 }

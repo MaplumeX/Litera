@@ -7,7 +7,9 @@ import {
   type ContinuousKey,
   type ReaderStyleState,
   type TypographyKey,
+  cssFontFamily,
 } from "@/lib/reader-styles";
+import { importedFontFamilies, useImportedFonts } from "@/lib/imported-fonts";
 import { saveReaderFlow, type ReaderFlow } from "@/lib/reader-flow";
 import { useT, type MessageKey } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -121,6 +123,45 @@ function Stepper({
   );
 }
 
+/** Imported families as chips under the generic typefaces; scrolls sideways when many. */
+function ImportedFontChips({
+  label,
+  families,
+  value,
+  onChange,
+}: {
+  label: string;
+  families: string[];
+  value: string;
+  onChange: (family: string) => void;
+}) {
+  return (
+    <div role="radiogroup" aria-label={label} className="flex gap-2 overflow-x-auto px-6 pb-2">
+      {families.map((family) => {
+        const active = family === value;
+        return (
+          <button
+            key={family}
+            type="button"
+            role="radio"
+            aria-checked={active}
+            onClick={() => onChange(family)}
+            style={{ fontFamily: cssFontFamily(family) }}
+            className={cn(
+              "h-9 max-w-48 shrink-0 truncate rounded-full px-4 text-sm transition-colors motion-reduce:transition-none",
+              active
+                ? "bg-foreground text-background"
+                : "bg-muted text-muted-foreground active:bg-foreground/10",
+            )}
+          >
+            {family}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 /**
  * The reader's "Aa" panel: the handful of settings people change while
  * reading (size, spacing, margins, typeface, day/night, page turn), as in
@@ -148,6 +189,7 @@ export function ReaderQuickSettings({
   onMoreSettings: () => void;
 }) {
   const { t } = useT();
+  const importedFamilies = importedFontFamilies(useImportedFonts());
   return (
     <MobileSheet open={open} onOpenChange={onOpenChange} title={t("mobile.readingSettings")}>
       <div className="pt-1 pb-2">
@@ -182,6 +224,14 @@ export function ReaderQuickSettings({
             onChange={(next) => onTypographyChange("fontFamily", next)}
           />
         </Row>
+        {importedFamilies.length > 0 && (
+          <ImportedFontChips
+            label={t("settings.font.imported")}
+            families={importedFamilies}
+            value={styleState.fontFamily}
+            onChange={(family) => onTypographyChange("fontFamily", family)}
+          />
+        )}
         <Row label={t("settings.theme")}>
           <Segmented
             label={t("settings.theme")}

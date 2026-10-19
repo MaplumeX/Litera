@@ -23,6 +23,7 @@ An EPUB reader for desktop and Android with a built-in reading assistant. Books 
 - In-place footnote popups instead of jumping to the notes page
 - System-voice read-aloud with follow-along highlight and auto page-turn
 - Typography: font, size, line height, measure, padding, tracking, paragraph spacing, first-line indent, alignment
+- On Android, import your own TrueType / OpenType fonts (Settings → Typography → Import fonts…); they stay on that device
 - Optional overrides for the book’s embedded fonts and chapter layout (independently)
 - Light / dark / system theme; UI font and size are separate from the page
 
