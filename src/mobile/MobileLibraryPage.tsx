@@ -357,10 +357,11 @@ export function MobileLibraryPage({
 
       <DialogPrimitive.Root open={drawerOpen} onOpenChange={setDrawerOpen}>
         <DialogPrimitive.Portal>
-          <DialogPrimitive.Overlay className="fixed inset-0 z-50 m-fade bg-black/40" />
+          {/* Drawer and scrim stop at the status bar, so it stays the page's. */}
+          <DialogPrimitive.Overlay className="fixed inset-x-0 top-[var(--safe-top)] bottom-0 z-50 m-fade bg-black/40" />
           <DialogPrimitive.Content
             aria-describedby={undefined}
-            className="fixed inset-y-0 left-0 z-50 flex w-[80%] max-w-xs flex-col rounded-r-2xl bg-background pt-[calc(var(--safe-top)+1rem)] pb-[var(--safe-bottom)] shadow-float outline-none m-drawer"
+            className="fixed top-[var(--safe-top)] bottom-0 left-0 z-50 flex w-[80%] max-w-xs flex-col rounded-r-2xl bg-background pt-4 pb-[var(--safe-bottom)] shadow-float outline-none m-drawer"
           >
             <DialogPrimitive.Title className="px-6 pb-4 text-xl font-medium">Litera</DialogPrimitive.Title>
             <nav aria-label={t("mobile.drawer")} className="flex flex-col">
