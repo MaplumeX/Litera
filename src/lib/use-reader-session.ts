@@ -26,6 +26,7 @@ import {
   type TypographyKey,
 } from "@/lib/reader-styles";
 import { usePreferences, resolveTheme, themeToClassName, type AppPreferences } from "@/lib/preferences";
+import { importedFontFaceCss, useImportedFonts } from "@/lib/imported-fonts";
 import type {
   AnnotationsFile,
   BookOpenContext,
@@ -166,6 +167,10 @@ export function useReaderSession(options: UseReaderSessionOptions = {}) {
   // The ref holds the resolved (light/dark) theme for reader CSS injection.
   const styleStateRef = useRef(styleState);
   styleStateRef.current = { ...styleState, theme: resolvedTheme };
+  const importedFonts = useImportedFonts();
+  const fontFaceCss = useMemo(() => importedFontFaceCss(importedFonts), [importedFonts]);
+  const fontFaceCssRef = useRef(fontFaceCss);
+  fontFaceCssRef.current = fontFaceCss;
 
   const reportPersistenceError = useCallback((error: unknown) => {
     console.error("Failed to persist reading state:", error);
@@ -277,10 +282,10 @@ export function useReaderSession(options: UseReaderSessionOptions = {}) {
 
   // Apply styles + persist whenever style state changes.
   useEffect(() => {
-    const css = generateStylesCss({ ...styleState, theme: resolvedTheme });
+    const css = generateStylesCss({ ...styleState, theme: resolvedTheme }, fontFaceCss);
     readerRef.current?.setStyles(css);
     readerRef.current?.setColumnCount(styleState.columnCount);
-  }, [styleState, resolvedTheme]);
+  }, [styleState, resolvedTheme, fontFaceCss]);
 
   useEffect(() => {
     readerRef.current?.setFlow(readerFlow);
@@ -440,7 +445,7 @@ export function useReaderSession(options: UseReaderSessionOptions = {}) {
     setTocExpanded(ancestorKeysForHref(bookToc, progressRef.current.chapterHref));
     setChapterTicks(readerRef.current?.getChapterTicks() ?? []);
     // Apply saved styles now that the renderer exists.
-    readerRef.current?.setStyles(generateStylesCss(styleStateRef.current));
+    readerRef.current?.setStyles(generateStylesCss(styleStateRef.current, fontFaceCssRef.current));
     readerRef.current?.setColumnCount(styleStateRef.current.columnCount);
     readerRef.current?.setFlow(readerFlowRef.current);
     void kosync.onBookReady();
@@ -613,7 +618,7 @@ export function useReaderSession(options: UseReaderSessionOptions = {}) {
   const overriddenKeys: TypographyKey[] = editingBook
     ? TYPOGRAPHY_KEYS.filter((key) => isTypographyOverridden(currentBook?.settings, key))
     : [];
-  const stylesCss = generateStylesCss({ ...styleState, theme: resolvedTheme });
+  const stylesCss = generateStylesCss({ ...styleState, theme: resolvedTheme }, fontFaceCss);
 
   return {
     readerRef,

@@ -40,6 +40,7 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg"]
 futures = "0.3"
 md-5 = "0.11.0"
 tauri-plugin-litera-platform = { path = "plugins/litera-platform" }
+ttf-parser = "0.25"
 
 [target.'cfg(any(target_os = "macos", windows, target_os = "linux"))'.dependencies]
 # System font enumeration for the font picker; Android lists the CSS generics.

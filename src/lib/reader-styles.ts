@@ -347,8 +347,11 @@ ${TABLE_SELECTOR} :where(th, td) { border: 1px solid color-mix(in srgb, currentC
 ${TABLE_SELECTOR} :where(th) { background: color-mix(in srgb, currentColor 6%, transparent); }
 :where(td, th) p { text-indent: 0 !important; }`;
 
-/** Combine font + typography + theme into a single CSS string for `view.renderer.setStyles`. */
-export function generateStylesCss(state: ReaderStyleState): string {
+/**
+ * Combine font + typography + theme into a single CSS string for `view.renderer.setStyles`.
+ * `fontFaces` declares imported fonts, which the book's own documents can't see otherwise.
+ */
+export function generateStylesCss(state: ReaderStyleState, fontFaces = ""): string {
   let fontCss = `html, body { font-family: ${cssFontFamily(state.fontFamily)}; font-size: ${state.fontSize}px !important; line-height: ${state.lineHeight}; letter-spacing: ${state.letterSpacing}em; max-width: ${state.contentWidth}em; margin-inline: auto; padding-inline: ${state.pagePadding}rem; text-align: ${state.textAlign}; }
 p { margin-block-end: ${state.paragraphSpacing}em !important; text-indent: ${state.firstLineIndent}em !important; }
 ${TABLE_CSS}
@@ -363,9 +366,10 @@ code, kbd, pre, samp { font-family: monospace !important; }`;
   // `@namespace` must come first in the sheet for `[epub|type]` to work.
   const noteref = noterefCss(state.theme === "dark" ? NOTEREF_ACCENT_DARK : NOTEREF_ACCENT_LIGHT);
   const themeCss = THEME_CSS[state.theme] ?? "";
+  const faces = fontFaces ? `${fontFaces}\n` : "";
   return themeCss
-    ? `${EPUB_NAMESPACE}${fontCss}\n${noteref}\n${themeCss}`
-    : `${EPUB_NAMESPACE}${fontCss}\n${noteref}`;
+    ? `${EPUB_NAMESPACE}${faces}${fontCss}\n${noteref}\n${themeCss}`
+    : `${EPUB_NAMESPACE}${faces}${fontCss}\n${noteref}`;
 }
 
 /**

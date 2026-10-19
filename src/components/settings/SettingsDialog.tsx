@@ -39,6 +39,9 @@ import { AgentConfigForm } from "@/components/AgentConfigForm";
 import { SyncSettingsForm } from "@/components/settings/SyncSettingsForm";
 import { KosyncSettingsForm } from "@/components/settings/KosyncSettingsForm";
 import { TypographyPreview } from "@/components/settings/TypographyPreview";
+import { ImportedFontsSection } from "@/components/settings/ImportedFontsSection";
+import { importedFontFamilies, useImportedFonts } from "@/lib/imported-fonts";
+import { platformBridge } from "@/lib/platform-bridge";
 import { cn } from "@/lib/utils";
 import { loadReaderFlow, saveReaderFlow, type ReaderFlow } from "@/lib/reader-flow";
 import {
@@ -320,6 +323,7 @@ function FontFamilyPicker({
   const [open, setOpen] = useState(false);
   const [systemFonts, setSystemFonts] = useState<string[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const imported = importedFontFamilies(useImportedFonts());
 
   useEffect(() => {
     let disposed = false;
@@ -341,6 +345,8 @@ function FontFamilyPicker({
   const listedSystem = systemFonts.filter((name) => {
     if (isGenericFontFamily(name)) return false;
     if (includeGeist && name === DEFAULT_UI_FONT_FAMILY) return false;
+    // An imported face overrides a same-named system one; list it once.
+    if (imported.includes(name)) return false;
     return true;
   });
   const isGeist = value === DEFAULT_UI_FONT_FAMILY;
@@ -348,6 +354,7 @@ function FontFamilyPicker({
     loaded &&
     !isGenericFontFamily(value) &&
     !(includeGeist && isGeist) &&
+    !imported.includes(value) &&
     !listedSystem.includes(value);
   const selectedLabel = isGenericFontFamily(value)
     ? t(FONT_LABEL_KEYS[value])
@@ -432,6 +439,33 @@ function FontFamilyPicker({
                 );
               })}
             </CommandGroup>
+            {imported.length > 0 && (
+              <>
+                <CommandSeparator />
+                <CommandGroup heading={t("settings.font.imported")}>
+                  {imported.map((name) => (
+                    <CommandItem
+                      key={name}
+                      value={name}
+                      onSelect={() => {
+                        onChange(name);
+                        setOpen(false);
+                      }}
+                    >
+                      <CheckIcon
+                        className={cn("size-4", value === name ? "opacity-100" : "opacity-0")}
+                      />
+                      <span
+                        className="min-w-0 truncate"
+                        style={{ fontFamily: cssFontFamily(name) }}
+                      >
+                        {name}
+                      </span>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              </>
+            )}
             {(missing || listedSystem.length > 0) && <CommandSeparator />}
             <CommandGroup>
               {missing && (
@@ -803,6 +837,8 @@ export function SettingsDialog({
                       onChange={(name) => onTypographyChange("fontFamily", name)}
                     />
                   </PresetRow>
+
+                  {platformBridge.hasDocumentPicker && <ImportedFontsSection />}
 
                   {STEPPER_ROWS.slice(1).map((row) => (
                     <StepperRow

@@ -9,6 +9,7 @@ identifier = "allow-platform"
 description = "Enables every command of the Android platform bridge."
 commands.allow = [
   "pickBooks",
+  "pickFonts",
   "takePendingIncomingBooks",
   "getInsets",
   "setImmersive",

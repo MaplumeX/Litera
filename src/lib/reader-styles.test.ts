@@ -151,6 +151,31 @@ describe("normalizeSettings", () => {
 });
 
 describe("generateStylesCss", () => {
+  it("declares imported font faces after the namespace rule", () => {
+    const face = '@font-face { font-family: "Literata"; src: url("x.ttf"); }';
+    const css = generateStylesCss(
+      {
+        fontSize: 16,
+        fontFamily: "Literata",
+        theme: "light",
+        lineHeight: 1.7,
+        contentWidth: 42,
+        pagePadding: 1.75,
+        textAlign: "start",
+        letterSpacing: 0,
+        paragraphSpacing: 1,
+        firstLineIndent: 0,
+        columnCount: 1,
+        overrideFont: false,
+        overrideLayout: false,
+      },
+      face,
+    );
+    expect(css.startsWith("@namespace")).toBe(true);
+    expect(css.indexOf(face)).toBeGreaterThan(css.indexOf("@namespace"));
+    expect(css.indexOf(face)).toBeLessThan(css.indexOf("html, body"));
+  });
+
   it("injects typography, measure, spacing, and paragraph rules", () => {
     const css = generateStylesCss({
       fontSize: 16,

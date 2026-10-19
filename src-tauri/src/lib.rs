@@ -5,6 +5,7 @@ use tauri_plugin_window_state::{Builder as WindowStateBuilder, StateFlags};
 mod agent_config;
 mod error;
 mod export;
+mod fonts;
 mod incoming;
 mod kosync;
 mod library;
@@ -47,6 +48,10 @@ pub fn run() {
             let root_result = app.path().app_data_dir().map_err(|error| {
                 error::AppError::storage_io(format!("Failed to resolve app data dir: {error}"))
             });
+            // Without a data dir the font commands fail with unmanaged state.
+            if let Ok(root) = &root_result {
+                app.manage(fonts::FontStore::new(root));
+            }
             let (library_store, preferences_store) = match root_result {
                 Ok(root) => {
                     let library_result =
@@ -169,6 +174,9 @@ pub fn run() {
             preferences::get_preferences,
             preferences::save_preferences,
             preferences::list_system_fonts,
+            fonts::import_incoming_font,
+            fonts::list_imported_fonts,
+            fonts::delete_imported_font,
             pi_sessions::create_agent_session,
             pi_sessions::list_agent_sessions,
             pi_sessions::load_agent_session,

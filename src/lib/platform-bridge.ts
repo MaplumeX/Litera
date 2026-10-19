@@ -59,6 +59,8 @@ export interface PlatformBridge {
   ): PlatformUnlisten;
   /** The system document picker (multi-select EPUB). Cancelling gives `[]`. */
   pickBooks(): Promise<IncomingBook[]>;
+  /** The same picker for TTF / OTF files, copied the same way. */
+  pickFonts(): Promise<IncomingBook[]>;
   /** Books that arrived before anything listened (a cold-start "Open with"). */
   takePendingIncomingBooks(): Promise<IncomingBook[]>;
   /** The latest insets, or null before the first layout pass (the event follows). */
@@ -101,6 +103,7 @@ const androidBridge: PlatformBridge = {
     );
   },
   pickBooks: async () => (await command<{ books: IncomingBook[] }>("pickBooks")).books,
+  pickFonts: async () => (await command<{ fonts: IncomingBook[] }>("pickFonts")).fonts,
   takePendingIncomingBooks: async () =>
     (await command<{ books: IncomingBook[] }>("takePendingIncomingBooks")).books,
   getInsets: async () => {
@@ -119,6 +122,7 @@ const desktopBridge: PlatformBridge = {
   hasDocumentPicker: false,
   listen: () => Object.assign(() => {}, { ready: Promise.resolve() }),
   pickBooks: async () => [],
+  pickFonts: async () => [],
   takePendingIncomingBooks: async () => [],
   getInsets: async () => null,
   setImmersive: async () => {},
