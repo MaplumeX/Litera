@@ -49,6 +49,9 @@ function fixFoliateGlob(): Plugin {
  *
  * Each patch must match exactly once, so a submodule bump that changes the
  * code fails the build instead of dropping the fix.
+ *
+ * Patches are written with LF line endings; a Windows checkout of the
+ * submodule (core.autocrlf) hands us CRLF, so the source is normalised first.
  */
 const PAGINATOR_PATCHES: [string, string][] = [
   [
@@ -102,7 +105,7 @@ function patchFoliatePaginator(): Plugin {
     enforce: "pre",
     transform(code, id) {
       if (!id.split("?")[0].endsWith("/src/foliate-js/paginator.js")) return;
-      let patched = code;
+      let patched = code.replace(/\r\n/g, "\n");
       for (const [search, replace] of PAGINATOR_PATCHES) {
         if (patched.split(search).length !== 2) {
           throw new Error(`foliate-js paginator patch no longer applies:\n${search}`);
