@@ -3,6 +3,7 @@ use tauri::Manager;
 use tauri_plugin_window_state::{Builder as WindowStateBuilder, StateFlags};
 
 mod agent_config;
+mod chatgpt_auth;
 mod error;
 mod export;
 mod fonts;
@@ -171,6 +172,9 @@ pub fn run() {
             agent_config::switch_provider,
             agent_config::set_thinking_level,
             agent_config::list_remote_models,
+            chatgpt_auth::chatgpt_login,
+            chatgpt_auth::chatgpt_cancel_login,
+            chatgpt_auth::chatgpt_logout,
             preferences::get_preferences,
             preferences::save_preferences,
             preferences::list_system_fonts,

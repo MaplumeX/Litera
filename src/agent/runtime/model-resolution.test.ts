@@ -104,4 +104,19 @@ describe("resolveRuntimeModel", () => {
       maxTokens: 8_192,
     });
   });
+
+  it("keeps ChatGPT models on the openai provider so pi-ai treats the token as a sign-in", async () => {
+    const config = { provider: "chatgpt", api: "openai-responses", baseUrl: "https://api.openai.com/v1" };
+    await expect(resolveRuntimeModel({ ...config, model: "gpt-5" })).resolves.toMatchObject({
+      id: "gpt-5",
+      provider: "openai",
+      baseUrl: "https://api.openai.com/v1",
+    });
+    await expect(resolveRuntimeModel({ ...config, model: "gpt-plan-only" })).resolves.toMatchObject({
+      id: "gpt-plan-only",
+      provider: "openai",
+      api: "openai-responses",
+      baseUrl: "https://api.openai.com/v1",
+    });
+  });
 });

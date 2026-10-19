@@ -38,8 +38,12 @@ const hook = {
   deleteCustomProvider: vi.fn(async () => {}),
   switchProvider: vi.fn(async () => {}),
   listRemoteModels: vi.fn(async () => ["qwen-2.5"]),
+  chatgptLogin: vi.fn(async () => ({ email: "reader@example.com", models: ["gpt-6.1-sol"] })),
+  chatgptCancelLogin: vi.fn(async () => {}),
+  chatgptLogout: vi.fn(async () => {}),
   loading: false,
   saving: false,
+  signingIn: false,
   error: null as string | null,
 };
 
@@ -135,6 +139,9 @@ beforeEach(() => {
   hook.switchProvider.mockClear();
   hook.listRemoteModels.mockClear();
   hook.listRemoteModels.mockResolvedValue(["qwen-2.5"]);
+  hook.chatgptLogin.mockClear();
+  hook.chatgptLogout.mockClear();
+  hook.signingIn = false;
 });
 
 afterEach(() => {
@@ -490,5 +497,38 @@ describe("AgentConfigForm", () => {
     const view = renderForm(builtinSnapshot);
     expect(view.queryByRole("button", { name: "刷新模型" })).toBeNull();
     expect(hook.listRemoteModels).not.toHaveBeenCalled();
+  });
+
+  it("signs in with ChatGPT instead of asking for an API key", async () => {
+    const view = renderForm(builtinSnapshot);
+    await chooseProvider(view, "ChatGPT");
+
+    expect(view.queryByPlaceholderText("输入 API Key")).toBeNull();
+    expect((view.getByRole("button", { name: "保存并应用" }) as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => {
+      view.getByRole("button", { name: "使用 ChatGPT 登录" }).click();
+    });
+    expect(hook.chatgptLogin).toHaveBeenCalledTimes(1);
+  });
+
+  it("applies a signed-in ChatGPT account through switch", async () => {
+    const view = renderForm({
+      ...builtinSnapshot,
+      provider: "chatgpt",
+      model: "gpt-6.1-sol",
+      chatgptAccount: { email: "reader@example.com", models: ["gpt-6.1-sol", "gpt-6-luna"] },
+    });
+    expect(view.getByText("已登录：reader@example.com")).toBeTruthy();
+
+    await act(async () => {
+      view.getByRole("button", { name: "保存并应用" }).click();
+    });
+    expect(hook.switchProvider).toHaveBeenCalledWith("chatgpt", "gpt-6.1-sol");
+    expect(hook.save).not.toHaveBeenCalled();
+
+    await act(async () => {
+      view.getByRole("button", { name: "退出登录" }).click();
+    });
+    expect(hook.chatgptLogout).toHaveBeenCalledTimes(1);
   });
 });

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Check, ChevronDown, Settings } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { listBuiltinModelIds } from "@/agent/runtime/model-resolution";
-import { isCustomProviderId } from "@/types/agent-config";
+import { CHATGPT_PROVIDER_ID, isCustomProviderId } from "@/types/agent-config";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
 
@@ -10,6 +10,7 @@ export interface ModelSwitcherProps {
   provider: string | null;
   model: string | null;
   configured: boolean;
+  /** A custom provider's saved models, or the ChatGPT plan's listed models. */
   customModels: string[];
   isStreaming: boolean;
   onModelSelect: (model: string) => void;
@@ -42,7 +43,7 @@ export function ModelSwitcher({
       setModels([]);
       return;
     }
-    if (isCustomProviderId(provider)) {
+    if (isCustomProviderId(provider) || (provider === CHATGPT_PROVIDER_ID && customModels.length > 0)) {
       setModels(customModels);
       return;
     }

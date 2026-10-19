@@ -15,7 +15,8 @@ type ModelCatalog = Record<string, Model<Api>>;
 async function builtinCatalog(provider: string): Promise<ModelCatalog | null> {
   switch (provider) {
     case "anthropic": return (await import("@earendil-works/pi-ai/providers/anthropic.models")).ANTHROPIC_MODELS;
-    case "openai": return (await import("@earendil-works/pi-ai/providers/openai.models")).OPENAI_MODELS;
+    case "openai":
+    case "chatgpt": return (await import("@earendil-works/pi-ai/providers/openai.models")).OPENAI_MODELS;
     case "deepseek": return (await import("@earendil-works/pi-ai/providers/deepseek.models")).DEEPSEEK_MODELS;
     case "google": return (await import("@earendil-works/pi-ai/providers/google.models")).GOOGLE_MODELS;
     case "openrouter": return (await import("@earendil-works/pi-ai/providers/openrouter.models")).OPENROUTER_MODELS;
@@ -50,12 +51,34 @@ function fullCatalogIndex(): Promise<Map<string, Model<Api>>> {
   return fullCatalogPromise;
 }
 
+/**
+ * A ChatGPT plan model missing from the catalog. Provider stays `openai` so
+ * pi-ai recognises the access token as a ChatGPT sign-in and drops the request
+ * fields that flow rejects.
+ */
+function chatgptPlanModel(config: RuntimeModelConfig): Model<Api> {
+  return {
+    id: config.model,
+    name: config.model,
+    api: "openai-responses",
+    provider: "openai",
+    baseUrl: config.baseUrl.replace(/\/+$/, ""),
+    reasoning: true,
+    input: ["text", "image"],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 272_000,
+    maxTokens: 128_000,
+  };
+}
+
 export async function resolveRuntimeModel(config: RuntimeModelConfig): Promise<Model<Api>> {
   const catalog = await builtinCatalog(config.provider);
   if (catalog) {
     const resolved = catalog[config.model];
-    if (!resolved) throw new Error("当前提供商不支持所选模型");
-    return resolved;
+    if (resolved) return resolved;
+    // The ChatGPT plan can list a model before the pi-ai catalog knows it.
+    if (config.provider === "chatgpt") return chatgptPlanModel(config);
+    throw new Error("当前提供商不支持所选模型");
   }
   if (!config.provider.startsWith("custom-")) {
     throw new Error("不支持的模型提供商");

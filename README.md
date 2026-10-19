@@ -52,6 +52,7 @@ An EPUB reader for desktop and Android with a built-in reading assistant. Books 
 - Thinking level (off → max); models without thinking degrade safely
 - Long chats are summarized instead of hard-truncated
 - Built-in providers (Anthropic, OpenAI, DeepSeek, Google, OpenRouter, Groq, Mistral, xAI, Together, Fireworks) plus any OpenAI-compatible endpoint (Ollama, etc.)
+- Sign in with ChatGPT to run the assistant on your ChatGPT plan, no API key needed
 
 ### App
 

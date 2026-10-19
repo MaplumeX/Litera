@@ -9,6 +9,13 @@ export interface CustomProviderEntry {
   imageInput: boolean;
 }
 
+/** The ChatGPT account signed in on this device. */
+export interface ChatgptAccount {
+  email: string | null;
+  /** Model slugs the plan offers, as listed at sign-in; empty when unknown. */
+  models: string[];
+}
+
 /** Snapshot of the agent configuration returned by `get_agent_config`. */
 export interface AgentConfigSnapshot {
   configured: boolean;
@@ -19,7 +26,11 @@ export interface AgentConfigSnapshot {
   providersWithKey: string[];
   customProviders: CustomProviderEntry[];
   thinkingLevel: string;
+  chatgptAccount?: ChatgptAccount | null;
 }
+
+/** Built-in provider backed by Sign in with ChatGPT instead of an API key. */
+export const CHATGPT_PROVIDER_ID = "chatgpt";
 
 /** Returns true when `id` is a custom provider (prefixes `custom-`). */
 export function isCustomProviderId(id: string): boolean {
@@ -37,6 +48,7 @@ export interface AgentProviderEntry {
 export const AGENT_PROVIDERS: AgentProviderEntry[] = [
   { id: "anthropic", label: "Anthropic", exampleModel: "claude-opus-4-5" },
   { id: "openai", label: "OpenAI", exampleModel: "gpt-4o" },
+  { id: CHATGPT_PROVIDER_ID, label: "ChatGPT", exampleModel: "gpt-6.1-sol" },
   { id: "deepseek", label: "DeepSeek", exampleModel: "deepseek-v4-pro" },
   { id: "google", label: "Google", exampleModel: "gemini-2.5-pro" },
   { id: "openrouter", label: "OpenRouter", exampleModel: "~anthropic/claude-opus-latest" },

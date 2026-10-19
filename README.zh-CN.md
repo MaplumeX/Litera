@@ -56,6 +56,7 @@
 - 思考强度（off → max）；不支持思考的模型会自动降级
 - 对话较长时用摘要压缩历史，而不是硬截断
 - 内置供应商（Anthropic、OpenAI、DeepSeek、Google、OpenRouter、Groq、Mistral、xAI、Together、Fireworks），也可加 OpenAI 兼容的自定义端点（如 Ollama）
+- 可以用 ChatGPT 账户登录，直接用 ChatGPT 订阅额度跑助手，不用 API Key
 
 ### 应用
 

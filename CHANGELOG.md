@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **用 ChatGPT 登录**：设置 → AI 的供应商里新增「ChatGPT」，点「使用 ChatGPT 登录」在浏览器里授权后，助手直接使用你的 ChatGPT 订阅额度，不需要 API Key。模型列表来自你的订阅；登录凭据只保存在这台设备上，不参与同步，过期前自动续期，也可以随时退出登录。
+
 ## [0.5.2] - 2026-10-19
 
 ### Added
