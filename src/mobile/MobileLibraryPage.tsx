@@ -31,6 +31,7 @@ import { cn } from "@/lib/utils";
 import { AppBarIconButton, MobileAppBar } from "@/mobile/MobileAppBar";
 import { MobileBookRow, MobileBookTile, MobileResumeCard } from "@/mobile/MobileBookItems";
 import { MobileSheet } from "@/mobile/MobileSheet";
+import { useSwipeDismiss } from "@/mobile/swipe-dismiss";
 
 interface MobileLibraryPageProps {
   shelf: LibraryShelf;
@@ -142,6 +143,13 @@ export function MobileLibraryPage({
   const [sortOpen, setSortOpen] = useState(false);
   const [actions, setActions] = useState<BookActionHandlers | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  // The drawer closes with a swipe left as well as a tap on the scrim.
+  const drawerScrimRef = useRef<HTMLDivElement>(null);
+  const drawerSwipeRef = useSwipeDismiss<HTMLDivElement>({
+    direction: "left",
+    onDismiss: () => setDrawerOpen(false),
+    scrimRef: drawerScrimRef,
+  });
   const {
     books,
     loaded,
@@ -358,8 +366,12 @@ export function MobileLibraryPage({
       <DialogPrimitive.Root open={drawerOpen} onOpenChange={setDrawerOpen}>
         <DialogPrimitive.Portal>
           {/* Drawer and scrim stop at the status bar, so it stays the page's. */}
-          <DialogPrimitive.Overlay className="fixed inset-x-0 top-[var(--safe-top)] bottom-0 z-50 m-fade bg-black/40" />
+          <DialogPrimitive.Overlay
+            ref={drawerScrimRef}
+            className="fixed inset-x-0 top-[var(--safe-top)] bottom-0 z-50 m-fade bg-black/40"
+          />
           <DialogPrimitive.Content
+            ref={drawerSwipeRef}
             aria-describedby={undefined}
             className="fixed top-[var(--safe-top)] bottom-0 left-0 z-50 flex w-[80%] max-w-xs flex-col rounded-r-2xl bg-background pt-4 pb-[var(--safe-bottom)] shadow-float outline-none m-drawer"
           >

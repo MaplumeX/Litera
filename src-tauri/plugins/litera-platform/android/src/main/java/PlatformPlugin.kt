@@ -13,6 +13,7 @@ import android.view.KeyEvent
 import android.view.Window
 import android.view.WindowManager
 import android.webkit.WebView
+import androidx.activity.BackEventCompat
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.ActivityResult
 import androidx.appcompat.app.AppCompatActivity
@@ -41,7 +42,7 @@ class FlagArgs {
 
 /**
  * The platform event bridge the mobile shell talks to. Events: `back`,
- * `volumeKey`, `lifecycle`, `incomingBooks`, `insets`. Commands: the document
+ * `backProgress` (the predictive Back gesture before it commits), `volumeKey`, `lifecycle`, `incomingBooks`, `insets`. Commands: the document
  * pickers (books and fonts), the current insets, immersive mode, the system bar icon colour,
  * keep-screen-on, volume-key interception, network type and leaving the app.
  *
@@ -73,6 +74,31 @@ class PlatformPlugin(private val activity: Activity) : Plugin(activity) {
       (activity as AppCompatActivity).onBackPressedDispatcher.onBackPressed()
       isEnabled = true
     }
+
+    // The predictive Back gesture (Android 14+): the shell previews what
+    // Back will close while the finger moves; `back` still commits it.
+    override fun handleOnBackStarted(backEvent: BackEventCompat) {
+      triggerBackProgress("start", backEvent)
+    }
+
+    override fun handleOnBackProgressed(backEvent: BackEventCompat) {
+      triggerBackProgress("progress", backEvent)
+    }
+
+    override fun handleOnBackCancelled() {
+      if (hasListener(BACK_PROGRESS_EVENT)) {
+        trigger(BACK_PROGRESS_EVENT, JSObject().apply { put("phase", "cancel") })
+      }
+    }
+  }
+
+  private fun triggerBackProgress(phase: String, backEvent: BackEventCompat) {
+    if (!hasListener(BACK_PROGRESS_EVENT)) return
+    trigger(BACK_PROGRESS_EVENT, JSObject().apply {
+      put("phase", phase)
+      put("progress", backEvent.progress.toDouble())
+      put("edge", if (backEvent.swipeEdge == BackEventCompat.EDGE_RIGHT) "right" else "left")
+    })
   }
 
   override fun load(webView: WebView) {
@@ -395,6 +421,7 @@ class PlatformPlugin(private val activity: Activity) : Plugin(activity) {
 
   companion object {
     private const val BACK_EVENT = "back"
+    private const val BACK_PROGRESS_EVENT = "backProgress"
     private const val VOLUME_KEY_EVENT = "volumeKey"
     private const val LIFECYCLE_EVENT = "lifecycle"
     private const val INCOMING_EVENT = "incomingBooks"

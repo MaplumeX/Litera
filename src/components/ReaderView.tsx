@@ -136,6 +136,8 @@ export interface ReaderViewHandle {
    * false when neither was (the mobile shell's Back moves on to the next layer).
    */
   dismissSelection: () => boolean;
+  /** Whether `dismissSelection` would close something (Back's preview asks first). */
+  hasSelection: () => boolean;
 }
 
 interface ReaderViewProps {
@@ -1357,6 +1359,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       clearIframeSelection();
       return true;
     }, [clearIframeSelection]);
+    const hasSelection = useCallback(() => selectionOpenRef.current, []);
 
     useImperativeHandle(
       ref,
@@ -1391,6 +1394,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         clearTtsHighlight,
         advanceTtsSection,
         dismissSelection,
+        hasSelection,
       }),
       [
         prev,
@@ -1423,6 +1427,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         clearTtsHighlight,
         advanceTtsSection,
         dismissSelection,
+        hasSelection,
       ],
     );
 

@@ -24,13 +24,23 @@ import { useSystemInsets } from "@/lib/use-system-insets";
 import { MobileLibraryPage } from "@/mobile/MobileLibraryPage";
 import { MobileReaderPage, type ReaderPanel } from "@/mobile/MobileReaderPage";
 import { MobileTrashPage } from "@/mobile/MobileTrashPage";
+import {
+  cancelBackPreview,
+  commitBackPreview,
+  releaseBackPreview,
+  startBackPreview,
+  updateBackPreview,
+  type BackPreviewKind,
+} from "@/mobile/back-preview";
+import { bookCover, supportsViewTransitions, transitionPage, type PageMotion } from "@/mobile/page-transition";
 
 type Page = "library" | "reader" | "trash";
 
 /**
- * How a page arrives, by where it came from: a Book opens out of the shelf
- * and the shelf comes back from behind it; Trash slides in from the side
- * like a sub-page and back out. Nothing on the first page.
+ * How a page arrives where the WebView has no View Transitions (there the
+ * motion lives in page-transition.ts): a Book opens out of the shelf and the
+ * shelf comes back from behind it; Trash slides in from the side like a
+ * sub-page and back out. Nothing on the first page.
  */
 function pageEnterClass(from: Page | null, to: Page): string | undefined {
   if (from === null || from === to) return undefined;
@@ -42,15 +52,31 @@ function pageEnterClass(from: Page | null, to: Page): string | undefined {
 const OVERLAY_SELECTOR = '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]';
 
 /**
- * Close the topmost dialog, menu or popup the way Escape would (every
- * overlay here listens for it). False when nothing is open. The footnote
- * popup stays mounted while closed, hidden, so visibility decides.
+ * The topmost open dialog, menu or popup, or null. The footnote popup stays
+ * mounted while closed, hidden, so visibility decides.
  */
-function closeTopOverlay(): boolean {
-  const open = Array.from(document.querySelectorAll<HTMLElement>(OVERLAY_SELECTOR)).some(
+function topOverlay(): HTMLElement | null {
+  const open = Array.from(document.querySelectorAll<HTMLElement>(OVERLAY_SELECTOR)).filter(
     (element) => getComputedStyle(element).visibility !== "hidden",
   );
-  if (!open) return false;
+  return open[open.length - 1] ?? null;
+}
+
+/** How Back's preview moves an overlay, by its kind; null for none (menus, or Back won't close it). */
+function overlayPreviewKind(overlay: HTMLElement): BackPreviewKind | null {
+  if (overlay.closest("[data-back-preview='none']")) return null;
+  if (overlay.classList.contains("m-sheet")) return "sheet";
+  if (overlay.classList.contains("m-drawer")) return "drawer";
+  if (overlay.classList.contains("m-page-dialog")) return "fullscreen";
+  return overlay.matches('[role="dialog"], [role="alertdialog"]') ? "dialog" : null;
+}
+
+/**
+ * Close the topmost dialog, menu or popup the way Escape would (every
+ * overlay here listens for it). False when nothing is open.
+ */
+function closeTopOverlay(): boolean {
+  if (!topOverlay()) return false;
   const target = (document.activeElement as HTMLElement | null) ?? document.body;
   target.dispatchEvent(
     new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true, cancelable: true }),
@@ -130,6 +156,9 @@ export default function MobileApp() {
   const { t, locale } = useT();
   const [mobileSettings, updateMobileSettings] = useMobileSettings();
   const [page, setPage] = useState<Page>("library");
+  const pageRef = useRef(page);
+  pageRef.current = page;
+  const pageElementRef = useRef<HTMLDivElement>(null);
   // The page before this one, for the entering animation.
   const [pageTransition, setPageTransition] = useState<{ from: Page | null; to: Page }>({
     from: null,
@@ -171,11 +200,24 @@ export default function MobileApp() {
   );
 
   const session = useReaderSession({
+    // The Book grows out of the cover that was tapped, when it's on screen.
     onOpened: (context) => {
-      setSnap(snapForReaderMode(resolveReaderMode(context.lastReaderMode)));
-      setChromeVisible(false);
-      setPanel(null);
-      setPage("reader");
+      const commit = () => {
+        setSnap(snapForReaderMode(resolveReaderMode(context.lastReaderMode)));
+        setChromeVisible(false);
+        setPanel(null);
+        setPage("reader");
+      };
+      if (pageRef.current === "reader") {
+        commit();
+        return;
+      }
+      void transitionPage({
+        motion: "open",
+        commit,
+        sharedFrom: () => bookCover(context.bookId),
+        sharedTo: () => pageElementRef.current,
+      });
     },
     beforeDownload,
   });
@@ -211,13 +253,41 @@ export default function MobileApp() {
     [session.rememberReaderMode],
   );
 
+  // A sub-page slides in over the shelf and back out.
+  const goToPage = useCallback((next: Page, motion: PageMotion) => {
+    void transitionPage({
+      motion,
+      commit: () => {
+        releaseBackPreview();
+        setPage(next);
+      },
+    });
+  }, []);
+
+  // The Book shrinks back into its cover. It closes once its last frame is
+  // captured, and the shelf reloads first, so the cover it lands on is where
+  // "Continue reading" now puts it.
   const closeReader = useCallback(async () => {
-    if (!(await session.closeBook())) return;
-    setPage("library");
-    setChromeVisible(false);
-    setSnap("collapsed");
-    setPanel(null);
-  }, [session.closeBook]);
+    const bookId = session.currentBook?.id;
+    await transitionPage({
+      motion: "close",
+      guard: async () => {
+        if (await session.closeBook()) return true;
+        cancelBackPreview();
+        return false;
+      },
+      commit: () => {
+        releaseBackPreview();
+        setPage("library");
+        setChromeVisible(false);
+        setSnap("collapsed");
+        setPanel(null);
+      },
+      prepare: refreshBooks,
+      sharedFrom: () => pageElementRef.current,
+      sharedTo: () => (bookId ? bookCover(bookId) : null),
+    });
+  }, [session.closeBook, session.currentBook?.id, refreshBooks]);
 
   useIncomingBooks({
     importIncoming: (books) => shelf.importIncoming(books, { suppressDuplicateNotice: true }),
@@ -243,6 +313,7 @@ export default function MobileApp() {
   // assistant sheet, then the reader toolbars, then the Reader itself. On
   // the Library it closes the search, then leaves the app.
   const handleBack = () => {
+    commitBackPreview();
     if (closeTopOverlay()) return;
     if (page === "reader") {
       if (session.readerRef.current?.dismissSelection()) return;
@@ -258,7 +329,7 @@ export default function MobileApp() {
       return;
     }
     if (page === "trash") {
-      setPage("library");
+      goToPage("library", "pop");
       return;
     }
     if (searchOpen) {
@@ -270,6 +341,50 @@ export default function MobileApp() {
   const handleBackRef = useRef(handleBack);
   handleBackRef.current = handleBack;
   useEffect(() => platformBridge.listen("back", () => handleBackRef.current()), []);
+
+  // What the predictive Back gesture previews: the same layer Back closes,
+  // if it's one that can show it (not the selection, the assistant sheet or
+  // the toolbars, and not leaving the app).
+  const backPreviewTarget = (): { element: HTMLElement; kind: BackPreviewKind } | null => {
+    const overlay = topOverlay();
+    if (overlay) {
+      const kind = overlayPreviewKind(overlay);
+      return kind && { element: overlay, kind };
+    }
+    const element = pageElementRef.current;
+    if (!element) return null;
+    if (page === "trash") return { element, kind: "page" };
+    if (page !== "reader" || snap !== "collapsed" || chromeVisible) return null;
+    if (session.readerRef.current?.hasSelection()) return null;
+    return { element, kind: "page" };
+  };
+  const backPreviewTargetRef = useRef(backPreviewTarget);
+  backPreviewTargetRef.current = backPreviewTarget;
+  const shellRef = useRef<HTMLElement>(null);
+  useEffect(
+    () =>
+      platformBridge.listen("backProgress", (event) => {
+        if (event.phase === "cancel") {
+          cancelBackPreview();
+          return;
+        }
+        if (event.phase === "progress") {
+          updateBackPreview(event.progress);
+          return;
+        }
+        const target = backPreviewTargetRef.current();
+        if (!target) return;
+        // A full-screen dialog's backdrop fades to show the page below it.
+        const backdrops = document.querySelectorAll<HTMLElement>(".m-page-backdrop");
+        const scrim = target.kind === "fullscreen" ? backdrops[backdrops.length - 1] : undefined;
+        startBackPreview(target.element, target.kind, event.edge, {
+          scrim,
+          shell: target.kind === "page" ? shellRef.current : null,
+        });
+        updateBackPreview(event.progress);
+      }),
+    [],
+  );
 
   useSystemInsets();
 
@@ -328,8 +443,15 @@ export default function MobileApp() {
   const editingBook = page === "reader" && session.editingBook;
 
   return (
-    <main className="mobile-shell fixed inset-0 flex flex-col bg-background text-foreground">
-      <div key={page} className={cn("min-h-0 flex-1", pageEnterClass(pageTransition.from, page))}>
+    <main ref={shellRef} className="mobile-shell fixed inset-0 flex flex-col bg-background text-foreground">
+      <div
+        key={page}
+        ref={pageElementRef}
+        className={cn(
+          "min-h-0 flex-1",
+          !supportsViewTransitions() && pageEnterClass(pageTransition.from, page),
+        )}
+      >
         {page === "reader" ? (
           <MobileReaderPage
             session={session}
@@ -346,7 +468,7 @@ export default function MobileApp() {
             }}
           />
         ) : page === "trash" ? (
-          <MobileTrashPage shelf={shelf} onBack={() => setPage("library")} />
+          <MobileTrashPage shelf={shelf} onBack={() => goToPage("library", "pop")} />
         ) : (
           <MobileLibraryPage
             shelf={shelf}
@@ -356,7 +478,7 @@ export default function MobileApp() {
               setSettingsSection(undefined);
               setSettingsOpen(true);
             }}
-            onOpenTrash={() => setPage("trash")}
+            onOpenTrash={() => goToPage("trash", "push")}
             searchOpen={searchOpen}
             onSearchOpenChange={handleSearchOpenChange}
           />
