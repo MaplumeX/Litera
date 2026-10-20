@@ -941,8 +941,8 @@ function App() {
             canPrevChapter={chapterNav.canPrev}
             canNextChapter={chapterNav.canNext}
             previewLabelAt={(frac) => readerRef.current?.previewLabelAt(frac)}
-            canGoBack={readerHistory.canGoBack}
-            canGoForward={readerHistory.canGoForward}
+            canGoBack={readerHistory.canGoBack && !readerHistory.readOn}
+            canGoForward={readerHistory.canGoForward && !readerHistory.readOn}
             onBack={() => readerRef.current?.goBack()}
             onForward={() => readerRef.current?.goForward()}
           />

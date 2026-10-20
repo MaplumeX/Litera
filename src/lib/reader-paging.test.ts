@@ -9,7 +9,9 @@ import {
   isSeekBurst,
   pageLocalX,
   pageWidthOf,
+  READ_ON_SCREENS,
   readerKeyAction,
+  screensBetween,
   scrolledBoundaryDirection,
   SEEK_BURST_MS,
   shouldIgnorePagingTarget,
@@ -508,6 +510,20 @@ describe("isSeekBurst", () => {
     expect(isSeekBurst(0, 1_000)).toBe(false);
     expect(isSeekBurst(1_000, 1_000 + SEEK_BURST_MS - 1)).toBe(true);
     expect(isSeekBurst(1_000, 1_000 + SEEK_BURST_MS)).toBe(false);
+  });
+});
+
+describe("screensBetween", () => {
+  it("counts pages or viewport heights within a section", () => {
+    expect(screensBetween({ index: 2, screen: 4 }, { index: 2, screen: 5 })).toBe(1);
+    expect(screensBetween({ index: 2, screen: 5 }, { index: 2, screen: 4 })).toBe(1);
+    expect(screensBetween({ index: 2, screen: 1 }, { index: 2, screen: 1.5 })).toBe(0.5);
+    expect(screensBetween({ index: 2, screen: 3 }, { index: 2, screen: 3 })).toBe(0);
+  });
+
+  it("counts a move into another section as one screen", () => {
+    expect(screensBetween({ index: 2, screen: 9 }, { index: 3, screen: 1 })).toBe(1);
+    expect(READ_ON_SCREENS).toBeGreaterThan(1);
   });
 });
 

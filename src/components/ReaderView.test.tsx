@@ -233,7 +233,7 @@ describe("ReaderView navigation history", () => {
     await waitFor(() => expect(onBookReady).toHaveBeenCalled());
     expect(viewEl().goToFraction).toHaveBeenCalledWith(0.4);
     expect(viewEl().history.canGoBack).toBe(false);
-    expect(onHistoryChange).toHaveBeenLastCalledWith({ canGoBack: false, canGoForward: false });
+    expect(onHistoryChange).toHaveBeenLastCalledWith({ canGoBack: false, canGoForward: false, readOn: false });
   });
 
   it("offers the way back after a jump and walks it", async () => {
@@ -243,11 +243,11 @@ describe("ReaderView navigation history", () => {
     await act(async () => {
       await ref.current!.goToCfi("epubcfi(/6/10!/4/2/1:0)");
     });
-    expect(onHistoryChange).toHaveBeenLastCalledWith({ canGoBack: true, canGoForward: false });
+    expect(onHistoryChange).toHaveBeenLastCalledWith({ canGoBack: true, canGoForward: false, readOn: false });
     act(() => ref.current!.goBack());
-    expect(onHistoryChange).toHaveBeenLastCalledWith({ canGoBack: false, canGoForward: true });
+    expect(onHistoryChange).toHaveBeenLastCalledWith({ canGoBack: false, canGoForward: true, readOn: false });
     act(() => ref.current!.goForward());
-    expect(onHistoryChange).toHaveBeenLastCalledWith({ canGoBack: true, canGoForward: false });
+    expect(onHistoryChange).toHaveBeenLastCalledWith({ canGoBack: true, canGoForward: false, readOn: false });
   });
 
   it("keeps a burst of seeks as one history entry", async () => {
@@ -266,6 +266,92 @@ describe("ReaderView navigation history", () => {
     expect(rendererGoTo).toHaveBeenCalledTimes(2);
     expect(view.history.replaceState).toHaveBeenLastCalledWith({ fraction: 0.32 });
     expect(view.history.states).toHaveLength(2);
+  });
+
+  it("steps through chapters without stacking history entries", async () => {
+    const onBookReady = vi.fn();
+    const { ref, onHistoryChange } = renderReader({ onBookReady });
+    await waitFor(() => expect(onBookReady).toHaveBeenCalled());
+    resolveImpl = (target) => ({ index: Number(String(target).replace(/\D/g, "")) });
+    const view = viewEl() as FakeFoliateView & { renderer?: unknown };
+    const rendererGoTo = vi.fn(async () => {});
+    view.renderer = { goTo: rendererGoTo };
+    await act(async () => {
+      await ref.current!.goToCfi("epubcfi(/6/10!/4/2/1:0)");
+      await ref.current!.turnToChapter("ch2.xhtml");
+      await ref.current!.turnToChapter("ch3.xhtml");
+    });
+    expect(view.goTo).toHaveBeenCalledTimes(1);
+    expect(rendererGoTo).toHaveBeenCalledTimes(2);
+    expect(view.history.states).toHaveLength(2);
+    expect(view.history.states[1]).toBe("ch3.xhtml");
+    expect(onHistoryChange).toHaveBeenLastCalledWith({ canGoBack: true, canGoForward: false, readOn: false });
+  });
+});
+
+describe("ReaderView reading on past a jump", () => {
+  class FakeRenderer extends EventTarget {
+    scrolled = false;
+    start = 0;
+    size = 600;
+    page = 1;
+    goTo = vi.fn(async () => {});
+    relocate(reason: string, index: number, page: number) {
+      this.page = page;
+      this.dispatchEvent(new CustomEvent("relocate", { detail: { reason, index } }));
+    }
+  }
+
+  async function openWithRenderer() {
+    const renderer = new FakeRenderer();
+    const onBookReady = vi.fn();
+    const utils = renderReader({ onBookReady });
+    (viewEl() as unknown as { renderer: FakeRenderer }).renderer = renderer;
+    await waitFor(() => expect(onBookReady).toHaveBeenCalled());
+    return { renderer, ...utils };
+  }
+
+  it("marks the jump read on after a few page turns, and fresh again on the next jump", async () => {
+    const { ref, renderer, onHistoryChange } = await openWithRenderer();
+    await act(async () => {
+      await ref.current!.goToCfi("epubcfi(/6/10!/4/2/1:0)");
+    });
+    act(() => renderer.relocate("navigation", 4, 1));
+    act(() => renderer.relocate("page", 4, 2));
+    act(() => renderer.relocate("snap", 4, 3));
+    expect(onHistoryChange).toHaveBeenLastCalledWith({ canGoBack: true, canGoForward: false, readOn: false });
+    act(() => renderer.relocate("page", 5, 1));
+    expect(onHistoryChange).toHaveBeenLastCalledWith({ canGoBack: true, canGoForward: false, readOn: true });
+
+    act(() => ref.current!.goBack());
+    expect(onHistoryChange).toHaveBeenLastCalledWith({ canGoBack: false, canGoForward: true, readOn: false });
+  });
+
+  it("does not count a jump's own landing or a page left unturned", async () => {
+    const { ref, renderer, onHistoryChange } = await openWithRenderer();
+    await act(async () => {
+      await ref.current!.goToCfi("epubcfi(/6/10!/4/2/1:0)");
+    });
+    act(() => renderer.relocate("anchor", 4, 1));
+    act(() => renderer.relocate("navigation", 7, 9));
+    act(() => renderer.relocate("snap", 7, 9));
+    act(() => renderer.relocate("snap", 7, 9));
+    expect(onHistoryChange).toHaveBeenLastCalledWith({ canGoBack: true, canGoForward: false, readOn: false });
+  });
+
+  it("counts scrolled flow in viewport heights", async () => {
+    const { ref, renderer, onHistoryChange } = await openWithRenderer();
+    renderer.scrolled = true;
+    await act(async () => {
+      await ref.current!.goToCfi("epubcfi(/6/10!/4/2/1:0)");
+    });
+    act(() => renderer.relocate("navigation", 4, 0));
+    renderer.start = 1200;
+    act(() => renderer.relocate("scroll", 4, 0));
+    expect(onHistoryChange).toHaveBeenLastCalledWith({ canGoBack: true, canGoForward: false, readOn: false });
+    renderer.start = 1800;
+    act(() => renderer.relocate("scroll", 4, 0));
+    expect(onHistoryChange).toHaveBeenLastCalledWith({ canGoBack: true, canGoForward: false, readOn: true });
   });
 });
 
