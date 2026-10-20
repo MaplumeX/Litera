@@ -71,6 +71,7 @@ const readerHandle = {
   next: vi.fn(),
   goToFraction: vi.fn(async () => {}),
   goToTocItem: vi.fn(),
+  turnToChapter: vi.fn(async () => {}),
   getChapterTicks: () => [],
   previewLabelAt: () => undefined,
   goToCfi: vi.fn(async () => true),

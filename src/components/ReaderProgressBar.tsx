@@ -87,8 +87,9 @@ export function ReaderProgressBar({
       data-testid="reader-progress-bar"
       className="group/bar flex h-11 shrink-0 items-center gap-1 px-2 pb-2"
     >
-      {/* Back / forward stay visible while they apply: after a jump, the way
-          back is the thing the reader is looking for. */}
+      {/* Back / forward show right after a jump, when the way back is the
+          thing the reader is looking for; App hides them once the reader
+          reads on. */}
       {canGoBack && (
         <Button
           type="button"

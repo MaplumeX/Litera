@@ -107,6 +107,7 @@ export function useReaderSession(options: UseReaderSessionOptions = {}) {
   const [readerHistory, setReaderHistory] = useState<ReaderHistoryState>({
     canGoBack: false,
     canGoForward: false,
+    readOn: false,
   });
   const [annotations, setAnnotations] = useState<AnnotationsFile>(emptyAnnotations);
   const annotationsRef = useRef(annotations);
@@ -541,13 +542,13 @@ export function useReaderSession(options: UseReaderSessionOptions = {}) {
 
   const handlePrevChapter = useCallback(() => {
     const href = chapterNavAt(toc, progress.chapterHref).prevHref;
-    if (href) goToChapterHref(href);
-  }, [goToChapterHref, progress.chapterHref, toc]);
+    if (href) void readerRef.current?.turnToChapter(href);
+  }, [progress.chapterHref, toc]);
 
   const handleNextChapter = useCallback(() => {
     const href = chapterNavAt(toc, progress.chapterHref).nextHref;
-    if (href) goToChapterHref(href);
-  }, [goToChapterHref, progress.chapterHref, toc]);
+    if (href) void readerRef.current?.turnToChapter(href);
+  }, [progress.chapterHref, toc]);
 
   /** Jump to an annotation's CFI, falling back to its fraction. */
   const jumpToCfi = useCallback(async (cfi: string, fraction?: number) => {

@@ -90,7 +90,8 @@ function ToolbarTab({
 /**
  * Where you are and a slider to go elsewhere, between previous / next
  * chapter. Dragging previews the chapter under the thumb and jumps on
- * release; after a jump, the way back sits at the start of the row.
+ * release; after a jump, the way back sits at the start of the row until
+ * the reader reads on.
  */
 function MobileProgressRow({ session }: { session: ReaderSession }) {
   const { t } = useT();
@@ -117,7 +118,7 @@ function MobileProgressRow({ session }: { session: ReaderSession }) {
         <span className="shrink-0 tabular-nums">{pct}%</span>
       </div>
       <div className="flex items-center">
-        {session.readerHistory.canGoBack ? (
+        {session.readerHistory.canGoBack && !session.readerHistory.readOn ? (
           <button
             type="button"
             className={sideButton}

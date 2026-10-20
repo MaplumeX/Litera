@@ -17,9 +17,12 @@ import {
   bindTapTouchGuard,
   isScrollKeyAction,
   readerKeyAction,
+  READ_ON_SCREENS,
+  screensBetween,
   scrollAreaAt,
   scrolledBoundaryDirection,
   type ReaderKeyAction,
+  type ReadingMark,
   type WheelPagingState,
 } from "@/lib/reader-paging";
 import type { ReaderFlow } from "@/lib/reader-flow";
@@ -74,7 +77,12 @@ export interface SelectionCapture {
 export interface ReaderHistoryState {
   canGoBack: boolean;
   canGoForward: boolean;
+  /** The reader has read on past the last jump, so back / forward step out of sight (Alt+←/→ still work). */
+  readOn: boolean;
 }
+
+/** Renderer relocations that come from reading on, not from a jump landing. */
+const READING_REASONS = new Set(["page", "snap", "scroll"]);
 
 /** Lines scrolled per ↑/↓ press in scrolled flow. */
 const SCROLL_LINE_PX = 80;
@@ -89,6 +97,13 @@ type FoliateHistory = EventTarget & {
   replaceState: (state: unknown) => void;
 };
 
+type FoliateRenderer = EventTarget & {
+  scrolled?: boolean;
+  start?: number;
+  size?: number;
+  page?: number;
+};
+
 export interface TocItem {
   label: string;
   href: string;
@@ -100,6 +115,8 @@ export interface ReaderViewHandle {
   next: () => void;
   goToFraction: (frac: number) => void;
   goToTocItem: (href: string) => void;
+  /** Go to a chapter the way a page turn goes on: the way back stays where the last jump started. */
+  turnToChapter: (href: string) => Promise<void>;
   /** Chapter start fractions plus a trailing 1, one per TOC entry rather than per spine file. */
   getChapterTicks: () => number[];
   previewLabelAt: (fraction: number) => string | undefined;
@@ -360,6 +377,29 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
     const scrolledRef = useRef(false);
     // Last progress-bar seek, so a burst of seeks is one history entry.
     const lastSeekAtRef = useRef(0);
+    // Screens read since the last jump; past READ_ON_SCREENS the back /
+    // forward controls step aside.
+    const readOnRef = useRef<{ mark: ReadingMark | null; screens: number; readOn: boolean }>({
+      mark: null,
+      screens: 0,
+      readOn: false,
+    });
+    const emitHistory = useCallback(() => {
+      const history = (viewRef.current as unknown as { history?: FoliateHistory } | null)?.history;
+      onHistoryChangeRef.current?.({
+        canGoBack: history?.canGoBack ?? false,
+        canGoForward: history?.canGoForward ?? false,
+        readOn: readOnRef.current.readOn,
+      });
+    }, []);
+    const addReadOnScreens = useCallback((screens: number) => {
+      const state = readOnRef.current;
+      if (state.readOn) return;
+      state.screens += screens;
+      if (state.screens < READ_ON_SCREENS) return;
+      state.readOn = true;
+      emitHistory();
+    }, [emitHistory]);
     const [image, setImage] = useState<ReaderImage | null>(null);
     // Latest reader CSS for footnote inner views (read inside the mount effect).
     const stylesCssRef = useRef(stylesCss);
@@ -951,10 +991,9 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       const history = (el as unknown as { history?: FoliateHistory }).history;
       const handleHistoryChange = () => {
         if (!history) return;
-        onHistoryChangeRef.current?.({
-          canGoBack: history.canGoBack,
-          canGoForward: history.canGoForward,
-        });
+        readOnRef.current.screens = 0;
+        readOnRef.current.readOn = false;
+        emitHistory();
       };
       history?.addEventListener?.("index-change", handleHistoryChange);
 
@@ -993,8 +1032,25 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       setImage(null);
       closeFootnote();
       lastSeekAtRef.current = 0;
-      onHistoryChangeRef.current?.({ canGoBack: false, canGoForward: false });
+      readOnRef.current = { mark: null, screens: 0, readOn: false };
+      onHistoryChangeRef.current?.({ canGoBack: false, canGoForward: false, readOn: false });
       if (!fileData || !viewRef.current) return;
+      let disposed = false;
+      let renderer: FoliateRenderer | null = null;
+      // The renderer's relocate carries why it moved; the view's does not.
+      const handleRendererRelocate = (e: Event) => {
+        const detail = (e as CustomEvent<{ reason?: string; index?: number }>).detail;
+        const r = e.currentTarget as FoliateRenderer;
+        const mark = {
+          index: detail?.index ?? 0,
+          screen: r.scrolled ? (r.start ?? 0) / (r.size || 1) : (r.page ?? 0),
+        };
+        const from = readOnRef.current.mark;
+        readOnRef.current.mark = mark;
+        if (from && READING_REASONS.has(detail?.reason ?? "")) {
+          addReadOnScreens(screensBetween(from, mark));
+        }
+      };
       const view = viewRef.current as unknown as {
         open: (file: File) => Promise<void>;
         init: (opts: Record<string, unknown>) => Promise<void>;
@@ -1047,15 +1103,20 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
             history.clear();
             history.pushState(at ?? { fraction: fractionToRestore ?? 0 });
           }
-          onHistoryChangeRef.current?.({
-            canGoBack: history?.canGoBack ?? false,
-            canGoForward: history?.canGoForward ?? false,
-          });
+          emitHistory();
+          if (!disposed) {
+            renderer = (view as unknown as { renderer?: FoliateRenderer }).renderer ?? null;
+            renderer?.addEventListener?.("relocate", handleRendererRelocate);
+          }
           // Notify App that the book is ready and toc is available.
           const book = (view as unknown as { book?: { toc?: TocItem[] } }).book;
           onBookReadyRef.current?.(book?.toc ?? []);
         })
         .catch((err: unknown) => console.error("foliate open error:", err));
+      return () => {
+        disposed = true;
+        renderer?.removeEventListener?.("relocate", handleRendererRelocate);
+      };
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [fileData, initialFraction, initialCfi]);
 
@@ -1156,6 +1217,29 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         ?.goTo?.(href)
         .catch((err: unknown) => console.error("goTo error:", err));
     }, []);
+    const turnToChapter = useCallback(async (href: string) => {
+      const view = viewRef.current as unknown as {
+        goTo?: (h: string) => Promise<unknown>;
+        resolveNavigation?: (target: string) => unknown;
+        renderer?: { goTo?: (target: unknown) => Promise<unknown> };
+        history?: FoliateHistory;
+      } | null;
+      if (!view) return;
+      try {
+        const resolved = view.resolveNavigation?.(href);
+        if (resolved && view.history && view.renderer?.goTo) {
+          // Move the current entry along, as a page turn does, instead of
+          // pushing one: stepping through chapters is reading, not a jump.
+          await view.renderer.goTo(resolved);
+          view.history.replaceState(href);
+          addReadOnScreens(1);
+        } else {
+          await view.goTo?.(href);
+        }
+      } catch (err: unknown) {
+        console.error("turnToChapter error:", err);
+      }
+    }, [addReadOnScreens]);
     const getChapterTicks = useCallback((): number[] => {
       const view = viewRef.current as unknown as {
         getSectionFractions?: () => number[];
@@ -1374,6 +1458,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         next,
         goToFraction,
         goToTocItem,
+        turnToChapter,
         getChapterTicks,
         previewLabelAt,
         goToCfi,
@@ -1407,6 +1492,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         next,
         goToFraction,
         goToTocItem,
+        turnToChapter,
         getChapterTicks,
         previewLabelAt,
         goToCfi,

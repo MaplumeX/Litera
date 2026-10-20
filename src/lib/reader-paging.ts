@@ -211,6 +211,21 @@ export function isSeekBurst(lastSeekAt: number, now: number): boolean {
   return lastSeekAt > 0 && now - lastSeekAt < SEEK_BURST_MS;
 }
 
+/** Screens read past a jump before its back / forward controls step aside. */
+export const READ_ON_SCREENS = 3;
+
+/** Where the Book shows: section index and offset in screens (pages, or viewport heights when scrolled). */
+export interface ReadingMark {
+  index: number;
+  screen: number;
+}
+
+/** Screens read between two marks; moving into another section counts as one. */
+export function screensBetween(from: ReadingMark, to: ReadingMark): number {
+  if (from.index !== to.index) return 1;
+  return Math.abs(to.screen - from.screen);
+}
+
 /**
  * Scrolled flow renders one section at a time: a wheel push past either end
  * of the section moves to the neighbouring one. Returns the direction to
