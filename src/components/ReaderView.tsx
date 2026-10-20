@@ -24,7 +24,12 @@ import {
 } from "@/lib/reader-paging";
 import type { ReaderFlow } from "@/lib/reader-flow";
 import { opensImageViewer, readerImageAt, type ReaderImage } from "@/lib/reader-images";
-import { quoteSearchQueries } from "@/lib/citations";
+import {
+  QUOTE_FLASH_MS,
+  QUOTE_HIGHLIGHT_COLOR,
+  QUOTE_OVERLAY_KEY,
+  quoteSearchQueries,
+} from "@/lib/citations";
 import { chapterTicks, sectionIndexAt } from "@/lib/reader-progress";
 import { parseXPointer, rangeFromXPointer, xpointerFromRange } from "@/lib/xpointer";
 import { TTS_HIGHLIGHT_COLOR, TTS_OVERLAY_KEY } from "@/lib/reader-tts";
@@ -208,6 +213,7 @@ type FoliateAnnotator = {
   ) => Promise<unknown>;
   deleteAnnotation?: (annotation: { value: string }) => Promise<unknown>;
   goTo?: (target: string) => Promise<unknown>;
+  clearSearch?: () => void;
   tts?: FoliateTtsEngine | null;
   initTTS?: (granularity?: string, highlight?: (range: Range) => void) => Promise<void>;
   lastLocation?: { range?: Range } | null;
@@ -398,6 +404,15 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       setFootnoteHeight(null);
     }, []);
     const ttsRangeRef = useRef<Range | null>(null);
+    const quoteFlashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const clearQuoteFlash = useCallback(() => {
+      if (quoteFlashTimerRef.current) clearTimeout(quoteFlashTimerRef.current);
+      quoteFlashTimerRef.current = null;
+      const view = viewRef.current as unknown as FoliateAnnotator | null;
+      for (const { overlayer } of view?.renderer?.getContents?.() ?? []) {
+        overlayer?.remove(QUOTE_OVERLAY_KEY);
+      }
+    }, []);
     const suppressUserRelocateRef = useRef(0);
     const applyTtsHighlightRef = useRef<(range: Range) => void>(() => {});
     const stableTtsHighlight = useRef((range: Range) => {
@@ -966,6 +981,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         el.removeEventListener("show-annotation", handleShowAnnotation as EventListener);
         el.removeEventListener("load", handleLoad as EventListener);
         el.removeEventListener("link", handleLink as EventListener);
+        if (quoteFlashTimerRef.current) clearTimeout(quoteFlashTimerRef.current);
         closeFootnote();
         unbindDoc?.();
         unbindHostPointer();
@@ -986,6 +1002,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       lastLocationRef.current = null;
       lastSelectionDocRef.current = null;
       ttsRangeRef.current = null;
+      clearQuoteFlash();
       suppressUserRelocateRef.current = 0;
       paintedCfisRef.current = new Set();
       setSelectionPos(null);
@@ -1189,21 +1206,35 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       }
     }, []);
     const goToQuote = useCallback(async (href: string, quote: string) => {
-      const view = viewRef.current as unknown as {
+      const view = viewRef.current as unknown as (FoliateAnnotator & {
         book?: { resolveHref?: (href: string) => { index: number } | null };
         search?: (opts: { query: string; index: number }) => AsyncGenerator<unknown>;
-        goTo?: (target: string) => Promise<unknown>;
-      } | null;
+      }) | null;
       if (!view) return false;
+      clearQuoteFlash();
       try {
         const index = view.book?.resolveHref?.(href)?.index;
         if (index != null && view.search) {
           for (const query of quoteSearchQueries(quote)) {
-            // The first hit is enough; foliate keeps its search outline as the highlight.
             for await (const result of view.search({ query, index })) {
               const cfi = (result as { cfi?: unknown } | null)?.cfi;
               if (typeof cfi === "string") {
-                await view.goTo?.(cfi);
+                // Only the first hit matters; drop foliate's persistent search
+                // outline and flash the quote briefly instead.
+                view.clearSearch?.();
+                const resolved = (await view.goTo?.(cfi)) as
+                  | { index: number; anchor?: (doc: Document) => Range }
+                  | undefined;
+                const contents = view.renderer
+                  ?.getContents?.()
+                  .find((item) => item.index === resolved?.index);
+                const range = contents?.doc ? resolved?.anchor?.(contents.doc) : undefined;
+                if (contents?.overlayer && range) {
+                  contents.overlayer.add(QUOTE_OVERLAY_KEY, range, Overlayer.highlight, {
+                    color: QUOTE_HIGHLIGHT_COLOR,
+                  });
+                  quoteFlashTimerRef.current = setTimeout(clearQuoteFlash, QUOTE_FLASH_MS);
+                }
                 return true;
               }
             }
@@ -1214,7 +1245,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         console.error("goToQuote error:", err);
       }
       return false;
-    }, []);
+    }, [clearQuoteFlash]);
     const setStyles = useCallback((css: string) => {
       const view = viewRef.current as unknown as { renderer?: { setStyles?: (c: string) => void } };
       view?.renderer?.setStyles?.(css);
