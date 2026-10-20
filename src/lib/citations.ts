@@ -9,6 +9,11 @@ const QUOTE_ELLIPSIS = /…+|\.{3,}|。{3,}/;
 const QUOTE_MARKS = /^["'“”‘’「」『』]+|["'“”‘’「」『』]+$/g;
 const FALLBACK_QUERY_CHARS = 20;
 
+/** Overlay for the quote an "Open in Book" jump lands on; fades after `QUOTE_FLASH_MS`. */
+export const QUOTE_OVERLAY_KEY = "litera-quote";
+export const QUOTE_HIGHLIGHT_COLOR = "#fbbf24";
+export const QUOTE_FLASH_MS = 2500;
+
 export function isCitationHref(href: string | undefined): href is string {
   return typeof href === "string" && href.startsWith(CITE_SCHEME);
 }
