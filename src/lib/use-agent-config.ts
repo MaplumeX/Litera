@@ -1,8 +1,20 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { AgentConfigSnapshot, ChatgptAccount, CustomProviderEntry } from "@/types/agent-config";
 import { invokeErrorMessage, isInvokeAppError } from "@/lib/app-error";
 import { embeddedAgentRuntime } from "@/agent/runtime/embedded-runtime";
+
+/**
+ * Every mounted useAgentConfig keeps its own snapshot, so a change made through
+ * one instance (e.g. the settings form) must reload the others (e.g. the chat
+ * composer's model switcher), or they keep showing the old provider and model.
+ */
+const configListeners = new Set<() => Promise<void>>();
+
+async function configChanged() {
+  embeddedAgentRuntime.invalidateConfig();
+  await Promise.all([...configListeners].map((reload) => reload()));
+}
 
 export function useAgentConfig() {
   const [snapshot, setSnapshot] = useState<AgentConfigSnapshot | null>(null);
@@ -23,13 +35,19 @@ export function useAgentConfig() {
     }
   }, []);
 
+  useEffect(() => {
+    configListeners.add(load);
+    return () => {
+      configListeners.delete(load);
+    };
+  }, [load]);
+
   const save = useCallback(async (provider: string, apiKey: string, model: string) => {
     setSaving(true);
     setError(null);
     try {
       await invoke("save_agent_config", { provider, apiKey, model });
-      embeddedAgentRuntime.invalidateConfig();
-      await load();
+      await configChanged();
     } catch (err) {
       setError(invokeErrorMessage(err));
       throw err;
@@ -50,8 +68,7 @@ export function useAgentConfig() {
           models,
           imageInput,
         });
-        embeddedAgentRuntime.invalidateConfig();
-        await load();
+        await configChanged();
         return entry;
       } catch (err) {
         setError(invokeErrorMessage(err));
@@ -69,8 +86,7 @@ export function useAgentConfig() {
       setError(null);
       try {
         await invoke("delete_custom_provider", { providerId: id });
-        embeddedAgentRuntime.invalidateConfig();
-        await load();
+        await configChanged();
       } catch (err) {
         setError(invokeErrorMessage(err));
         throw err;
@@ -94,8 +110,7 @@ export function useAgentConfig() {
           models,
           imageInput,
         });
-        embeddedAgentRuntime.invalidateConfig();
-        await load();
+        await configChanged();
         return entry;
       } catch (err) {
         setError(invokeErrorMessage(err));
@@ -113,8 +128,7 @@ export function useAgentConfig() {
       setError(null);
       try {
         await invoke("switch_provider", { providerId, model });
-        embeddedAgentRuntime.invalidateConfig();
-        await load();
+        await configChanged();
       } catch (err) {
         setError(invokeErrorMessage(err));
         throw err;
@@ -125,6 +139,11 @@ export function useAgentConfig() {
     [load],
   );
 
+  const setThinkingLevel = useCallback(async (level: string) => {
+    await invoke("set_thinking_level", { level });
+    await configChanged();
+  }, []);
+
   const [signingIn, setSigningIn] = useState(false);
 
   /** Opens the browser for Sign in with ChatGPT and resolves once tokens are saved. */
@@ -133,8 +152,7 @@ export function useAgentConfig() {
     setError(null);
     try {
       const account = await invoke<ChatgptAccount>("chatgpt_login");
-      embeddedAgentRuntime.invalidateConfig();
-      await load();
+      await configChanged();
       return account;
     } catch (err) {
       if (!(isInvokeAppError(err) && err.code === "Cancelled")) setError(invokeErrorMessage(err));
@@ -153,8 +171,7 @@ export function useAgentConfig() {
     setError(null);
     try {
       await invoke("chatgpt_logout");
-      embeddedAgentRuntime.invalidateConfig();
-      await load();
+      await configChanged();
     } catch (err) {
       setError(invokeErrorMessage(err));
       throw err;
@@ -182,6 +199,7 @@ export function useAgentConfig() {
     updateCustomProvider,
     deleteCustomProvider,
     switchProvider,
+    setThinkingLevel,
     listRemoteModels,
     chatgptLogin,
     chatgptCancelLogin,
