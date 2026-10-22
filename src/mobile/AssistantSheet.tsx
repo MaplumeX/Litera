@@ -66,7 +66,11 @@ export const AssistantSheet = forwardRef<ChatPanelHandle, AssistantSheetProps>(
         )}
         style={{
           height: `calc(${snap === "full" ? "100%" : "50%"} - ${dragOffset}px)`,
-          paddingBottom: "var(--safe-bottom)",
+          bottom: "var(--keyboard-inset)",
+          maxHeight: snap === "full"
+            ? "calc(100% - var(--keyboard-inset))"
+            : "calc(100% - var(--keyboard-inset) - var(--safe-top))",
+          paddingBottom: "var(--keyboard-safe-bottom)",
         }}
       >
         <div className="relative flex shrink-0 items-center gap-1 px-2">

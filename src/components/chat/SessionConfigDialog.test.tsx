@@ -13,6 +13,7 @@ vi.stubGlobal("ResizeObserver", ResizeObserverStub);
 
 afterEach(() => {
   cleanup();
+  document.documentElement.classList.remove("mobile-ui");
   vi.unstubAllGlobals();
 });
 
@@ -36,6 +37,17 @@ function renderDialog(overrides: {
 }
 
 describe("SessionConfigDialog", () => {
+  it("focuses the phone dialog without automatically opening the keyboard", () => {
+    document.documentElement.classList.add("mobile-ui");
+    const { view } = renderDialog();
+    expect(document.activeElement).toBe(view.getByRole("dialog"));
+  });
+
+  it("preserves desktop autofocus on the prompt", () => {
+    const { view } = renderDialog();
+    expect(document.activeElement).toBe(view.getByRole("textbox"));
+  });
+
   it("prefills the textarea from the session config", () => {
     const { view } = renderDialog({
       session: { id: "session-1", title: "古文翻译", systemPrompt: "你是古文翻译助手" },

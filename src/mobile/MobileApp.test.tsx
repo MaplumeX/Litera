@@ -355,7 +355,7 @@ describe("MobileApp — navigation", () => {
 
 describe("MobileApp — system bars", () => {
   const inset = (name: string) => document.documentElement.style.getPropertyValue(name);
-  const insets = { top: 24, bottom: 16, left: 0, right: 0, cutoutTop: 24, cutoutBottom: 0 };
+  const insets = { top: 24, bottom: 16, imeBottom: 0, left: 0, right: 0, cutoutTop: 24, cutoutBottom: 0 };
 
   it("keeps the page clear of the system bars: asks for the insets, then follows them", async () => {
     bridge.api.getInsets.mockImplementationOnce(async () => insets as never);
@@ -367,6 +367,17 @@ describe("MobileApp — system bars", () => {
     act(() => emit("insets", { ...insets, top: 0, bottom: 0 }));
     expect(inset("--android-inset-top")).toBe("0px");
     expect(inset("--android-cutout-top")).toBe("24px");
+  });
+
+  it("keeps keyboard occlusion separate from the navigation bar, including after dismissal", async () => {
+    await renderApp();
+    act(() => emit("insets", { ...insets, imeBottom: 320 }));
+    expect(inset("--android-inset-bottom")).toBe("16px");
+    expect(inset("--android-ime-bottom")).toBe("320px");
+
+    act(() => emit("insets", insets));
+    expect(inset("--android-inset-bottom")).toBe("16px");
+    expect(inset("--android-ime-bottom")).toBe("0px");
   });
 
   it("matches the status bar icons to the app's theme", async () => {

@@ -50,6 +50,7 @@ function DialogContent({
   overlayClassName,
   children,
   showCloseButton = true,
+  onOpenAutoFocus,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean
@@ -65,6 +66,15 @@ function DialogContent({
           className
         )}
         {...props}
+        onOpenAutoFocus={(event) => {
+          onOpenAutoFocus?.(event)
+          if (!event.defaultPrevented && document.documentElement.classList.contains("mobile-ui")) {
+            event.preventDefault()
+            // Keep focus accessible without opening the IME as the dialog enters.
+            const content = event.target
+            if (content instanceof HTMLElement) content.focus({ preventScroll: true })
+          }
+        }}
       >
         {children}
         {showCloseButton && (

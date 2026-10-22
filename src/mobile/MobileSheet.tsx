@@ -38,9 +38,15 @@ export function MobileSheet({
           ref={swipeRef}
           aria-describedby={undefined}
           className={cn(
-            "fixed inset-x-0 bottom-0 z-50 flex max-h-[calc(100%-var(--safe-top)-2rem)] flex-col rounded-t-[1.75rem] bg-background pb-[var(--safe-bottom)] shadow-float outline-none m-sheet",
+            "fixed inset-x-0 bottom-[var(--keyboard-inset)] z-50 flex max-h-[calc(100%-var(--keyboard-inset)-var(--safe-top)-2rem)] flex-col rounded-t-[1.75rem] bg-background pb-[var(--keyboard-safe-bottom)] shadow-float outline-none m-sheet",
             className,
           )}
+          onOpenAutoFocus={(event) => {
+            // Focus the sheet without opening the keyboard mid-entry animation.
+            event.preventDefault();
+            const content = event.target;
+            if (content instanceof HTMLElement) content.focus({ preventScroll: true });
+          }}
         >
           <div aria-hidden className="mx-auto mt-3 h-1 w-8 shrink-0 rounded-full bg-muted-foreground/30" />
           <DialogPrimitive.Title
@@ -48,7 +54,7 @@ export function MobileSheet({
           >
             {title}
           </DialogPrimitive.Title>
-          <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">{children}</div>
         </DialogPrimitive.Content>
       </DialogPrimitive.Portal>
     </DialogPrimitive.Root>

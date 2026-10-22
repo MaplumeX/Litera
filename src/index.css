@@ -273,7 +273,8 @@
   }
 }
 
-/* What the system bars, cutout and keyboard cover, as one set of variables.
+/* System bars and cutouts form the safe area; the keyboard is an occlusion
+ * that moves input surfaces above it, rather than adding huge inner padding.
  * The Android plugin publishes --android-inset-* (use-system-insets.ts);
  * env() covers a WebView that reports safe areas itself. max(), so a WebView
  * that does both never pads twice. */
@@ -282,6 +283,34 @@
   --safe-bottom: max(env(safe-area-inset-bottom, 0px), var(--android-inset-bottom, 0px));
   --safe-left: max(env(safe-area-inset-left, 0px), var(--android-inset-left, 0px));
   --safe-right: max(env(safe-area-inset-right, 0px), var(--android-inset-right, 0px));
+  --keyboard-inset: var(--android-ime-bottom, 0px);
+  --content-bottom: max(var(--safe-bottom), var(--keyboard-inset));
+  --keyboard-safe-bottom: max(0px, calc(var(--safe-bottom) - var(--keyboard-inset)));
+}
+
+/* Only inner panels scroll. Focusing an input must not pan the body and
+ * displace fixed dialogs or the phone shell. Portalled dialogs inherit this. */
+html.mobile-ui,
+.mobile-ui body {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+/* Centre regular dialogs in the space above the keyboard. Explicit vh
+ * limits on desktop dialogs do not account for an edge-to-edge Android IME. */
+.mobile-ui :is([data-slot="dialog-content"], [data-slot="alert-dialog-content"]):not(.m-page-dialog) {
+  top: calc((100% + var(--safe-top) - var(--content-bottom)) / 2);
+  max-height: calc(100% - var(--safe-top) - var(--content-bottom) - 2rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* Follow native IME frames without a second CSS layout transition. */
+  transition-property: opacity, transform, translate;
+}
+
+.mobile-ui .m-page-dialog {
+  height: calc(100% - var(--keyboard-inset));
+  padding-bottom: var(--keyboard-safe-bottom);
 }
 
 /* The phone shell: no tap flash, no rubber-band scroll of the whole page,
