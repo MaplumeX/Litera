@@ -69,12 +69,12 @@ export const AssistantSheet = forwardRef<ChatPanelHandle, AssistantSheetProps>(
           paddingBottom: "var(--safe-bottom)",
         }}
       >
-        <div className="flex shrink-0 items-center gap-1 px-2">
+        <div className="relative flex shrink-0 items-center gap-1 px-2">
           <div
             role="separator"
             aria-orientation="horizontal"
             aria-label={t("mobile.sheetHandle")}
-            className="flex h-8 flex-1 touch-none items-center justify-center"
+            className="h-8 flex-1 touch-none"
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
             onPointerUp={endDrag}
@@ -83,7 +83,11 @@ export const AssistantSheet = forwardRef<ChatPanelHandle, AssistantSheetProps>(
               setDragOffset(0);
             }}
           >
-            <span aria-hidden className="h-1 w-10 rounded-full bg-muted-foreground/30" />
+            {/* Centered on the whole sheet, not the space left of the buttons. */}
+            <span
+              aria-hidden
+              className="pointer-events-none absolute top-1/2 left-1/2 h-1 w-10 -translate-1/2 rounded-full bg-muted-foreground/30"
+            />
           </div>
           <Button
             size="icon-sm"
