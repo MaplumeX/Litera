@@ -62,7 +62,7 @@ export const AssistantSheet = forwardRef<ChatPanelHandle, AssistantSheetProps>(
           snap === "full" ? "rounded-none pt-[var(--safe-top)]" : "rounded-t-2xl",
           collapsed && "invisible translate-y-full",
           dragOffset === 0 &&
-            "transition-[height,translate,visibility] duration-300 ease-[var(--ease-emphasized-decelerate)] motion-reduce:transition-none",
+            "transition-[height,translate,visibility] duration-[var(--motion-enter)] ease-[var(--ease-emphasized-decelerate)] motion-reduce:transition-none",
         )}
         style={{
           height: `calc(${snap === "full" ? "100%" : "50%"} - ${dragOffset}px)`,

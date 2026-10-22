@@ -334,14 +334,19 @@ html.mobile-ui,
   touch-action: none;
 }
 
-/* Phone shell motion, after Material 3: emphasized easing, ~300ms in and
- * ~200ms out. Radix waits for a closing animation before it unmounts, so
- * sheets and the drawer leave the way they came. Pages only animate in: the
- * old page is gone at once and the new one arrives over it. */
+/* Phone motion shares a calm pace: travel is spread across the entrance,
+ * and exits ease to a stop instead of accelerating into an abrupt removal.
+ * Radix keeps closing panels mounted until their exit animation finishes.
+ * Pages without View Transitions use the entrance-only fallback below. */
 :root {
-  --ease-emphasized-decelerate: cubic-bezier(0.05, 0.7, 0.1, 1);
-  --ease-emphasized-accelerate: cubic-bezier(0.3, 0, 0.8, 0.15);
-  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-emphasized-decelerate: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --ease-emphasized-accelerate: cubic-bezier(0.4, 0, 0.6, 1);
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --motion-enter: 400ms;
+  --motion-exit: 300ms;
+  --motion-page: 420ms;
+  --motion-feedback: 280ms;
+  --motion-fade: 240ms;
 }
 @keyframes m-fade-in { from { opacity: 0; } }
 @keyframes m-fade-out { to { opacity: 0; } }
@@ -349,121 +354,121 @@ html.mobile-ui,
 @keyframes m-sheet-out { to { transform: translateY(100%); } }
 @keyframes m-drawer-in { from { transform: translateX(-100%); } }
 @keyframes m-drawer-out { to { transform: translateX(-100%); } }
-@keyframes m-page-push { from { transform: translateX(25%); opacity: 0; } }
-@keyframes m-page-pop { from { transform: translateX(-25%); opacity: 0; } }
-@keyframes m-page-out { to { transform: translateX(25%); opacity: 0; } }
-@keyframes m-page-open { from { transform: scale(0.94); opacity: 0; } }
-@keyframes m-page-return { from { transform: scale(1.04); opacity: 0; } }
+@keyframes m-page-push { from { transform: translateX(32px); opacity: 0; } }
+@keyframes m-page-pop { from { transform: translateX(-32px); opacity: 0; } }
+@keyframes m-page-out { to { transform: translateX(32px); opacity: 0; } }
+@keyframes m-page-open { from { transform: scale(0.98); opacity: 0; } }
+@keyframes m-page-return { from { transform: scale(1.02); opacity: 0; } }
 @keyframes m-rise { from { transform: translateY(1rem); opacity: 0; } }
-@keyframes m-dialog-in { from { transform: scale(0.92); opacity: 0; } }
-@keyframes m-dialog-out { to { transform: scale(0.96); opacity: 0; } }
+@keyframes m-dialog-in { from { transform: scale(0.97); opacity: 0; } }
+@keyframes m-dialog-out { to { transform: scale(0.98); opacity: 0; } }
 
 @media (prefers-reduced-motion: no-preference) {
-  .m-fade[data-state="open"] { animation: m-fade-in 250ms var(--ease-standard); }
-  .m-fade[data-state="closed"] { animation: m-fade-out 200ms var(--ease-standard) forwards; }
-  .m-sheet[data-state="open"] { animation: m-sheet-in 350ms var(--ease-emphasized-decelerate); }
-  .m-sheet[data-state="closed"] { animation: m-sheet-out 200ms var(--ease-emphasized-accelerate) forwards; }
-  .m-drawer[data-state="open"] { animation: m-drawer-in 350ms var(--ease-emphasized-decelerate); }
-  .m-drawer[data-state="closed"] { animation: m-drawer-out 200ms var(--ease-emphasized-accelerate) forwards; }
+  .m-fade[data-state="open"] { animation: m-fade-in var(--motion-enter) var(--ease-standard); }
+  .m-fade[data-state="closed"] { animation: m-fade-out var(--motion-exit) var(--ease-standard) forwards; }
+  .m-sheet[data-state="open"] { animation: m-sheet-in var(--motion-enter) var(--ease-emphasized-decelerate); }
+  .m-sheet[data-state="closed"] { animation: m-sheet-out var(--motion-exit) var(--ease-emphasized-accelerate) forwards; }
+  .m-drawer[data-state="open"] { animation: m-drawer-in var(--motion-enter) var(--ease-emphasized-decelerate); }
+  .m-drawer[data-state="closed"] { animation: m-drawer-out var(--motion-exit) var(--ease-emphasized-accelerate) forwards; }
   /* Centred dialogs on the phone (the shell sets .mobile-ui on <html>). */
   .mobile-ui :is([data-slot="dialog-overlay"], [data-slot="alert-dialog-overlay"])[data-state="open"] {
-    animation: m-fade-in 250ms var(--ease-standard);
+    animation: m-fade-in var(--motion-enter) var(--ease-standard);
   }
   .mobile-ui :is([data-slot="dialog-overlay"], [data-slot="alert-dialog-overlay"])[data-state="closed"] {
-    animation: m-fade-out 150ms var(--ease-standard) forwards;
+    animation: m-fade-out var(--motion-exit) var(--ease-standard) forwards;
   }
   .mobile-ui :is([data-slot="dialog-content"], [data-slot="alert-dialog-content"])[data-state="open"] {
-    animation: m-dialog-in 300ms var(--ease-emphasized-decelerate);
+    animation: m-dialog-in var(--motion-enter) var(--ease-emphasized-decelerate);
   }
   .mobile-ui :is([data-slot="dialog-content"], [data-slot="alert-dialog-content"])[data-state="closed"] {
-    animation: m-dialog-out 150ms var(--ease-emphasized-accelerate) forwards;
+    animation: m-dialog-out var(--motion-exit) var(--ease-emphasized-accelerate) forwards;
   }
   /* A full-screen page in a dialog (Settings): in from the right, out to it. */
   .mobile-ui .m-page-dialog.m-page-dialog[data-state="open"] {
-    animation: m-page-push 300ms var(--ease-emphasized-decelerate);
+    animation: m-page-push var(--motion-page) var(--ease-emphasized-decelerate);
   }
   .mobile-ui .m-page-dialog.m-page-dialog[data-state="closed"] {
-    animation: m-page-out 200ms var(--ease-emphasized-accelerate) forwards;
+    animation: m-page-out var(--motion-exit) var(--ease-emphasized-accelerate) forwards;
   }
-  /* Its backdrop hides the page underneath at once, as a page change does,
-   * and fades out with the page on the way back. */
+  /* Reveal the page backdrop with the content, keeping the page below
+   * visible at the start rather than covering it before anything moves. */
   .mobile-ui .m-page-backdrop.m-page-backdrop[data-state="open"] {
-    animation: none;
+    animation: m-fade-in var(--motion-fade) var(--ease-standard);
   }
   .mobile-ui .m-page-backdrop.m-page-backdrop[data-state="closed"] {
-    animation: m-fade-out 200ms var(--ease-emphasized-accelerate) forwards;
+    animation: m-fade-out var(--motion-exit) var(--ease-emphasized-accelerate) forwards;
   }
-  .m-page-push { animation: m-page-push 300ms var(--ease-emphasized-decelerate); }
-  .m-page-pop { animation: m-page-pop 300ms var(--ease-emphasized-decelerate); }
-  .m-page-open { animation: m-page-open 300ms var(--ease-emphasized-decelerate); }
-  .m-page-return { animation: m-page-return 300ms var(--ease-emphasized-decelerate); }
-  .m-rise { animation: m-rise 250ms var(--ease-emphasized-decelerate); }
-  .m-enter-fade { animation: m-fade-in 200ms var(--ease-standard); }
+  .m-page-push { animation: m-page-push var(--motion-page) var(--ease-emphasized-decelerate); }
+  .m-page-pop { animation: m-page-pop var(--motion-page) var(--ease-emphasized-decelerate); }
+  .m-page-open { animation: m-page-open var(--motion-page) var(--ease-emphasized-decelerate); }
+  .m-page-return { animation: m-page-return var(--motion-page) var(--ease-emphasized-decelerate); }
+  .m-rise { animation: m-rise var(--motion-feedback) var(--ease-emphasized-decelerate); }
+  .m-enter-fade { animation: m-fade-in var(--motion-fade) var(--ease-standard); }
   /* Bars and sheets that stay mounted slide by transition instead. */
   .m-slide {
     /* Tailwind's translate-* utilities set `translate`, not `transform`. */
     transition:
-      translate 250ms var(--ease-emphasized-decelerate),
-      visibility 250ms;
+      translate var(--motion-feedback) var(--ease-emphasized-decelerate),
+      visibility var(--motion-feedback);
   }
   .m-slide[data-shown="false"] {
     transition-timing-function: var(--ease-emphasized-accelerate);
-    transition-duration: 200ms;
+    transition-duration: var(--motion-feedback);
   }
 }
 
 /* Page changes through the View Transitions API (src/mobile/page-transition.ts
  * sets data-page-motion on <html> for the length of one). Material 3's
- * shared X axis, container transform and fade through: the old page leaves
- * in the first ~90ms, the new one arrives over the rest. The API only runs
+ * shared X axis and container transform. Old and new pictures overlap so
+ * the handoff never becomes a brief empty frame. The API only runs
  * without reduced motion, so nothing here needs the media query. */
 @keyframes m-axis-out-start { to { transform: translateX(-30px); } }
 @keyframes m-axis-out-end { to { transform: translateX(30px); } }
 @keyframes m-axis-in-start { from { transform: translateX(-30px); } }
 @keyframes m-axis-in-end { from { transform: translateX(30px); } }
-@keyframes m-grow-in { from { transform: scale(0.92); } }
-@keyframes m-settle-in { from { transform: scale(0.96); } }
+@keyframes m-grow-in { from { transform: scale(0.98); } }
+@keyframes m-settle-in { from { transform: scale(0.98); } }
 html[data-page-motion]::view-transition-old(*),
 html[data-page-motion]::view-transition-new(*) {
   mix-blend-mode: normal;
 }
 html[data-page-motion="push"]::view-transition-old(root) {
   animation:
-    m-axis-out-start 300ms var(--ease-standard) both,
-    m-fade-out 90ms var(--ease-emphasized-accelerate) both;
+    m-axis-out-start var(--motion-page) var(--ease-standard) both,
+    m-fade-out var(--motion-fade) var(--ease-standard) both;
 }
 html[data-page-motion="push"]::view-transition-new(root) {
   animation:
-    m-axis-in-end 300ms var(--ease-standard) both,
-    m-fade-in 210ms var(--ease-emphasized-decelerate) 90ms both;
+    m-axis-in-end var(--motion-page) var(--ease-standard) both,
+    m-fade-in 320ms var(--ease-standard) both;
 }
 html[data-page-motion="pop"]::view-transition-old(root) {
   animation:
-    m-axis-out-end 300ms var(--ease-standard) both,
-    m-fade-out 90ms var(--ease-emphasized-accelerate) both;
+    m-axis-out-end var(--motion-page) var(--ease-standard) both,
+    m-fade-out var(--motion-fade) var(--ease-standard) both;
 }
 html[data-page-motion="pop"]::view-transition-new(root) {
   animation:
-    m-axis-in-start 300ms var(--ease-standard) both,
-    m-fade-in 210ms var(--ease-emphasized-decelerate) 90ms both;
+    m-axis-in-start var(--motion-page) var(--ease-standard) both,
+    m-fade-in 320ms var(--ease-standard) both;
 }
 html[data-page-motion="fade"]::view-transition-old(*) {
-  animation: m-fade-out 90ms var(--ease-emphasized-accelerate) both;
+  animation: m-fade-out var(--motion-fade) var(--ease-standard) both;
 }
 html[data-page-motion="fade"]::view-transition-new(*) {
   animation:
-    m-grow-in 210ms var(--ease-emphasized-decelerate) 90ms both,
-    m-fade-in 210ms var(--ease-emphasized-decelerate) 90ms both;
+    m-grow-in var(--motion-page) var(--ease-standard) both,
+    m-fade-in 320ms var(--ease-standard) both;
 }
 /* The container transform: the shared element's box moves and resizes
  * between its two ends while its old picture gives way to the new one. Both
  * pictures fill the box, cropped, rather than stretch. */
 html[data-page-motion="open"]::view-transition-group(m-shared) {
-  animation-duration: 350ms;
+  animation-duration: var(--motion-page);
   animation-timing-function: var(--ease-standard);
 }
 html[data-page-motion="close"]::view-transition-group(m-shared) {
-  animation-duration: 300ms;
+  animation-duration: 360ms;
   animation-timing-function: var(--ease-standard);
 }
 html:is([data-page-motion="open"], [data-page-motion="close"])::view-transition-old(m-shared),
@@ -473,10 +478,10 @@ html:is([data-page-motion="open"], [data-page-motion="close"])::view-transition-
   object-fit: cover;
 }
 html[data-page-motion="open"]::view-transition-old(m-shared) {
-  animation: m-fade-out 100ms var(--ease-emphasized-accelerate) both;
+  animation: m-fade-out 200ms var(--ease-standard) 40ms both;
 }
 html[data-page-motion="open"]::view-transition-new(m-shared) {
-  animation: m-fade-in 250ms var(--ease-emphasized-decelerate) 60ms both;
+  animation: m-fade-in 300ms var(--ease-standard) 80ms both;
 }
 /* The new page's picture is drawn over the old one: here it's the Book's
  * empty backdrop, fading in over the shelf as the cover grows. */
@@ -484,13 +489,13 @@ html[data-page-motion="open"]::view-transition-old(root) {
   animation: none;
 }
 html[data-page-motion="open"]::view-transition-new(root) {
-  animation: m-fade-in 200ms var(--ease-standard) both;
+  animation: m-fade-in var(--motion-exit) var(--ease-standard) both;
 }
 html[data-page-motion="close"]::view-transition-old(m-shared) {
-  animation: m-fade-out 120ms var(--ease-emphasized-accelerate) 30ms both;
+  animation: m-fade-out 220ms var(--ease-standard) 40ms both;
 }
 html[data-page-motion="close"]::view-transition-new(m-shared) {
-  animation: m-fade-in 150ms var(--ease-emphasized-decelerate) 90ms both;
+  animation: m-fade-in var(--motion-fade) var(--ease-standard) 80ms both;
 }
 html[data-page-motion="close"]::view-transition-old(root) {
   animation: none;
@@ -498,6 +503,6 @@ html[data-page-motion="close"]::view-transition-old(root) {
 }
 html[data-page-motion="close"]::view-transition-new(root) {
   animation:
-    m-settle-in 300ms var(--ease-standard) both,
-    m-fade-in 250ms var(--ease-standard) both;
+    m-settle-in 360ms var(--ease-standard) both,
+    m-fade-in var(--motion-exit) var(--ease-standard) both;
 }

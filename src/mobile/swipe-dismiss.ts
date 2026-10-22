@@ -32,7 +32,7 @@ export function canStartDrag(target: Element, panel: HTMLElement, direction: Dis
   return true;
 }
 
-const SETTLE = "250ms var(--ease-emphasized-decelerate)";
+const SETTLE = "var(--motion-feedback) var(--ease-emphasized-decelerate)";
 
 /**
  * Drag a modal panel toward its edge to close it, as native sheets and
