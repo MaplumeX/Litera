@@ -1086,6 +1086,13 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       view
         .open(file)
         .then(async () => {
+          // Style the fresh renderer before init renders the first section;
+          // otherwise that section shows the book's own fonts until onBookReady.
+          const css = stylesCssRef.current;
+          if (css) {
+            (view as unknown as { renderer?: { setStyles?: (c: string) => void } })
+              .renderer?.setStyles?.(css);
+          }
           const restoreFraction = async () => {
             if (fractionToRestore != null && fractionToRestore > 0) {
               await view.goToFraction(fractionToRestore).catch((err: unknown) =>
