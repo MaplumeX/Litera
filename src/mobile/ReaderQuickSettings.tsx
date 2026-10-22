@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { ArrowLeft, Check, ChevronRight, Minus, Plus } from "lucide-react";
 import {
-  FONT_FAMILIES,
+  DEFAULT_FONT_FAMILY,
   THEMES,
   TYPOGRAPHY_RANGES,
   type ContinuousKey,
@@ -15,12 +15,6 @@ import { saveReaderFlow, type ReaderFlow } from "@/lib/reader-flow";
 import { useT, type MessageKey } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { MobileSheet } from "@/mobile/MobileSheet";
-
-const FONT_LABEL_KEYS: Record<(typeof FONT_FAMILIES)[number]["value"], MessageKey> = {
-  serif: "settings.font.serif",
-  "sans-serif": "settings.font.sans",
-  monospace: "settings.font.mono",
-};
 
 const THEME_LABEL_KEYS: Record<(typeof THEMES)[number], MessageKey> = {
   light: "settings.theme.light",
@@ -151,7 +145,7 @@ function FontOption({
   );
 }
 
-/** The typeface list, laid out like the desktop picker: generic families, then imported fonts. */
+/** The typeface list: the default, followed by imported fonts. */
 function FontList({
   value,
   importedFamilies,
@@ -175,15 +169,12 @@ function FontList({
         <span>{t("settings.font")}</span>
       </button>
       <div role="radiogroup" aria-label={t("settings.font")}>
-        {FONT_FAMILIES.map((family) => (
-          <FontOption
-            key={family.value}
-            family={family.value}
-            label={t(FONT_LABEL_KEYS[family.value])}
-            selected={value === family.value}
-            onSelect={() => onChange(family.value)}
-          />
-        ))}
+        <FontOption
+          family={DEFAULT_FONT_FAMILY}
+          label={t("settings.font.default")}
+          selected={isGenericFontFamily(value)}
+          onSelect={() => onChange(DEFAULT_FONT_FAMILY)}
+        />
         {importedFamilies.length > 0 && (
           <>
             <div className="px-6 pt-4 pb-1 text-xs font-medium text-muted-foreground">
@@ -235,7 +226,7 @@ export function ReaderQuickSettings({
   const importedFamilies = importedFontFamilies(useImportedFonts());
   const [fontListOpen, setFontListOpen] = useState(false);
   const fontFamily = styleState.fontFamily;
-  const fontLabel = isGenericFontFamily(fontFamily) ? t(FONT_LABEL_KEYS[fontFamily]) : fontFamily;
+  const fontLabel = isGenericFontFamily(fontFamily) ? t("settings.font.default") : fontFamily;
   return (
     <MobileSheet
       open={open}

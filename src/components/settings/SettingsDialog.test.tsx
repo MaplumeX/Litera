@@ -583,7 +583,7 @@ describe("SettingsDialog", () => {
     expect(getByRole("button", { name: "增大字体大小" })).toBeTruthy();
     expect(queryByRole("slider")).toBeNull();
     expect(getByRole("combobox")).toHaveProperty("disabled", false);
-    expect(getByText("衬线")).toBeTruthy();
+    expect(getByRole("combobox").textContent).toBe("默认");
     expect(queryByText("打开书籍后生效")).toBeNull();
     expect(queryByText("恢复默认")).toBeNull();
 
@@ -866,12 +866,12 @@ describe("SettingsDialog", () => {
     act(() => {
       getByRole("combobox").click();
     });
-    await waitFor(() => getByRole("option", { name: "衬线" }));
+    await waitFor(() => getByRole("option", { name: "默认" }));
     expect(queryByRole("option", { name: "Geist" })).toBeNull();
   });
 
-  it("opens a searchable font combobox with generics at the top", async () => {
-    const { getByRole, getByPlaceholderText } = render(
+  it("opens a searchable font combobox with one default instead of generic families", async () => {
+    const { getByRole, queryByRole, getByPlaceholderText } = render(
       <SettingsDialog
         open
         onClose={noop}
@@ -891,12 +891,13 @@ describe("SettingsDialog", () => {
     });
 
     expect(getByPlaceholderText("搜索字体…")).toBeTruthy();
-    const serif = await waitFor(() => getByRole("option", { name: "衬线" }));
+    const defaultFont = await waitFor(() => getByRole("option", { name: "默认" }));
     const named = await waitFor(() => getByRole("option", { name: "Noto Sans CJK SC" }));
-    expect(getByRole("option", { name: "无衬线" })).toBeTruthy();
-    expect(getByRole("option", { name: "等宽" })).toBeTruthy();
+    expect(queryByRole("option", { name: "衬线" })).toBeNull();
+    expect(queryByRole("option", { name: "无衬线" })).toBeNull();
+    expect(queryByRole("option", { name: "等宽" })).toBeNull();
     expect(
-      serif.compareDocumentPosition(named) & Node.DOCUMENT_POSITION_FOLLOWING,
+      defaultFont.compareDocumentPosition(named) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
   });
 
@@ -949,7 +950,7 @@ describe("SettingsDialog", () => {
 
   it("shows chrome font and size under appearance and applies them live", async () => {
     const onTypographyChange = vi.fn();
-    const { getByRole, getByText } = render(
+    const { getByRole, getByText, queryByRole } = render(
       <SettingsDialog
         open
         onClose={noop}
@@ -981,13 +982,12 @@ describe("SettingsDialog", () => {
       getByRole("combobox").click();
     });
     const geist = await waitFor(() => getByRole("option", { name: "Geist" }));
-    const serif = getByRole("option", { name: "衬线" });
     const named = await waitFor(() => getByRole("option", { name: "Noto Sans CJK SC" }));
+    expect(queryByRole("option", { name: "衬线" })).toBeNull();
+    expect(queryByRole("option", { name: "无衬线" })).toBeNull();
+    expect(queryByRole("option", { name: "等宽" })).toBeNull();
     expect(
-      geist.compareDocumentPosition(serif) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-    expect(
-      serif.compareDocumentPosition(named) & Node.DOCUMENT_POSITION_FOLLOWING,
+      geist.compareDocumentPosition(named) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
 
     act(() => {
