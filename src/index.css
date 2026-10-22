@@ -342,11 +342,11 @@ html.mobile-ui,
   --ease-emphasized-decelerate: cubic-bezier(0.22, 0.61, 0.36, 1);
   --ease-emphasized-accelerate: cubic-bezier(0.4, 0, 0.6, 1);
   --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
-  --motion-enter: 400ms;
-  --motion-exit: 300ms;
-  --motion-page: 420ms;
-  --motion-feedback: 280ms;
-  --motion-fade: 240ms;
+  --motion-enter: 320ms;
+  --motion-exit: 230ms;
+  --motion-page: 340ms;
+  --motion-feedback: 230ms;
+  --motion-fade: 200ms;
 }
 @keyframes m-fade-in { from { opacity: 0; } }
 @keyframes m-fade-out { to { opacity: 0; } }
@@ -440,7 +440,7 @@ html[data-page-motion="push"]::view-transition-old(root) {
 html[data-page-motion="push"]::view-transition-new(root) {
   animation:
     m-axis-in-end var(--motion-page) var(--ease-standard) both,
-    m-fade-in 320ms var(--ease-standard) both;
+    m-fade-in 260ms var(--ease-standard) both;
 }
 html[data-page-motion="pop"]::view-transition-old(root) {
   animation:
@@ -450,7 +450,7 @@ html[data-page-motion="pop"]::view-transition-old(root) {
 html[data-page-motion="pop"]::view-transition-new(root) {
   animation:
     m-axis-in-start var(--motion-page) var(--ease-standard) both,
-    m-fade-in 320ms var(--ease-standard) both;
+    m-fade-in 260ms var(--ease-standard) both;
 }
 html[data-page-motion="fade"]::view-transition-old(*) {
   animation: m-fade-out var(--motion-fade) var(--ease-standard) both;
@@ -458,7 +458,7 @@ html[data-page-motion="fade"]::view-transition-old(*) {
 html[data-page-motion="fade"]::view-transition-new(*) {
   animation:
     m-grow-in var(--motion-page) var(--ease-standard) both,
-    m-fade-in 320ms var(--ease-standard) both;
+    m-fade-in 260ms var(--ease-standard) both;
 }
 /* The container transform: the shared element's box moves and resizes
  * between its two ends while its old picture gives way to the new one. Both
@@ -468,7 +468,7 @@ html[data-page-motion="open"]::view-transition-group(m-shared) {
   animation-timing-function: var(--ease-standard);
 }
 html[data-page-motion="close"]::view-transition-group(m-shared) {
-  animation-duration: 360ms;
+  animation-duration: 300ms;
   animation-timing-function: var(--ease-standard);
 }
 html:is([data-page-motion="open"], [data-page-motion="close"])::view-transition-old(m-shared),
@@ -478,10 +478,10 @@ html:is([data-page-motion="open"], [data-page-motion="close"])::view-transition-
   object-fit: cover;
 }
 html[data-page-motion="open"]::view-transition-old(m-shared) {
-  animation: m-fade-out 200ms var(--ease-standard) 40ms both;
+  animation: m-fade-out 160ms var(--ease-standard) 30ms both;
 }
 html[data-page-motion="open"]::view-transition-new(m-shared) {
-  animation: m-fade-in 300ms var(--ease-standard) 80ms both;
+  animation: m-fade-in 240ms var(--ease-standard) 60ms both;
 }
 /* The new page's picture is drawn over the old one: here it's the Book's
  * empty backdrop, fading in over the shelf as the cover grows. */
@@ -492,10 +492,10 @@ html[data-page-motion="open"]::view-transition-new(root) {
   animation: m-fade-in var(--motion-exit) var(--ease-standard) both;
 }
 html[data-page-motion="close"]::view-transition-old(m-shared) {
-  animation: m-fade-out 220ms var(--ease-standard) 40ms both;
+  animation: m-fade-out 180ms var(--ease-standard) 30ms both;
 }
 html[data-page-motion="close"]::view-transition-new(m-shared) {
-  animation: m-fade-in var(--motion-fade) var(--ease-standard) 80ms both;
+  animation: m-fade-in var(--motion-fade) var(--ease-standard) 60ms both;
 }
 html[data-page-motion="close"]::view-transition-old(root) {
   animation: none;
@@ -503,6 +503,6 @@ html[data-page-motion="close"]::view-transition-old(root) {
 }
 html[data-page-motion="close"]::view-transition-new(root) {
   animation:
-    m-settle-in 360ms var(--ease-standard) both,
+    m-settle-in 300ms var(--ease-standard) both,
     m-fade-in var(--motion-exit) var(--ease-standard) both;
 }

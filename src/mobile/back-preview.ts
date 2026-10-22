@@ -24,7 +24,7 @@ interface Preview {
   shell: HTMLElement | null;
 }
 
-const SETTLE_MS = 280;
+const SETTLE_MS = 230;
 const SETTLE = `${SETTLE_MS}ms var(--ease-standard)`;
 
 let current: Preview | null = null;
