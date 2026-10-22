@@ -92,16 +92,18 @@ export class LiteraAgentRuntime {
   private readonly loadConfig:()=>Promise<RuntimeConfig>; private readonly loadStream:(api:string)=>Promise<StreamFn>;
   private readonly loadAnnotations:(bookId:string)=>Promise<AnnotationsFile>;
   private images=new Map<string,Promise<ModelImage>>();
-  private bookId:string|null=null; private session:DecodedPiSession|null=null; private agent:Agent|null=null; private promptId:string|null=null; private revision=0; private bookGeneration=0; private configRevision=0; private promptAbort:AbortController|null=null;
+  private bookId:string|null=null; private session:DecodedPiSession|null=null; private agent:Agent|null=null; private promptId:string|null=null; private revision=0; private bookGeneration=0; private configRevision=0; private promptAbort:AbortController|null=null; private promptAgent:Agent|null=null;
   /** Background context maintenance after a turn; a new prompt awaits it. */
   private maintenance:{abort:AbortController;done:Promise<void>}|null=null;
   constructor(options?:{sessions?:SessionPort;book?:BookContentPort;loadConfig?:()=>Promise<RuntimeConfig>;loadStream?:(api:string)=>Promise<StreamFn>;loadAnnotations?:(bookId:string)=>Promise<AnnotationsFile>}){this.sessions=options?.sessions??tauriSessionPort;this.book=options?.book??new BookWorkerClient();this.loadConfig=options?.loadConfig??(()=>invoke<RuntimeConfig>("get_agent_runtime_config"));this.loadStream=options?.loadStream??streamFor;this.loadAnnotations=options?.loadAnnotations??((bookId)=>invoke<AnnotationsFile>("get_annotations",{bookId}));}
   subscribe(listener:Listener){this.listeners.add(listener);return()=>{this.listeners.delete(listener);};}
   syncBook(bookId:string){if(this.bookId===bookId)this.emit({type:"book_ready",bookId});}
   private emit(payload:RuntimeEventPayload){const event={version:++this.revision,...payload} as AgentEvent; for(const listener of this.listeners)listener(event);}
-  invalidateConfig(){this.configRevision+=1;this.cancelMaintenance();this.promptAbort?.abort();this.agent?.abort();this.agent=null;}
-  async openBook(bookId:string,bytes:ArrayBuffer){this.cancelMaintenance();this.promptAbort?.abort();this.agent?.abort();this.book.close();this.images.clear();const generation=++this.bookGeneration;this.bookId=bookId;this.session=null;this.agent=null;this.emit({type:"book_loading",bookId});try{await this.book.open(bookId,bytes);if(this.bookGeneration===generation&&this.bookId===bookId)this.emit({type:"book_ready",bookId});}catch(error){if(this.bookGeneration===generation&&this.bookId===bookId)this.emit({type:"error",scope:"book",message:error instanceof Error?error.message:String(error),recoverable:true,bookId});}}
-  closeBook(){const id=this.bookId;this.cancelMaintenance();this.promptAbort?.abort();this.agent?.abort();this.book.close();this.images.clear();this.bookGeneration+=1;this.bookId=null;this.session=null;this.agent=null;if(id)this.emit({type:"book_closed",bookId:id});}
+  // A config change only affects later prompts: an in-flight answer finishes on
+  // the config it started with, and only the cached Agent is dropped.
+  invalidateConfig(){this.configRevision+=1;this.cancelMaintenance();this.agent=null;}
+  async openBook(bookId:string,bytes:ArrayBuffer){this.cancelMaintenance();this.promptAbort?.abort();this.promptAgent?.abort();this.agent?.abort();this.book.close();this.images.clear();const generation=++this.bookGeneration;this.bookId=bookId;this.session=null;this.agent=null;this.emit({type:"book_loading",bookId});try{await this.book.open(bookId,bytes);if(this.bookGeneration===generation&&this.bookId===bookId)this.emit({type:"book_ready",bookId});}catch(error){if(this.bookGeneration===generation&&this.bookId===bookId)this.emit({type:"error",scope:"book",message:error instanceof Error?error.message:String(error),recoverable:true,bookId});}}
+  closeBook(){const id=this.bookId;this.cancelMaintenance();this.promptAbort?.abort();this.promptAgent?.abort();this.agent?.abort();this.book.close();this.images.clear();this.bookGeneration+=1;this.bookId=null;this.session=null;this.agent=null;if(id)this.emit({type:"book_closed",bookId:id});}
   async listSessions(requestId?:string){if(!this.bookId)return;const bookId=this.bookId;const sessions=await this.sessions.list(bookId);if(this.bookId===bookId)this.emit({type:"sessions_list",bookId,requestId,sessions});}
   async newSession(requestId?:string){if(!this.bookId)return;this.cancelMaintenance();const bookId=this.bookId;const session=await this.sessions.create(bookId);if(this.bookId!==bookId)return;this.session=session;this.agent=null;this.emit({type:"session_created",bookId,sessionId:session.header.id,requestId});}
   async switchSession(sessionId:string,requestId?:string){if(!this.bookId)return;this.cancelMaintenance();const bookId=this.bookId;const session=await this.sessions.load(bookId,sessionId);if(this.bookId!==bookId)return;this.session=session;this.agent=null;this.emit({type:"session_switched",bookId,sessionId,requestId,messages:visibleMessages(session),...sessionNavigation(session)});}
@@ -138,7 +140,7 @@ export class LiteraAgentRuntime {
   async deleteSession(sessionId:string,requestId?:string){if(!this.bookId)return;const bookId=this.bookId;await this.sessions.delete(bookId,sessionId);if(this.bookId!==bookId)return;if(this.session?.header.id===sessionId){this.cancelMaintenance();this.session=null;this.agent=null;}this.emit({type:"session_deleted",bookId,sessionId,requestId});}
   async renameSession(sessionId:string,title:string,requestId?:string){if(!this.bookId)return;const bookId=this.bookId;const clean=title.trim();if(!clean||clean.length>128)throw new Error("Invalid session title");const session=this.session?.header.id===sessionId?this.session:await this.sessions.load(bookId,sessionId);if(this.bookId!==bookId)return;const entry=newEntry("session_info",session.leafId,{name:clean});const leaf=await this.sessions.append(bookId,sessionId,session.leafId,[entry]);if(this.bookId!==bookId)return;session.entries.push(entry);session.leafId=leaf;this.emit({type:"session_renamed",bookId,sessionId,title:clean,requestId});}
   async updateSessionConfig(sessionId:string,systemPrompt:string,requestId?:string){if(!this.bookId)throw new Error("No book is open");this.cancelMaintenance();const bookId=this.bookId;if(systemPrompt.length>16*1024)throw new Error("Invalid system prompt");const session=this.session?.header.id===sessionId?this.session:await this.sessions.load(bookId,sessionId);if(this.bookId!==bookId)return;const entry=newEntry("session_config",session.leafId,{systemPrompt});const leaf=await this.sessions.append(bookId,sessionId,session.leafId,[entry]);if(this.bookId!==bookId)return;session.entries.push(entry);session.leafId=leaf;this.agent=null;this.emit({type:"session_config_updated",bookId,sessionId,systemPrompt,requestId});}
-  abort(_requestId?:string){this.cancelMaintenance();this.promptAbort?.abort();this.agent?.abort();}
+  abort(_requestId?:string){this.cancelMaintenance();this.promptAbort?.abort();this.promptAgent?.abort();this.agent?.abort();}
   /** Resolves once background context maintenance (if any) has finished. */
   async settled(){await this.maintenance?.done;}
   private cancelMaintenance(){this.maintenance?.abort.abort();}
@@ -177,10 +179,10 @@ export class LiteraAgentRuntime {
       const snapshot=formatBookSnapshot(metadata,toc);
       const readingContext=[chapterAside(toc,context.chapterHref),context.selection?`Selected text: ${context.selection}`:""].filter(Boolean).join("\n\n");
       const agent=await this.ensureAgent(config,session,promptBookId,carriedConfig??sessionConfig(session));
-      if(configAtStart!==this.configRevision||this.bookId!==promptBookId)throw new Error("Agent context changed");
-      this.agent=agent;
+      if(this.bookId!==promptBookId)throw new Error("Agent context changed");
+      this.promptAgent=agent;if(configAtStart===this.configRevision)this.agent=agent;
       compactedBeforePrompt=await this.maintainContext(agent,session,promptBookId,promptAbort.signal);
-      if(configAtStart!==this.configRevision||this.bookId!==promptBookId)throw new Error("Agent context changed");
+      if(this.bookId!==promptBookId)throw new Error("Agent context changed");
       let before=agent.state.messages.length;
       const pendingEntries:PiSessionEntry[]=[];let pendingParent=session.leafId;
       if(carriedConfig){const configEntry=newEntry("session_config",pendingParent,{systemPrompt:carriedConfig.systemPrompt});pendingEntries.push(configEntry);pendingParent=configEntry.id;}
@@ -193,7 +195,7 @@ export class LiteraAgentRuntime {
       const user:PiMessage={role:"user",content:text,timestamp:Date.now()};const userEntry=newEntry("message",pendingParent,{message:user,...(context.selection?{selection:context.selection}:{}),...(context.chapterHref?{chapterHref:context.chapterHref}:{})});
       pendingEntries.push(userEntry);
       const leaf=await this.sessions.append(promptBookId,session.header.id,persistedLeaf,pendingEntries);session.entries.push(...pendingEntries);session.leafId=leaf;userPersisted=true;
-      if(configAtStart!==this.configRevision||this.bookId!==promptBookId)throw new Error("Agent context changed");
+      if(this.bookId!==promptBookId)throw new Error("Agent context changed");
       this.emit({type:"prompt_started",bookId:promptBookId,sessionId:session.header.id,promptId,requestId});
       unsubscribe=agent.subscribe((event)=>this.onPiEvent(event,promptBookId,promptId,session!.header.id));
       const runTurn=()=>retryAssistantCall(async()=>{
@@ -227,7 +229,7 @@ export class LiteraAgentRuntime {
       const finalMessages=visibleMessages(session);const finalNavigation=sessionNavigation(session);
       // The answer is complete: unlock the input first, then maintain the context in the background.
       this.emit(aborted?{type:"prompt_aborted",bookId:promptBookId,sessionId:session.header.id,promptId,requestId,messages:finalMessages,...finalNavigation}:{type:"prompt_end",bookId:promptBookId,sessionId:session.header.id,promptId,messages:finalMessages,...finalNavigation});
-      if(!aborted)this.startMaintenance(agent,session,promptBookId);
+      if(!aborted&&configAtStart===this.configRevision)this.startMaintenance(agent,session,promptBookId);
       const hasManualTitle=session.entries.some((entry)=>entry.type==="session_info"&&entry.auto!==true);
       if(!aborted&&isFirstTurn&&!hasManualTitle){const leafAtEnd=session.leafId;const assistantText=finalAssistant.content.flatMap((block)=>block.type==="text"&&typeof block.text==="string"?[block.text]:[]).join("");void this.maybeGenerateTitle(promptBookId,session.header.id,leafAtEnd,text.slice(0,2000),assistantText.slice(0,2000),agent);}
     }catch(error){
@@ -238,12 +240,15 @@ export class LiteraAgentRuntime {
         if(compactedBeforePrompt&&rewoundFrom)await this.sessions.setLeaf(promptBookId,session.header.id,rewoundFrom).catch(()=>{});
         if(this.bookId===promptBookId&&this.session===session){this.agent=null;this.emit({type:"branch_switched",bookId:promptBookId,sessionId:session.header.id,requestId,messages:visibleMessages(session),...sessionNavigation(session)});}
       }
-      const rawMessage=error instanceof Error?error.message:String(error);const safeError=new Error(rawMessage===EDIT_TARGET_ERROR?rawMessage:classifyPromptError(error).message);this.emit({type:"error",scope:"prompt",message:safeError.message,recoverable:true,bookId:promptBookId,sessionId:session?.header.id,promptId});throw safeError;}finally{unsubscribe?.();if(this.promptAbort===promptAbort)this.promptAbort=null;if(this.promptId===promptId)this.promptId=null;}
+      const rawMessage=error instanceof Error?error.message:String(error);const safeError=new Error(rawMessage===EDIT_TARGET_ERROR?rawMessage:classifyPromptError(error).message);this.emit({type:"error",scope:"prompt",message:safeError.message,recoverable:true,bookId:promptBookId,sessionId:session?.header.id,promptId});throw safeError;}finally{unsubscribe?.();if(this.promptAbort===promptAbort)this.promptAbort=null;if(this.promptId===promptId){this.promptId=null;this.promptAgent=null;}}
   }
 
   private async ensureAgent(config:RuntimeConfig,session:DecodedPiSession,bookId:string,configured:SessionConfig|null){if(this.agent)return this.agent;const resolvedModel=await resolveRuntimeModel(config);const nativeFetch=createGuardedNativeFetch({baseUrl:resolvedModel.baseUrl});const providerStream=await this.loadStream(resolvedModel.api);const stream:StreamFn=(requestModel,requestContext,options)=>providerStream(requestModel,requestContext,{...options,fetch:nativeFetch,maxRetries:3});const vision=resolvedModel.input.includes("image");const tools=await this.tools(bookId,vision);const userPrompt=configured?.systemPrompt.trim();
     // Persisted tool results carry Image references; put the images back for vision models.
-    const convertToLlm=async(messages:PiMessage[])=>{const llm=convertPiContextToLlm(messages);return vision?restoreImageRefs(llm,async(src)=>{const image=await this.bookCall(bookId,()=>this.loadImage(src));return{type:"image",data:image.data,mimeType:image.mimeType};}):llm;};return new Agent({initialState:{systemPrompt:userPrompt?`${SYSTEM_PROMPT}\n\n${userPrompt}`:SYSTEM_PROMPT,model:resolvedModel,thinkingLevel:clampThinkingLevel(resolvedModel,config.thinkingLevel as ModelThinkingLevel),messages:piContextMessages(session),tools},streamFn:stream,convertToLlm,getApiKey:config.provider==="chatgpt"?async()=>(await this.loadConfig()).apiKey:()=>config.apiKey,transport:"sse"});}
+    const convertToLlm=async(messages:PiMessage[])=>{const llm=convertPiContextToLlm(messages);return vision?restoreImageRefs(llm,async(src)=>{const image=await this.bookCall(bookId,()=>this.loadImage(src));return{type:"image",data:image.data,mimeType:image.mimeType};}):llm;};return new Agent({initialState:{systemPrompt:userPrompt?`${SYSTEM_PROMPT}\n\n${userPrompt}`:SYSTEM_PROMPT,model:resolvedModel,thinkingLevel:clampThinkingLevel(resolvedModel,config.thinkingLevel as ModelThinkingLevel),messages:piContextMessages(session),tools},streamFn:stream,convertToLlm,getApiKey:config.provider==="chatgpt"?async()=>{
+      // Refreshes the short-lived ChatGPT token; the provider may have been
+      // switched since, and another provider's key must never reach ChatGPT.
+      const current=await this.loadConfig();if(current.provider!=="chatgpt")throw new Error("ChatGPT is no longer the active provider");return current.apiKey;}:()=>config.apiKey,transport:"sse"});}
 
   /**
    * Fire-and-forget session title generation after the first completed turn.

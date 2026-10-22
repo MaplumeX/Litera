@@ -64,6 +64,44 @@ describe("LiteraAgentRuntime",()=>{
     expect(changes).toMatchObject([{provider:"custom-a",modelId:"model-a"},{provider:"custom-b",modelId:"model-b"}]);
   });
 
+  it("lets an in-flight answer finish when the config changes and still honours a later stop",async()=>{
+    const current=session();const requestedModels:string[]=[];const events:AgentEvent[]=[];
+    const sessions:SessionPort={create:async()=>current,list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,entries)=>entries[entries.length-1]?.id??null};
+    const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:1}),toc:async()=>[],readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:1,text:"chapter"}),search:async()=>[],close:()=>{}};
+    const faux=createFauxCore({tokensPerSecond:200});faux.setResponses([fauxAssistantMessage("a fairly long first answer that streams in several deltas"),fauxAssistantMessage("title"),fauxAssistantMessage("a fairly long second answer that streams in several deltas")]);
+    let config:RuntimeConfig={provider:"custom-a",model:"model-a",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret",thinkingLevel:"off"};
+    const runtime=new LiteraAgentRuntime({sessions,book,loadConfig:async()=>config,loadStream:async()=>((requestModel,context,options)=>{requestedModels.push(requestModel.id);return faux.streamSimple(requestModel,context,options);})});
+    runtime.subscribe((event)=>{events.push(event);});
+    await runtime.openBook("book",new ArrayBuffer(1));
+    let invalidated=false;
+    const unsubscribe=runtime.subscribe((event)=>{if(event.type==="text_delta"&&!invalidated){invalidated=true;config={...config,provider:"custom-b",model:"model-b"};runtime.invalidateConfig();}});
+    await runtime.prompt("first",{});
+    unsubscribe();
+    expect(invalidated).toBe(true);
+    expect(events.some((event)=>event.type==="prompt_end")).toBe(true);
+    expect(events.some((event)=>event.type==="prompt_aborted")).toBe(false);
+    await new Promise((resolve)=>setTimeout(resolve,0));
+    // A stop pressed after a config change still reaches the in-flight request.
+    const stop=runtime.subscribe((event)=>{if(event.type==="text_delta"){runtime.invalidateConfig();runtime.abort();}});
+    await runtime.prompt("second",{});
+    stop();
+    expect(events.some((event)=>event.type==="prompt_aborted")).toBe(true);
+    expect(requestedModels.at(-1)).toBe("model-b");
+  });
+
+  it("never hands another provider's key to a ChatGPT request after a mid-answer switch",async()=>{
+    const current=session();const apiKeys:(string|undefined)[]=[];
+    const sessions:SessionPort={create:async()=>current,list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,entries)=>entries[entries.length-1]?.id??null};
+    const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:1}),toc:async()=>[{index:0,label:"One",ancestors:[],depth:0,hrefs:["one.xhtml"],chars:10}],readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:1,text:"chapter"}),search:async()=>[],close:()=>{}};
+    const faux=createFauxCore({tokensPerSecond:10_000});faux.setResponses([fauxAssistantMessage(fauxToolCall("list_annotations",{}),{stopReason:"toolUse"}),fauxAssistantMessage("done")]);
+    let config:RuntimeConfig={provider:"chatgpt",model:"gpt-plan-only",api:"openai-responses",baseUrl:"https://chatgpt.example/v1",apiKey:"chatgpt-token",thinkingLevel:"off"};
+    const runtime=new LiteraAgentRuntime({sessions,book,loadConfig:async()=>config,loadAnnotations:async()=>({version:1,annotations:[]} as unknown as AnnotationsFile),loadStream:async()=>((requestModel,context,options)=>{apiKeys.push(options?.apiKey);if(apiKeys.length===1){config={...config,provider:"anthropic",model:"claude",apiKey:"anthropic-key"};runtime.invalidateConfig();}return faux.streamSimple(requestModel,context,options);})});
+    await runtime.openBook("book",new ArrayBuffer(1));
+    await runtime.prompt("question",{}).catch(()=>{});
+    expect(apiKeys[0]).toBe("chatgpt-token");
+    expect(apiKeys).not.toContain("anthropic-key");
+  });
+
   it("compares an edited branch against the persisted leaf while parenting from the edit point",async()=>{
     const current=session();
     current.entries=[

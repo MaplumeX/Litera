@@ -7,7 +7,6 @@ import {
   useRef,
   useState,
 } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
@@ -15,7 +14,6 @@ import { MessagesSquare, AlertCircle, RefreshCw } from "lucide-react";
 import { useAgentBridge } from "@/lib/use-agent-bridge";
 import { useAgentConfig } from "@/lib/use-agent-config";
 import { invokeErrorMessage } from "@/lib/app-error";
-import { embeddedAgentRuntime } from "@/agent/runtime/embedded-runtime";
 import type { QuoteLocation } from "@/agent/book/book-content";
 import { CHATGPT_PROVIDER_ID, isCustomProviderId } from "@/types/agent-config";
 import { AgentConfigDialog } from "@/components/AgentConfigDialog";
@@ -116,7 +114,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     const [editDraft, setEditDraft] = useState("");
     const [stickToBottom, setStickToBottom] = useState(true);
     const [activeUserMessageIndex, setActiveUserMessageIndex] = useState<number | null>(null);
-    const { snapshot: configSnapshot, load: loadConfig, switchProvider } = useAgentConfig();
+    const { snapshot: configSnapshot, load: loadConfig, switchProvider, setThinkingLevel } = useAgentConfig();
     const thinkingLevel = configSnapshot?.thinkingLevel ?? "medium";
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -441,13 +439,11 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     const handleThinkingLevelChange = useCallback(async (level: string) => {
       setInvokeError(null);
       try {
-        await invoke("set_thinking_level", { level });
-        embeddedAgentRuntime.invalidateConfig();
-        await loadConfig();
+        await setThinkingLevel(level);
       } catch (error) {
         setInvokeError(String(error));
       }
-    }, [loadConfig]);
+    }, [setThinkingLevel]);
 
     const fillInput = useCallback((text: string, chapterHref?: string) => {
       setPendingSelection({ text, chapterHref });
