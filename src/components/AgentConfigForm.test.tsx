@@ -207,8 +207,8 @@ describe("AgentConfigForm", () => {
 
   it("updates a custom provider when image input is toggled", async () => {
     const view = renderForm(customSnapshot);
-    const toggle = view.getByRole("checkbox", { name: /支持图片输入/ }) as HTMLInputElement;
-    expect(toggle.checked).toBe(false);
+    const toggle = view.getByRole("switch", { name: /支持图片输入/ });
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
     fireEvent.click(toggle);
 
     await act(async () => {
@@ -228,7 +228,7 @@ describe("AgentConfigForm", () => {
 
   it("hides the image input toggle for built-in providers", () => {
     const view = renderForm(builtinSnapshot);
-    expect(view.queryByRole("checkbox", { name: /支持图片输入/ })).toBeNull();
+    expect(view.queryByRole("switch", { name: /支持图片输入/ })).toBeNull();
   });
 
   it("applies a built-in provider through save", async () => {

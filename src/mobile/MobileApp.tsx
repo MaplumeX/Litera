@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import { BookImportConfirmDialog } from "@/components/BookImportFeedback";
 import { SettingsDialog, type SettingsSection } from "@/components/settings/SettingsDialog";
 import {
@@ -132,12 +133,10 @@ function DeviceSettings({
             <span className="block text-sm">{row.label}</span>
             {row.hint && <span className="mt-1 block text-xs text-muted-foreground">{row.hint}</span>}
           </span>
-          <input
-            type="checkbox"
-            role="switch"
-            className="mt-0.5 size-5 shrink-0 accent-primary"
+          <Switch
+            className="mt-0.5"
             checked={settings[row.key]}
-            onChange={(event) => onChange({ [row.key]: event.target.checked })}
+            onCheckedChange={(checked) => onChange({ [row.key]: checked })}
           />
         </label>
       ))}
