@@ -17,8 +17,9 @@ pub struct SyncManifestData {
     pub books: std::collections::BTreeMap<String, SyncedBookData>,
     #[serde(default)]
     pub tombstones: Vec<SyncTombstoneData>,
-    /// Written only by older clients: app preferences are per-device now.
-    /// Kept on the wire so those clients still converge among themselves.
+    /// Written only by older clients: app preferences and LLM provider
+    /// configuration are per-device now. Kept on the wire so those clients
+    /// still converge among themselves.
     #[serde(default)]
     pub preferences: Option<SyncEnvelopeData>,
     #[serde(default)]
@@ -133,10 +134,6 @@ pub const MANIFEST_OBJECT_KEY: &str = "litera/manifest.json";
 /// Tombstones older than this no longer suppress and may be purged.
 /// Mirrors TOMBSTONE_TTL_MS in the TS merge engine.
 pub const TOMBSTONE_TTL_SECS: i64 = 30 * 24 * 60 * 60;
-
-/// Pre-dates every real edit timestamp; used as the baseline for envelopes
-/// recorded when Sync is first enabled on a device.
-const EPOCH_BASELINE: &str = "1970-01-01T00:00:00+00:00";
 
 fn is_tombstone_active(tombstone: &SyncTombstoneData) -> bool {
     let Ok(deleted_at) = chrono::DateTime::parse_from_rfc3339(&tombstone.deleted_at) else {
@@ -337,35 +334,11 @@ pub fn rebase_annotations(
     (next, removed)
 }
 
-/// A local provider-settings edit: marks the local envelope as newest.
-pub fn note_provider_saved(root: &Path) -> AppResult<()> {
-    update_sync_state(root, |state| {
-        state.provider_updated_at = Some(chrono::Utc::now().to_rfc3339());
-        Ok(())
-    })
-}
-
-/// Sync being enabled for the first time: the current local provider
-/// settings become this device's baseline (timestamp, only when the device
-/// has never recorded an edit).
-pub fn note_sync_enabled(root: &Path) -> AppResult<()> {
-    update_sync_state(root, |state| {
-        // Epoch baseline, not "now": a device enabling Sync for the first time
-        // must lose merges against any envelope another device actually edited,
-        // so the new device feels pre-configured rather than clobbering the
-        // backend with its untouched defaults.
-        if state.provider_updated_at.is_none() {
-            state.provider_updated_at = Some(EPOCH_BASELINE.to_string());
-        }
-        Ok(())
-    })
-}
-
 /// The Sync Backend changed (endpoint, region, bucket, or addressing): what
 /// this device knows about the old backend's objects says nothing about the
 /// new one. Forget it so every book file and session uploads again, and the
 /// first bulk upload asks for confirmation again. Local data — Tombstones,
-/// timestamps, provider settings — is kept and merges into the new backend.
+/// timestamps — is kept and merges into the new backend.
 pub fn note_sync_backend_changed(root: &Path) -> AppResult<()> {
     update_sync_state(root, |state| {
         state.book_revisions.clear();
@@ -400,9 +373,9 @@ pub fn export_local_manifest(
         schema_version: 1,
         books: std::collections::BTreeMap::new(),
         tombstones: state.tombstones.clone(),
-        // App preferences are per-device and never sync. The last envelope
-        // seen (written by an older client) passes through untouched so
-        // older clients keep converging among themselves.
+        // App preferences and LLM provider settings are per-device and never
+        // sync. The last envelopes seen (written by older clients) pass
+        // through untouched so older clients keep converging among themselves.
         preferences: state.preferences.clone(),
         provider: state.provider.clone(),
     };
@@ -1242,9 +1215,9 @@ pub struct SyncState {
     /// files written by older versions parse; dropped on the next write.
     #[serde(default, skip_serializing)]
     pub preferences_updated_at: Option<String>,
-    /// Explicit recorded timestamp of the last local provider edit (never
-    /// file mtimes): the merge orders the provider envelope by it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Retired: LLM provider settings no longer sync. Still accepted so state
+    /// files written by older versions parse; dropped on the next write.
+    #[serde(default, skip_serializing)]
     pub provider_updated_at: Option<String>,
     /// Local books whose EPUB is older than the revision on the Sync
     /// Backend (another device re-imported a newer file). They are not
@@ -1316,29 +1289,6 @@ pub fn write_sync_state(root: &Path, state: &SyncState) -> AppResult<()> {
     crate::library::atomic_write(&sync_state_path(root), &json, "sync-state.json")
 }
 
-/// The provider envelope covers agent/settings.json and agent/models.json
-/// (provider choice, model, custom providers) — never auth.json, so API
-/// keys stay per-device.
-fn read_agent_object(root: &Path, file: &str) -> serde_json::Value {
-    match fs::read(root.join("agent").join(file)) {
-        Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null),
-        Err(_) => serde_json::Value::Null,
-    }
-}
-
-fn build_provider_envelope(root: &Path, state: &SyncState) -> Option<SyncEnvelopeData> {
-    state.provider_updated_at.as_ref().map(|updated_at| {
-        SyncEnvelopeData {
-            updated_at: updated_at.clone(),
-            device_id: state.device_id.clone(),
-            data: serde_json::json!({
-                "settings": read_agent_object(root, "settings.json"),
-                "models": read_agent_object(root, "models.json"),
-            }),
-        }
-    })
-}
-
 #[tauri::command]
 pub async fn sync_export_local_manifest(
     app: tauri::AppHandle,
@@ -1347,11 +1297,7 @@ pub async fn sync_export_local_manifest(
     let store = store.inner().clone();
     let root = sync_root(&app)?;
     run_sync_blocking(move || {
-        let manifest = update_sync_state(&root, |state| {
-            let mut manifest = export_local_manifest(&store, state)?;
-            manifest.provider = build_provider_envelope(&root, state);
-            Ok(manifest)
-        })?;
+        let manifest = update_sync_state(&root, |state| export_local_manifest(&store, state))?;
         serde_json::to_value(manifest)
             .map_err(|error| AppError::storage_io(format!("Failed to serialize manifest: {error}")))
     })
@@ -1370,57 +1316,6 @@ pub async fn sync_download_manifest(
         .map_err(|error| AppError::storage_io(format!("Failed to serialize: {error}")))
 }
 
-fn write_agent_object(root: &Path, file: &str, value: &serde_json::Value) -> AppResult<()> {
-    if value.is_null() {
-        return Ok(());
-    }
-    let bytes = serde_json::to_vec_pretty(value).map_err(|error| {
-        AppError::storage_io(format!("Failed to serialize agent {file}: {error}"))
-    })?;
-    let agent_dir = root.join("agent");
-    fs::create_dir_all(&agent_dir).map_err(|error| {
-        AppError::storage_io(format!("Failed to create agent directory: {error}"))
-    })?;
-    crate::library::atomic_write(&agent_dir.join(file), &bytes, file)
-}
-
-/// Apply a merged envelope when it is strictly newer than any local edit:
-/// protects a local change made while the network round trip was in flight.
-fn envelope_is_newer(envelope: &SyncEnvelopeData, local_dirty: Option<&String>) -> bool {
-    match local_dirty {
-        Some(dirty) => envelope.updated_at > *dirty,
-        None => true,
-    }
-}
-
-/// Apply the merged provider envelope to local storage. Writes happen only
-/// when the merged envelope is strictly newer than any local edit (mid-sync
-/// local changes win and re-propagate next pass); auth.json is never
-/// touched, so API keys stay per-device. App preferences (theme, language,
-/// typography) are per-device and never applied from the Manifest.
-pub fn apply_provider_envelope(
-    root: &Path,
-    state: &mut SyncState,
-    manifest: &SyncManifestData,
-) -> AppResult<()> {
-    if let Some(envelope) = &manifest.provider {
-        let is_newer = envelope_is_newer(envelope, state.provider_updated_at.as_ref());
-        if state.provider.as_ref() != Some(envelope) && is_newer {
-            if let Some(settings) = envelope.data.get("settings") {
-                write_agent_object(root, "settings.json", settings)?;
-            }
-            if let Some(models) = envelope.data.get("models") {
-                write_agent_object(root, "models.json", models)?;
-            }
-        }
-        state.provider = Some(envelope.clone());
-        if is_newer {
-            state.provider_updated_at = Some(envelope.updated_at.clone());
-        }
-    }
-    Ok(())
-}
-
 #[tauri::command]
 pub async fn sync_apply_merged_manifest(
     app: tauri::AppHandle,
@@ -1435,7 +1330,6 @@ pub async fn sync_apply_merged_manifest(
         let stale_files = apply_merged_manifest(&store, &manifest, &base)?;
         state.stale_files.extend(stale_files);
 
-        apply_provider_envelope(&root, state, &manifest)?;
         // Deletions recorded while the network round trip was in flight must
         // survive: union by tombstone key with the newest deletedAt winning.
         // Expired book Tombstones are retained until their objects are purged.
@@ -3186,8 +3080,9 @@ async fn delete_prefix(
 }
 
 // ---------------------------------------------------------------------------
-// Ticket 07: provider settings sync via the Manifest; app preferences are
-// per-device and never sync.
+// Ticket 07: app preferences and LLM provider settings are per-device and
+// never sync. The Manifest still carries their envelopes for older clients;
+// newer clients pass them through untouched.
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
@@ -3202,66 +3097,10 @@ mod preference_sync_tests {
         }
     }
 
-    #[test]
-    fn local_edits_bump_the_dirty_timestamp() {
+    fn temp_library() -> (tempfile::TempDir, LibraryStore) {
         let dir = tempfile::tempdir().expect("temp dir");
-
-        note_provider_saved(dir.path()).expect("note");
-
-        let state = read_sync_state(dir.path()).expect("state");
-        assert!(state.provider_updated_at.is_some());
-    }
-
-    #[test]
-    fn the_enable_baseline_loses_to_any_real_envelope() {
-        let dir = tempfile::tempdir().expect("temp dir");
-
-        note_sync_enabled(dir.path()).expect("enable");
-        let state = read_sync_state(dir.path()).expect("state");
-
-        // The baseline predates every real edit, so an envelope another
-        // device actually saved wins the merge and applies locally.
-        let remote = envelope("2026-01-01T00:00:00Z", serde_json::json!({ "settings": {} }));
-        let baseline = state.provider_updated_at.expect("baseline");
-        assert!(envelope_is_newer(&remote, Some(&baseline)));
-    }
-
-    #[test]
-    fn enabling_sync_baselines_only_missing_timestamps() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        note_provider_saved(dir.path()).expect("existing edit");
-        let before = read_sync_state(dir.path()).expect("state").provider_updated_at;
-
-        note_sync_enabled(dir.path()).expect("enable");
-
-        let state = read_sync_state(dir.path()).expect("state");
-        assert_eq!(state.provider_updated_at, before);
-    }
-
-    #[test]
-    fn a_synced_preferences_envelope_is_never_applied() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let preferences = crate::preferences::PreferencesStore::initialize(dir.path().to_path_buf())
-            .expect("preferences store");
-        // An older client still uploads its theme, typography, and language.
-        let remote = envelope(
-            "2026-06-01T00:00:00Z",
-            serde_json::json!({ "theme": "dark", "fontSize": 18.0, "language": "zh-CN" }),
-        );
-        let manifest = SyncManifestData {
-            schema_version: 1,
-            books: Default::default(),
-            tombstones: Vec::new(),
-            preferences: Some(remote),
-            provider: None,
-        };
-        let mut state = SyncState::default();
-
-        apply_provider_envelope(dir.path(), &mut state, &manifest).expect("apply");
-
-        let response = preferences.get().expect("preferences");
-        assert_eq!(response.theme, "light");
-        assert_eq!(response.font_size, 16.0);
+        let store = LibraryStore::initialize(dir.path().to_path_buf()).expect("store");
+        (dir, store)
     }
 
     #[test]
@@ -3281,102 +3120,33 @@ mod preference_sync_tests {
     }
 
     #[test]
-    fn a_state_file_with_the_retired_preferences_timestamp_still_parses() {
+    fn export_passes_an_older_clients_provider_envelope_through() {
+        let (_dir, store) = temp_library();
+        let remote = envelope(
+            "2026-06-01T00:00:00Z",
+            serde_json::json!({ "settings": { "defaultModel": "claude" } }),
+        );
+        let state = SyncState {
+            device_id: "device-a".to_string(),
+            provider: Some(remote.clone()),
+            ..SyncState::default()
+        };
+
+        let manifest = export_local_manifest(&store, &state).expect("export");
+
+        assert_eq!(manifest.provider, Some(remote));
+    }
+
+    #[test]
+    fn a_state_file_with_retired_timestamps_still_parses() {
         let state: SyncState = serde_json::from_str(
-            r#"{"deviceId":"device-a","preferencesUpdatedAt":"2026-01-01T00:00:00Z"}"#,
+            r#"{"deviceId":"device-a","preferencesUpdatedAt":"2026-01-01T00:00:00Z","providerUpdatedAt":"2026-01-01T00:00:00Z"}"#,
         )
         .expect("parse");
 
         let json = serde_json::to_string(&state).expect("serialize");
         assert!(!json.contains("preferencesUpdatedAt"));
-    }
-
-    fn temp_library() -> (tempfile::TempDir, LibraryStore) {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let store = LibraryStore::initialize(dir.path().to_path_buf()).expect("store");
-        (dir, store)
-    }
-
-    #[test]
-    fn a_newer_synced_provider_envelope_rewrites_settings_but_not_auth() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        std::fs::create_dir_all(dir.path().join("agent")).expect("agent dir");
-        std::fs::write(
-            dir.path().join("agent").join("auth.json"),
-            serde_json::to_vec(&serde_json::json!({
-                "anthropic": { "type": "api_key", "key": "local-secret" }
-            }))
-            .expect("auth bytes"),
-        )
-        .expect("auth write");
-
-        let manifest = SyncManifestData {
-            schema_version: 1,
-            books: Default::default(),
-            tombstones: Vec::new(),
-            preferences: None,
-            provider: Some(envelope(
-                "2026-06-01T00:00:00Z",
-                serde_json::json!({
-                    "settings": {
-                        "defaultProvider": "custom-abcd1234",
-                        "defaultModel": "some-model",
-                        "defaultThinkingLevel": "high"
-                    },
-                    "models": {
-                        "providers": {
-                            "custom-abcd1234": {
-                                "name": "My provider",
-                                "baseUrl": "https://example.com/v1",
-                                "models": [{ "id": "some-model" }]
-                            }
-                        }
-                    }
-                }),
-            )),
-        };
-        let mut state = SyncState::default();
-
-        apply_provider_envelope(dir.path(), &mut state, &manifest).expect("apply");
-
-        let settings: serde_json::Value = serde_json::from_slice(
-            &std::fs::read(dir.path().join("agent").join("settings.json")).expect("settings"),
-        )
-        .expect("json");
-        assert_eq!(settings["defaultProvider"], "custom-abcd1234");
-        assert_eq!(settings["defaultThinkingLevel"], "high");
-        let auth: serde_json::Value = serde_json::from_slice(
-            &std::fs::read(dir.path().join("agent").join("auth.json")).expect("auth"),
-        )
-        .expect("json");
-        // API keys never leave the device — and the synced envelope never
-        // overwrites them: the local key is intact and the new provider has
-        // none yet (the UI will ask for it).
-        assert_eq!(auth["anthropic"]["key"], "local-secret");
-        assert!(auth.get("custom-abcd1234").is_none());
-    }
-
-    #[test]
-    fn export_envelope_carries_agent_settings() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let state = SyncState {
-            device_id: "device-a".to_string(),
-            provider_updated_at: Some("2026-06-01T00:00:00Z".to_string()),
-            ..SyncState::default()
-        };
-        std::fs::create_dir_all(dir.path().join("agent")).expect("agent dir");
-        std::fs::write(
-            dir.path().join("agent").join("settings.json"),
-            br#"{"defaultProvider":"anthropic","defaultModel":"claude"}"#,
-        )
-        .expect("settings");
-
-        let provider_envelope = build_provider_envelope(dir.path(), &state).expect("provider");
-
-        assert_eq!(
-            provider_envelope.data["settings"]["defaultModel"],
-            "claude"
-        );
+        assert!(!json.contains("providerUpdatedAt"));
     }
 }
 

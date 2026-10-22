@@ -9,7 +9,7 @@
 - [x] Sessions created on one device appear and continue on another after sync
 - [x] Session summaries and per-session system prompts sync along with the messages
 - [x] Diverged Sessions keep both branches after merge; neither side's conversation is lost
-- [x] API keys never sync (provider settings syncing is ticket 07; keys stay per-device)
+- [x] API keys never sync (and neither does provider configuration — ticket 07; keys stay per-device)
 - [x] Branch-preservation behavior covered by merge-engine tests; wiring covered by app-level tests
 
 ## Comments

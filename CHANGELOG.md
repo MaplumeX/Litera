@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **AI 配置按设备独立**：供应商、模型、自定义端点与思考等级不再通过 S3 同步到其他设备——配置本来就跟着本机的端点和 Key 走，API Key 也一直不参与同步，一台设备的改动不会再把另一台设备覆盖掉。阅读进度、书签、高亮与笔记、助手会话仍照常同步；旧版本写进 Manifest 的配置字段原样保留，新旧客户端混用时不至于互相覆盖。
+
 ## [0.5.3] - 2026-10-20
 
 ### Added

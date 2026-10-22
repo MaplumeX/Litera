@@ -410,19 +410,13 @@ pub async fn save_sync_config(
 ) -> AppResult<SyncConfigPublic> {
     let root = sync_config_root(&app)?;
     let previous = read_sync_config(&root)?;
-    let was_enabled = previous.as_ref().is_some_and(|previous| previous.enabled);
-    let newly_enabled = config.enabled && !was_enabled;
     let backend_changed = previous
         .as_ref()
         .is_some_and(|previous| !same_backend(previous, &config));
     let config = merge_blank_secret(config, previous.as_ref());
     let config = run_blocking(move || {
         write_sync_config(&root, &config)?;
-        // First enable: the current local preferences and provider settings
-        // become this device's sync baseline.
-        if newly_enabled {
-            crate::sync::note_sync_enabled(&root)?;
-        }
+        // A new Sync Backend gets every object uploaded again.
         if backend_changed {
             crate::sync::note_sync_backend_changed(&root)?;
         }

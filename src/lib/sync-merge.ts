@@ -73,7 +73,9 @@ export interface SyncManifest {
   schemaVersion: number;
   books: Record<string, SyncedBook>;
   tombstones: Tombstone[];
+  /** Written only by older clients: app preferences are per-device now. */
   preferences: PreferenceEnvelope | null;
+  /** Written only by older clients: LLM provider settings are per-device now. */
   provider: PreferenceEnvelope | null;
 }
 

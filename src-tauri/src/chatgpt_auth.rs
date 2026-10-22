@@ -6,7 +6,8 @@
 //! client id in the callback and every later sign-in or refresh reuses it.
 //!
 //! Credentials live in agent/auth.json under the `chatgpt` key, which never
-//! leaves the device (Sync only mirrors settings.json and models.json). The host
+//! leaves the device (Sync mirrors neither auth.json nor the provider
+//! configuration it belongs to). The host
 //! id identifying this installation lives in its own file so signing out keeps
 //! it stable. The access token is handed to pi-ai as the `openai` provider's
 //! API key; pi-ai recognises a non-`sk-` key against api.openai.com as a
