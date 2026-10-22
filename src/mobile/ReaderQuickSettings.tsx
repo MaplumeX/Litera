@@ -14,6 +14,7 @@ import { saveReaderFlow, type ReaderFlow } from "@/lib/reader-flow";
 import { useT, type MessageKey } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { MobileSheet } from "@/mobile/MobileSheet";
+import { ReaderFooterSettingsForm } from "@/components/settings/ReaderFooterSettingsForm";
 
 const FONT_LABEL_KEYS: Record<(typeof FONT_FAMILIES)[number]["value"], MessageKey> = {
   serif: "settings.font.serif",
@@ -254,6 +255,10 @@ export function ReaderQuickSettings({
             }}
           />
         </Row>
+        <section className="mx-6 my-3 border-t pt-3" aria-label={t("reader.footer.title")}>
+          <h3 className="mb-1 text-sm text-muted-foreground">{t("reader.footer.title")}</h3>
+          <ReaderFooterSettingsForm />
+        </section>
         <button
           type="button"
           onClick={onMoreSettings}

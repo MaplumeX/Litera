@@ -14,6 +14,12 @@ export interface IncomingBook {
 
 export type LifecycleState = "foreground" | "background";
 
+export interface BatteryStatus {
+  /** Remaining charge, from 0 to 1. */
+  level: number;
+  charging: boolean;
+}
+
 /**
  * Where the system bars, the display cutout and the keyboard cover the
  * WebView, in CSS px. Hidden bars count as zero; the cutout is reported on
@@ -57,8 +63,8 @@ export type PlatformUnlisten = (() => void) & { ready: Promise<void> };
 
 /**
  * What the WebView can't do on its own. Android implements it with the
- * Litera platform plugin; on desktop every call is a no-op and no event
- * ever fires, so shared code can depend on it unconditionally.
+ * Litera platform plugin. Desktop uses the WebView for battery information;
+ * mobile-only calls are no-ops and no event fires there.
  */
 export interface PlatformBridge {
   /** Imports go through `pickBooks` instead of the Rust file dialog. */
@@ -75,6 +81,8 @@ export interface PlatformBridge {
   takePendingIncomingBooks(): Promise<IncomingBook[]>;
   /** The latest insets, or null before the first layout pass (the event follows). */
   getInsets(): Promise<SystemInsets | null>;
+  /** Null when the device cannot report its battery. */
+  getBatteryStatus(): Promise<BatteryStatus | null>;
   setImmersive(enabled: boolean): Promise<void>;
   /** Dark system bar icons for a light page (true), light icons for a dark one. */
   setSystemBarsLight(light: boolean): Promise<void>;
@@ -121,6 +129,13 @@ const androidBridge: PlatformBridge = {
     return typeof insets.top === "number" ? (insets as SystemInsets) : null;
   },
   setImmersive: (enabled) => command("setImmersive", { enabled }),
+  getBatteryStatus: async () => {
+    const status = await command<Partial<BatteryStatus>>("getBatteryStatus");
+    return typeof status.level === "number" && Number.isFinite(status.level) &&
+      status.level >= 0 && status.level <= 1 && typeof status.charging === "boolean"
+      ? status as BatteryStatus
+      : null;
+  },
   setSystemBarsLight: (enabled) => command("setSystemBarsLight", { enabled }),
   setKeepScreenOn: (enabled) => command("setKeepScreenOn", { enabled }),
   setVolumeKeyPaging: (enabled) => command("setVolumeKeyPaging", { enabled }),
@@ -135,6 +150,14 @@ const desktopBridge: PlatformBridge = {
   pickFonts: async () => [],
   takePendingIncomingBooks: async () => [],
   getInsets: async () => null,
+  getBatteryStatus: async () => {
+    const nav = navigator as Navigator & { getBattery?: () => Promise<BatteryStatus> };
+    if (!nav.getBattery) return null;
+    const battery = await nav.getBattery();
+    return Number.isFinite(battery.level) && battery.level >= 0 && battery.level <= 1
+      ? { level: battery.level, charging: battery.charging }
+      : null;
+  },
   setImmersive: async () => {},
   setSystemBarsLight: async () => {},
   setKeepScreenOn: async () => {},
