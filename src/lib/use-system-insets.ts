@@ -4,6 +4,7 @@ import { platformBridge, type SystemInsets } from "@/lib/platform-bridge";
 const VARIABLES: Record<keyof SystemInsets, string> = {
   top: "--android-inset-top",
   bottom: "--android-inset-bottom",
+  imeBottom: "--android-ime-bottom",
   left: "--android-inset-left",
   right: "--android-inset-right",
   cutoutTop: "--android-cutout-top",
@@ -18,7 +19,8 @@ export function applySystemInsets(insets: SystemInsets, style = document.documen
 
 /**
  * Keeps the `--android-inset-*` CSS variables in step with the system bars,
- * the cutout and the keyboard (index.css folds them into `--safe-*`). Asks
+ * the cutout and the keyboard (index.css keeps keyboard avoidance separate
+ * from `--safe-*`, so a keyboard cannot become a sheet's padding). Asks
  * once on mount, so a page that loaded after the last change still gets
  * them, then follows the `insets` event. A no-op on desktop.
  */

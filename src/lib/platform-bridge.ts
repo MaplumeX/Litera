@@ -22,6 +22,8 @@ export type LifecycleState = "foreground" | "background";
 export interface SystemInsets {
   top: number;
   bottom: number;
+  /** Keyboard occlusion, separate from the navigation bar's safe area. */
+  imeBottom: number;
   left: number;
   right: number;
   cutoutTop: number;

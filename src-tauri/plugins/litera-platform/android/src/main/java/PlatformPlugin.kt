@@ -19,6 +19,7 @@ import androidx.activity.result.ActivityResult
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsAnimationCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import app.tauri.Logger
@@ -161,8 +162,9 @@ class PlatformPlugin(private val activity: Activity) : Plugin(activity) {
    * zero; `cutout*` stays put either way so the reader can avoid a notch.
    */
   private fun publishInsets(webView: WebView) {
-    ViewCompat.setOnApplyWindowInsetsListener(webView) { view, insets ->
-      val density = view.resources.displayMetrics.density
+    var animatingIme = false
+    fun dispatch(insets: WindowInsetsCompat) {
+      val density = webView.resources.displayMetrics.density
       val bars = insets.getInsets(
         WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
       )
@@ -170,7 +172,8 @@ class PlatformPlugin(private val activity: Activity) : Plugin(activity) {
       val ime = insets.getInsets(WindowInsetsCompat.Type.ime())
       val payload = JSObject().apply {
         put("top", bars.top / density)
-        put("bottom", maxOf(bars.bottom, ime.bottom) / density)
+        put("bottom", bars.bottom / density)
+        put("imeBottom", ime.bottom / density)
         put("left", bars.left / density)
         put("right", bars.right / density)
         put("cutoutTop", cutout.top / density)
@@ -178,8 +181,34 @@ class PlatformPlugin(private val activity: Activity) : Plugin(activity) {
       }
       synchronized(insetsLock) { lastInsets = payload }
       trigger(INSETS_EVENT, payload)
+    }
+    ViewCompat.setOnApplyWindowInsetsListener(webView) { view, insets ->
+      // During an IME animation this is already the final inset. Publishing
+      // it now would jump to the end before onProgress delivers the frames.
+      if (!animatingIme) dispatch(insets)
       ViewCompat.onApplyWindowInsets(view, insets)
     }
+    ViewCompat.setWindowInsetsAnimationCallback(webView, object : WindowInsetsAnimationCompat.Callback(
+      WindowInsetsAnimationCompat.Callback.DISPATCH_MODE_CONTINUE_ON_SUBTREE
+    ) {
+      override fun onPrepare(animation: WindowInsetsAnimationCompat) {
+        if (animation.typeMask and WindowInsetsCompat.Type.ime() != 0) animatingIme = true
+      }
+
+      override fun onProgress(
+        insets: WindowInsetsCompat,
+        runningAnimations: MutableList<WindowInsetsAnimationCompat>
+      ): WindowInsetsCompat {
+        if (animatingIme) dispatch(insets)
+        return insets
+      }
+
+      override fun onEnd(animation: WindowInsetsAnimationCompat) {
+        if (animation.typeMask and WindowInsetsCompat.Type.ime() == 0) return
+        animatingIme = false
+        ViewCompat.getRootWindowInsets(webView)?.let { dispatch(it) }
+      }
+    })
     ViewCompat.requestApplyInsets(webView)
   }
 
