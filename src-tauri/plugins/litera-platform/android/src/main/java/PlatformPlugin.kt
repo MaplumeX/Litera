@@ -19,6 +19,7 @@ import androidx.activity.BackEventCompat
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.ActivityResult
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.graphics.Insets
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsAnimationCompat
@@ -162,6 +163,11 @@ class PlatformPlugin(private val activity: Activity) : Plugin(activity) {
    * loses the values whenever the page (re)loads after the last change,
    * which on a cold start is always. Hidden bars (immersive mode) report
    * zero; `cutout*` stays put either way so the reader can avoid a notch.
+   *
+   * The page lifts its inputs above the keyboard itself, so the WebView
+   * never sees the IME inset: recent WebViews would otherwise shrink the
+   * viewport and pan the focused field into view, lifting the whole app a
+   * second time.
    */
   private fun publishInsets(webView: WebView) {
     var animatingIme = false
@@ -188,7 +194,10 @@ class PlatformPlugin(private val activity: Activity) : Plugin(activity) {
       // During an IME animation this is already the final inset. Publishing
       // it now would jump to the end before onProgress delivers the frames.
       if (!animatingIme) dispatch(insets)
-      ViewCompat.onApplyWindowInsets(view, insets)
+      val withoutIme = WindowInsetsCompat.Builder(insets)
+        .setInsets(WindowInsetsCompat.Type.ime(), Insets.NONE)
+        .build()
+      ViewCompat.onApplyWindowInsets(view, withoutIme)
     }
     ViewCompat.setWindowInsetsAnimationCallback(webView, object : WindowInsetsAnimationCompat.Callback(
       WindowInsetsAnimationCompat.Callback.DISPATCH_MODE_CONTINUE_ON_SUBTREE

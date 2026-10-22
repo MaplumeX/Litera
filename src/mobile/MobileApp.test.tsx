@@ -380,6 +380,24 @@ describe("MobileApp — system bars", () => {
     expect(inset("--android-ime-bottom")).toBe("0px");
   });
 
+  it("keeps the focused field in view while the keyboard rises", async () => {
+    await renderApp();
+    const field = document.createElement("input");
+    document.body.append(field);
+    field.focus();
+    const scrollIntoView = vi.fn();
+    field.scrollIntoView = scrollIntoView;
+
+    act(() => emit("insets", { ...insets, imeBottom: 120 }));
+    act(() => emit("insets", { ...insets, imeBottom: 320 }));
+    expect(scrollIntoView).toHaveBeenCalledTimes(2);
+    expect(scrollIntoView).toHaveBeenLastCalledWith({ block: "nearest" });
+
+    act(() => emit("insets", insets));
+    expect(scrollIntoView).toHaveBeenCalledTimes(2);
+    field.remove();
+  });
+
   it("matches the status bar icons to the app's theme", async () => {
     const screen = await renderApp();
     expect(bridge.api.setSystemBarsLight).toHaveBeenLastCalledWith(true);
