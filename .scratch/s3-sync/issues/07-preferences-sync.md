@@ -1,24 +1,19 @@
-# 07: Preferences and provider settings sync
+# 07: Settings stay per-device (preferences and provider sync retired)
 
-**What to build:** A reader's settings follow them across devices: typography and reader preferences, app preferences (language, theme, UI font), and LLM provider configuration (chosen provider, model, custom endpoints) sync via the Manifest so a new device feels pre-configured. LLM API keys are strictly excluded — they stay per-device in local storage, and a new device only needs keys re-entered once. Verifiable: configure typography and a provider on one machine, sync, open Litera on another and find both already in place minus the API key.
+**What to build:** Nothing: typography, reader preferences, app preferences (language, theme, UI font), and LLM provider configuration (chosen provider, model, custom endpoints, thinking level) are per-device and never sync. API keys were always excluded. Verifiable: configure typography and a provider on one machine, sync, open Litera on another and find both unchanged by Sync.
 
 **Blocked by:** 03 (First sync — Manifest push/pull).
 
-**Status:** ready-for-agent
+**Status:** done
 
-- [x] Typography and reader preferences converge across devices after sync
-- [x] App preferences (language, theme, UI font) converge after sync
-- [x] LLM provider choice, model, and custom endpoints converge after sync
-- [x] API keys never leave the device; a new device shows providers as needing keys (existing `has_api_key` semantics)
-- [x] Merge-engine tests cover preference merge determinism; app-level tests cover the wiring
+- [x] App preferences (typography, reader, language, theme, UI font) are per-device and never applied from the Manifest (#117)
+- [x] LLM provider choice, model, custom endpoints, and thinking level are per-device and never applied from the Manifest
+- [x] API keys never leave the device (`has_api_key` semantics unchanged)
+- [x] `preferences` and `provider` envelopes pass through untouched, so older clients keep converging among themselves
+- [x] Tests cover envelope pass-through, and a state file with the retired timestamps still parses
 
 ## Comments
 
-- Preferences and provider settings ride the Manifest as `PreferenceEnvelope`s (newest `updatedAt` wins, ties by device id — merge-engine semantics). Explicit recorded dirty timestamps live in sync-state: bumped by `save_preferences` / agent-config mutations, baselined when Sync is first enabled, and by a UI-language change (locale passed to the export; language rides in the preferences envelope and is applied live by the frontend via the `litera:sync-applied` event).
-- Provider envelope covers agent/settings.json + models.json (provider choice, model, custom providers) — auth.json is never read into or written from the envelope, so API keys stay per-device (`has_api_key` shows them as missing on a new device).
-- Apply guards mid-sync local edits: envelopes apply only when strictly newer than the local dirty timestamp.
-- Tests: Rust `preference_sync_tests` (dirty bumps, enable baseline, newer-wins both directions, auth untouched, envelope contents, locale-change bump) and a runner test asserting the language event.
-
-## Comments (post-review)
-
-- Review fix: first-enable baselines are the epoch, not "now" — a device enabling Sync loses merges against envelopes other devices actually edited, so the new device feels pre-configured instead of clobbering the backend with untouched defaults.
+- Originally: preferences and provider settings rode the Manifest as `PreferenceEnvelope`s (newest `updatedAt` wins, ties by device id — merge-engine semantics), with dirty timestamps bumped by `save_preferences` / agent-config mutations and baselined when Sync was first enabled. Provider envelopes covered agent/settings.json + models.json; auth.json was never read or written, so API keys stayed per-device.
+- Retired app preferences (#117): theme, language, and typography are per-device — desktop and phone are different interfaces. The `preferences` envelope is now written only by older clients and passes through untouched.
+- Retired provider settings: a provider setup belongs to the machine that runs it (localhost endpoints, per-device keys), and keys already never synced — so provider choice, model, custom endpoints, and thinking level are per-device too. `note_provider_saved` and the first-enable provider baseline are gone; `providerUpdatedAt` is accepted on read and dropped on write; the `provider` envelope is passed through untouched like `preferences`.

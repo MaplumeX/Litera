@@ -43,7 +43,7 @@ Merges are item-level, not whole-database: Annotations merge by id union, readin
 23. As a reader who chatted on two devices about the same book, I want diverged Sessions to keep both branches, so that neither conversation is silently dropped.
 24. As a reader, I want my typography and reader preferences to sync, so that my reading experience is identical across devices.
 25. As a reader, I want my app preferences (language, theme, UI font) to sync, so that a new device feels configured.
-26. As a reader, I want my LLM provider settings (provider choice, model, custom endpoints) to sync but not the API keys, so that I re-enter keys once per device and everything else follows.
+26. As a reader, I want my LLM provider settings (provider choice, model, custom endpoints) to stay per-device, so that a setup made for this machine's endpoints and keys is never overwritten by another device's.
 27. As a reader, I want book metadata edits (title, author, cover) to sync, so that my curation effort isn't device-local.
 28. As a reader, I want sync conflicts on the Manifest to be retried automatically (conditional PUT, re-fetch, re-merge), so that simultaneous syncs on two devices don't lose data.
 29. As a reader, I want sync failures to retry silently, so that transient network errors don't interrupt my reading.
@@ -57,7 +57,7 @@ Merges are item-level, not whole-database: Annotations merge by id union, readin
 ## Implementation Decisions
 
 - Follows ADR `docs/adr/0001-s3-sync.md` and the glossary in `CONTEXT.md` (Library, Book, Annotations, Session, Sync, Sync Backend, Manifest, Tombstone). Use those terms in code and UI copy.
-- **Scope of synced data**: book files, covers, reading positions, Annotations, Sessions (with summaries and per-session system prompts), app preferences, LLM provider settings. **Never synced**: LLM API keys, S3 credentials, local trash contents.
+- **Scope of synced data**: book files, covers, reading positions, Annotations, Sessions (with summaries and per-session system prompts). **Never synced**: app preferences, LLM provider settings, LLM API keys, S3 credentials, local trash contents. The Manifest keeps `preferences` and `provider` envelopes for older clients; newer clients pass them through untouched.
 - **Backend**: user-configured S3-compatible object store. Rust-side client via the `object_store` crate (not `aws-sdk-s3`), supporting custom endpoint, region, and path-style.
 - **Cloud layout**: a single `manifest.json` object holds all small data — book metadata, per-book reading positions, Annotations, Tombstones, and per-item timestamps with device ids. EPUB files and covers are separate objects referenced by revision from the Manifest. One GET yields the full merge state; merge runs in memory.
 - **Concurrency**: Manifest uploads use conditional PUT (`If-Match` on the current etag). On etag mismatch, re-GET, re-merge, and retry a bounded number of times before surfacing an error.
@@ -90,6 +90,7 @@ Merges are item-level, not whole-database: Annotations merge by id union, readin
 - Client-side encryption of synced data.
 - Any Litera-operated backend, accounts, or billing.
 - Syncing the local trash.
+- Syncing app preferences or LLM provider configuration (both per-device; older clients' envelopes pass through untouched).
 - Mobile clients.
 - Selective sync (choosing which books sync).
 - Conflict-resolution UI (merges are automatic; no manual merge dialogs).
