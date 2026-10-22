@@ -347,6 +347,14 @@ ${TABLE_SELECTOR} :where(th, td) { border: 1px solid color-mix(in srgb, currentC
 ${TABLE_SELECTOR} :where(th) { background: color-mix(in srgb, currentColor 6%, transparent); }
 :where(td, th) p { text-indent: 0 !important; }`;
 
+/** Fallback quote style: browsers only indent a blockquote, which reads as a
+ *  stray margin. A leading rule and softened text set it apart from body text.
+ *  `:where()` keeps it at zero specificity so a book's own quote styling wins;
+ *  colors derive from `currentColor`, so both themes work. The last paragraph
+ *  drops its forced spacing so the rule ends with the text. */
+const BLOCKQUOTE_CSS = `:where(blockquote) { margin-block: 1em; margin-inline: 1em 0; padding-inline: 1em 0; border-inline-start: 3px solid color-mix(in srgb, currentColor 20%, transparent); color: color-mix(in srgb, currentColor 80%, transparent); }
+blockquote > p:last-child { margin-block-end: 0 !important; }`;
+
 /**
  * Combine font + typography + theme into a single CSS string for `view.renderer.setStyles`.
  * `fontFaces` declares imported fonts, which the book's own documents can't see otherwise.
@@ -355,6 +363,7 @@ export function generateStylesCss(state: ReaderStyleState, fontFaces = ""): stri
   let fontCss = `html, body { font-family: ${cssFontFamily(state.fontFamily)}; font-size: ${state.fontSize}px !important; line-height: ${state.lineHeight}; letter-spacing: ${state.letterSpacing}em; max-width: ${state.contentWidth}em; margin-inline: auto; padding-inline: ${state.pagePadding}rem; text-align: ${state.textAlign}; }
 p { margin-block-end: ${state.paragraphSpacing}em !important; text-indent: ${state.firstLineIndent}em !important; }
 ${TABLE_CSS}
+${BLOCKQUOTE_CSS}
 ${IMAGE_CURSOR_CSS}`;
   if (state.overrideFont) {
     fontCss += `\nhtml, body, p, div, span, li, blockquote, td, th, a, h1, h2, h3, h4, h5, h6 { font-family: ${cssFontFamily(state.fontFamily)} !important; }

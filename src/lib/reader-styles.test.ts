@@ -265,6 +265,8 @@ describe("generateStylesCss", () => {
         ':where(table:not([border="0"], [role="presentation"])) :where(th, td) { border: 1px solid color-mix(in srgb, currentColor 25%, transparent); padding: 0.3em 0.6em; }\n' +
         ':where(table:not([border="0"], [role="presentation"])) :where(th) { background: color-mix(in srgb, currentColor 6%, transparent); }\n' +
         ":where(td, th) p { text-indent: 0 !important; }\n" +
+        ":where(blockquote) { margin-block: 1em; margin-inline: 1em 0; padding-inline: 1em 0; border-inline-start: 3px solid color-mix(in srgb, currentColor 20%, transparent); color: color-mix(in srgb, currentColor 80%, transparent); }\n" +
+        "blockquote > p:last-child { margin-block-end: 0 !important; }\n" +
         "img, svg image { cursor: zoom-in; } a[href] img, a[href] image { cursor: pointer; }\n" +
         'a[epub\\:type~="noteref"], a[epub|type~="noteref"], sup > a[href^="#"] { font-size: 0.83em !important; vertical-align: super !important; line-height: 1 !important; text-decoration: none !important; color: #2563eb !important; }\n' +
         'a[href] > sup { font-size: 0.83em !important; vertical-align: super !important; line-height: 1 !important; color: #2563eb !important; }\n' +
