@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import { invokeErrorMessage } from "@/lib/app-error";
 import { useT } from "@/lib/i18n";
 import { runSyncOnce } from "@/lib/sync-runner";
@@ -285,7 +286,7 @@ export function SyncSettingsForm() {
             onChange={(event) => patch({ bucket: event.target.value })}
           />
         </label>
-        <div className="flex items-center justify-between gap-2">
+        <label className="flex items-center justify-between gap-2">
           <div className="min-w-0">
             <div className="text-xs font-medium text-muted-foreground">
               {t("settings.sync.pathStyle")}
@@ -294,13 +295,11 @@ export function SyncSettingsForm() {
               {t("settings.sync.pathStyle.hint")}
             </div>
           </div>
-          <input
-            type="checkbox"
+          <Switch
             checked={draft.pathStyle}
-            onChange={(event) => patch({ pathStyle: event.target.checked })}
-            className="size-4 shrink-0"
+            onCheckedChange={(pathStyle) => patch({ pathStyle })}
           />
-        </div>
+        </label>
         <label className="block space-y-1.5">
           <span className="text-xs font-medium text-muted-foreground">
             {t("settings.sync.accessKey")}

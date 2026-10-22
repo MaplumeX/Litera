@@ -658,10 +658,14 @@ describe("MobileApp — volume keys and settings", () => {
     fireEvent.click(await screen.findByRole("button", { name: t("library.settings") }));
     fireEvent.click(await screen.findByRole("button", { name: t("mobile.device") }));
 
-    const volume = screen.getByRole("switch", { name: t("mobile.volumeKeys") }) as HTMLInputElement;
-    const keepOn = screen.getByRole("switch", { name: t("mobile.keepScreenOn") }) as HTMLInputElement;
-    const wifi = screen.getByRole("switch", { name: new RegExp(t("mobile.wifiOnly")) }) as HTMLInputElement;
-    expect([volume.checked, keepOn.checked, wifi.checked]).toEqual([false, false, true]);
+    const volume = screen.getByRole("switch", { name: t("mobile.volumeKeys") });
+    const keepOn = screen.getByRole("switch", { name: t("mobile.keepScreenOn") });
+    const wifi = screen.getByRole("switch", { name: new RegExp(t("mobile.wifiOnly")) });
+    expect([volume, keepOn, wifi].map((s) => s.getAttribute("aria-checked"))).toEqual([
+      "false",
+      "false",
+      "true",
+    ]);
     expect(screen.queryByRole("button", { name: t("window.minimize") })).toBeNull();
     expect(screen.queryByRole("button", { name: t("window.close") })).toBeNull();
 

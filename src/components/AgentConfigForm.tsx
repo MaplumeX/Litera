@@ -32,6 +32,7 @@ import {
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { useAgentConfig } from "@/lib/use-agent-config";
 import { invokeErrorMessage } from "@/lib/app-error";
 import { cn } from "@/lib/utils";
@@ -486,12 +487,10 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
               <div className="text-xs font-medium text-muted-foreground">{t("agent.imageInput")}</div>
               <div className="text-[11px] text-muted-foreground/80">{t("agent.imageInputHint")}</div>
             </div>
-            <input
-              type="checkbox"
+            <Switch
               checked={customImageInput}
               disabled={saving}
-              onChange={(event) => setCustomImageInput(event.target.checked)}
-              className="size-4 shrink-0"
+              onCheckedChange={setCustomImageInput}
             />
           </label>
         )}
