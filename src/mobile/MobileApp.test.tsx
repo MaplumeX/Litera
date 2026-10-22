@@ -7,6 +7,8 @@ import type { IncomingBook, PlatformEvent, PlatformEvents } from "@/lib/platform
 import { t } from "@/lib/i18n";
 import { notifySyncActivity } from "@/lib/sync-activity";
 import { MOBILE_SETTINGS_KEY } from "@/lib/mobile-settings";
+import { READER_FLOW_KEY } from "@/lib/reader-flow";
+import { READER_FOOTER_KEY } from "@/lib/reader-footer";
 
 const invokeMock = vi.fn();
 
@@ -650,6 +652,25 @@ describe("MobileApp — Sync lifecycle", () => {
 });
 
 describe("MobileApp — volume keys and settings", () => {
+  it("configures the footer from reading settings and reserves space during scrolled reading", async () => {
+    localStorage.setItem(READER_FLOW_KEY, "scrolled");
+    const screen = await renderApp();
+    await openBook(screen);
+    const reader = screen.getByTestId("mobile-reader");
+    const page = screen.getByTestId("reader-view").parentElement!;
+    expect(within(reader).getByTestId("reader-footer")).toBeTruthy();
+    expect(page.style.paddingBottom).toBe("3rem");
+
+    fireEvent.click(screen.getByText("middle-tap"));
+    fireEvent.click(screen.getByRole("button", { name: t("mobile.readingSettings") }));
+    const settings = await screen.findByRole("dialog", { name: t("mobile.readingSettings") });
+    fireEvent.click(within(settings).getByRole("switch", { name: t("reader.footer.show") }));
+    expect(within(reader).queryByTestId("reader-footer")).toBeNull();
+    expect(page.style.paddingBottom).toBe("");
+    expect(JSON.parse(localStorage.getItem(READER_FOOTER_KEY)!).enabled).toBe(false);
+    expect(within(settings).getByText(t("reader.footer.localOnly"))).toBeTruthy();
+  });
+
   it("turns pages with the volume keys only when enabled, and only in the Reader", async () => {
     localStorage.setItem(MOBILE_SETTINGS_KEY, JSON.stringify({ volumeKeyPaging: true }));
     const screen = await renderApp();

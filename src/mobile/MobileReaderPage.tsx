@@ -15,6 +15,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { ReaderView, type SelectionCapture } from "@/components/ReaderView";
+import { ReaderFooter } from "@/components/ReaderFooter";
 import type { ChatPanelHandle } from "@/components/chat/ChatPanel";
 import { TocSidebar, TocSidebarActions } from "@/components/TocSidebar";
 import { AnnotationsSidebar } from "@/components/AnnotationsSidebar";
@@ -26,6 +27,7 @@ import type { SheetSnap } from "@/lib/assistant-sheet";
 import type { ReaderSession } from "@/lib/use-reader-session";
 import { quoteTargetHref } from "@/lib/toc-items";
 import { shortBookTitle } from "@/lib/book-title";
+import { READER_FOOTER_POSITIONS, useReaderFooter } from "@/lib/reader-footer";
 import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { AppBarIconButton, MobileAppBar } from "@/mobile/MobileAppBar";
@@ -34,26 +36,6 @@ import { MobileSheet } from "@/mobile/MobileSheet";
 import { ReaderQuickSettings } from "@/mobile/ReaderQuickSettings";
 
 export type ReaderPanel = "toc" | "search" | "annotations";
-
-/** The time of day for the running foot, kept to the minute. */
-function Clock() {
-  const { locale } = useT();
-  const [now, setNow] = useState(() => new Date());
-  useEffect(() => {
-    const tick = () => setNow(new Date());
-    // Line up with the minute, then step a minute at a time.
-    let interval: number | undefined;
-    const timeout = window.setTimeout(() => {
-      tick();
-      interval = window.setInterval(tick, 60_000);
-    }, 60_000 - (Date.now() % 60_000));
-    return () => {
-      window.clearTimeout(timeout);
-      if (interval !== undefined) window.clearInterval(interval);
-    };
-  }, []);
-  return <span>{now.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" })}</span>;
-}
 
 /** An icon over a short label: the bottom toolbar's entries. */
 function ToolbarTab({
@@ -203,6 +185,7 @@ export function MobileReaderPage({
   const pendingCaptureRef = useRef<SelectionCapture | null>(null);
   const pendingQuoteRef = useRef<{ href: string; quote: string } | null>(null);
   const [quickSettingsOpen, setQuickSettingsOpen] = useState(false);
+  const [footerSettings] = useReaderFooter();
 
   // "Ask" on a selection: open the sheet with the passage attached.
   const handleSelectionCapture = useCallback(
@@ -266,13 +249,17 @@ export function MobileReaderPage({
         : t("mobile.annotations");
   const dark = session.resolvedTheme === "dark";
   const paginated = session.readerFlow === "paginated";
-  const pct = Math.round(progress.fraction * 100);
+  const reserveFooter = !paginated && footerSettings.enabled &&
+    READER_FOOTER_POSITIONS.some((position) => footerSettings[position] !== "none");
 
   return (
     <div className="relative h-full min-h-0 overflow-hidden" data-testid="mobile-reader">
       {/* The cutout stays when the bars hide, so the page keeps clear of it
           and doesn't reflow as the toolbars come and go. */}
-      <div className="absolute inset-x-0 top-[var(--android-cutout-top,0px)] bottom-[var(--android-cutout-bottom,0px)]">
+      <div
+        className="absolute inset-x-0 top-[var(--android-cutout-top,0px)] bottom-[var(--android-cutout-bottom,0px)]"
+        style={{ paddingBottom: reserveFooter ? "3rem" : undefined }}
+      >
         {fileData && (
           <ReaderView
             ref={readerRef}
@@ -292,24 +279,22 @@ export function MobileReaderPage({
             onMiddleTap={onToggleChrome}
           />
         )}
-        {/* Running head and foot in the page margins, as printed books and
-            other readers have them: the chapter, the time, how far along. */}
+        {/* The running head stays in the paginated top margin. */}
         {fileData && paginated && (
-          <>
-            <div
-              aria-hidden
-              className="pointer-events-none absolute inset-x-0 top-0 flex h-12 items-center px-6 text-[0.6875rem] text-muted-foreground/80"
-            >
-              <span className="truncate">{session.chapterLabel}</span>
-            </div>
-            <div
-              aria-hidden
-              className="pointer-events-none absolute inset-x-0 bottom-0 flex h-12 items-center justify-between gap-4 px-6 text-[0.6875rem] text-muted-foreground/80 tabular-nums"
-            >
-              <Clock />
-              <span>{pct}%</span>
-            </div>
-          </>
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-x-0 top-0 flex h-12 items-center px-6 text-[0.6875rem] text-muted-foreground/80"
+          >
+            <span className="truncate">{session.chapterLabel}</span>
+          </div>
+        )}
+        {fileData && (
+          <ReaderFooter
+            chapterLabel={session.chapterLabel}
+            fraction={progress.fraction}
+            ticks={session.chapterTicks}
+            className="pointer-events-none absolute inset-x-0 bottom-0 h-12 px-6 text-[0.6875rem] text-muted-foreground/80"
+          />
         )}
         {session.kosync.prompt && (
           <KosyncPrompt

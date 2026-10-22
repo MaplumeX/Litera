@@ -10,6 +10,7 @@ import {
   Cloud,
   Info,
   Palette,
+  PanelBottom,
   Smartphone,
   Sparkles,
   Type,
@@ -40,6 +41,7 @@ import { SyncSettingsForm } from "@/components/settings/SyncSettingsForm";
 import { KosyncSettingsForm } from "@/components/settings/KosyncSettingsForm";
 import { TypographyPreview } from "@/components/settings/TypographyPreview";
 import { ImportedFontsSection } from "@/components/settings/ImportedFontsSection";
+import { ReaderFooterSettingsForm } from "@/components/settings/ReaderFooterSettingsForm";
 import { importedFontFamilies, useImportedFonts } from "@/lib/imported-fonts";
 import { platformBridge } from "@/lib/platform-bridge";
 import { cn } from "@/lib/utils";
@@ -73,11 +75,12 @@ import {
   saveUiFontSize,
 } from "@/lib/ui-chrome-font";
 
-export type SettingsSection = "typography" | "appearance" | "device" | "ai" | "sync" | "about";
+export type SettingsSection = "typography" | "appearance" | "footer" | "device" | "ai" | "sync" | "about";
 
 const SECTIONS: { id: SettingsSection; labelKey: MessageKey; icon: LucideIcon }[] = [
   { id: "typography", labelKey: "settings.typography", icon: Type },
   { id: "appearance", labelKey: "settings.appearance", icon: Palette },
+  { id: "footer", labelKey: "reader.footer.title", icon: PanelBottom },
   { id: "device", labelKey: "mobile.device", icon: Smartphone },
   { id: "ai", labelKey: "settings.ai", icon: Sparkles },
   { id: "sync", labelKey: "settings.sync", icon: Cloud },
@@ -905,8 +908,11 @@ export function SettingsDialog({
                     ? t("settings.sync.description")
                     : section === "device"
                       ? t("mobile.deviceDesc")
-                      : scopeCopy}
+                      : section === "footer"
+                        ? t("reader.footer.description")
+                        : scopeCopy}
               </DialogDescription>
+              {section === "footer" && <div className="max-w-md"><ReaderFooterSettingsForm /></div>}
               {section === "device" && <div className="max-w-md space-y-5">{deviceSettings}</div>}
               {section === "appearance" && (
                 <div className="max-w-md space-y-5">

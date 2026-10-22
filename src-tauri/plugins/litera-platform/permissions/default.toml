@@ -12,6 +12,7 @@ commands.allow = [
   "pickFonts",
   "takePendingIncomingBooks",
   "getInsets",
+  "getBatteryStatus",
   "setImmersive",
   "setSystemBarsLight",
   "setKeepScreenOn",
