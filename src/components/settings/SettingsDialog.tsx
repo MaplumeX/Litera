@@ -45,7 +45,7 @@ import { platformBridge } from "@/lib/platform-bridge";
 import { cn } from "@/lib/utils";
 import { loadReaderFlow, saveReaderFlow, type ReaderFlow } from "@/lib/reader-flow";
 import {
-  FONT_FAMILIES,
+  DEFAULT_FONT_FAMILY,
   TEXT_ALIGNS,
   THEMES,
   TYPOGRAPHY_RANGES,
@@ -91,12 +91,6 @@ const THEME_LABEL_KEYS: Record<(typeof THEMES)[number], MessageKey> = {
   light: "settings.theme.light",
   dark: "settings.theme.dark",
   system: "settings.theme.system",
-};
-
-const FONT_LABEL_KEYS: Record<(typeof FONT_FAMILIES)[number]["value"], MessageKey> = {
-  serif: "settings.font.serif",
-  "sans-serif": "settings.font.sans",
-  monospace: "settings.font.mono",
 };
 
 const ALIGN_LABEL_KEYS: Record<(typeof TEXT_ALIGNS)[number]["value"], MessageKey> = {
@@ -357,7 +351,7 @@ function FontFamilyPicker({
     !imported.includes(value) &&
     !listedSystem.includes(value);
   const selectedLabel = isGenericFontFamily(value)
-    ? t(FONT_LABEL_KEYS[value])
+    ? t("settings.font.default")
     : includeGeist && isGeist
       ? t("settings.font.geist")
       : value;
@@ -416,28 +410,25 @@ function FontFamilyPicker({
                   </span>
                 </CommandItem>
               )}
-              {FONT_FAMILIES.map((fam) => {
-                const label = t(FONT_LABEL_KEYS[fam.value]);
-                return (
-                  <CommandItem
-                    key={fam.value}
-                    value={`${fam.value} ${label}`}
-                    keywords={[fam.value, label]}
-                    onSelect={() => {
-                      onChange(fam.value);
-                      setOpen(false);
-                    }}
-                  >
-                    <CheckIcon
-                      className={cn(
-                        "size-4",
-                        value === fam.value ? "opacity-100" : "opacity-0",
-                      )}
-                    />
-                    <span style={{ fontFamily: fam.css }}>{label}</span>
-                  </CommandItem>
-                );
-              })}
+              {!includeGeist && (
+                <CommandItem
+                  value={t("settings.font.default")}
+                  onSelect={() => {
+                    onChange(DEFAULT_FONT_FAMILY);
+                    setOpen(false);
+                  }}
+                >
+                  <CheckIcon
+                    className={cn(
+                      "size-4",
+                      isGenericFontFamily(value) ? "opacity-100" : "opacity-0",
+                    )}
+                  />
+                  <span style={{ fontFamily: cssFontFamily(DEFAULT_FONT_FAMILY) }}>
+                    {t("settings.font.default")}
+                  </span>
+                </CommandItem>
+              )}
             </CommandGroup>
             {imported.length > 0 && (
               <>

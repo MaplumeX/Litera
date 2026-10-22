@@ -399,6 +399,7 @@ describe("MobileApp — reading settings", () => {
   });
 
   it("picks the typeface from a list behind the font row, then returns to the settings", async () => {
+    openContext.settings = { fontFamily: "sans-serif" };
     const screen = await renderApp();
     await openBook(screen);
     fireEvent.click(screen.getByText("middle-tap"));
@@ -406,14 +407,17 @@ describe("MobileApp — reading settings", () => {
     const sheet = await screen.findByRole("dialog", { name: t("mobile.readingSettings") });
 
     fireEvent.click(within(sheet).getByRole("button", { name: new RegExp(`^${t("settings.font")}:`) }));
+    expect(within(sheet).getAllByRole("radio").map((option) => option.textContent)).toEqual([
+      t("settings.font.default"),
+    ]);
     readerHandle.setStyles.mockClear();
-    fireEvent.click(within(sheet).getByRole("radio", { name: t("settings.font.sans") }));
+    fireEvent.click(within(sheet).getByRole("radio", { name: t("settings.font.default") }));
 
     await waitFor(() =>
-      expect(readerHandle.setStyles).toHaveBeenLastCalledWith(expect.stringContaining("sans-serif")),
+      expect(readerHandle.setStyles).toHaveBeenLastCalledWith(expect.stringContaining("font-family: serif;")),
     );
     expect(
-      within(sheet).getByRole("button", { name: `${t("settings.font")}: ${t("settings.font.sans")}` }),
+      within(sheet).getByRole("button", { name: `${t("settings.font")}: ${t("settings.font.default")}` }),
     ).toBeTruthy();
   });
 
