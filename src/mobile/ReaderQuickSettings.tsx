@@ -1,5 +1,5 @@
-import type { ReactNode } from "react";
-import { ChevronRight, Minus, Plus } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import { ArrowLeft, Check, ChevronRight, Minus, Plus } from "lucide-react";
 import {
   FONT_FAMILIES,
   THEMES,
@@ -8,6 +8,7 @@ import {
   type ReaderStyleState,
   type TypographyKey,
   cssFontFamily,
+  isGenericFontFamily,
 } from "@/lib/reader-styles";
 import { importedFontFamilies, useImportedFonts } from "@/lib/imported-fonts";
 import { saveReaderFlow, type ReaderFlow } from "@/lib/reader-flow";
@@ -123,41 +124,83 @@ function Stepper({
   );
 }
 
-/** Imported families as chips under the generic typefaces; scrolls sideways when many. */
-function ImportedFontChips({
+function FontOption({
+  family,
   label,
-  families,
-  value,
-  onChange,
+  selected,
+  onSelect,
 }: {
+  family: string;
   label: string;
-  families: string[];
-  value: string;
-  onChange: (family: string) => void;
+  selected: boolean;
+  onSelect: () => void;
 }) {
   return (
-    <div role="radiogroup" aria-label={label} className="flex gap-2 overflow-x-auto px-6 pb-2">
-      {families.map((family) => {
-        const active = family === value;
-        return (
-          <button
-            key={family}
-            type="button"
-            role="radio"
-            aria-checked={active}
-            onClick={() => onChange(family)}
-            style={{ fontFamily: cssFontFamily(family) }}
-            className={cn(
-              "h-9 max-w-48 shrink-0 truncate rounded-full px-4 text-sm transition-colors motion-reduce:transition-none",
-              active
-                ? "bg-foreground text-background"
-                : "bg-muted text-muted-foreground active:bg-foreground/10",
-            )}
-          >
-            {family}
-          </button>
-        );
-      })}
+    <button
+      type="button"
+      role="radio"
+      aria-checked={selected}
+      onClick={onSelect}
+      className="flex min-h-12 w-full items-center gap-3 px-6 text-left transition-colors active:bg-foreground/5"
+    >
+      <span className="min-w-0 flex-1 truncate" style={{ fontFamily: cssFontFamily(family) }}>
+        {label}
+      </span>
+      <Check className={cn("size-5 shrink-0", selected ? "opacity-100" : "opacity-0")} aria-hidden />
+    </button>
+  );
+}
+
+/** The typeface list, laid out like the desktop picker: generic families, then imported fonts. */
+function FontList({
+  value,
+  importedFamilies,
+  onChange,
+  onBack,
+}: {
+  value: string;
+  importedFamilies: string[];
+  onChange: (family: string) => void;
+  onBack: () => void;
+}) {
+  const { t } = useT();
+  return (
+    <div className="pb-2">
+      <button
+        type="button"
+        onClick={onBack}
+        className="flex min-h-12 w-full items-center gap-3 px-6 text-left text-sm text-muted-foreground transition-colors active:bg-foreground/5"
+      >
+        <ArrowLeft className="size-5" aria-hidden />
+        <span>{t("settings.font")}</span>
+      </button>
+      <div role="radiogroup" aria-label={t("settings.font")}>
+        {FONT_FAMILIES.map((family) => (
+          <FontOption
+            key={family.value}
+            family={family.value}
+            label={t(FONT_LABEL_KEYS[family.value])}
+            selected={value === family.value}
+            onSelect={() => onChange(family.value)}
+          />
+        ))}
+        {importedFamilies.length > 0 && (
+          <>
+            <div className="px-6 pt-4 pb-1 text-xs font-medium text-muted-foreground">
+              {t("settings.font.imported")}
+            </div>
+            {importedFamilies.map((family) => (
+              <FontOption
+                key={family}
+                family={family}
+                label={family}
+                selected={value === family}
+                onSelect={() => onChange(family)}
+              />
+            ))}
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -190,79 +233,98 @@ export function ReaderQuickSettings({
 }) {
   const { t } = useT();
   const importedFamilies = importedFontFamilies(useImportedFonts());
+  const [fontListOpen, setFontListOpen] = useState(false);
+  const fontFamily = styleState.fontFamily;
+  const fontLabel = isGenericFontFamily(fontFamily) ? t(FONT_LABEL_KEYS[fontFamily]) : fontFamily;
   return (
-    <MobileSheet open={open} onOpenChange={onOpenChange} title={t("mobile.readingSettings")}>
-      <div className="pt-1 pb-2">
-        {STEPPERS.map((row) => {
-          const range = TYPOGRAPHY_RANGES[row.key];
-          const value = Number(styleState[row.key]);
-          const label = t(row.labelKey);
-          return (
-            <Row key={row.key} label={label}>
-              <Stepper
-                label={label}
-                value={value}
-                display={value.toFixed(row.digits)}
-                canDecrease={value > range.min + 1e-9}
-                canIncrease={value < range.max - 1e-9}
-                onStep={(direction) => {
-                  const next = Math.min(range.max, Math.max(range.min, value + direction * row.step));
-                  onTypographyChange(row.key, Number(next.toFixed(2)));
-                }}
-              />
-            </Row>
-          );
-        })}
-        <Row label={t("settings.font")}>
-          <Segmented
-            label={t("settings.font")}
-            value={styleState.fontFamily}
-            options={FONT_FAMILIES.map((family) => ({
-              value: family.value as string,
-              label: t(FONT_LABEL_KEYS[family.value]),
-            }))}
-            onChange={(next) => onTypographyChange("fontFamily", next)}
-          />
-        </Row>
-        {importedFamilies.length > 0 && (
-          <ImportedFontChips
-            label={t("settings.font.imported")}
-            families={importedFamilies}
-            value={styleState.fontFamily}
-            onChange={(family) => onTypographyChange("fontFamily", family)}
-          />
-        )}
-        <Row label={t("settings.theme")}>
-          <Segmented
-            label={t("settings.theme")}
-            value={theme}
-            options={THEMES.map((value) => ({ value: value as string, label: t(THEME_LABEL_KEYS[value]) }))}
-            onChange={onThemeChange}
-          />
-        </Row>
-        <Row label={t("mobile.pageTurn")}>
-          <Segmented
-            label={t("mobile.pageTurn")}
-            value={flow}
-            options={[
-              { value: "paginated" as ReaderFlow, label: t("settings.flow.paginated") },
-              { value: "scrolled" as ReaderFlow, label: t("settings.flow.scrolled") },
-            ]}
-            onChange={(next) => {
-              saveReaderFlow(next);
-              onFlowChange(next);
-            }}
-          />
-        </Row>
-        <button
-          type="button"
-          onClick={onMoreSettings}
-          className="mt-1 flex min-h-12 w-full items-center gap-2 px-6 text-left text-sm transition-colors active:bg-foreground/5"
-        >
-          <span className="flex-1">{t("mobile.moreSettings")}</span>
-          <ChevronRight className="size-5 text-muted-foreground" aria-hidden />
-        </button>
-      </div>
+    <MobileSheet
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) setFontListOpen(false);
+        onOpenChange(next);
+      }}
+      title={t("mobile.readingSettings")}
+    >
+      {fontListOpen ? (
+        <FontList
+          value={fontFamily}
+          importedFamilies={importedFamilies}
+          onChange={(family) => {
+            onTypographyChange("fontFamily", family);
+            setFontListOpen(false);
+          }}
+          onBack={() => setFontListOpen(false)}
+        />
+      ) : (
+        <div className="pt-1 pb-2">
+          {STEPPERS.map((row) => {
+            const range = TYPOGRAPHY_RANGES[row.key];
+            const value = Number(styleState[row.key]);
+            const label = t(row.labelKey);
+            return (
+              <Row key={row.key} label={label}>
+                <Stepper
+                  label={label}
+                  value={value}
+                  display={value.toFixed(row.digits)}
+                  canDecrease={value > range.min + 1e-9}
+                  canIncrease={value < range.max - 1e-9}
+                  onStep={(direction) => {
+                    const next = Math.min(range.max, Math.max(range.min, value + direction * row.step));
+                    onTypographyChange(row.key, Number(next.toFixed(2)));
+                  }}
+                />
+              </Row>
+            );
+          })}
+          <Row label={t("settings.font")}>
+            <button
+              type="button"
+              aria-label={`${t("settings.font")}: ${fontLabel}`}
+              onClick={() => setFontListOpen(true)}
+              className="flex h-11 w-full min-w-0 items-center gap-2 rounded-full bg-muted pr-3 pl-4 text-sm transition-colors active:bg-foreground/10"
+            >
+              <span
+                className="min-w-0 flex-1 truncate text-left"
+                style={{ fontFamily: cssFontFamily(fontFamily) }}
+              >
+                {fontLabel}
+              </span>
+              <ChevronRight className="size-5 shrink-0 text-muted-foreground" aria-hidden />
+            </button>
+          </Row>
+          <Row label={t("settings.theme")}>
+            <Segmented
+              label={t("settings.theme")}
+              value={theme}
+              options={THEMES.map((value) => ({ value: value as string, label: t(THEME_LABEL_KEYS[value]) }))}
+              onChange={onThemeChange}
+            />
+          </Row>
+          <Row label={t("mobile.pageTurn")}>
+            <Segmented
+              label={t("mobile.pageTurn")}
+              value={flow}
+              options={[
+                { value: "paginated" as ReaderFlow, label: t("settings.flow.paginated") },
+                { value: "scrolled" as ReaderFlow, label: t("settings.flow.scrolled") },
+              ]}
+              onChange={(next) => {
+                saveReaderFlow(next);
+                onFlowChange(next);
+              }}
+            />
+          </Row>
+          <button
+            type="button"
+            onClick={onMoreSettings}
+            className="mt-1 flex min-h-12 w-full items-center gap-2 px-6 text-left text-sm transition-colors active:bg-foreground/5"
+          >
+            <span className="flex-1">{t("mobile.moreSettings")}</span>
+            <ChevronRight className="size-5 text-muted-foreground" aria-hidden />
+          </button>
+        </div>
+      )}
     </MobileSheet>
   );
 }

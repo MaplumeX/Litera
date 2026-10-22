@@ -398,6 +398,25 @@ describe("MobileApp — reading settings", () => {
     );
   });
 
+  it("picks the typeface from a list behind the font row, then returns to the settings", async () => {
+    const screen = await renderApp();
+    await openBook(screen);
+    fireEvent.click(screen.getByText("middle-tap"));
+    fireEvent.click(screen.getByRole("button", { name: t("mobile.readingSettings") }));
+    const sheet = await screen.findByRole("dialog", { name: t("mobile.readingSettings") });
+
+    fireEvent.click(within(sheet).getByRole("button", { name: new RegExp(`^${t("settings.font")}:`) }));
+    readerHandle.setStyles.mockClear();
+    fireEvent.click(within(sheet).getByRole("radio", { name: t("settings.font.sans") }));
+
+    await waitFor(() =>
+      expect(readerHandle.setStyles).toHaveBeenLastCalledWith(expect.stringContaining("sans-serif")),
+    );
+    expect(
+      within(sheet).getByRole("button", { name: `${t("settings.font")}: ${t("settings.font.sans")}` }),
+    ).toBeTruthy();
+  });
+
   it("opens Settings on the typography page from “More settings”, and Back returns to the list", async () => {
     const screen = await renderApp();
     await openBook(screen);
