@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { invokeErrorMessage } from "@/lib/app-error";
 import { useT } from "@/lib/i18n";
+import { formatLibraryTimestamp } from "@/lib/library-shelf";
 
 export interface KosyncConfigPublic {
   enabled: boolean;
@@ -34,7 +35,7 @@ const EMPTY_DRAFT: KosyncConfigDraft = {
 
 /** KOReader Sync: a kosync-compatible Progress Server (KOReader, BookOrbit, …). */
 export function KosyncSettingsForm() {
-  const { t } = useT();
+  const { t, locale } = useT();
   const [draft, setDraft] = useState<KosyncConfigDraft>(EMPTY_DRAFT);
   const [hasStoredKey, setHasStoredKey] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -220,7 +221,7 @@ export function KosyncSettingsForm() {
       <div className="text-xs text-muted-foreground">
         <div>
           {status.lastSyncedAt
-            ? t("settings.kosync.status.lastRun", { time: status.lastSyncedAt })
+            ? t("settings.kosync.status.lastRun", { time: formatLibraryTimestamp(status.lastSyncedAt, locale) })
             : t("settings.kosync.status.never")}
         </div>
         {status.lastError && (

@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { invokeErrorMessage } from "@/lib/app-error";
 import { useT } from "@/lib/i18n";
+import { formatLibraryTimestamp } from "@/lib/library-shelf";
 import { runSyncOnce } from "@/lib/sync-runner";
 
 export interface SyncConfigPublic {
@@ -53,7 +54,7 @@ const EMPTY_DRAFT: SyncBackendConfigDraft = {
 };
 
 export function SyncSettingsForm() {
-  const { t } = useT();
+  const { t, locale } = useT();
   const [draft, setDraft] = useState<SyncBackendConfigDraft>(EMPTY_DRAFT);
   const [hasStoredSecret, setHasStoredSecret] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -399,7 +400,7 @@ export function SyncSettingsForm() {
       <div className="text-xs text-muted-foreground">
         <div>
           {lastSyncedAt
-            ? t("settings.sync.status.lastRun", { time: lastSyncedAt })
+            ? t("settings.sync.status.lastRun", { time: formatLibraryTimestamp(lastSyncedAt, locale) })
             : t("settings.sync.status.never")}
         </div>
         {lastError && <div>{t("settings.sync.status.error", { message: lastError })}</div>}

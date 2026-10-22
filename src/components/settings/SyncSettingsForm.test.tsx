@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SyncSettingsForm } from "./SyncSettingsForm";
 import { setLocale } from "@/lib/i18n";
+import { formatLibraryTimestamp } from "@/lib/library-shelf";
 
 class ResizeObserverStub {
   observe() {}
@@ -304,7 +305,9 @@ describe("SyncSettingsForm — Sync now", () => {
 
     renderForm();
     await waitFor(() => {
-      expect(screen.getByText(/last sync: 2026-06-01T12:00:00\+00:00/i)).toBeTruthy();
+      expect(
+        screen.getByText(`Last sync: ${formatLibraryTimestamp("2026-06-01T12:00:00+00:00", "en")}`),
+      ).toBeTruthy();
     });
     expect(screen.getByText(/last error: sync backend error: connection reset/i)).toBeTruthy();
   });
