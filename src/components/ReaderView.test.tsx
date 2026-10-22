@@ -19,6 +19,7 @@ vi.mock("../foliate-js/overlayer.js", () => ({
 }));
 
 let initImpl: (opts: Record<string, unknown>) => Promise<void> = async () => {};
+let openImpl: (view: FakeFoliateView) => void = () => {};
 let resolveImpl: (target: string) => unknown = (target) =>
   String(target).startsWith("epubcfi(") ? { index: 1 } : undefined;
 
@@ -59,7 +60,7 @@ class FakeHistory extends EventTarget {
 
 class FakeFoliateView extends HTMLElement {
   history = new FakeHistory();
-  open = vi.fn(async () => {});
+  open = vi.fn(async () => openImpl(this));
   init = vi.fn(async (opts: Record<string, unknown>) => {
     this.history.pushState(opts.lastLocation ?? 0);
     return initImpl(opts);
@@ -99,6 +100,7 @@ function viewEl(): FakeFoliateView {
 
 beforeEach(() => {
   initImpl = async () => {};
+  openImpl = () => {};
   resolveImpl = (target) =>
     String(target).startsWith("epubcfi(") ? { index: 1 } : undefined;
 });
@@ -162,6 +164,21 @@ describe("ReaderView open restore", () => {
     });
     expect(consoleError).toHaveBeenCalled();
     consoleError.mockRestore();
+  });
+
+  it("styles the renderer before the first section renders", async () => {
+    const calls: string[] = [];
+    openImpl = (view) => {
+      (view as unknown as { renderer: unknown }).renderer = {
+        setStyles: (css: string) => calls.push(`setStyles:${css}`),
+      };
+    };
+    initImpl = async () => {
+      calls.push("init");
+    };
+    render(<ReaderView fileData={fileData} stylesCss="body { font-family: Reader; }" />);
+    await waitFor(() => expect(calls).toContain("init"));
+    expect(calls[0]).toBe("setStyles:body { font-family: Reader; }");
   });
 });
 
