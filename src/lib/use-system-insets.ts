@@ -18,6 +18,18 @@ export function applySystemInsets(insets: SystemInsets, style = document.documen
 }
 
 /**
+ * Scrolls the focused field back into its panel as the keyboard rises. The
+ * WebView never sees the keyboard (the page avoids it itself), so it no
+ * longer does this, and a panel that shrank above the keyboard can clip it.
+ */
+function revealFocusedField() {
+  const field = document.activeElement;
+  if (field instanceof HTMLElement && field.matches("input, textarea, [contenteditable]")) {
+    field.scrollIntoView?.({ block: "nearest" });
+  }
+}
+
+/**
  * Keeps the `--android-inset-*` CSS variables in step with the system bars,
  * the cutout and the keyboard (index.css keeps keyboard avoidance separate
  * from `--safe-*`, so a keyboard cannot become a sheet's padding). Asks
@@ -29,9 +41,12 @@ export function useSystemInsets() {
     let disposed = false;
     // An event is newer than whatever the initial query returns.
     let heard = false;
+    let imeBottom = 0;
     const unlisten = platformBridge.listen("insets", (insets) => {
       heard = true;
       applySystemInsets(insets);
+      if (insets.imeBottom > imeBottom) revealFocusedField();
+      imeBottom = insets.imeBottom;
     });
     void unlisten.ready
       .then(() => platformBridge.getInsets())
