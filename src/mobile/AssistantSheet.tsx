@@ -3,7 +3,7 @@ import { ChevronDown, Maximize2, Minimize2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ChatPanel, type ChatPanelHandle } from "@/components/chat/ChatPanel";
 import type { QuoteLocation } from "@/agent/book/book-content";
-import { snapAfterDrag, type SheetSnap } from "@/lib/assistant-sheet";
+import { readerModeForSnap, snapAfterDrag, type SheetSnap } from "@/lib/assistant-sheet";
 import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -117,6 +117,7 @@ export const AssistantSheet = forwardRef<ChatPanelHandle, AssistantSheetProps>(
             currentChapterHref={currentChapterHref}
             onOpenQuote={onOpenQuote}
             variant="docked"
+            preferGuidedSession={readerModeForSnap(snap) === "agent"}
           />
         </div>
       </section>

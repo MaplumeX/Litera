@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { MoreHorizontal, Pencil, Plus, Settings, Trash2 } from "lucide-react";
+import { BookOpen, MoreHorizontal, Pencil, Plus, Settings, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
@@ -27,6 +27,7 @@ import {
   sessionTimeGroup,
   type SessionTimeGroup,
 } from "@/lib/session-time";
+import { guidePositionLabel } from "./GuideBar";
 
 interface SessionListProps {
   sessions: AgentSessionSummary[];
@@ -36,6 +37,7 @@ interface SessionListProps {
   editingTitle: string;
   layout?: "popover" | "rail";
   onNewSession: () => void;
+  onNewGuided: () => void;
   onSwitchSession: (id: string) => void;
   onStartRename: (id: string, title: string) => void;
   onTitleChange: (title: string) => void;
@@ -69,6 +71,7 @@ export function SessionList({
   editingTitle,
   layout = "popover",
   onNewSession,
+  onNewGuided,
   onSwitchSession,
   onStartRename,
   onTitleChange,
@@ -113,21 +116,44 @@ export function SessionList({
             <Plus />
             {t("chat.newSession")}
           </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="w-full justify-start font-normal text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground"
+            onClick={onNewGuided}
+            disabled={isStreaming}
+          >
+            <BookOpen />
+            {t("chat.newGuided")}
+          </Button>
         </div>
       ) : (
         <div className="flex items-center justify-between border-b py-1.5 pr-1.5 pl-3">
           <span className="text-xs font-medium text-muted-foreground">{t("chat.sessions")}</span>
-          <Button
-            size="icon-xs"
-            variant="ghost"
-            className="text-muted-foreground hover:text-foreground"
-            onClick={onNewSession}
-            disabled={isStreaming}
-            aria-label={t("chat.newSession")}
-            title={t("chat.newSession")}
-          >
-            <Plus />
-          </Button>
+          <div className="flex items-center">
+            <Button
+              size="icon-xs"
+              variant="ghost"
+              className="text-muted-foreground hover:text-foreground"
+              onClick={onNewGuided}
+              disabled={isStreaming}
+              aria-label={t("chat.newGuided")}
+              title={t("chat.newGuided")}
+            >
+              <BookOpen />
+            </Button>
+            <Button
+              size="icon-xs"
+              variant="ghost"
+              className="text-muted-foreground hover:text-foreground"
+              onClick={onNewSession}
+              disabled={isStreaming}
+              aria-label={t("chat.newSession")}
+              title={t("chat.newSession")}
+            >
+              <Plus />
+            </Button>
+          </div>
         </div>
       )}
       <div className={cn("min-h-0 flex-1 overflow-y-auto p-1.5", isRail && "pt-0")}>
@@ -200,8 +226,21 @@ export function SessionList({
                         disabled={isStreaming}
                         aria-current={active ? "true" : undefined}
                       >
-                        <span className={cn("min-w-0 flex-1 truncate", active && "font-medium")}>
-                          {session.title}
+                        {session.kind === "guided" && (
+                          <BookOpen
+                            className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
+                            aria-label={t("chat.guide.badge")}
+                          />
+                        )}
+                        <span className="flex min-w-0 flex-1 flex-col">
+                          <span className={cn("truncate", active && "font-medium")}>
+                            {session.title}
+                          </span>
+                          {session.guide && (
+                            <span className="truncate text-[11px] text-muted-foreground">
+                              {guidePositionLabel(session.guide)}
+                            </span>
+                          )}
                         </span>
                         {/* The time gives way to the actions button on hover,
                             keyboard focus, or while the menu is open. */}

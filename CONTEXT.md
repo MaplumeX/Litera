@@ -28,6 +28,14 @@ _Avoid_: Notes (too narrow — notes are one kind of annotation), marks
 One assistant conversation about a book. A book has many sessions; a session can branch.
 _Avoid_: Chat, conversation (too generic)
 
+**Guided session**:
+A Session in which the assistant takes the reader through the Book part by part, in order, explaining each part in full. Fixed at creation; a book can have several, next to ordinary Sessions. Side questions in it do not move the reading on.
+_Avoid_: Tutor mode, read-along, guided mode
+
+**Guide cursor**:
+The chapter part a Guided session has reached: the latest guided step on the Session's active branch. Derived, never stored; skipping or picking a chapter only changes the next step until it is sent.
+_Avoid_: Bookmark, reading position (that is the Book's)
+
 **Compaction**:
 A Session event that replaces older messages in the model's context with a summary entry. The full transcript stays visible to the user; only the model-facing projection is truncated. The transcript marks the point with a compaction notice (a collapsible divider showing the summary).
 _Avoid_: Summarization, truncation, context limit

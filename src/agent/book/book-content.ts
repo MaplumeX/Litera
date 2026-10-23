@@ -56,10 +56,15 @@ function sameFragmentHref(left: string, right: string): boolean {
   return hrefMatches(left, right) && (left.split("#")[1] ?? "") === (right.split("#")[1] ?? "");
 }
 
-export function chapterAside(toc: readonly BookTocEntry[], href: string | undefined): string | undefined {
+/** The TOC entry an href points into, preferring an exact fragment match. */
+export function chapterForHref(toc: readonly BookTocEntry[], href: string | undefined): BookTocEntry | undefined {
   if (!href) return undefined;
   const exact = toc.find((entry) => entry.hrefs.some((candidate) => sameFragmentHref(candidate, href)));
-  const chapter = exact ?? toc.find((entry) => entry.hrefs.some((candidate) => hrefMatches(candidate, href)));
+  return exact ?? toc.find((entry) => entry.hrefs.some((candidate) => hrefMatches(candidate, href)));
+}
+
+export function chapterAside(toc: readonly BookTocEntry[], href: string | undefined): string | undefined {
+  const chapter = chapterForHref(toc, href);
   if (!chapter) return undefined;
   const title = chapterTitle(chapter).trim();
   return title

@@ -32,6 +32,10 @@ pub struct PiSessionSummary {
     created_at: String,
     updated_at: String,
     system_prompt: Option<String>,
+    /// "guided" for a Guided session; absent for an ordinary one.
+    kind: Option<String>,
+    /// The latest guided step on the active branch (the guide cursor).
+    guide: Option<Value>,
 }
 
 #[derive(Debug, Serialize)]
@@ -126,6 +130,18 @@ impl PiSessionStore {
     }
 
     pub fn create(&self, book_id: &str) -> AppResult<LoadedPiSession> {
+        self.create_with_kind(book_id, None)
+    }
+
+    /// A Session's kind is fixed at creation and lives in the header.
+    pub fn create_with_kind(
+        &self,
+        book_id: &str,
+        kind: Option<&str>,
+    ) -> AppResult<LoadedPiSession> {
+        if kind.is_some_and(|kind| kind != "guided") {
+            return Err(AppError::invalid_input("Unknown session kind"));
+        }
         let _guard = self
             .gate
             .lock()
@@ -133,7 +149,11 @@ impl PiSessionStore {
         let dir = self.book_dir(book_id, true)?;
         let id = uuid::Uuid::new_v4().to_string();
         let timestamp = Utc::now().to_rfc3339();
-        let header = json!({"type":"session","version":3,"id":id,"timestamp":timestamp,"cwd":""});
+        let mut header =
+            json!({"type":"session","version":3,"id":id,"timestamp":timestamp,"cwd":""});
+        if let Some(kind) = kind {
+            header["kind"] = Value::String(kind.to_string());
+        }
         let path = dir.join(format!("{id}.jsonl"));
         let bytes = format!(
             "{}\n",
@@ -254,12 +274,23 @@ impl PiSessionStore {
                 .and_then(|entry| entry.get("systemPrompt"))
                 .and_then(Value::as_str)
                 .map(str::to_string);
+            let kind = header
+                .get("kind")
+                .and_then(Value::as_str)
+                .filter(|kind| *kind == "guided")
+                .map(str::to_string);
+            let guide = kind
+                .as_ref()
+                .and_then(|_| latest_guide_on_branch(&entries, leaf_id.as_deref()))
+                .cloned();
             summaries.push(PiSessionSummary {
                 id: id.to_string(),
                 title,
                 created_at: created,
                 updated_at: updated,
                 system_prompt,
+                kind,
+                guide,
             });
         }
         summaries.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
@@ -757,6 +788,32 @@ fn latest_on_branch<'a>(
     None
 }
 
+/// The `guide` field of the latest guided step (a user message entry carrying
+/// one) on the branch ending at `leaf_id`.
+fn latest_guide_on_branch<'a>(entries: &'a [Value], leaf_id: Option<&str>) -> Option<&'a Value> {
+    let by_id: HashMap<&str, &Value> = entries
+        .iter()
+        .filter_map(|entry| entry_id(entry).map(|id| (id, entry)))
+        .collect();
+    let mut visited = HashSet::new();
+    let mut current = leaf_id.and_then(|id| by_id.get(id).copied());
+    while let Some(entry) = current {
+        if !visited.insert(entry_id(entry)?) {
+            return None;
+        }
+        if entry.get("type").and_then(Value::as_str) == Some("message") {
+            if let Some(guide) = entry.get("guide").filter(|guide| guide.is_object()) {
+                return Some(guide);
+            }
+        }
+        current = entry
+            .get("parentId")
+            .and_then(Value::as_str)
+            .and_then(|parent| by_id.get(parent).copied());
+    }
+    None
+}
+
 /// The newest of `candidates` (by append order) whose ancestry reaches
 /// `leaf`, i.e. the latest entry that continues the branch ending at `leaf`.
 fn newest_descendant(entries: &[Value], leaf: &str, candidates: &[String]) -> Option<String> {
@@ -1018,10 +1075,13 @@ fn resolve_store(app: &tauri::AppHandle) -> AppResult<PiSessionStore> {
 pub async fn create_agent_session(
     app: tauri::AppHandle,
     book_id: String,
+    kind: Option<String>,
 ) -> AppResult<LoadedPiSession> {
-    tauri::async_runtime::spawn_blocking(move || resolve_store(&app)?.create(&book_id))
-        .await
-        .map_err(|error| AppError::storage_io(format!("Session worker failed: {error}")))?
+    tauri::async_runtime::spawn_blocking(move || {
+        resolve_store(&app)?.create_with_kind(&book_id, kind.as_deref())
+    })
+    .await
+    .map_err(|error| AppError::storage_io(format!("Session worker failed: {error}")))?
 }
 #[tauri::command]
 pub async fn list_agent_sessions(
@@ -1632,6 +1692,60 @@ mod sync_merge_tests {
         assert_eq!(summaries[0].system_prompt.as_deref(), Some("Discuss this book"));
         // The returned content matches what is on disk.
         assert!(session_content(&store, "book-1", &id).contains("Summary title"));
+    }
+
+    #[test]
+    fn guided_session_keeps_its_kind_and_reports_the_guide_on_the_active_branch() {
+        let (_temp, store) = store();
+        assert!(store.create_with_kind("book", Some("tutor")).is_err());
+        let created = store.create_with_kind("book", Some("guided")).unwrap();
+        assert_eq!(created.header["kind"], "guided");
+        let id = created.header["id"].as_str().unwrap().to_string();
+        let summary = &store.list("book").unwrap()[0];
+        assert_eq!(summary.kind.as_deref(), Some("guided"));
+        assert_eq!(summary.guide, None);
+
+        let mut first = message("step0001", None, "step one");
+        first["guide"] = json!({"chapterIndex": 2, "part": 0, "totalParts": 2});
+        let mut second = message("step0002", Some("step0001"), "step two");
+        second["guide"] = json!({"chapterIndex": 2, "part": 1, "totalParts": 2});
+        let side = message("side0001", Some("step0002"), "side question");
+        store
+            .append("book", &id, None, vec![first, second, side])
+            .unwrap();
+        let summary = &store.list("book").unwrap()[0];
+        assert_eq!(summary.guide.as_ref().unwrap()["part"], 1);
+
+        // Back on the first step's branch, the cursor follows it.
+        store.set_leaf("book", &id, "step0001").unwrap();
+        let summary = &store.list("book").unwrap()[0];
+        assert_eq!(summary.guide.as_ref().unwrap()["part"], 0);
+
+        // Ordinary sessions never report a kind or guide.
+        store.create("other").unwrap();
+        let ordinary = &store.list("other").unwrap()[0];
+        assert_eq!(ordinary.kind, None);
+        assert_eq!(ordinary.guide, None);
+    }
+
+    #[test]
+    fn a_guided_session_synced_from_another_device_keeps_its_kind() {
+        let (_temp, store) = store();
+        let mut step = message("step0001", None, "step one");
+        step["guide"] = json!({"chapterIndex": 0, "part": 0, "totalParts": 1});
+        let remote = format!(
+            "{}\n{}\n",
+            serde_json::to_string(&json!({
+                "type": "session", "version": 3, "id": "remote-guided",
+                "timestamp": "2026-01-01T00:00:00Z", "cwd": "", "kind": "guided",
+            }))
+            .unwrap(),
+            serde_json::to_string(&step).unwrap(),
+        );
+        store.merge_remote_session("book-1", &remote).unwrap();
+        let summary = &store.list("book-1").unwrap()[0];
+        assert_eq!(summary.kind.as_deref(), Some("guided"));
+        assert_eq!(summary.guide.as_ref().unwrap()["chapterIndex"], 0);
     }
 
     #[test]

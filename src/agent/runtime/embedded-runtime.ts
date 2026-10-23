@@ -2,17 +2,19 @@ import { invoke } from "@tauri-apps/api/core";
 import { Agent, type AgentEvent as PiEvent, type AgentMessage as PiMessage, type AgentTool, type StreamFn } from "@earendil-works/pi-agent-core";
 import { clampThinkingLevel, isContextOverflow, normalizeContext, retryAssistantCall, type AssistantMessage, type ModelThinkingLevel } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
-import { BookWorkerClient, chapterAside, formatBookSnapshot, type BookContentPort, type ModelImage, type QuoteLocation } from "@/agent/book/book-content";
+import { BookWorkerClient, chapterAside, chapterForHref, formatBookSnapshot, type BookContentPort, type ModelImage, type QuoteLocation } from "@/agent/book/book-content";
 import { contextBudget, estimateBranchTokens, generateSummary, prepareCompaction, preparePrune } from "@/agent/compaction/compaction";
 import { createGuardedNativeFetch } from "@/agent/transport/native-fetch";
 import { validateMindmapParams } from "@/agent/runtime/mindmap";
+import { guidedPrompt, guideStepContext, guideTocProgress, nextGuideStep, resolveGuideStep, skipChapterStep, type GuideChapterProgress } from "@/agent/runtime/guide";
 import { resolveRuntimeModel } from "@/agent/runtime/model-resolution";
 import { classifyPromptError } from "@/agent/runtime/prompt-error";
-import { activeBranch, branchLeafId, branchNavigation, contextBranch, convertPiContextToLlm, newEntry, piContextMessages, sessionConfig, sessionNavigation, visibleMessageEntries, visibleMessages, type DecodedPiSession, type PiSessionEntry, type SessionConfig } from "@/agent/sessions/pi-session";
+import { activeBranch, branchLeafId, guideCursor, branchNavigation, contextBranch, convertPiContextToLlm, newEntry, piContextMessages, sessionConfig, sessionNavigation, visibleMessageEntries, visibleMessages, type DecodedPiSession, type PiSessionEntry, type SessionConfig } from "@/agent/sessions/pi-session";
 import { restoreImageRefs, withImageRefs } from "@/agent/sessions/image-refs";
 import { tauriSessionPort, type SessionPort } from "@/agent/sessions/session-port";
 import { invokeErrorMessage } from "@/lib/app-error";
-import type { AgentEvent, AgentMessage as UiMessage } from "@/types/agent";
+import { loadGuidedStyle } from "@/lib/guided-style";
+import type { AgentEvent, AgentMessage as UiMessage, GuideStep, SessionKind } from "@/types/agent";
 import type { AnnotationsFile } from "@/types/library";
 
 export interface RuntimeConfig { provider:string; model:string; api:string; baseUrl:string; apiKey:string; thinkingLevel:string; contextWindow?:number; imageInput?:boolean }
@@ -90,12 +92,12 @@ function errorAssistant(model:{api:AssistantMessage["api"];provider:string;id:st
 export class LiteraAgentRuntime {
   private readonly listeners=new Set<Listener>(); private readonly sessions:SessionPort; private book:BookContentPort;
   private readonly loadConfig:()=>Promise<RuntimeConfig>; private readonly loadStream:(api:string)=>Promise<StreamFn>;
-  private readonly loadAnnotations:(bookId:string)=>Promise<AnnotationsFile>;
+  private readonly loadAnnotations:(bookId:string)=>Promise<AnnotationsFile>; private readonly loadGuidedStyle:()=>string|null;
   private images=new Map<string,Promise<ModelImage>>();
   private bookId:string|null=null; private session:DecodedPiSession|null=null; private agent:Agent|null=null; private promptId:string|null=null; private revision=0; private bookGeneration=0; private configRevision=0; private promptAbort:AbortController|null=null; private promptAgent:Agent|null=null;
   /** Background context maintenance after a turn; a new prompt awaits it. */
   private maintenance:{abort:AbortController;done:Promise<void>}|null=null;
-  constructor(options?:{sessions?:SessionPort;book?:BookContentPort;loadConfig?:()=>Promise<RuntimeConfig>;loadStream?:(api:string)=>Promise<StreamFn>;loadAnnotations?:(bookId:string)=>Promise<AnnotationsFile>}){this.sessions=options?.sessions??tauriSessionPort;this.book=options?.book??new BookWorkerClient();this.loadConfig=options?.loadConfig??(()=>invoke<RuntimeConfig>("get_agent_runtime_config"));this.loadStream=options?.loadStream??streamFor;this.loadAnnotations=options?.loadAnnotations??((bookId)=>invoke<AnnotationsFile>("get_annotations",{bookId}));}
+  constructor(options?:{sessions?:SessionPort;book?:BookContentPort;loadConfig?:()=>Promise<RuntimeConfig>;loadStream?:(api:string)=>Promise<StreamFn>;loadAnnotations?:(bookId:string)=>Promise<AnnotationsFile>;loadGuidedStyle?:()=>string|null}){this.loadGuidedStyle=options?.loadGuidedStyle??loadGuidedStyle;this.sessions=options?.sessions??tauriSessionPort;this.book=options?.book??new BookWorkerClient();this.loadConfig=options?.loadConfig??(()=>invoke<RuntimeConfig>("get_agent_runtime_config"));this.loadStream=options?.loadStream??streamFor;this.loadAnnotations=options?.loadAnnotations??((bookId)=>invoke<AnnotationsFile>("get_annotations",{bookId}));}
   subscribe(listener:Listener){this.listeners.add(listener);return()=>{this.listeners.delete(listener);};}
   syncBook(bookId:string){if(this.bookId===bookId)this.emit({type:"book_ready",bookId});}
   private emit(payload:RuntimeEventPayload){const event={version:++this.revision,...payload} as AgentEvent; for(const listener of this.listeners)listener(event);}
@@ -105,7 +107,15 @@ export class LiteraAgentRuntime {
   async openBook(bookId:string,bytes:ArrayBuffer){this.cancelMaintenance();this.promptAbort?.abort();this.promptAgent?.abort();this.agent?.abort();this.book.close();this.images.clear();const generation=++this.bookGeneration;this.bookId=bookId;this.session=null;this.agent=null;this.emit({type:"book_loading",bookId});try{await this.book.open(bookId,bytes);if(this.bookGeneration===generation&&this.bookId===bookId)this.emit({type:"book_ready",bookId});}catch(error){if(this.bookGeneration===generation&&this.bookId===bookId)this.emit({type:"error",scope:"book",message:error instanceof Error?error.message:String(error),recoverable:true,bookId});}}
   closeBook(){const id=this.bookId;this.cancelMaintenance();this.promptAbort?.abort();this.promptAgent?.abort();this.agent?.abort();this.book.close();this.images.clear();this.bookGeneration+=1;this.bookId=null;this.session=null;this.agent=null;if(id)this.emit({type:"book_closed",bookId:id});}
   async listSessions(requestId?:string){if(!this.bookId)return;const bookId=this.bookId;const sessions=await this.sessions.list(bookId);if(this.bookId===bookId)this.emit({type:"sessions_list",bookId,requestId,sessions});}
-  async newSession(requestId?:string){if(!this.bookId)return;this.cancelMaintenance();const bookId=this.bookId;const session=await this.sessions.create(bookId);if(this.bookId!==bookId)return;this.session=session;this.agent=null;this.emit({type:"session_created",bookId,sessionId:session.header.id,requestId});}
+  async newSession(requestId?:string,kind?:SessionKind){if(!this.bookId)return;this.cancelMaintenance();const bookId=this.bookId;const session=await this.sessions.create(bookId,kind);if(this.bookId!==bookId)return;this.session=session;this.agent=null;this.emit({type:"session_created",bookId,sessionId:session.header.id,requestId,...(kind?{kind}:{})});}
+  /** The open Guided session's next step; before its first step, start from `startHref`'s chapter. Null at the end of the Book or outside a Guided session. */
+  async nextGuideStep(startHref?:string):Promise<GuideStep|null>{if(!this.bookId)return null;const bookId=this.bookId;const session=this.session;if(session?.header.kind!=="guided")return null;const toc=await this.bookCall(bookId,()=>this.book.toc());return nextGuideStep(toc,guideCursor(session),chapterForHref(toc,startHref)?.index);}
+  /** The first guided step of the chapter after `step`'s. */
+  async guideStepAfterChapter(step:GuideStep):Promise<GuideStep|null>{if(!this.bookId)return null;const bookId=this.bookId;const toc=await this.bookCall(bookId,()=>this.book.toc());return skipChapterStep(toc,step);}
+  /** Guide progress per TOC href for `steps` (a Guided session's steps, oldest first). */
+  async guideTocProgress(steps:readonly GuideStep[],hrefs:readonly string[]):Promise<Record<string,GuideChapterProgress>>{if(!this.bookId||!steps.length)return{};const bookId=this.bookId;const toc=await this.bookCall(bookId,()=>this.book.toc());return guideTocProgress(toc,steps,hrefs);}
+  /** The first guided step at `href`'s chapter (or the next one with text). */
+  async guideStepAt(href:string):Promise<GuideStep|null>{if(!this.bookId)return null;const bookId=this.bookId;const toc=await this.bookCall(bookId,()=>this.book.toc());const chapter=chapterForHref(toc,href);return chapter?nextGuideStep(toc,null,chapter.index):null;}
   async switchSession(sessionId:string,requestId?:string){if(!this.bookId)return;this.cancelMaintenance();const bookId=this.bookId;const session=await this.sessions.load(bookId,sessionId);if(this.bookId!==bookId)return;this.session=session;this.agent=null;this.emit({type:"session_switched",bookId,sessionId,requestId,messages:visibleMessages(session),...sessionNavigation(session)});}
   // Sync merged another device's entries into the files: show them, unless a
   // prompt or background maintenance is still writing to the open session.
@@ -150,7 +160,7 @@ export class LiteraAgentRuntime {
   /** Check a Citation against the open Book's text. */
   async locateQuote(chapterIndex:number,quote:string):Promise<QuoteLocation>{if(!this.bookId)throw new Error("No book is open");const bookId=this.bookId;return this.bookCall(bookId,()=>this.book.locateQuote(chapterIndex,quote));}
 
-  async prompt(text:string,context:{selection?:string;chapterHref?:string},promptId:string=crypto.randomUUID(),requestId?:string,editIndex?:number){
+  async prompt(text:string,context:{selection?:string;chapterHref?:string;guide?:GuideStep},promptId:string=crypto.randomUUID(),requestId?:string,editIndex?:number){
     if(!this.bookId)throw new Error("No book is open"); if(this.promptId)throw new Error("A prompt is already active");
     if(!text||text.length>64*1024||(context.selection?.length??0)>64*1024||(context.chapterHref?.length??0)>4096)throw new Error("Invalid prompt context");
     const promptBookId=this.bookId;
@@ -180,7 +190,9 @@ export class LiteraAgentRuntime {
       const configAtStart=this.configRevision; const config=await this.loadConfig();if(this.bookId!==promptBookId)throw new Error("Book context changed");
       const metadata=await this.book.metadata(); const toc=await this.book.toc();
       const snapshot=formatBookSnapshot(metadata,toc);
-      const readingContext=[chapterAside(toc,context.chapterHref),context.selection?`Selected text: ${context.selection}`:""].filter(Boolean).join("\n\n");
+      // A guided step names its own part; the reader's position is beside the point.
+      let guide:GuideStep|null=null;if(context.guide){if(session.header.kind!=="guided")throw new Error("Not a guided session");guide=resolveGuideStep(toc,context.guide);if(!guide)throw new Error("Guided step is not in this book");}
+      const readingContext=guide?guideStepContext(guide):[chapterAside(toc,context.chapterHref),context.selection?`Selected text: ${context.selection}`:""].filter(Boolean).join("\n\n");
       const agent=await this.ensureAgent(config,session,promptBookId,carriedConfig??sessionConfig(session));
       if(this.bookId!==promptBookId)throw new Error("Agent context changed");
       this.promptAgent=agent;if(configAtStart===this.configRevision)this.agent=agent;
@@ -195,7 +207,7 @@ export class LiteraAgentRuntime {
       const hasSnapshot=contextBranch(session).some((entry)=>entry.type==="custom_message"&&entry.customType==="bookSnapshot");
       if(!hasSnapshot){const snapshotEntry=newEntry("custom_message",pendingParent,{customType:"bookSnapshot",content:snapshot,display:false});pendingEntries.push(snapshotEntry);pendingParent=snapshotEntry.id;promptMessages.push({role:"custom",customType:"bookSnapshot",content:snapshot,display:false,timestamp:Date.now()} as PiMessage);}
       if(readingContext){const contextEntry=newEntry("custom_message",pendingParent,{customType:"readingContext",content:readingContext,display:false});pendingEntries.push(contextEntry);pendingParent=contextEntry.id;promptMessages.push({role:"custom",customType:"readingContext",content:readingContext,display:false,timestamp:Date.now()} as PiMessage);}
-      const user:PiMessage={role:"user",content:text,timestamp:Date.now()};const userEntry=newEntry("message",pendingParent,{message:user,...(context.selection?{selection:context.selection}:{}),...(context.chapterHref?{chapterHref:context.chapterHref}:{})});
+      const user:PiMessage={role:"user",content:text,timestamp:Date.now()};const userEntry=newEntry("message",pendingParent,{message:user,...(context.selection?{selection:context.selection}:{}),...(context.chapterHref?{chapterHref:context.chapterHref}:{}),...(guide?{guide}:{})});
       pendingEntries.push(userEntry);
       const leaf=await this.sessions.append(promptBookId,session.header.id,persistedLeaf,pendingEntries);session.entries.push(...pendingEntries);session.leafId=leaf;userPersisted=true;
       if(this.bookId!==promptBookId)throw new Error("Agent context changed");
@@ -246,9 +258,9 @@ export class LiteraAgentRuntime {
       const rawMessage=error instanceof Error?error.message:String(error);const safeError=new Error(rawMessage===EDIT_TARGET_ERROR?rawMessage:classifyPromptError(error).message);this.emit({type:"error",scope:"prompt",message:safeError.message,recoverable:true,bookId:promptBookId,sessionId:session?.header.id,promptId});throw safeError;}finally{unsubscribe?.();if(this.promptAbort===promptAbort)this.promptAbort=null;if(this.promptId===promptId){this.promptId=null;this.promptAgent=null;}}
   }
 
-  private async ensureAgent(config:RuntimeConfig,session:DecodedPiSession,bookId:string,configured:SessionConfig|null){if(this.agent)return this.agent;const resolvedModel=await resolveRuntimeModel(config);const nativeFetch=createGuardedNativeFetch({baseUrl:resolvedModel.baseUrl});const providerStream=await this.loadStream(resolvedModel.api);const stream:StreamFn=(requestModel,requestContext,options)=>providerStream(requestModel,requestContext,{...options,fetch:nativeFetch,maxRetries:3});const vision=resolvedModel.input.includes("image");const tools=await this.tools(bookId,vision);const userPrompt=configured?.systemPrompt.trim();
+  private async ensureAgent(config:RuntimeConfig,session:DecodedPiSession,bookId:string,configured:SessionConfig|null){if(this.agent)return this.agent;const resolvedModel=await resolveRuntimeModel(config);const nativeFetch=createGuardedNativeFetch({baseUrl:resolvedModel.baseUrl});const providerStream=await this.loadStream(resolvedModel.api);const stream:StreamFn=(requestModel,requestContext,options)=>providerStream(requestModel,requestContext,{...options,fetch:nativeFetch,maxRetries:3});const vision=resolvedModel.input.includes("image");const tools=await this.tools(bookId,vision);const userPrompt=configured?.systemPrompt.trim();const basePrompt=session.header.kind==="guided"?`${SYSTEM_PROMPT}\n\n${guidedPrompt(this.loadGuidedStyle()??undefined)}`:SYSTEM_PROMPT;
     // Persisted tool results carry Image references; put the images back for vision models.
-    const convertToLlm=async(messages:PiMessage[])=>{const llm=convertPiContextToLlm(messages);return vision?restoreImageRefs(llm,async(src)=>{const image=await this.bookCall(bookId,()=>this.loadImage(src));return{type:"image",data:image.data,mimeType:image.mimeType};}):llm;};return new Agent({initialState:{systemPrompt:userPrompt?`${SYSTEM_PROMPT}\n\n${userPrompt}`:SYSTEM_PROMPT,model:resolvedModel,thinkingLevel:clampThinkingLevel(resolvedModel,config.thinkingLevel as ModelThinkingLevel),messages:piContextMessages(session),tools},streamFn:stream,convertToLlm,getApiKey:config.provider==="chatgpt"?async()=>{
+    const convertToLlm=async(messages:PiMessage[])=>{const llm=convertPiContextToLlm(messages);return vision?restoreImageRefs(llm,async(src)=>{const image=await this.bookCall(bookId,()=>this.loadImage(src));return{type:"image",data:image.data,mimeType:image.mimeType};}):llm;};return new Agent({initialState:{systemPrompt:userPrompt?`${basePrompt}\n\n${userPrompt}`:basePrompt,model:resolvedModel,thinkingLevel:clampThinkingLevel(resolvedModel,config.thinkingLevel as ModelThinkingLevel),messages:piContextMessages(session),tools},streamFn:stream,convertToLlm,getApiKey:config.provider==="chatgpt"?async()=>{
       // Refreshes the short-lived ChatGPT token; the provider may have been
       // switched since, and another provider's key must never reach ChatGPT.
       const current=await this.loadConfig();if(current.provider!=="chatgpt")throw new Error("ChatGPT is no longer the active provider");return current.apiKey;}:()=>config.apiKey,transport:"sse"});}
@@ -366,4 +378,4 @@ export class LiteraAgentRuntime {
 }
 
 export const embeddedAgentRuntime=new LiteraAgentRuntime();
-export const uiUserMessage=(text:string,context:{selection?:string;chapterHref?:string}):UiMessage=>({role:"user",content:text,selection:context.selection,chapterHref:context.chapterHref});
+export const uiUserMessage=(text:string,context:{selection?:string;chapterHref?:string;guide?:GuideStep}):UiMessage=>({role:"user",content:text,selection:context.selection,chapterHref:context.chapterHref,...(context.guide?{guide:context.guide}:{})});

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activeBranch, branchLeafId, branchNavigation, contextBranch, convertPiContextToLlm, decodePiSession, piContextMessages, sessionConfig, sessionSummary, visibleMessageEntries, visibleMessages } from "./pi-session";
+import { activeBranch, branchLeafId, branchNavigation, contextBranch, convertPiContextToLlm, decodeGuide, decodePiSession, guideCursor, piContextMessages, sessionConfig, sessionSummary, visibleMessageEntries, visibleMessages } from "./pi-session";
 import type { PiSessionEntry } from "./pi-session";
 
 const timestamp = "2026-08-14T00:00:00Z";
@@ -558,5 +558,52 @@ describe("contextBranch pruning", () => {
       "{\"ok\":true}",
       expect.stringContaining("read_chapter(chapterIndex=4)"),
     ]);
+  });
+});
+
+describe("guided sessions", () => {
+  const step = (id: string, parentId: string | null, part: number) => ({
+    ...entry(id, parentId, "user", `step ${part}`),
+    guide: { chapterIndex: 4, part, totalParts: 3, chapterTitle: "Chapter 5" },
+  });
+
+  it("keeps the guided kind from the header and drops unknown kinds", () => {
+    const guided = decodePiSession({ header: { type: "session", version: 3, id: "g", timestamp, cwd: "", kind: "guided" }, entries: [], leafId: null });
+    expect(guided.header.kind).toBe("guided");
+    const other = decodePiSession({ header: { type: "session", version: 3, id: "o", timestamp, cwd: "", kind: "tutor" }, entries: [], leafId: null });
+    expect(other.header.kind).toBeUndefined();
+  });
+
+  it("decodes only well-formed guided steps", () => {
+    expect(decodeGuide({ chapterIndex: 1, part: 0, totalParts: 1 })).toEqual({ chapterIndex: 1, part: 0, totalParts: 1 });
+    expect(decodeGuide({ chapterIndex: 1, part: 1, totalParts: 1 })).toBeNull();
+    expect(decodeGuide({ chapterIndex: -1, part: 0, totalParts: 1 })).toBeNull();
+    expect(decodeGuide("chapter 1")).toBeNull();
+    expect(decodeGuide({ chapterIndex: 1, part: 0, totalParts: 2, skim: true })).toMatchObject({ skim: true });
+    expect(decodeGuide({ chapterIndex: 1, part: 0, totalParts: 2, skim: "yes" })).not.toHaveProperty("skim");
+  });
+
+  it("puts the guide on visible user messages", () => {
+    const session = makeSession([step("u1", null, 0), entry("a1", "u1", "assistant", "retelling")], "a1");
+    expect(visibleMessages(session)[0]).toMatchObject({ role: "user", guide: { chapterIndex: 4, part: 0 } });
+  });
+
+  it("derives the cursor from the latest step on the active branch, skipping side questions", () => {
+    const entries = [
+      step("u1", null, 0), entry("a1", "u1", "assistant", "part one"),
+      step("u2", "a1", 1), entry("a2", "u2", "assistant", "part two"),
+      entry("q1", "a2", "user", "side question"), entry("a3", "q1", "assistant", "answer"),
+    ];
+    expect(guideCursor(makeSession(entries, "a3"))).toMatchObject({ part: 1 });
+    expect(guideCursor(makeSession(entries, "a1"))).toMatchObject({ part: 0 });
+    expect(guideCursor(makeSession([entry("q", null, "user", "hi")], "q"))).toBeNull();
+  });
+
+  it("passes kind and guide through the summary", () => {
+    expect(sessionSummary({ id: "g", title: "t", createdAt: timestamp, updatedAt: timestamp, kind: "guided", guide: { chapterIndex: 2, part: 0, totalParts: 1 } }))
+      .toMatchObject({ kind: "guided", guide: { chapterIndex: 2, part: 0, totalParts: 1 } });
+    const ordinary = sessionSummary({ id: "o", title: "t", createdAt: timestamp, updatedAt: timestamp, kind: null, guide: null });
+    expect(ordinary.kind).toBeUndefined();
+    expect(ordinary.guide).toBeUndefined();
   });
 });

@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
@@ -26,6 +27,8 @@ import {
 import { ReaderView, type SelectionCapture } from "@/components/ReaderView";
 import { ChatPanel, type ChatPanelHandle } from "@/components/chat/ChatPanel";
 import { embeddedAgentRuntime } from "@/agent/runtime/embedded-runtime";
+import type { GuideChapterProgress } from "@/agent/runtime/guide";
+import type { GuideStep } from "@/types/agent";
 import type { QuoteLocation } from "@/agent/book/book-content";
 import { LibraryView } from "@/components/LibraryView";
 import {
@@ -135,6 +138,9 @@ function App() {
   // Agent mode: the chapter picked from the TOC as the discussion scope. It
   // overrides the Book pane's position as the prompt's chapter context.
   const [chapterScope, setChapterScope] = useState<{ href: string; label: string } | null>(null);
+  // Agent mode in a Guided session: its steps, and the TOC progress they make.
+  const [guideSteps, setGuideSteps] = useState<GuideStep[] | null>(null);
+  const [guideProgress, setGuideProgress] = useState<Record<string, GuideChapterProgress> | undefined>(undefined);
   const [tocWidth, setTocWidth] = useState(loadTocWidth);
   // Bumped by Ctrl/⌘+F so the search field takes focus even when already open.
   const [searchFocusToken, setSearchFocusToken] = useState(0);
@@ -383,6 +389,22 @@ function App() {
     setSidePanelOpen(false);
   }, [bookCollapsed, goToChapterHref, readerMode, toc]);
 
+  const guideTocHrefs = useMemo(
+    () => flattenToc(toc).map((item) => item.href).filter(Boolean),
+    [toc],
+  );
+  useEffect(() => {
+    if (readerMode !== "agent" || !guideSteps?.length) {
+      setGuideProgress(undefined);
+      return;
+    }
+    let cancelled = false;
+    embeddedAgentRuntime.guideTocProgress(guideSteps, guideTocHrefs)
+      .then((next) => { if (!cancelled) setGuideProgress(next); })
+      .catch((error) => console.error("guide progress error:", error));
+    return () => { cancelled = true; };
+  }, [guideSteps, guideTocHrefs, readerMode]);
+
   // A Citation's "Open in Book": reveal a collapsed Agent-mode Book pane
   // first, then jump once it is visible.
   const handleOpenQuote = useCallback(
@@ -611,6 +633,7 @@ function App() {
               expanded={tocExpanded}
               onToggle={session.handleTocToggle}
               onGoTo={handleTocGoTo}
+              guideProgress={guideProgress}
             />
           ) : sidePanelTab === "search" ? (
             <BookSearchPanel
@@ -979,6 +1002,8 @@ function App() {
               bookId={fileData?.bookId ?? ""}
               variant={readerMode === "agent" ? "workspace" : "docked"}
               sessionRailOpen={sessionRailOpen}
+              preferGuidedSession={readerMode === "agent"}
+              onGuideStepsChange={setGuideSteps}
             />
           </div>
         </div>

@@ -265,6 +265,7 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
               title: t("chat.newSessionTitle"),
               createdAt: new Date().toISOString(),
               updatedAt: new Date().toISOString(),
+              ...(event.kind ? { kind: event.kind } : {}),
             }),
           }
         : base;
