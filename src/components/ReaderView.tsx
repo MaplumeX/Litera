@@ -37,6 +37,7 @@ import { chapterTicks, sectionIndexAt } from "@/lib/reader-progress";
 import { parseXPointer, rangeFromXPointer, xpointerFromRange } from "@/lib/xpointer";
 import { TTS_HIGHLIGHT_COLOR, TTS_OVERLAY_KEY } from "@/lib/reader-tts";
 import { clampSnap, footnotePopupCss, TYPOGRAPHY_RANGES } from "@/lib/reader-styles";
+import { platformBridge } from "@/lib/platform-bridge";
 import {
   getLastUsedHighlightColor,
   highlightColorHex,
@@ -685,8 +686,11 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       // Last scroll area outside the Book the reader pressed in (chat
       // transcript, side panel list); cleared by a press in the Book.
       let lastScrollArea: Element | null = null;
+      // Touches inside a chapter never reach this window, so this only sees
+      // the rest of the app (assistant chat, inputs): keep the native menu.
       const handleWindowPointerDown = (e: Event) => {
         lastScrollArea = scrollAreaAt(e.target, el);
+        platformBridge.setSelectionMenuHidden(false);
       };
       const handleKeyDown = (e: Event) => {
         const ke = e as KeyboardEvent;
@@ -825,6 +829,8 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         const onSelectionChange = () => handleIframeSelection(doc);
         const onDocPointerDown = () => {
           lastScrollArea = null;
+          // Selections here get the SelectionToolbar instead.
+          platformBridge.setSelectionMenuHidden(true);
         };
         doc.addEventListener("pointerdown", onDocPointerDown);
         doc.addEventListener("keydown", handleDocKeyDown);
@@ -911,6 +917,10 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         // (iframe keydown does not reach the parent window).
         inner.addEventListener("load", ((loadEvent) => {
           const doc = (loadEvent as CustomEvent<{ doc?: Document }>).detail?.doc;
+          // No SelectionToolbar in the footnote: keep the native menu there.
+          doc?.addEventListener("pointerdown", () => {
+            platformBridge.setSelectionMenuHidden(false);
+          });
           doc?.addEventListener("keydown", (keyEvent) => {
             const ke = keyEvent as KeyboardEvent;
             if (ke.key !== "Escape") return;
@@ -1028,6 +1038,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         el.removeEventListener("wheel", handleWheel);
         window.removeEventListener("keydown", handleKeyDown);
         window.removeEventListener("pointerdown", handleWindowPointerDown, true);
+        platformBridge.setSelectionMenuHidden(false);
         (el as unknown as { close?: () => void }).close?.();
         el.remove();
         viewRef.current = null;
