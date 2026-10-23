@@ -107,6 +107,9 @@ export class LiteraAgentRuntime {
   async listSessions(requestId?:string){if(!this.bookId)return;const bookId=this.bookId;const sessions=await this.sessions.list(bookId);if(this.bookId===bookId)this.emit({type:"sessions_list",bookId,requestId,sessions});}
   async newSession(requestId?:string){if(!this.bookId)return;this.cancelMaintenance();const bookId=this.bookId;const session=await this.sessions.create(bookId);if(this.bookId!==bookId)return;this.session=session;this.agent=null;this.emit({type:"session_created",bookId,sessionId:session.header.id,requestId});}
   async switchSession(sessionId:string,requestId?:string){if(!this.bookId)return;this.cancelMaintenance();const bookId=this.bookId;const session=await this.sessions.load(bookId,sessionId);if(this.bookId!==bookId)return;this.session=session;this.agent=null;this.emit({type:"session_switched",bookId,sessionId,requestId,messages:visibleMessages(session),...sessionNavigation(session)});}
+  // Sync merged another device's entries into the files: show them, unless a
+  // prompt or background maintenance is still writing to the open session.
+  async refreshAfterSync(){if(!this.bookId)return;const bookId=this.bookId;await this.listSessions();const current=this.session;if(!current||this.promptId||this.maintenance||this.bookId!==bookId)return;const session=await this.sessions.load(bookId,current.header.id);if(this.bookId!==bookId||this.session!==current||this.promptId||this.maintenance)return;if(session.entries.length===current.entries.length&&session.leafId===current.leafId)return;this.session=session;this.agent=null;this.emit({type:"session_switched",bookId,sessionId:session.header.id,messages:visibleMessages(session),...sessionNavigation(session)});}
   async switchBranch(sessionId:string,targetLeafId:string,requestId?:string){
     if(!this.bookId)throw new Error("No book is open");
     const bookId=this.bookId;
