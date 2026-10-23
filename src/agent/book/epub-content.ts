@@ -8,6 +8,7 @@ import {
   type QuoteLocation,
   type SearchHit,
 } from "./book-content";
+import { isMathElement, mathMarkdown, mathText } from "./mathml";
 
 interface ManifestItem {
   href: string;
@@ -119,6 +120,28 @@ function imageSource(element: XmlElement): string {
 function imageAlt(element: XmlElement): string {
   const alt = element.getAttribute("alt") || element.getAttribute("title") || "";
   return alt.replace(/[[\]]/g, "").replace(/\s+/g, " ").trim().slice(0, IMAGE_ALT_MAX_CHARS);
+}
+
+/**
+ * Markdown-only markup with no counterpart in the flat text (link brackets
+ * and targets, `<sup>`/`<sub>` tags, math, repeated rowspan cells) is wrapped
+ * in these noncharacter sentinels while chapters are built. The dense guard
+ * and quote matching drop wrapped spans whole; `finalMarkdown` deletes the
+ * sentinels before Markdown leaves this module.
+ */
+const MARKUP_SENTINELS = /[\uFDD0\uFDD1]/g;
+const MARKUP_SPAN = /\uFDD0[^\uFDD1]*\uFDD1/g;
+
+function markup(text: string): string {
+  return text ? `\uFDD0${text.replace(MARKUP_SENTINELS, "")}\uFDD1` : "";
+}
+
+function withoutMarkup(markdown: string): string {
+  return markdown.replace(MARKUP_SPAN, "");
+}
+
+function finalMarkdown(markdown: string): string {
+  return markdown.replace(MARKUP_SENTINELS, "");
 }
 
 /** Percent-encode the characters that would end a Markdown link target early. */
@@ -286,6 +309,7 @@ function inlineNode(node: XmlNode): string {
   const element = node as XmlElement;
   const label = noterefLabel(element);
   if (label) return `[^${label}]`;
+  if (isMathElement(element)) return markup(mathMarkdown(element));
   const tag = elementTag(element);
   if (IMAGE_TAGS.has(tag)) return imagePlaceholders(element);
   if (INLINE_EMPTY_TAGS.has(tag)) return "";
@@ -296,7 +320,21 @@ function inlineNode(node: XmlNode): string {
   if (tag === "em" || tag === "i") return text ? `*${text}*` : text;
   if (tag === "strong" || tag === "b") return text ? `**${text}**` : text;
   if (tag === "del" || tag === "s" || tag === "strike") return text ? `~~${text}~~` : text;
+  // A superscript holding only a footnote mark stays the bare `[^label]`.
+  if (tag === "sup" || tag === "sub") return withoutFootnoteRefs(text).trim() ? `${markup(`<${tag}>`)}${text}${markup(`</${tag}>`)}` : text;
+  if (tag === "a") return linkMarkdown(element, text);
   return text;
+}
+
+const EXTERNAL_HREF = /^(?:https?:|mailto:)/i;
+
+/** `[text](href)` for a link out of the book; in-book links keep only their text. */
+function linkMarkdown(link: XmlElement, text: string): string {
+  const href = (link.getAttribute("href") ?? "").trim();
+  if (!EXTERNAL_HREF.test(href)) return text;
+  const label = collapseInline(text).trim();
+  if (!label || label === href || label === href.replace(/^mailto:/i, "")) return text;
+  return `${markup("[")}${text}${markup(`](${escapeImageSource(href)})`)}`;
 }
 
 /** Render `<ul>`/`<ol>` as Markdown list lines; nested lists indent two spaces. */
@@ -328,9 +366,15 @@ function tableCell(cell: XmlElement): string {
   return state.blocks.join(" ").replace(/\s+/g, " ").trim().replace(/\|/g, "\\|");
 }
 
-/** The table's own rows (through row groups, never a nested table's), each `colspan` padded with empty cells. */
+/**
+ * The table's own rows (through row groups, never a nested table's), each
+ * `colspan` padded with empty cells and each `rowspan` cell repeated in the
+ * rows it covers, so every row reads on its own.
+ */
 function tableRows(table: XmlElement): string[][] {
   const rows: string[][] = [];
+  // Column → the cell a rowspan from an earlier row still covers it with.
+  const spanning: Array<{ text: string; rows: number } | undefined> = [];
   const visit = (parent: XmlElement) => {
     const children = parent.childNodes;
     for (let index = 0; index < children.length; index += 1) {
@@ -341,6 +385,13 @@ function tableRows(table: XmlElement): string[][] {
       if (tag === "thead" || tag === "tbody" || tag === "tfoot") visit(element);
       else if (tag === "tr") {
         const cells: string[] = [];
+        const spanned = () => {
+          for (let cover = spanning[cells.length]; cover; cover = spanning[cells.length]) {
+            cells.push(cover.text);
+            cover.rows -= 1;
+            if (!cover.rows) spanning[cells.length - 1] = undefined;
+          }
+        };
         const cellNodes = element.childNodes;
         for (let cellIndex = 0; cellIndex < cellNodes.length; cellIndex += 1) {
           const cellNode = cellNodes[cellIndex];
@@ -348,10 +399,19 @@ function tableRows(table: XmlElement): string[][] {
           const cell = cellNode as XmlElement;
           const cellTag = elementTag(cell);
           if (cellTag !== "td" && cellTag !== "th") continue;
-          cells.push(tableCell(cell));
+          spanned();
+          const text = tableCell(cell);
           const span = Math.min(Number.parseInt(cell.getAttribute("colspan") ?? "", 10) || 1, 100);
-          for (let extra = 1; extra < span; extra += 1) cells.push("");
+          const rowSpan = Number.parseInt(cell.getAttribute("rowspan") ?? "", 10);
+          // rowspan="0" covers the rest of the table.
+          const below = Math.min(rowSpan === 0 ? 1000 : (rowSpan || 1) - 1, 1000);
+          for (let column = 0; column < span; column += 1) {
+            const value = column ? "" : text;
+            if (below > 0) spanning[cells.length] = { text: markup(value), rows: below };
+            cells.push(value);
+          }
         }
+        spanned();
         if (cells.length) rows.push(cells);
       }
     }
@@ -434,7 +494,7 @@ export function markdownText(source: string): string {
   if (!root) return "";
   const state: MarkdownWalk = { blocks: [] };
   walkElement(root, state);
-  return state.blocks.map((block) => block.replace(/\s+$/g, "")).filter(Boolean).join("\n\n");
+  return finalMarkdown(state.blocks.map((block) => block.replace(/\s+$/g, "")).filter(Boolean).join("\n\n"));
 }
 
 // Block roots are consumed by `walkElement` as a whole subtree; everything
@@ -521,6 +581,10 @@ function markdownEvents(root: XmlElement): MarkdownEvent[] {
       flushInline();
       events.push({ kind: "anchor", id: anchor });
     }
+    if (isMathElement(element)) {
+      buffer += markup(mathMarkdown(element));
+      return;
+    }
     const tag = elementTag(element);
     if (isMarkdownBlockRoot(element) && !BLOCK_TAGS.has(tag)) {
       flushInline();
@@ -590,7 +654,7 @@ function dense(text: string): string {
  * text, which is always safe.
  */
 function denseMarkdown(markdown: string): string {
-  const lines = withoutFootnoteRefs(withoutImages(markdown)).split("\n").map((line) => {
+  const lines = withoutFootnoteRefs(withoutImages(withoutMarkup(markdown))).split("\n").map((line) => {
     let text = line.replace(/^(\s*)([-+]|\d{1,9}\.)\s+/, "$1");
     text = text.replace(/^(\s*)#{1,6}\s+/, "$1");
     while (/^(\s*)>\s?/.test(text)) text = text.replace(/^(\s*)>\s?/, "$1");
@@ -645,7 +709,9 @@ function markdownSlices(events: readonly MarkdownEvent[], anchorIds: readonly st
 export function parseSpineSegments(source: string, fileHref = ""): Segment[] {
   const root = parseSpineRoot(source);
   if (root) annotateFootnotes([{ href: fileHref, root }]);
-  return spineSegments(source, root, fileHref);
+  return spineSegments(source, root, fileHref).map((segment) =>
+    segment.markdown === undefined ? segment : { ...segment, markdown: finalMarkdown(segment.markdown) },
+  );
 }
 
 /** Parsed spine document root; null when the markup cannot be parsed. */
@@ -694,6 +760,11 @@ function spineSegments(source: string, root: XmlElement | null, fileHref: string
         finish();
         anchorId = nextAnchor;
         anchorIds.push(nextAnchor);
+      }
+      if (isMathElement(element)) {
+        // The Markdown projection renders math as LaTeX; search keeps its text.
+        parts.push(mathText(element));
+        return;
       }
       const children = element.childNodes;
       for (let index = 0; index < children.length; index += 1) visit(children[index]);
@@ -944,20 +1015,48 @@ function isBacklinkType(element: XmlElement): boolean {
 }
 
 /**
- * A link that looks like a footnote reference: an `epub:type`/`role`
- * noteref, or a fragment link set as a superscript (`<sup><a>` or
- * `<a><sup>`) — the same shapes the reader styles as note marks.
+ * Marker text of a reference written without noteref semantics: `[1]`,
+ * `〔注2〕`, `①`, `注3`, `*`, `†`. Parenthesized `(1)` is left out: it is
+ * usually an equation or list cross-reference.
  */
-function isNoterefCandidate(element: XmlElement): boolean {
-  if (!(element.getAttribute("href") ?? "").includes("#") || isBacklinkType(element)) return false;
-  if (linkTypes(element).some((type) => type === "noteref" || type === "doc-noteref")) return true;
-  if (elementTag(element.parentNode as XmlNode) === "sup") return true;
+const NOTE_MARKER = /^(?:[[［〔【]\s*(?:注|註)?\s*[\p{L}\p{N}]{1,4}\s*[\]］〕】]|[\u2460-\u24ff\u2776-\u2793\u3251-\u325f\u32b1-\u32bf]|(?:注|註)\s*[\p{N}\u2460-\u24ff]{1,4}|\*{1,3}|[†‡§¶])$/u;
+/** A class naming the link (or its wrapper or icon) a footnote reference, e.g. Duokan's `duokan-footnote`. */
+const NOTE_CLASS = /foot-?note|note-?ref|endnote|fnref|(?:^|[\s_-])(?:fn|note)(?:$|[\s_-]|\d)/i;
+/** A plain-link note must be short and must not be a section (headings) or the whole document. */
+const NOTE_MAX_CHARS = 4000;
+
+function hasNoteClass(element: XmlElement | null): boolean {
+  return !!element && element.nodeType === 1 && NOTE_CLASS.test(element.getAttribute("class") ?? "");
+}
+
+/**
+ * How a link looks like a footnote reference. `strong`: an `epub:type`/`role`
+ * noteref, or a fragment link set as a superscript (`<sup><a>` or
+ * `<a><sup>`) — the same shapes the reader styles as note marks. `weak`: a
+ * plain fragment link whose text is a note marker or whose class names it a
+ * footnote; its target must also look like a note. `null`: not a reference.
+ */
+function noterefShape(element: XmlElement): "strong" | "weak" | null {
+  if (!(element.getAttribute("href") ?? "").includes("#") || isBacklinkType(element)) return null;
+  if (linkTypes(element).some((type) => type === "noteref" || type === "doc-noteref")) return "strong";
+  if (elementTag(element.parentNode as XmlNode) === "sup") return "strong";
   const children = Array.from(element.childNodes).filter((child) => child.nodeType === 1 || ((child.nodeType === 3 || child.nodeType === 4) && child.nodeValue?.trim()));
-  return children.length === 1 && elementTag(children[0]) === "sup";
+  if (children.length === 1 && elementTag(children[0]) === "sup") return "strong";
+  if (NOTE_MARKER.test((element.textContent ?? "").replace(/\s+/g, ""))) return "weak";
+  const classed = [element, element.parentNode as XmlElement | null, ...children.filter((child): child is XmlElement => child.nodeType === 1)];
+  return classed.some(hasNoteClass) ? "weak" : null;
+}
+
+/** True when a weak reference's target block reads like a note rather than a section or heading. */
+function isNoteLike(note: XmlElement): boolean {
+  const tag = elementTag(note);
+  if (tag === "body" || tag === "html" || /^h[1-6]$/.test(tag)) return false;
+  if (Array.from(note.getElementsByTagName("*")).some((element) => /^h[1-6]$/.test(elementTag(element)))) return false;
+  return (note.textContent ?? "").length <= NOTE_MAX_CHARS;
 }
 
 function footnoteLabel(text: string, id: string): string {
-  const clean = (value: string) => value.replace(/[\s[\]()（）【】〔〕^]/g, "");
+  const clean = (value: string) => value.replace(/[\s[\]()（）【】〔〕［］〈〉^]/g, "");
   const label = clean(text);
   return label && label.length <= FOOTNOTE_LABEL_MAX_CHARS ? label : clean(id) || "note";
 }
@@ -991,7 +1090,7 @@ function footnoteDefinition(note: XmlElement, noteHref: string): string {
   }
   const state: MarkdownWalk = { blocks: [] };
   walkElement(clone, state);
-  return resolveImageRefs(state.blocks.join(" ").replace(/\s+/g, " ").trim(), noteHref);
+  return finalMarkdown(resolveImageRefs(state.blocks.join(" ").replace(/\s+/g, " ").trim(), noteHref));
 }
 
 /**
@@ -1031,9 +1130,10 @@ function annotateFootnotes(docs: ReadonlyArray<{ href: string; root: XmlElement 
     docs.forEach((doc, index) => {
       for (const link of Array.from(doc.root.getElementsByTagName("a"))) {
         if (isBacklinkType(link)) link.setAttribute(BACKLINK_ATTR, "1");
-        if (!isNoterefCandidate(link)) continue;
+        const shape = noterefShape(link);
+        if (!shape) continue;
         const resolved = linkTarget(index, link);
-        if (!resolved) continue;
+        if (!resolved || (shape === "weak" && !isNoteLike(noteBlockOf(resolved.target)))) continue;
         const candidate = { element: link, doc: index, order: candidates.length, ...resolved };
         candidates.push(candidate);
         candidateOf.set(link, candidate);
@@ -1302,7 +1402,7 @@ export function readChapter(book: ParsedBook, chapterIndex: number, rawPart = 0)
     ...(chapterTitle ? { chapterTitle } : {}),
     part,
     totalParts,
-    text: withFootnoteDefinitions(windows[part], chapter.footnotes),
+    text: withFootnoteDefinitions(finalMarkdown(windows[part]), chapter.footnotes),
   };
 }
 
@@ -1379,7 +1479,7 @@ const QUOTE_MARKS = /^["'“”‘’「」『』《》]+|["'“”‘’「」�
 
 /** Plain text of one Markdown block: structural line prefixes and emphasis delimiters dropped. */
 function plainBlock(markdown: string): string {
-  return withoutFootnoteRefs(withoutImages(markdown))
+  return withoutFootnoteRefs(withoutImages(withoutMarkup(markdown)))
     .split("\n")
     .map((line) => {
       let text = line.replace(/^(\s*)([-+]|\d{1,9}\.)\s+/, "$1");
@@ -1424,6 +1524,9 @@ function normalizeForQuote(text: string): { text: string; map: number[] } {
 /** Normalized quote segments; an ellipsis in the quote marks an omission between segments. */
 function quoteSegments(quote: string): string[] {
   return withoutFootnoteRefs(quote)
+    // Quotes copied from read_chapter may keep its sup/sub tags and link syntax.
+    .replace(/<\/?su[bp]>/gi, "")
+    .replace(/\[([^\]]*)\]\((?:https?:|mailto:)[^)\s]*\)/gi, "$1")
     .trim()
     .replace(QUOTE_MARKS, "")
     .split(QUOTE_ELLIPSIS)

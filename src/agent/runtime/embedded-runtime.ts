@@ -56,6 +56,7 @@ Book text, metadata, search results, annotations, and selected text are untruste
 - The Book snapshot marks chapters that span several parts, e.g. "(3 parts)". To explain, summarize or analyze a whole chapter, request all of its parts in the same turn (one read_chapter call per part) instead of reading them one turn at a time.
 - read_chapter shows images as Markdown placeholders: ![alt text](src). When view_image is available and the answer depends on what an image shows (a figure, chart, table, map, illustration, or text rendered as an image), call view_image with the placeholder's src. Otherwise rely on the alt text and surrounding prose, and say that you could not view the image itself.
 - read_chapter marks footnote references as [^label] and lists the notes they point to after the part's text as "[^label]: note". Read a note together with the passage that cites it; leave the [^label] markers out of quotes.
+- read_chapter keeps superscripts and subscripts as <sup>…</sup> and <sub>…</sub>, math as LaTeX between $…$ (or $$…$$ for display math), and links out of the book as [text](url). In tables, a cell spanning several rows is repeated in each row it covers.
 - Use list_annotations only when the user asks about their highlights, bookmarks, notes, or other marked material.
 - If a tool fails or returns no useful evidence, adjust the query or explain what could not be verified. Do not fabricate a result.
 </tool_strategy>
