@@ -857,3 +857,119 @@ describe("book images", () => {
     expect(() => readImageFile(book, "OPS/images/missing.png")).toThrow("No image");
   });
 });
+
+describe("footnotes", () => {
+  const EPUB_NS = 'xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"';
+
+  function footnoteBook(files: FileMap, spine: string[], nav: Array<[string, string]>): ParsedBook {
+    const items = spine
+      .map((href, index) => `<item id="s${index}" href="${href}" media-type="application/xhtml+xml"/>`)
+      .join("");
+    return parseEpub(pack(baseFiles(
+      `<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>${items}`,
+      spine.map((_, index) => `<itemref idref="s${index}"/>`).join(""),
+      {
+        "nav.xhtml": `<html ${EPUB_NS}><body><nav epub:type="toc">${nav.map(([label, href]) => `<a href="${href}">${label}</a>`).join("")}</nav></body></html>`,
+        ...files,
+      },
+    )));
+  }
+
+  it("renders an epub:type noteref as [^label] without splitting its paragraph and appends the aside definition", () => {
+    const book = footnoteBook(
+      {
+        "text/c1.xhtml": `<html ${EPUB_NS}><body><p>吾生也有涯<a epub:type="noteref" href="#fn1" id="r1"><sup>1</sup></a>，而知也无涯。</p><p>下一段。</p><aside epub:type="footnote" id="fn1"><p>出自《养生主》。</p></aside></body></html>`,
+      },
+      ["text/c1.xhtml"],
+      [["一", "text/c1.xhtml"]],
+    );
+    const { text } = readChapter(book, 0);
+    expect(text).toContain("吾生也有涯[^1]，而知也无涯。\n\n下一段。");
+    expect(text.endsWith("[^1]: 出自《养生主》。")).toBe(true);
+    expect(book.chapters[0].text).toContain("吾生也有涯1，而知也无涯。");
+  });
+
+  it("resolves cross-file endnotes, strips their backlinks, and does not treat backlinks as noterefs", () => {
+    const book = footnoteBook(
+      {
+        "text/c1.xhtml": `<html ${EPUB_NS}><body><p>正文甲<sup><a id="r1" href="notes.xhtml#n1">[1]</a></sup>与正文乙<sup><a id="r2" href="notes.xhtml#n2">[2]</a></sup>。</p></body></html>`,
+        "text/notes.xhtml": `<html ${EPUB_NS}><body><h1>注释</h1><p><sup><a id="n1" href="c1.xhtml#r1">[1]</a></sup>第一条注释。</p><p id="n2"><a href="c1.xhtml#r2">[2]</a> 第二条<em>注释</em>。</p></body></html>`,
+      },
+      ["text/c1.xhtml", "text/notes.xhtml"],
+      [["一", "text/c1.xhtml"], ["注释", "text/notes.xhtml"]],
+    );
+    const { text } = readChapter(book, 0);
+    expect(text).toBe("正文甲[^1]与正文乙[^2]。\n\n[^1]: 第一条注释。\n[^2]: 第二条*注释*。");
+    const notes = readChapter(book, 1).text;
+    expect(notes).not.toContain("[^");
+    expect(notes).toContain("[1]第一条注释。");
+  });
+
+  it("only appends definitions for noterefs inside the requested part", () => {
+    const filler = "填充文字。".repeat(Math.ceil(CHAPTER_PART_CHARS / 5));
+    const book = footnoteBook(
+      {
+        "text/c1.xhtml": `<html ${EPUB_NS}><body><p>开头<a epub:type="noteref" href="#a">a</a></p><p>${filler}</p><p>结尾<a epub:type="noteref" href="#b">*</a></p><aside epub:type="footnote" id="a">注甲</aside><aside epub:type="footnote" id="b">注乙</aside></body></html>`,
+      },
+      ["text/c1.xhtml"],
+      [["一", "text/c1.xhtml"]],
+    );
+    const first = readChapter(book, 0, 0);
+    expect(first.totalParts).toBeGreaterThan(1);
+    expect(first.text).toContain("开头[^a]");
+    expect(first.text).toContain("[^a]: 注甲");
+    expect(first.text).not.toContain("[^*]: ");
+    const last = readChapter(book, 0, first.totalParts - 1).text;
+    expect(last).toContain("结尾[^*]");
+    expect(last).toContain("[^*]: 注乙");
+  });
+
+  it("gives distinct labels to different notes sharing the same marker text", () => {
+    const book = footnoteBook(
+      {
+        "text/c1.xhtml": `<html ${EPUB_NS}><body><p>甲<a epub:type="noteref" href="#x">*</a>乙<a epub:type="noteref" href="#y">*</a>丙<a epub:type="noteref" href="#x">*</a></p><aside epub:type="footnote" id="x">注X</aside><aside epub:type="footnote" id="y">注Y</aside></body></html>`,
+      },
+      ["text/c1.xhtml"],
+      [["一", "text/c1.xhtml"]],
+    );
+    const { text } = readChapter(book, 0);
+    expect(text).toContain("甲[^*]乙[^*-2]丙[^*]");
+    expect(text).toContain("[^*]: 注X\n[^*-2]: 注Y");
+  });
+
+  it("keeps the Markdown structure of a section whose notes are a pandoc-style list", () => {
+    const book = footnoteBook(
+      {
+        "text/c1.xhtml": `<html ${EPUB_NS}><body><section id="s1"><h2>一节</h2><p>正文<a href="#fn1" class="footnote-ref" id="fnref1" epub:type="noteref">1</a>继续。</p><p>第二段<em>强调</em>。</p></section><section class="footnotes" epub:type="footnotes"><hr /><ol><li id="fn1" epub:type="footnote"><p>注释内容。<a href="#fnref1" class="footnote-back" role="doc-backlink">↩︎</a></p></li></ol></section></body></html>`,
+      },
+      ["text/c1.xhtml"],
+      [["一节", "text/c1.xhtml#s1"]],
+    );
+    const { text } = readChapter(book, 0);
+    expect(text.startsWith("## 一节\n\n正文[^1]继续。\n\n第二段*强调*。")).toBe(true);
+    expect(text.endsWith("\n\n[^1]: 注释内容。")).toBe(true);
+  });
+
+  it("leaves ordinary links and links to missing targets as plain text", () => {
+    const book = footnoteBook(
+      {
+        "text/c1.xhtml": `<html ${EPUB_NS}><body><p>见<a href="#sec">第二节</a>与<sup><a href="#missing">9</a></sup>。</p><p id="sec">第二节内容</p></body></html>`,
+      },
+      ["text/c1.xhtml"],
+      [["一", "text/c1.xhtml"]],
+    );
+    expect(readChapter(book, 0).text).toBe("见第二节与9。\n\n第二节内容");
+  });
+
+  it("locates quotes whether or not they carry footnote markers", () => {
+    const book = footnoteBook(
+      {
+        "text/c1.xhtml": `<html ${EPUB_NS}><body><p>吾生也有涯<a epub:type="noteref" href="#fn1">1</a>，而知也无涯。</p><aside epub:type="footnote" id="fn1">出自《养生主》。</aside></body></html>`,
+      },
+      ["text/c1.xhtml"],
+      [["一", "text/c1.xhtml"]],
+    );
+    expect(locateQuote(book, 0, "吾生也有涯，而知也无涯").status).toBe("verified");
+    expect(locateQuote(book, 0, "吾生也有涯[^1]，而知也无涯").status).toBe("verified");
+  });
+});

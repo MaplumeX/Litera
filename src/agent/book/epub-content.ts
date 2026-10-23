@@ -38,6 +38,8 @@ interface Chapter {
   hrefs: string[];
   text: string;
   markdown: string;
+  /** Footnote definitions by label, for the `[^label]` markers in `markdown`. */
+  footnotes?: ReadonlyMap<string, string>;
 }
 
 export interface ParsedBook {
@@ -282,6 +284,8 @@ function inlineNode(node: XmlNode): string {
   if (type === 3 || type === 4) return node.nodeValue ?? "";
   if (type !== 1) return "";
   const element = node as XmlElement;
+  const label = noterefLabel(element);
+  if (label) return `[^${label}]`;
   const tag = elementTag(element);
   if (IMAGE_TAGS.has(tag)) return imagePlaceholders(element);
   if (INLINE_EMPTY_TAGS.has(tag)) return "";
@@ -551,6 +555,11 @@ function markdownEvents(root: XmlElement): MarkdownEvent[] {
       flushInline();
       return;
     }
+    const label = noterefLabel(element);
+    if (label) {
+      buffer += `[^${label}]`;
+      return;
+    }
     if (IMAGE_TAGS.has(tag)) {
       buffer += imagePlaceholders(element);
       return;
@@ -581,7 +590,7 @@ function dense(text: string): string {
  * text, which is always safe.
  */
 function denseMarkdown(markdown: string): string {
-  const lines = withoutImages(markdown).split("\n").map((line) => {
+  const lines = withoutFootnoteRefs(withoutImages(markdown)).split("\n").map((line) => {
     let text = line.replace(/^(\s*)([-+]|\d{1,9}\.)\s+/, "$1");
     text = text.replace(/^(\s*)#{1,6}\s+/, "$1");
     while (/^(\s*)>\s?/.test(text)) text = text.replace(/^(\s*)>\s?/, "$1");
@@ -634,27 +643,52 @@ function markdownSlices(events: readonly MarkdownEvent[], anchorIds: readonly st
  * projection.
  */
 export function parseSpineSegments(source: string, fileHref = ""): Segment[] {
+  const root = parseSpineRoot(source);
+  if (root) annotateFootnotes([{ href: fileHref, root }]);
+  return spineSegments(source, root, fileHref);
+}
+
+/** Parsed spine document root; null when the markup cannot be parsed. */
+function parseSpineRoot(source: string): XmlElement | null {
   try {
-    const parsed = parseXml(source, "text/html");
-    const root = parsed.documentElement;
+    return parseXml(source, "text/html").documentElement ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function spineSegments(source: string, root: XmlElement | null, fileHref: string): Segment[] {
+  try {
     if (!root) return [{ text: htmlText(source) }];
-    const flats: Array<{ anchorId?: string; text: string }> = [];
+    // `guard` is the flat text minus footnote reference marks, which the
+    // Markdown projection renders as `[^label]` instead of their own text.
+    const flats: Array<{ anchorId?: string; text: string; guard: string }> = [];
     const anchorIds: string[] = [];
     let parts: string[] = [];
+    let guardParts: string[] = [];
     let anchorId: string | undefined = undefined;
     const finish = () => {
-      flats.push({ anchorId, text: parts.join("").replace(/\s+/g, " ").trim() });
+      flats.push({ anchorId, text: parts.join("").replace(/\s+/g, " ").trim(), guard: guardParts.join("") });
       parts = [];
+      guardParts = [];
     };
     const visit = (node: XmlNode) => {
       const type = node.nodeType;
       if (type === 3 || type === 4) {
         const value = node.nodeValue;
-        if (value) parts.push(value);
+        if (value) {
+          parts.push(value);
+          guardParts.push(value);
+        }
         return;
       }
       if (type !== 1) return;
       const element = node as XmlElement;
+      if (noterefLabel(element)) {
+        // Flat text keeps the mark verbatim for search and the trigram index.
+        parts.push(element.textContent ?? "");
+        return;
+      }
       const nextAnchor = anchorIdOf(element);
       if (nextAnchor !== undefined) {
         finish();
@@ -673,7 +707,7 @@ export function parseSpineSegments(source: string, fileHref = ""): Segment[] {
       return {
         anchorId: flat.anchorId,
         text: flat.text,
-        markdown: markdown !== undefined && denseMarkdown(markdown) === dense(flat.text) ? resolveImageRefs(markdown, fileHref) : flat.text,
+        markdown: markdown !== undefined && denseMarkdown(markdown) === dense(flat.guard) ? resolveImageRefs(markdown, fileHref) : flat.text,
       };
     });
     return segments;
@@ -738,6 +772,8 @@ function parseNcx(files: Record<string, Uint8Array>, ncx: ManifestItem): NavNode
 }
 
 function anchorIdOf(element: XmlElement): string | undefined {
+  // A footnote reference is never a TOC target; anchoring it would split its paragraph.
+  if (noterefLabel(element) || element.getAttribute?.(NOTE_ATTR)) return undefined;
   const id = element.getAttribute("id");
   if (id) return id;
   if (elementTag(element) === "a") {
@@ -881,6 +917,212 @@ export function buildOwnedChapters(
   });
 }
 
+/** Set on a recognized footnote reference; the value is its `[^label]` label. */
+const NOTEREF_ATTR = "data-litera-noteref";
+/** Set on a note inside a list or table: its id must not cut segments the Markdown walk cannot cut. */
+const NOTE_ATTR = "data-litera-note";
+/** Set on a link from a note back to its reference; stripped from definitions. */
+const BACKLINK_ATTR = "data-litera-backlink";
+const FOOTNOTE_REF = /\[\^[^\]\s]+\]/g;
+const FOOTNOTE_LABEL_MAX_CHARS = 12;
+const NOTE_BLOCK_TAGS = new Set(["li", "dd", "dt", "td"]);
+
+function noterefLabel(element: XmlElement): string {
+  return element.getAttribute?.(NOTEREF_ATTR) ?? "";
+}
+
+function withoutFootnoteRefs(text: string): string {
+  return text.replace(FOOTNOTE_REF, "");
+}
+
+function linkTypes(element: XmlElement): string[] {
+  return `${element.getAttribute("epub:type") ?? ""} ${element.getAttribute("role") ?? ""}`.split(/\s+/).filter(Boolean);
+}
+
+function isBacklinkType(element: XmlElement): boolean {
+  return linkTypes(element).some((type) => type === "backlink" || type === "doc-backlink");
+}
+
+/**
+ * A link that looks like a footnote reference: an `epub:type`/`role`
+ * noteref, or a fragment link set as a superscript (`<sup><a>` or
+ * `<a><sup>`) — the same shapes the reader styles as note marks.
+ */
+function isNoterefCandidate(element: XmlElement): boolean {
+  if (!(element.getAttribute("href") ?? "").includes("#") || isBacklinkType(element)) return false;
+  if (linkTypes(element).some((type) => type === "noteref" || type === "doc-noteref")) return true;
+  if (elementTag(element.parentNode as XmlNode) === "sup") return true;
+  const children = Array.from(element.childNodes).filter((child) => child.nodeType === 1 || ((child.nodeType === 3 || child.nodeType === 4) && child.nodeValue?.trim()));
+  return children.length === 1 && elementTag(children[0]) === "sup";
+}
+
+function footnoteLabel(text: string, id: string): string {
+  const clean = (value: string) => value.replace(/[\s[\]()（）【】〔〕^]/g, "");
+  const label = clean(text);
+  return label && label.length <= FOOTNOTE_LABEL_MAX_CHARS ? label : clean(id) || "note";
+}
+
+/** The note body a reference points at: the target, or its nearest block ancestor when the target is inline. */
+function noteBlockOf(target: XmlElement): XmlElement {
+  let node: XmlElement | null = target;
+  while (node && node.nodeType === 1) {
+    if (isMarkdownBlockRoot(node) || NOTE_BLOCK_TAGS.has(elementTag(node))) return node;
+    node = node.parentNode as XmlElement | null;
+  }
+  return target;
+}
+
+/**
+ * True when an ancestor is a block the Markdown walk consumes whole (list,
+ * table, quote, heading, pre): anchors inside it never reach the event stream.
+ */
+function insideAtomicBlock(element: XmlElement): boolean {
+  for (let node = element.parentNode as XmlElement | null; node && node.nodeType === 1; node = node.parentNode as XmlElement | null) {
+    if (isMarkdownBlockRoot(node) && !BLOCK_TAGS.has(elementTag(node))) return true;
+  }
+  return false;
+}
+
+/** One-line Markdown of a note body with its backlinks removed. */
+function footnoteDefinition(note: XmlElement, noteHref: string): string {
+  const clone = note.cloneNode(true) as XmlElement;
+  for (const link of Array.from(clone.getElementsByTagName("a"))) {
+    if (link.getAttribute(BACKLINK_ATTR)) link.parentNode?.removeChild(link);
+  }
+  const state: MarkdownWalk = { blocks: [] };
+  walkElement(clone, state);
+  return resolveImageRefs(state.blocks.join(" ").replace(/\s+/g, " ").trim(), noteHref);
+}
+
+/**
+ * Recognize footnote references across the spine documents: mark each with
+ * its label (unique per document) and return the note definitions by
+ * referring document and label. A candidate must resolve to an existing
+ * element; of a reference/backlink pair pointing at each other, the one
+ * earlier in reading order is the reference.
+ */
+function annotateFootnotes(docs: ReadonlyArray<{ href: string; root: XmlElement }>): Map<string, Map<string, string>> {
+  const definitions = new Map<string, Map<string, string>>();
+  try {
+    const docIndex = new Map(docs.map((doc, index) => [decodedPath(doc.href), index]));
+    const idIndexes = new Map<number, Map<string, XmlElement>>();
+    const elementById = (index: number, id: string): XmlElement | undefined => {
+      let ids = idIndexes.get(index);
+      if (!ids) {
+        ids = new Map();
+        for (const element of Array.from(docs[index].root.getElementsByTagName("*"))) {
+          const key = element.getAttribute("id") || (elementTag(element) === "a" ? element.getAttribute("name") : "");
+          if (key && !ids.has(key)) ids.set(key, element);
+        }
+        idIndexes.set(index, ids);
+      }
+      return ids.get(id);
+    };
+    const linkTarget = (doc: number, link: XmlElement): { target: XmlElement; targetDoc: number } | undefined => {
+      const href = link.getAttribute("href") ?? "";
+      const resolved = href.startsWith("#") ? `${docs[doc].href}${href}` : resolveHref(docs[doc].href, href);
+      const targetDoc = docIndex.get(decodedPath(stripFragment(resolved)));
+      const target = targetDoc === undefined ? undefined : elementById(targetDoc, decodedPath(hrefFragment(resolved)));
+      return target && targetDoc !== undefined ? { target, targetDoc } : undefined;
+    };
+    interface Candidate { element: XmlElement; doc: number; order: number; target: XmlElement; targetDoc: number }
+    const candidates: Candidate[] = [];
+    const candidateOf = new Map<XmlElement, Candidate>();
+    docs.forEach((doc, index) => {
+      for (const link of Array.from(doc.root.getElementsByTagName("a"))) {
+        if (isBacklinkType(link)) link.setAttribute(BACKLINK_ATTR, "1");
+        if (!isNoterefCandidate(link)) continue;
+        const resolved = linkTarget(index, link);
+        if (!resolved) continue;
+        const candidate = { element: link, doc: index, order: candidates.length, ...resolved };
+        candidates.push(candidate);
+        candidateOf.set(link, candidate);
+      }
+    });
+    const isBacklink = (candidate: Candidate): boolean =>
+      [candidate.target, ...Array.from(candidate.target.getElementsByTagName("a"))].some((element) => {
+        const other = candidateOf.get(element);
+        return other !== undefined && other.order < candidate.order;
+      });
+    const refs = candidates.filter((candidate) => {
+      if (!isBacklink(candidate)) return true;
+      candidate.element.setAttribute(BACKLINK_ATTR, "1");
+      return false;
+    });
+    const labels = new Map<number, { byLabel: Set<string>; byTarget: Map<XmlElement, string> }>();
+    const pending: Array<{ element: XmlElement; label: string }> = [];
+    const notes = new Set<XmlElement>();
+    for (const ref of refs) {
+      let docLabels = labels.get(ref.doc);
+      if (!docLabels) {
+        docLabels = { byLabel: new Set(), byTarget: new Map() };
+        labels.set(ref.doc, docLabels);
+      }
+      let label = docLabels.byTarget.get(ref.target);
+      if (!label) {
+        const base = footnoteLabel(ref.element.textContent ?? "", hrefFragment(ref.element.getAttribute("href") ?? ""));
+        label = base;
+        for (let suffix = 2; docLabels.byLabel.has(label); suffix += 1) label = `${base}-${suffix}`;
+        docLabels.byLabel.add(label);
+        docLabels.byTarget.set(ref.target, label);
+        const note = noteBlockOf(ref.target);
+        // Any link in the note pointing back at the reference (or its enclosing block) is a backlink.
+        const refBlock = noteBlockOf(ref.element);
+        for (const link of Array.from(note.getElementsByTagName("a"))) {
+          const back = linkTarget(ref.targetDoc, link)?.target;
+          for (let node: XmlNode | null = ref.element; back && node; node = node === refBlock ? null : node.parentNode) {
+            if (node === back) link.setAttribute(BACKLINK_ATTR, "1");
+          }
+        }
+        const definition = footnoteDefinition(note, docs[ref.targetDoc].href);
+        if (definition) {
+          const href = docs[ref.doc].href;
+          if (!definitions.has(href)) definitions.set(href, new Map());
+          definitions.get(href)!.set(label, definition);
+        }
+      }
+      pending.push({ element: ref.element, label });
+      if (insideAtomicBlock(ref.target)) notes.add(ref.target);
+    }
+    // Mark last: a failure above leaves the documents untouched.
+    for (const { element, label } of pending) element.setAttribute(NOTEREF_ATTR, label);
+    for (const note of notes) note.setAttribute(NOTE_ATTR, "1");
+  } catch {
+    // Footnotes are an enhancement; on any failure the text reads as before.
+    definitions.clear();
+  }
+  return definitions;
+}
+
+/** Attach to each chapter the definitions of the files it draws from; the first file to use a label wins. */
+function withFootnotes(chapters: Chapter[], definitions: ReadonlyMap<string, ReadonlyMap<string, string>>): Chapter[] {
+  if (!definitions.size) return chapters;
+  return chapters.map((chapter) => {
+    const footnotes = new Map<string, string>();
+    for (const file of new Set(chapter.hrefs.map(stripFragment))) {
+      for (const [label, definition] of definitions.get(file) ?? []) {
+        if (!footnotes.has(label)) footnotes.set(label, definition);
+      }
+    }
+    return footnotes.size ? { ...chapter, footnotes } : chapter;
+  });
+}
+
+/** Append `[^label]: definition` lines for the footnote references a read_chapter window contains. */
+function withFootnoteDefinitions(window: string, footnotes: ReadonlyMap<string, string> | undefined): string {
+  if (!footnotes?.size) return window;
+  const lines: string[] = [];
+  const seen = new Set<string>();
+  for (const [ref] of window.matchAll(FOOTNOTE_REF)) {
+    const label = ref.slice(2, -1);
+    const definition = footnotes.get(label);
+    if (definition === undefined || seen.has(label)) continue;
+    seen.add(label);
+    lines.push(`[^${label}]: ${definition}`);
+  }
+  return lines.length ? `${window.trimEnd()}\n\n${lines.join("\n")}` : window;
+}
+
 export function parseEpub(buffer: ArrayBuffer): ParsedBook {
   const archive = new Uint8Array(buffer);
   const files = unzipSync(archive);
@@ -906,8 +1148,14 @@ export function parseEpub(buffer: ArrayBuffer): ParsedBook {
   const nav = [...manifest.values()].find((item) => item.properties.split(/\s+/).includes("nav"));
   const ncx = [...manifest.values()].find((item) => item.mediaType === "application/x-dtbncx+xml");
   const toc = nav ? parseNav(files, nav) : ncx ? parseNcx(files, ncx) : [];
-  const spineSegments = spineHrefs.map((href) => parseSpineSegments(fileText(files, href), href));
-  const chapters = buildOwnedChapters(toc, spineHrefs, spineSegments);
+  const sources = spineHrefs.map((href) => fileText(files, href));
+  const roots = sources.map(parseSpineRoot);
+  const footnotes = annotateFootnotes(spineHrefs.flatMap((href, index) => {
+    const root = roots[index];
+    return root ? [{ href, root }] : [];
+  }));
+  const segments = spineHrefs.map((href, index) => spineSegments(sources[index], roots[index], href));
+  const chapters = withFootnotes(buildOwnedChapters(toc, spineHrefs, segments), footnotes);
   return {
     metadata: {
       title: firstText(opf, ["dc:title", "title"], "Unknown"),
@@ -1054,7 +1302,7 @@ export function readChapter(book: ParsedBook, chapterIndex: number, rawPart = 0)
     ...(chapterTitle ? { chapterTitle } : {}),
     part,
     totalParts,
-    text: windows[part],
+    text: withFootnoteDefinitions(windows[part], chapter.footnotes),
   };
 }
 
@@ -1131,7 +1379,7 @@ const QUOTE_MARKS = /^["'“”‘’「」『』《》]+|["'“”‘’「」�
 
 /** Plain text of one Markdown block: structural line prefixes and emphasis delimiters dropped. */
 function plainBlock(markdown: string): string {
-  return withoutImages(markdown)
+  return withoutFootnoteRefs(withoutImages(markdown))
     .split("\n")
     .map((line) => {
       let text = line.replace(/^(\s*)([-+]|\d{1,9}\.)\s+/, "$1");
@@ -1175,7 +1423,7 @@ function normalizeForQuote(text: string): { text: string; map: number[] } {
 
 /** Normalized quote segments; an ellipsis in the quote marks an omission between segments. */
 function quoteSegments(quote: string): string[] {
-  return quote
+  return withoutFootnoteRefs(quote)
     .trim()
     .replace(QUOTE_MARKS, "")
     .split(QUOTE_ELLIPSIS)
