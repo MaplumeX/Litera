@@ -252,7 +252,9 @@ pub fn remove_book_tombstone(root: &Path, book_id: &str) -> AppResult<()> {
 
 /// A book was (re-)imported locally: like Restore, its own deletion
 /// Tombstone is revoked, and the imported file is now this device's truth,
-/// so any pending "newer file on the Sync Backend" marker is dropped.
+/// so any pending "newer file on the Sync Backend" marker is dropped. Its
+/// Sessions went to the Trash with the old copy, so their revisions are
+/// forgotten too: the next pass downloads them again.
 pub fn note_book_imported(root: &Path, book_id: &str) -> AppResult<()> {
     validate_sync_id(book_id)?;
     update_sync_state(root, |state| {
@@ -260,6 +262,10 @@ pub fn note_book_imported(root: &Path, book_id: &str) -> AppResult<()> {
             .tombstones
             .retain(|tombstone| !(tombstone.kind == "book" && tombstone.book_id == book_id));
         state.stale_files.remove(book_id);
+        let prefix = format!("{book_id}/");
+        state
+            .session_revisions
+            .retain(|key, _| !key.starts_with(&prefix));
         Ok(())
     })
 }
@@ -3310,6 +3316,11 @@ mod review_fix_tests {
         record_book_tombstone(directory.path(), "book1").expect("record");
         update_sync_state(directory.path(), |state| {
             state.stale_files.insert("book1".to_string());
+            for key in ["book1/s1", "book2/s1"] {
+                state
+                    .session_revisions
+                    .insert(key.to_string(), SessionRevisionState::default());
+            }
             Ok(())
         })
         .expect("stale");
@@ -3319,6 +3330,9 @@ mod review_fix_tests {
         let state = read_sync_state(directory.path()).expect("state");
         assert!(state.tombstones.is_empty());
         assert!(state.stale_files.is_empty());
+        // Its Sessions download again; other books' stay known.
+        let keys: Vec<&str> = state.session_revisions.keys().map(String::as_str).collect();
+        assert_eq!(keys, vec!["book2/s1"]);
     }
 
     #[test]

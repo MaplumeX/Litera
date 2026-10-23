@@ -102,6 +102,8 @@ async function runPassSteps(options: { uploadFiles?: boolean }): Promise<void> {
       // session files, download and merge (union, both branches kept) remote
       // ones.
       await invoke("sync_sessions");
+      // Open agent conversations pick up messages from other devices.
+      window.dispatchEvent(new CustomEvent("litera:sessions-synced"));
       return;
     } catch (error) {
       if (attempt < MAX_SYNC_ATTEMPTS - 1 && isPreconditionFailure(error)) {

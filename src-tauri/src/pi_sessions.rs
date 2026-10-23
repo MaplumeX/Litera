@@ -474,6 +474,7 @@ impl PiSessionStore {
             .map(str::to_string)
             .collect();
         let mut local_has_extra = false;
+        let mut advanced_leaf = None;
         let (header, entries) = match local_path.as_ref() {
             Some(path) => {
                 recover_truncated_tail(path)?;
@@ -484,12 +485,19 @@ impl PiSessionStore {
                     .map(str::to_string)
                     .collect();
                 local_has_extra = ids.iter().any(|id| !remote_ids.contains(id));
+                let local_leaf = stored_leaf_id(path, &merged);
+                let mut added = Vec::new();
                 for entry in remote_entries {
                     let Some(id) = entry_id(&entry) else { continue };
                     if !ids.contains(id) {
+                        added.push(id.to_string());
                         merged.push(entry);
                     }
                 }
+                // Another device continued this device's active branch: move
+                // the pointer along, or the new messages would sit off-branch.
+                advanced_leaf = local_leaf
+                    .and_then(|leaf| newest_descendant(&merged, &leaf, &added));
                 (local_header, merged)
             }
             None => (remote_header, remote_entries),
@@ -512,6 +520,9 @@ impl PiSessionStore {
         match local_path {
             Some(path) => {
                 crate::library::atomic_write(&path, content.as_bytes(), "merged session")?;
+                if let Some(leaf) = advanced_leaf {
+                    write_leaf_sidecar(&path, &leaf)?;
+                }
             }
             None => {
                 let dir = self.book_dir(book_id, true)?;
@@ -744,6 +755,37 @@ fn latest_on_branch<'a>(
             .and_then(|parent| by_id.get(parent).copied());
     }
     None
+}
+
+/// The newest of `candidates` (by append order) whose ancestry reaches
+/// `leaf`, i.e. the latest entry that continues the branch ending at `leaf`.
+fn newest_descendant(entries: &[Value], leaf: &str, candidates: &[String]) -> Option<String> {
+    let by_id: HashMap<&str, &Value> = entries
+        .iter()
+        .filter_map(|entry| entry_id(entry).map(|id| (id, entry)))
+        .collect();
+    candidates
+        .iter()
+        .rev()
+        .find(|candidate| {
+            let mut visited = HashSet::new();
+            let mut current = by_id.get(candidate.as_str()).copied();
+            while let Some(entry) = current {
+                let Some(id) = entry_id(entry) else { return false };
+                if !visited.insert(id) {
+                    return false;
+                }
+                if id == leaf {
+                    return true;
+                }
+                current = entry
+                    .get("parentId")
+                    .and_then(Value::as_str)
+                    .and_then(|parent| by_id.get(parent).copied());
+            }
+            false
+        })
+        .cloned()
 }
 
 fn write_leaf_sidecar(session_path: &Path, leaf_id: &str) -> AppResult<()> {
@@ -1466,6 +1508,74 @@ mod sync_merge_tests {
         // the leaf pointer).
         store.set_leaf("book-1", &id, "local0001").unwrap();
         store.set_leaf("book-1", &id, "remote001").unwrap();
+    }
+
+    fn remote_session(id: &str, entries: &[Value]) -> String {
+        let mut content = serde_json::to_string(&json!({
+            "type": "session", "version": 3, "id": id,
+            "timestamp": "2026-01-01T00:00:00Z", "cwd": "",
+        }))
+        .unwrap();
+        content.push('\n');
+        for entry in entries {
+            content.push_str(&serde_json::to_string(entry).unwrap());
+            content.push('\n');
+        }
+        content
+    }
+
+    #[test]
+    fn merging_a_continuation_of_the_active_branch_advances_the_leaf() {
+        let (_temp, store) = store();
+        let created = store.create("book-1").unwrap();
+        let id = created.header["id"].as_str().unwrap().to_string();
+        store
+            .append("book-1", &id, None, vec![message("entry001", None, "first")])
+            .unwrap();
+
+        // Another device kept talking in the same session.
+        let remote = remote_session(
+            &id,
+            &[
+                message("entry001", None, "first"),
+                message("remote001", Some("entry001"), "second"),
+                message("remote002", Some("remote001"), "third"),
+            ],
+        );
+        store.merge_remote_session("book-1", &remote).unwrap();
+
+        let loaded = store.load("book-1", &id).unwrap();
+        assert_eq!(loaded.leaf_id.as_deref(), Some("remote002"));
+    }
+
+    #[test]
+    fn merging_another_branch_keeps_the_local_leaf() {
+        let (_temp, store) = store();
+        let created = store.create("book-1").unwrap();
+        let id = created.header["id"].as_str().unwrap().to_string();
+        store
+            .append("book-1", &id, None, vec![message("entry001", None, "shared")])
+            .unwrap();
+        store
+            .append(
+                "book-1",
+                &id,
+                Some("entry001"),
+                vec![message("local0001", Some("entry001"), "local branch")],
+            )
+            .unwrap();
+
+        let remote = remote_session(
+            &id,
+            &[
+                message("entry001", None, "shared"),
+                message("remote001", Some("entry001"), "remote branch"),
+            ],
+        );
+        store.merge_remote_session("book-1", &remote).unwrap();
+
+        let loaded = store.load("book-1", &id).unwrap();
+        assert_eq!(loaded.leaf_id.as_deref(), Some("local0001"));
     }
 
     #[test]

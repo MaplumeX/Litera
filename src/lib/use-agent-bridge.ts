@@ -51,7 +51,15 @@ export function useAgentBridge(bookId: string) {
       }
     });
     queueMicrotask(() => embeddedAgentRuntime.syncBook(bookIdRef.current));
-    return unsubscribe;
+    const onSessionsSynced = () => {
+      void embeddedAgentRuntime.refreshAfterSync().catch((error) =>
+        console.error("refresh synced sessions error:", error));
+    };
+    window.addEventListener("litera:sessions-synced", onSessionsSynced);
+    return () => {
+      unsubscribe();
+      window.removeEventListener("litera:sessions-synced", onSessionsSynced);
+    };
   }, [listSessions]);
 
   useEffect(() => {
