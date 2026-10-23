@@ -91,6 +91,12 @@ export interface PlatformBridge {
   setKeepScreenOn(enabled: boolean): Promise<void>;
   /** Intercept the volume keys for paging; otherwise they change the volume. */
   setVolumeKeyPaging(enabled: boolean): Promise<void>;
+  /**
+   * Hide the WebView's floating selection menu where the page draws its own
+   * (the reader), keep it everywhere else. Synchronous, so a touch can set it
+   * before the long press that starts the selection.
+   */
+  setSelectionMenuHidden(hidden: boolean): void;
   /** Whether the active network is metered (mobile data). */
   isNetworkMetered(): Promise<boolean>;
   /** Leave the app, as Back on the root screen does in other Android apps. */
@@ -98,6 +104,11 @@ export interface PlatformBridge {
 }
 
 const PLUGIN = "litera-platform";
+
+/** Added to the WebView by `MainActivity`, outside the plugin's async IPC. */
+interface SelectionMenuSwitch {
+  setHidden(hidden: boolean): void;
+}
 
 function command<T = void>(name: string, args?: Record<string, unknown>): Promise<T> {
   return invoke<T>(`plugin:${PLUGIN}|${name}`, args);
@@ -141,6 +152,10 @@ const androidBridge: PlatformBridge = {
   setSystemBarsLight: (enabled) => command("setSystemBarsLight", { enabled }),
   setKeepScreenOn: (enabled) => command("setKeepScreenOn", { enabled }),
   setVolumeKeyPaging: (enabled) => command("setVolumeKeyPaging", { enabled }),
+  setSelectionMenuHidden: (hidden) => {
+    (globalThis as { literaSelectionMenu?: SelectionMenuSwitch }).literaSelectionMenu
+      ?.setHidden(hidden);
+  },
   isNetworkMetered: async () => (await command<{ metered: boolean }>("getNetworkStatus")).metered,
   exitApp: () => command("exitApp"),
 };
@@ -164,6 +179,7 @@ const desktopBridge: PlatformBridge = {
   setSystemBarsLight: async () => {},
   setKeepScreenOn: async () => {},
   setVolumeKeyPaging: async () => {},
+  setSelectionMenuHidden: () => {},
   // Desktops don't ration book-file transfers.
   isNetworkMetered: async () => false,
   exitApp: async () => {},
