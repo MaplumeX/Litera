@@ -1,6 +1,7 @@
 import { useEffect, useRef, type RefObject } from "react";
-import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown } from "lucide-react";
 import type { TocItem } from "@/components/ReaderView";
+import type { GuideChapterProgress } from "@/agent/runtime/guide";
 import { Button } from "@/components/ui/button";
 import { useT } from "@/lib/i18n";
 import { tocPathKey } from "@/lib/toc-items";
@@ -12,6 +13,35 @@ interface TocSidebarProps {
   expanded: string[];
   onToggle: (key: string) => void;
   onGoTo: (href: string) => void;
+  /** Agent mode in a Guided session: how far the guide has got, per href. */
+  guideProgress?: Record<string, GuideChapterProgress>;
+}
+
+/** A Guided session's progress on one TOC row. */
+function GuideMark({ progress }: { progress: GuideChapterProgress }) {
+  const { t } = useT();
+  const done = progress.covered >= progress.totalParts;
+  const label = progress.skimmed
+    ? t("toc.guide.skimmed")
+    : done
+      ? t("toc.guide.done")
+      : t("toc.guide.partial", { covered: progress.covered, total: progress.totalParts });
+  return (
+    <span
+      className="ml-1 flex shrink-0 items-center gap-1 text-[11px] tabular-nums text-muted-foreground"
+      title={progress.current ? `${label} · ${t("toc.guide.current")}` : label}
+      aria-label={progress.current ? `${label}, ${t("toc.guide.current")}` : label}
+    >
+      {progress.current && <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-primary" />}
+      <span aria-hidden>
+        {progress.skimmed
+          ? t("toc.guide.skimmedShort")
+          : done
+            ? <Check className="h-3.5 w-3.5" />
+            : `${progress.covered}/${progress.totalParts}`}
+      </span>
+    </span>
+  );
 }
 
 function TocNode({
@@ -22,6 +52,7 @@ function TocNode({
   onToggle,
   onGoTo,
   listRef,
+  guideProgress,
 }: {
   item: TocItem;
   path: number[];
@@ -30,7 +61,9 @@ function TocNode({
   onToggle: (key: string) => void;
   onGoTo: (href: string) => void;
   listRef: RefObject<HTMLDivElement | null>;
+  guideProgress?: Record<string, GuideChapterProgress>;
 }) {
+  const progress = item.href ? guideProgress?.[item.href] : undefined;
   const { t } = useT();
   const isCurrent = Boolean(currentHref) && item.href === currentHref;
   const rowRef = useRef<HTMLDivElement>(null);
@@ -90,6 +123,7 @@ function TocNode({
             {item.label}
           </span>
         )}
+        {progress && <GuideMark progress={progress} />}
       </div>
       {hasChildren && isExpanded
         ? item.subitems?.map((sub, i) => (
@@ -102,6 +136,7 @@ function TocNode({
               onToggle={onToggle}
               onGoTo={onGoTo}
               listRef={listRef}
+              guideProgress={guideProgress}
             />
           ))
         : null}
@@ -150,6 +185,7 @@ export function TocSidebar({
   expanded,
   onToggle,
   onGoTo,
+  guideProgress,
 }: TocSidebarProps) {
   const { t } = useT();
   const listRef = useRef<HTMLDivElement>(null);
@@ -169,6 +205,7 @@ export function TocSidebar({
               onToggle={onToggle}
               onGoTo={onGoTo}
               listRef={listRef}
+              guideProgress={guideProgress}
             />
           ))
         )}

@@ -1,10 +1,12 @@
-import { Bot } from "lucide-react";
+import { BookOpen, Bot } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useT, type MessageKey } from "@/lib/i18n";
 
 interface EmptyStateProps {
   hasSelection: boolean;
   bookReady: boolean;
+  /** A Guided session: explain the mode instead of offering prompts. */
+  guided?: boolean;
   onSuggestion: (text: string) => void;
 }
 
@@ -19,8 +21,19 @@ const BOOK_SUGGESTIONS: MessageKey[] = [
   "chat.suggest.outline",
 ];
 
-export function EmptyState({ hasSelection, bookReady, onSuggestion }: EmptyStateProps) {
+export function EmptyState({ hasSelection, bookReady, guided = false, onSuggestion }: EmptyStateProps) {
   const { t } = useT();
+  if (guided) {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-4 px-6 py-8 text-center">
+        <BookOpen className="h-5 w-5 text-muted-foreground" aria-hidden="true" />
+        <div>
+          <h3 className="text-sm font-semibold">{t("chat.guide.emptyTitle")}</h3>
+          <p className="mt-1 max-w-80 text-sm text-muted-foreground">{t("chat.guide.emptySubtitle")}</p>
+        </div>
+      </div>
+    );
+  }
   const suggestionKeys = hasSelection ? SELECTION_SUGGESTIONS : bookReady ? BOOK_SUGGESTIONS : [];
   return (
     <div className="flex h-full flex-col items-center justify-center gap-4 px-6 py-8 text-center">

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useReducer, useRef } from "react";
 import { embeddedAgentRuntime } from "@/agent/runtime/embedded-runtime";
 import { agentReducer, createAgentState } from "@/lib/agent-reducer";
-import type { AgentMessage } from "@/types/agent";
+import type { AgentMessage, GuideStep, SessionKind } from "@/types/agent";
 
 function id(prefix: string): string {
   return `${prefix}-${crypto.randomUUID()}`;
@@ -69,7 +69,7 @@ export function useAgentBridge(bookId: string) {
 
   const prompt = useCallback(async (
     text: string,
-    context: { selection?: string; chapterHref?: string },
+    context: { selection?: string; chapterHref?: string; guide?: GuideStep },
     message: AgentMessage,
   ) => {
     const currentBookId = bookIdRef.current;
@@ -91,7 +91,7 @@ export function useAgentBridge(bookId: string) {
   const editPrompt = useCallback(async (
     messageIndex: number,
     text: string,
-    context: { selection?: string; chapterHref?: string },
+    context: { selection?: string; chapterHref?: string; guide?: GuideStep },
     message: AgentMessage,
   ) => {
     const currentBookId = bookIdRef.current;
@@ -119,9 +119,18 @@ export function useAgentBridge(bookId: string) {
     if (!sessionId) throw new Error("No active session");
     await embeddedAgentRuntime.switchBranchAtAnchor(sessionId, anchorId, direction, id("switch-branch"));
   }, [state.sessionId]);
-  const newSession = useCallback(async () => {
-    if (bookIdRef.current) await embeddedAgentRuntime.newSession(id("new-session"));
+  const newSession = useCallback(async (kind?: SessionKind) => {
+    if (bookIdRef.current) await embeddedAgentRuntime.newSession(id("new-session"), kind);
   }, []);
+  const nextGuideStep = useCallback(
+    (startHref?: string) => embeddedAgentRuntime.nextGuideStep(startHref),
+    [],
+  );
+  const guideStepAfterChapter = useCallback(
+    (step: GuideStep) => embeddedAgentRuntime.guideStepAfterChapter(step),
+    [],
+  );
+  const guideStepAt = useCallback((href: string) => embeddedAgentRuntime.guideStepAt(href), []);
   const deleteSession = useCallback(async (sessionId: string) => {
     if (bookIdRef.current) await embeddedAgentRuntime.deleteSession(sessionId, id("delete-session"));
   }, []);
@@ -139,5 +148,5 @@ export function useAgentBridge(bookId: string) {
     [],
   );
 
-  return { state, prompt, editPrompt, abort, listSessions, newSession, switchSession, deleteSession, renameSession, updateSessionConfig, switchBranchAtAnchor, locateQuote };
+  return { state, prompt, editPrompt, abort, listSessions, newSession, nextGuideStep, guideStepAfterChapter, guideStepAt, switchSession, deleteSession, renameSession, updateSessionConfig, switchBranchAtAnchor, locateQuote };
 }

@@ -15,12 +15,33 @@ export interface AgentError {
   promptId?: string;
 }
 
+/** A Guided session reads the Book to the reader; fixed at creation. */
+export type SessionKind = "guided";
+
+/**
+ * One guided step: the chapter part the assistant retells. Persisted on the
+ * step's user-message entry; the latest one on the active branch is the
+ * guide cursor.
+ */
+export interface GuideStep {
+  chapterIndex: number;
+  /** 0-based read_chapter part. */
+  part: number;
+  totalParts: number;
+  chapterTitle?: string;
+  /** A skim: parts `part` to the chapter's end in one compressed pass. */
+  skim?: true;
+}
+
 export interface AgentSessionSummary {
   id: string;
   title: string;
   createdAt: string;
   updatedAt: string;
   systemPrompt?: string;
+  kind?: SessionKind;
+  /** Guided sessions: the guide cursor, absent before the first step. */
+  guide?: GuideStep;
 }
 
 export interface BranchOption {
@@ -56,6 +77,8 @@ export interface UserMessage {
   content: string;
   selection?: string;
   chapterHref?: string;
+  /** Set on a guided step; the content is then the step's label. */
+  guide?: GuideStep;
 }
 
 export interface AssistantChatMessage {
@@ -114,7 +137,7 @@ export type AgentEvent = EventEnvelope & (
   | ({ type: "retry_scheduled"; attempt: number; maxAttempts: number; delayMs: number } & PromptCorrelation)
   | ({ type: "prompt_end"; messages?: AgentMessage[]; anchors?: string[]; navigation?: Record<string, AnchorBranchInfo> } & PromptCorrelation)
   | ({ type: "prompt_aborted"; messages?: AgentMessage[]; anchors?: string[]; navigation?: Record<string, AnchorBranchInfo> } & PromptCorrelation & RequestCorrelation)
-  | ({ type: "session_created" } & BookCorrelation & { sessionId: string } & RequestCorrelation)
+  | ({ type: "session_created"; kind?: SessionKind } & BookCorrelation & { sessionId: string } & RequestCorrelation)
   | ({ type: "session_switched"; messages: AgentMessage[]; anchors?: string[]; navigation?: Record<string, AnchorBranchInfo> } & BookCorrelation & { sessionId: string } & RequestCorrelation)
   | ({ type: "branch_switched"; messages: AgentMessage[]; anchors: string[]; navigation: Record<string, AnchorBranchInfo> } & BookCorrelation & { sessionId: string } & RequestCorrelation)
   | ({ type: "session_rewound"; messages: AgentMessage[] } & PromptCorrelation & RequestCorrelation)

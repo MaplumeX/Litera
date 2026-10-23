@@ -280,3 +280,25 @@ describe("TocSidebar", () => {
     expect(list.scrollTop).toBe(0);
   });
 });
+
+describe("TocSidebar guide progress", () => {
+  it("marks chapters the guide has covered, skimmed, partly read, and where it is", () => {
+    const view = render(
+      <TocSidebar
+        toc={[...toc, { href: "c3", label: "第三章" }, { href: "c4", label: "第四章" }]}
+        expanded={["0"]}
+        onToggle={() => {}}
+        onGoTo={() => {}}
+        guideProgress={{
+          c1: { covered: 2, totalParts: 2, skimmed: false, current: false },
+          c2: { covered: 3, totalParts: 3, skimmed: true, current: false },
+          c3: { covered: 1, totalParts: 4, skimmed: false, current: true },
+        }}
+      />,
+    );
+    expect(view.getByLabelText("已带读")).toBeTruthy();
+    expect(view.getByLabelText("已略读")).toBeTruthy();
+    expect(view.getByLabelText("已带读 1/4 部分, 当前带读位置").textContent).toBe("1/4");
+    expect(view.queryAllByLabelText(/已带读|已略读/)).toHaveLength(3);
+  });
+});

@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { notifySyncActivity } from "@/lib/sync-activity";
-import type { AgentSessionSummary } from "@/types/agent";
+import type { AgentSessionSummary, SessionKind } from "@/types/agent";
 import {
   decodePiSession,
   sessionSummary,
@@ -9,7 +9,7 @@ import {
 } from "./pi-session";
 
 export interface SessionPort {
-  create(bookId: string): Promise<DecodedPiSession>;
+  create(bookId: string, kind?: SessionKind): Promise<DecodedPiSession>;
   list(bookId: string): Promise<AgentSessionSummary[]>;
   load(bookId: string, sessionId: string): Promise<DecodedPiSession>;
   setLeaf(bookId: string, sessionId: string, leafId: string): Promise<DecodedPiSession>;
@@ -18,7 +18,7 @@ export interface SessionPort {
 }
 
 export const tauriSessionPort: SessionPort = {
-  async create(bookId) { return decodePiSession(await invoke("create_agent_session", { bookId })); },
+  async create(bookId, kind) { return decodePiSession(await invoke("create_agent_session", { bookId, kind: kind ?? null })); },
   async list(bookId) {
     const result = await invoke<unknown>("list_agent_sessions", { bookId });
     if (!Array.isArray(result)) throw new Error("Invalid session list");

@@ -1,5 +1,5 @@
 import type { KeyboardEvent, ReactNode } from "react";
-import { Check, Pencil, Quote, X } from "lucide-react";
+import { BookOpen, Check, Pencil, Quote, X } from "lucide-react";
 import type { UserMessage } from "@/types/agent";
 import { useT } from "@/lib/i18n";
 
@@ -12,6 +12,8 @@ interface MessageBubbleProps {
   onSave: () => void;
   onCancel: () => void;
   editDisabled: boolean;
+  /** Guided steps are app-generated and cannot be edited. */
+  editable?: boolean;
   /** Optional branch switcher rendered in the reserved action row. */
   branchSwitcher?: ReactNode;
 }
@@ -25,6 +27,7 @@ export function MessageBubble({
   onSave,
   onCancel,
   editDisabled,
+  editable = true,
   branchSwitcher,
 }: MessageBubbleProps) {
   const { t } = useT();
@@ -55,8 +58,9 @@ export function MessageBubble({
           autoFocus
         />
       ) : (
-        <div className="max-w-[85%] rounded-xl bg-primary px-3 py-2 text-sm text-primary-foreground">
-          {message.content}
+        <div className="flex max-w-[85%] items-start gap-1.5 rounded-xl bg-primary px-3 py-2 text-sm text-primary-foreground">
+          {message.guide && <BookOpen className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
+          <span>{message.content}</span>
         </div>
       )}
       <div className="flex h-6 items-center justify-end gap-1">
@@ -81,7 +85,7 @@ export function MessageBubble({
               <Check className="h-3.5 w-3.5" />
             </button>
           </>
-        ) : (
+        ) : editable && (
           <button
             type="button"
             onClick={onStartEdit}

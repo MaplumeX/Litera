@@ -41,6 +41,7 @@ import { SyncSettingsForm } from "@/components/settings/SyncSettingsForm";
 import { KosyncSettingsForm } from "@/components/settings/KosyncSettingsForm";
 import { TypographyPreview } from "@/components/settings/TypographyPreview";
 import { ImportedFontsSection } from "@/components/settings/ImportedFontsSection";
+import { GuidedStyleSection } from "@/components/settings/GuidedStyleSection";
 import { ReaderFooterSettingsForm } from "@/components/settings/ReaderFooterSettingsForm";
 import { importedFontFamilies, useImportedFonts } from "@/lib/imported-fonts";
 import { platformBridge } from "@/lib/platform-bridge";
@@ -1005,8 +1006,11 @@ export function SettingsDialog({
               )}
 
               {section === "ai" && (
-                <div className="max-w-md">
+                <div className="max-w-md space-y-8">
                   <AgentConfigForm />
+                  <div className="border-t border-border pt-6">
+                    <GuidedStyleSection />
+                  </div>
                 </div>
               )}
 

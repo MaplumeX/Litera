@@ -7,6 +7,8 @@ import type {
   AgentToolCall,
   AssistantBlock,
   BranchOption,
+  GuideStep,
+  SessionKind,
 } from "@/types/agent";
 
 export interface PiSessionHeader {
@@ -15,6 +17,7 @@ export interface PiSessionHeader {
   id: string;
   timestamp: string;
   cwd: string;
+  kind?: SessionKind;
 }
 
 export interface PiSessionEntry {
@@ -45,6 +48,25 @@ function object(value: unknown): Record<string, unknown> | null {
 
 function string(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+function nonNegativeInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0;
+}
+
+/** A persisted guided step, or null when absent or malformed. */
+export function decodeGuide(value: unknown): GuideStep | null {
+  const guide = object(value);
+  if (!guide || !nonNegativeInteger(guide.chapterIndex) || !nonNegativeInteger(guide.part)
+    || !nonNegativeInteger(guide.totalParts) || guide.part >= guide.totalParts) return null;
+  const chapterTitle = string(guide.chapterTitle);
+  return {
+    chapterIndex: guide.chapterIndex,
+    part: guide.part,
+    totalParts: guide.totalParts,
+    ...(chapterTitle ? { chapterTitle } : {}),
+    ...(guide.skim === true ? { skim: true as const } : {}),
+  };
 }
 
 function validContent(content: unknown, role: string): boolean {
@@ -110,7 +132,10 @@ export function decodePiSession(value: unknown): DecodedPiSession {
   const leafId = payload.leafId == null ? null : string(payload.leafId);
   if (leafId && !ids.has(leafId)) throw new Error("Invalid Pi session leaf");
   return {
-    header: { type: "session", version: 3, id, timestamp, cwd: rawHeader.cwd },
+    header: {
+      type: "session", version: 3, id, timestamp, cwd: rawHeader.cwd,
+      ...(rawHeader.kind === "guided" ? { kind: "guided" as const } : {}),
+    },
     entries,
     leafId,
   };
@@ -349,7 +374,8 @@ export function visibleMessages(session: DecodedPiSession): UiAgentMessage[] {
       // untouched. Old entries without these fields degrade to undefined.
       const selection = string(entry.selection) ?? undefined;
       const chapterHref = string(entry.chapterHref) ?? undefined;
-      output.push({ role: "user", content: contentText(message.content), ...(selection ? { selection } : {}), ...(chapterHref ? { chapterHref } : {}) });
+      const guide = decodeGuide(entry.guide);
+      output.push({ role: "user", content: contentText(message.content), ...(selection ? { selection } : {}), ...(chapterHref ? { chapterHref } : {}), ...(guide ? { guide } : {}) });
       continue;
     }
     const stopReason = message.stopReason === "aborted" || message.stopReason === "error" ? message.stopReason : undefined;
@@ -552,7 +578,24 @@ export function sessionSummary(value: unknown): AgentSessionSummary {
   const summary: AgentSessionSummary = { id: item.id as string, title: item.title, createdAt: item.createdAt as string, updatedAt: item.updatedAt as string };
   const systemPrompt = string(item.systemPrompt);
   if (systemPrompt !== null) summary.systemPrompt = systemPrompt;
+  if (item.kind === "guided") {
+    summary.kind = "guided";
+    const guide = decodeGuide(item.guide);
+    if (guide) summary.guide = guide;
+  }
   return summary;
+}
+
+/** The guide cursor: the latest guided step on the active branch. */
+export function guideCursor(session: DecodedPiSession): GuideStep | null {
+  const branch = activeBranch(session);
+  for (let index = branch.length - 1; index >= 0; index -= 1) {
+    const entry = branch[index];
+    if (entry.type !== "message") continue;
+    const guide = decodeGuide(entry.guide);
+    if (guide) return guide;
+  }
+  return null;
 }
 
 export function newEntry(type: string, parentId: string | null, fields: Record<string, unknown>): PiSessionEntry {
