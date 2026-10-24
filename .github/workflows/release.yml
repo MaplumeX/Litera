@@ -187,3 +187,23 @@ jobs:
           out="Litera_${{ steps.version.outputs.version }}_android_arm64.apk"
           cp "$apk" "$out"
           gh release upload "$TAG" "$out" --clobber
+
+  # Publish only once every installer, the APK included, is attached, so the
+  # Release never goes public half-filled.
+  publish:
+    needs: [release, android]
+    permissions:
+      contents: write
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Read the version
+        id: version
+        run: node scripts/bump-version.mjs --check
+
+      - name: Publish the Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v{0}', steps.version.outputs.version) }}
+        run: gh release edit "$TAG" --draft=false --latest
