@@ -600,6 +600,27 @@ describe("SettingsDialog", () => {
     expect(getByText("供应商")).toBeTruthy();
   });
 
+  it("offers the reading footer section only in the mobile page layout", () => {
+    const props = {
+      open: true,
+      onClose: noop,
+      bookTitle: null,
+      hasBook: false,
+      styleState,
+      onTypographyChange: noop,
+      onRestoreDefault: noop,
+      overriddenKeys: [],
+      theme: "light",
+      onThemeChange: noop,
+    };
+    const dialog = render(<SettingsDialog {...props} />);
+    expect(dialog.queryByRole("button", { name: "阅读页脚" })).toBeNull();
+    dialog.unmount();
+
+    const page = render(<SettingsDialog {...props} layout="page" />);
+    expect(page.getByRole("button", { name: /阅读页脚/ })).toBeTruthy();
+  });
+
   it("shows book copy and restore-default only for overridden keys", () => {
     const onRestore = vi.fn();
     const { getByText, queryByText, getAllByText } = render(
