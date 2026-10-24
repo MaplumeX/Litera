@@ -1,4 +1,4 @@
-import { forwardRef, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { forwardRef, useRef, type PointerEvent as ReactPointerEvent } from "react";
 import { ChevronDown, Maximize2, Minimize2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ChatPanel, type ChatPanelHandle } from "@/components/chat/ChatPanel";
@@ -15,6 +15,10 @@ interface AssistantSheetProps {
   onOpenQuote: (location: QuoteLocation, quote: string) => void;
 }
 
+function sheetHeight(snap: SheetSnap, dragOffset: number) {
+  return `calc(${snap === "full" ? "100%" : "50%"} - ${dragOffset}px)`;
+}
+
 /**
  * The reading assistant over the Book: half height keeps the page visible
  * above it, full screen is the conversation alone. Dragging the handle moves
@@ -26,9 +30,17 @@ export const AssistantSheet = forwardRef<ChatPanelHandle, AssistantSheetProps>(
     const { t } = useT();
     const sheetRef = useRef<HTMLElement>(null);
     const dragRef = useRef<{ pointerId: number; startY: number } | null>(null);
-    const [dragOffset, setDragOffset] = useState(0);
 
     const containerHeight = () => sheetRef.current?.parentElement?.getBoundingClientRect().height ?? 0;
+
+    // The drag writes the sheet's height straight to the DOM: a state update
+    // per pointer move would re-render the whole conversation every frame.
+    const settle = (next: SheetSnap) => {
+      const sheet = sheetRef.current;
+      if (!sheet) return;
+      delete sheet.dataset.dragging;
+      sheet.style.height = sheetHeight(next, 0);
+    };
 
     const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
       dragRef.current = { pointerId: event.pointerId, startY: event.clientY };
@@ -36,15 +48,17 @@ export const AssistantSheet = forwardRef<ChatPanelHandle, AssistantSheetProps>(
     };
     const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
       const drag = dragRef.current;
-      if (!drag || drag.pointerId !== event.pointerId) return;
-      setDragOffset(event.clientY - drag.startY);
+      const sheet = sheetRef.current;
+      if (!drag || drag.pointerId !== event.pointerId || !sheet) return;
+      sheet.dataset.dragging = "";
+      sheet.style.height = sheetHeight(snap, event.clientY - drag.startY);
     };
     const endDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
       const drag = dragRef.current;
       if (!drag || drag.pointerId !== event.pointerId) return;
       dragRef.current = null;
-      setDragOffset(0);
       const next = snapAfterDrag(snap, event.clientY - drag.startY, containerHeight());
+      settle(next);
       if (next !== snap) onSnapChange(next);
     };
 
@@ -61,11 +75,10 @@ export const AssistantSheet = forwardRef<ChatPanelHandle, AssistantSheetProps>(
           "absolute inset-x-0 bottom-0 z-30 flex flex-col border-t bg-card shadow-float",
           snap === "full" ? "rounded-none pt-[var(--safe-top)]" : "rounded-t-2xl",
           collapsed && "invisible translate-y-full",
-          dragOffset === 0 &&
-            "transition-[height,translate,visibility] duration-[var(--motion-enter)] ease-[var(--ease-emphasized-decelerate)] motion-reduce:transition-none",
+          "transition-[height,translate,visibility] duration-[var(--motion-enter)] ease-[var(--ease-emphasized-decelerate)] data-[dragging]:transition-none motion-reduce:transition-none",
         )}
         style={{
-          height: `calc(${snap === "full" ? "100%" : "50%"} - ${dragOffset}px)`,
+          height: sheetHeight(snap, 0),
           bottom: "var(--keyboard-inset)",
           maxHeight: snap === "full"
             ? "calc(100% - var(--keyboard-inset))"
@@ -84,7 +97,7 @@ export const AssistantSheet = forwardRef<ChatPanelHandle, AssistantSheetProps>(
             onPointerUp={endDrag}
             onPointerCancel={() => {
               dragRef.current = null;
-              setDragOffset(0);
+              settle(snap);
             }}
           >
             {/* Centered on the whole sheet, not the space left of the buttons. */}
@@ -110,7 +123,7 @@ export const AssistantSheet = forwardRef<ChatPanelHandle, AssistantSheetProps>(
             <ChevronDown />
           </Button>
         </div>
-        <div className="min-h-0 flex-1">
+        <div className="assistant-sheet-body min-h-0 flex-1">
           <ChatPanel
             ref={ref}
             bookId={bookId}
