@@ -25,6 +25,7 @@ export interface FontImportOutcome {
 }
 
 const STYLE_ELEMENT_ID = "litera-imported-fonts";
+const CACHE_KEY = "litera.importedFonts";
 
 let fonts: ImportedFont[] = [];
 const listeners = new Set<() => void>();
@@ -32,7 +33,39 @@ const listeners = new Set<() => void>();
 function setFonts(next: ImportedFont[]): void {
   fonts = next;
   applyDocumentFontFaces(next);
+  saveCachedFonts(next);
   for (const listener of listeners) listener();
+}
+
+function loadCachedFonts(): ImportedFont[] {
+  try {
+    if (typeof localStorage === "undefined") return [];
+    const parsed: unknown = JSON.parse(localStorage.getItem(CACHE_KEY) ?? "[]");
+    return Array.isArray(parsed) ? (parsed as ImportedFont[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveCachedFonts(list: readonly ImportedFont[]): void {
+  try {
+    if (typeof localStorage === "undefined") return;
+    localStorage.setItem(CACHE_KEY, JSON.stringify(list));
+  } catch {
+    // private mode / quota
+  }
+}
+
+/**
+ * Declare last session's faces synchronously, before the first render, so
+ * the UI chrome and an opening Book never paint in the fallback font while
+ * `list_imported_fonts` is in flight. `refreshImportedFonts` corrects it.
+ */
+export function primeImportedFonts(): void {
+  const cached = loadCachedFonts();
+  if (cached.length === 0) return;
+  fonts = cached;
+  applyDocumentFontFaces(cached);
 }
 
 function subscribe(listener: () => void): () => void {
@@ -103,7 +136,7 @@ export function importedFontFaceCss(list: readonly ImportedFont[]): string {
   return list
     .map((font) => {
       const format = font.path.toLowerCase().endsWith(".otf") ? "opentype" : "truetype";
-      return `@font-face { font-family: ${cssString(font.family)}; src: url(${cssString(convertFileSrc(font.path))}) format("${format}"); font-weight: ${font.weight}; font-style: ${font.italic ? "italic" : "normal"}; font-display: swap; }`;
+      return `@font-face { font-family: ${cssString(font.family)}; src: url(${cssString(convertFileSrc(font.path))}) format("${format}"); font-weight: ${font.weight}; font-style: ${font.italic ? "italic" : "normal"}; font-display: block; }`;
     })
     .join("\n");
 }
