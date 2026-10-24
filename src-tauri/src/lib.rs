@@ -35,7 +35,9 @@ pub fn run() {
                         StateFlags::SIZE | StateFlags::POSITION | StateFlags::MAXIMIZED,
                     )
                     .build(),
-            );
+            )
+            .plugin(tauri_plugin_updater::Builder::new().build())
+            .plugin(tauri_plugin_process::init());
     }
 
     builder

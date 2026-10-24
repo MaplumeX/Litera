@@ -72,6 +72,8 @@ import { useReaderTts } from "@/lib/use-reader-tts";
 import { isFindShortcut } from "@/lib/reader-paging";
 import { FinishBookPrompt } from "@/components/FinishBookPrompt";
 import { KosyncPrompt } from "@/components/KosyncPrompt";
+import { UpdateBanner } from "@/components/UpdateBanner";
+import { useAutoUpdateCheck } from "@/lib/app-update";
 
 function PersistenceErrorBanner({
   message,
@@ -124,6 +126,7 @@ function App() {
   const { t } = useT();
   const titlebarDrag = useTitlebarWindowDrag();
   const syncScheduler = useSyncScheduler();
+  useAutoUpdateCheck();
   const [view, setView] = useState<"library" | "reader">("library");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [chatCollapsed, setChatCollapsed] = useState(true);
@@ -549,6 +552,7 @@ function App() {
       theme={globalTheme}
       onThemeChange={session.setGlobalTheme}
       onReaderFlowChange={session.setReaderFlow}
+      beforeUpdateRestart={flushReadingState}
     />
   );
 
@@ -701,6 +705,7 @@ function App() {
           message={syncScheduler.persistentFailure}
           onDismiss={syncScheduler.clearPersistentFailure}
         />
+        <UpdateBanner beforeRestart={flushReadingState} />
         <BookImportNotices
           notices={bookImport.notices}
           dismissNotice={bookImport.dismissNotice}
@@ -732,6 +737,7 @@ function App() {
         message={syncScheduler.persistentFailure}
         onDismiss={syncScheduler.clearPersistentFailure}
       />
+      <UpdateBanner beforeRestart={flushReadingState} />
       <BookImportNotices
         notices={bookImport.notices}
         dismissNotice={bookImport.dismissNotice}

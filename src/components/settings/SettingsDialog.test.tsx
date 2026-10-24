@@ -5,6 +5,7 @@ import { SettingsDialog } from "./SettingsDialog";
 import type { ReaderStyleState } from "@/lib/reader-styles";
 import { setLocale } from "@/lib/i18n";
 import { DEFAULT_READER_MODE_KEY } from "@/lib/reader-mode";
+import { AUTO_CHECK_UPDATES_KEY, resetAppUpdateForTests } from "@/lib/app-update";
 import {
   DEFAULT_UI_FONT_FAMILY,
   UI_FONT_FAMILY_KEY,
@@ -37,6 +38,12 @@ vi.mock("@tauri-apps/api/app", () => ({
 
 vi.mock("@tauri-apps/plugin-opener", () => ({
   openUrl: (url: string) => openUrlMock(url),
+}));
+
+const checkUpdateMock = vi.fn();
+
+vi.mock("@tauri-apps/plugin-updater", () => ({
+  check: (...args: unknown[]) => checkUpdateMock(...args),
 }));
 
 vi.mock("@/lib/use-agent-config", () => ({
@@ -1166,7 +1173,7 @@ describe("SettingsDialog", () => {
     });
 
     expect(getByText("Litera")).toBeTruthy();
-    expect(getByText("版本信息与项目链接")).toBeTruthy();
+    expect(getByText("版本信息、更新与项目链接")).toBeTruthy();
     expect(await findByText("0.2.0")).toBeTruthy();
     expect(queryByRole("slider", { name: "字体大小" })).toBeNull();
     expect(queryByRole("radio", { name: "白天" })).toBeNull();
@@ -1208,6 +1215,44 @@ describe("SettingsDialog", () => {
       getByRole("button", { name: "发行版本" }).click();
     });
     expect(openUrlMock).toHaveBeenCalledWith("https://github.com/MaplumeX/Litera/releases");
+  });
+
+  it("checks for updates manually and toggles the automatic check", async () => {
+    localStorage.removeItem(AUTO_CHECK_UPDATES_KEY);
+    resetAppUpdateForTests();
+    checkUpdateMock.mockResolvedValueOnce(null);
+    const { getByRole, findByText } = render(
+      <SettingsDialog
+        open
+        onClose={noop}
+        bookTitle={null}
+        hasBook={false}
+        styleState={styleState}
+        onTypographyChange={noop}
+        onRestoreDefault={noop}
+        overriddenKeys={[]}
+        theme="light"
+        onThemeChange={noop}
+      />,
+    );
+
+    act(() => {
+      getByRole("button", { name: "关于" }).click();
+    });
+
+    const toggle = getByRole("switch", { name: /自动检查更新/ });
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    act(() => {
+      toggle.click();
+    });
+    expect(localStorage.getItem(AUTO_CHECK_UPDATES_KEY)).toBe("false");
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+
+    act(() => {
+      getByRole("button", { name: "检查更新" }).click();
+    });
+    expect(await findByText("已是最新版本")).toBeTruthy();
+    expect(checkUpdateMock).toHaveBeenCalledTimes(1);
   });
 
   it("shows a version placeholder when getVersion fails and keeps links usable", async () => {

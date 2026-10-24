@@ -26,6 +26,8 @@ const pairs = [
   { npm: "@tauri-apps/api", cargo: "tauri" },
   { npm: "@tauri-apps/plugin-http", cargo: "tauri-plugin-http" },
   { npm: "@tauri-apps/plugin-opener", cargo: "tauri-plugin-opener" },
+  { npm: "@tauri-apps/plugin-process", cargo: "tauri-plugin-process" },
+  { npm: "@tauri-apps/plugin-updater", cargo: "tauri-plugin-updater" },
 ];
 
 // Same rule, but the CLI has no Rust counterpart to compare against: it ships
@@ -69,18 +71,23 @@ function cargoResolved(lock, crate) {
   return match[1];
 }
 
+// `[dependencies]` plus every `[target.'cfg(...)'.dependencies]` table:
+// desktop-only plugins (the updater) are declared under a target.
 function readCargoDependencies(manifest) {
   const lines = manifest.split(/\r?\n/);
-  const start = lines.findIndex((line) => line.trim() === "[dependencies]");
-  if (start === -1) {
+  const isDependencies = (line) =>
+    /^\[(?:target\.[^\]]+\.)?dependencies\]$/.test(line.trim());
+  if (!lines.some(isDependencies)) {
     throw new Error(`${cargoManifest} has no [dependencies] section`);
   }
   const body = [];
-  for (const line of lines.slice(start + 1)) {
+  let inside = false;
+  for (const line of lines) {
     if (line.trimStart().startsWith("[")) {
-      break;
+      inside = isDependencies(line);
+      continue;
     }
-    body.push(line);
+    if (inside) body.push(line);
   }
   return body.join("\n");
 }
