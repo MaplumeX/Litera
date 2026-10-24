@@ -676,3 +676,24 @@ describe("ChatPanel compaction notice", () => {
     expect(summary.textContent).not.toContain("##");
   });
 });
+
+describe("ChatPanel chapter recap", () => {
+  it("shows a collapsed recap marker that expands to the recap", () => {
+    bridgeState = readyState({
+      compaction: null,
+      messages: [
+        { role: "user", content: "带读：第一章" },
+        { role: "assistant", content: "第一章复述" },
+        { role: "recap", chapterIndex: 0, chapterTitle: "第一章", text: "- 要点**一**" },
+      ],
+    });
+    const view = render(<ChatPanel currentChapterHref="OEBPS/ch1.xhtml" bookId="book-1" />);
+    const recap = view.getByTestId("guide-recap");
+    expect(within(recap).getByText("本章回顾：第一章")).toBeTruthy();
+    expect(view.queryByTestId("guide-recap-text")).toBeNull();
+    fireEvent.click(within(recap).getByRole("button"));
+    expect(view.getByTestId("guide-recap-text").textContent?.trim()).toBe("要点一");
+    // The answer before the marker is still the last chat turn: it can be regenerated.
+    expect(view.getByRole("button", { name: /重新生成/ })).toBeTruthy();
+  });
+});

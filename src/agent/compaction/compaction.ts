@@ -1,6 +1,6 @@
 import type { AgentMessage, StreamFn } from "@earendil-works/pi-agent-core";
 import { normalizeContext, type Api, type Model, type SimpleStreamOptions } from "@earendil-works/pi-ai";
-import { isPrunableEntry, type PiSessionEntry } from "@/agent/sessions/pi-session";
+import { GUIDE_RECAP, isPrunableEntry, type PiSessionEntry } from "@/agent/sessions/pi-session";
 import { imageRefSource } from "@/agent/sessions/image-refs";
 
 /**
@@ -357,8 +357,8 @@ function truncate(text: string, maxChars: number): string {
  *
  * Plain text keeps the model from continuing the conversation. Thinking is
  * dropped, Book text from read_chapter is omitted (it can be read again), the
- * Book snapshot is skipped (re-inserted when absent from the context), and
- * other tool results are truncated.
+ * Book snapshot is skipped (re-inserted when absent from the context), so are
+ * chapter recaps (kept in the context), and other tool results are truncated.
  */
 export function serializeConversation(messages: AgentMessage[]): string {
   const parts: string[] = [];
@@ -383,7 +383,8 @@ export function serializeConversation(messages: AgentMessage[]): string {
       const content = contentText(message.content);
       if (content) parts.push(`[Tool result ${message.toolName}]: ${truncate(content, TOOL_RESULT_MAX_CHARS)}`);
     } else if (message.role === "custom") {
-      if (message.customType === "bookSnapshot") continue;
+      // The context keeps chapter recaps whole (see `contextBranch`).
+      if (message.customType === "bookSnapshot" || message.customType === GUIDE_RECAP) continue;
       const content = contentText(message.content);
       if (content) parts.push(`[Reading context]: ${content}`);
     } else if (message.role === "compactionSummary") {

@@ -36,6 +36,10 @@ _Avoid_: Tutor mode, read-along, guided mode
 The chapter part a Guided session has reached: the latest guided step on the Session's active branch. Derived, never stored; skipping or picking a chapter only changes the next step until it is sent.
 _Avoid_: Bookmark, reading position (that is the Book's)
 
+**Chapter recap**:
+A short account of one chapter, written by the assistant when a Guided session finishes the chapter (every part retold or skimmed) and recorded on the Session's branch. The model keeps every recap in its context for the rest of the Session, past Compaction; the transcript shows it as a collapsible marker. Belongs to the Session, not the Book.
+_Avoid_: Chapter summary, notes
+
 **Compaction**:
 A Session event that replaces older messages in the model's context with a summary entry. The full transcript stays visible to the user; only the model-facing projection is truncated. The transcript marks the point with a compaction notice (a collapsible divider showing the summary).
 _Avoid_: Summarization, truncation, context limit

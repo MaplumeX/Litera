@@ -178,6 +178,23 @@ export function isPrunableEntry(entry: PiSessionEntry): boolean {
   return message?.role === "toolResult" && PRUNABLE_TOOLS.has(string(message.toolName) ?? "");
 }
 
+/** A chapter recap of a Guided session. */
+export function isGuideRecapEntry(entry: PiSessionEntry): boolean {
+  return entry.type === "custom_message" && entry.customType === GUIDE_RECAP;
+}
+
+export const GUIDE_RECAP = "guideRecap";
+
+/** A recap entry's chapter and reader-facing text, or null when malformed. */
+function decodeRecap(entry: PiSessionEntry): { chapterIndex: number; chapterTitle?: string; text: string } | null {
+  if (!isGuideRecapEntry(entry)) return null;
+  const details = object(entry.details);
+  const text = string(details?.text);
+  if (!details || !nonNegativeInteger(details.chapterIndex) || !text) return null;
+  const chapterTitle = string(details.chapterTitle);
+  return { chapterIndex: details.chapterIndex, ...(chapterTitle ? { chapterTitle } : {}), text };
+}
+
 function prunedPlaceholder(toolName: string, args: Record<string, unknown> | undefined): string {
   const call = `${toolName}(${Object.entries(args ?? {}).map(([key, value]) => `${key}=${JSON.stringify(value)}`).join(", ")})`;
   return `[Result of ${call} was cleared to save context. Call ${toolName} again if you need it.]`;
@@ -205,7 +222,10 @@ export function contextBranch(session: DecodedPiSession): PiSessionEntry[] {
     const compactIndex = path.indexOf(latestCompaction);
     const firstKeptId = string(latestCompaction.firstKeptEntryId);
     const keptIndex = firstKeptId ? path.findIndex((entry) => entry.id === firstKeptId) : -1;
-    projected = [latestCompaction, ...(keptIndex >= 0 ? path.slice(keptIndex, compactIndex) : []), ...path.slice(compactIndex + 1)];
+    // Chapter recaps outlive the turns they followed: the model keeps every
+    // one, right after the summary, which leaves them out.
+    const recaps = path.slice(0, keptIndex >= 0 ? keptIndex : compactIndex).filter(isGuideRecapEntry);
+    projected = [latestCompaction, ...recaps, ...(keptIndex >= 0 ? path.slice(keptIndex, compactIndex) : []), ...path.slice(compactIndex + 1)];
   }
   const throughIndex = latestPrune ? path.findIndex((entry) => entry.id === latestPrune.throughEntryId) : -1;
   if (throughIndex < 0) return projected;
@@ -319,6 +339,11 @@ function visibleMessageAnchors(session: DecodedPiSession): PiSessionEntry[] {
       if (typeof entry.summary === "string") anchors.push(entry);
       continue;
     }
+    // So does a chapter recap.
+    if (decodeRecap(entry)) {
+      anchors.push(entry);
+      continue;
+    }
     const role = messageRole(entry);
     if (role !== "user" && role !== "assistant") continue;
     if (role === "assistant" && messageRole(anchors[anchors.length - 1]) === "assistant") continue;
@@ -347,6 +372,11 @@ export function visibleMessages(session: DecodedPiSession): UiAgentMessage[] {
     // the durable branch; the full history around it stays visible.
     if (entry.type === "compaction" && typeof entry.summary === "string") {
       output.push({ role: "notice", summary: entry.summary, tokensBefore: typeof entry.tokensBefore === "number" ? entry.tokensBefore : 0 });
+      continue;
+    }
+    const recap = decodeRecap(entry);
+    if (recap) {
+      output.push({ role: "recap", ...recap });
       continue;
     }
     if (entry.type !== "message") continue;
@@ -596,6 +626,35 @@ export function guideCursor(session: DecodedPiSession): GuideStep | null {
     if (guide) return guide;
   }
   return null;
+}
+
+/**
+ * The guided steps on the active branch, oldest first, each with the text of
+ * the answer that followed it (the assistant entries up to the next user
+ * message). Side questions are left out.
+ */
+export function guidedTurns(session: DecodedPiSession): Array<{ step: GuideStep; text: string }> {
+  const turns: Array<{ step: GuideStep; text: string }> = [];
+  let current: { step: GuideStep; text: string } | null = null;
+  for (const entry of activeBranch(session)) {
+    const role = messageRole(entry);
+    if (role === "user") {
+      const step = decodeGuide(entry.guide);
+      current = step ? { step, text: "" } : null;
+      if (current) turns.push(current);
+    } else if (role === "assistant" && current) {
+      current.text += contentText(object(entry.message)?.content);
+    }
+  }
+  return turns;
+}
+
+/** The chapters with a recap on the active branch. */
+export function guideRecapChapters(session: DecodedPiSession): Set<number> {
+  return new Set(activeBranch(session).flatMap((entry) => {
+    const recap = decodeRecap(entry);
+    return recap ? [recap.chapterIndex] : [];
+  }));
 }
 
 export function newEntry(type: string, parentId: string | null, fields: Record<string, unknown>): PiSessionEntry {

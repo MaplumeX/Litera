@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activeBranch, branchLeafId, branchNavigation, contextBranch, convertPiContextToLlm, decodeGuide, decodePiSession, guideCursor, piContextMessages, sessionConfig, sessionSummary, visibleMessageEntries, visibleMessages } from "./pi-session";
+import { activeBranch, branchLeafId, branchNavigation, contextBranch, convertPiContextToLlm, decodeGuide, decodePiSession, guideCursor, guidedTurns, guideRecapChapters, piContextMessages, sessionConfig, sessionSummary, visibleMessageEntries, visibleMessages } from "./pi-session";
 import type { PiSessionEntry } from "./pi-session";
 
 const timestamp = "2026-08-14T00:00:00Z";
@@ -597,6 +597,41 @@ describe("guided sessions", () => {
     expect(guideCursor(makeSession(entries, "a3"))).toMatchObject({ part: 1 });
     expect(guideCursor(makeSession(entries, "a1"))).toMatchObject({ part: 0 });
     expect(guideCursor(makeSession([entry("q", null, "user", "hi")], "q"))).toBeNull();
+  });
+
+  const recap = (id: string, parentId: string, chapterIndex: number, text: string) => ({
+    type: "custom_message", id, parentId, timestamp, customType: "guideRecap", display: true,
+    content: `Chapter recap (chapterIndex ${chapterIndex}):\n\n${text}`,
+    details: { chapterIndex, chapterTitle: `Chapter ${chapterIndex + 1}`, text },
+  });
+
+  it("pairs each guided step on the branch with its retelling, leaving out side questions", () => {
+    const entries = [
+      step("u1", null, 0), entry("a1", "u1", "assistant", "part one"),
+      entry("q1", "a1", "user", "side question"), entry("a2", "q1", "assistant", "answer"),
+      step("u2", "a2", 1), entry("a3", "u2", "assistant", "part two, "), entry("a4", "a3", "assistant", "continued"),
+    ];
+    expect(guidedTurns(makeSession(entries, "a4"))).toEqual([
+      { step: expect.objectContaining({ part: 0 }), text: "part one" },
+      { step: expect.objectContaining({ part: 1 }), text: "part two, continued" },
+    ]);
+  });
+
+  it("shows a chapter recap as a transcript marker, anchored in step with the messages", () => {
+    const session = makeSession([step("u1", null, 2), entry("a1", "u1", "assistant", "retelling"), recap("r1", "a1", 4, "The gist.")], "r1");
+    expect(visibleMessages(session)[2]).toEqual({ role: "recap", chapterIndex: 4, chapterTitle: "Chapter 5", text: "The gist." });
+    expect(visibleMessageEntries(session).map((item) => item.id)).toEqual(["u1", "a1", "r1"]);
+    expect(guideRecapChapters(session)).toEqual(new Set([4]));
+    expect(guideRecapChapters(makeSession([step("u1", null, 2), entry("a1", "u1", "assistant", "retelling")], "a1")).size).toBe(0);
+  });
+
+  it("keeps recaps that a compaction cut off in the model context, right after the summary", () => {
+    const session = makeSession([
+      step("u1", null, 2), entry("a1", "u1", "assistant", "retelling"), recap("r1", "a1", 4, "The gist."),
+      entry("q1", "r1", "user", "side question"), entry("a2", "q1", "assistant", "answer"),
+      { type: "compaction", id: "c1", parentId: "a2", timestamp, summary: "summary", firstKeptEntryId: "q1", tokensBefore: 10 },
+    ], "c1");
+    expect(contextBranch(session).map((item) => item.id)).toEqual(["c1", "r1", "q1", "a2"]);
   });
 
   it("passes kind and guide through the summary", () => {

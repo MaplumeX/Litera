@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { BookTocEntry } from "@/agent/book/book-content";
-import { guideStepContext, guideTocProgress, nextGuideStep, resolveGuideStep, skipChapterStep } from "./guide";
+import { dueRecapChapter, guideStepContext, guideTocProgress, nextGuideStep, resolveGuideStep, skipChapterStep } from "./guide";
 
 const chapter = (index: number, parts: number, chars = 1000, label = `Chapter ${index + 1}`): BookTocEntry => ({
   index, label, ancestors: [], depth: 0, hrefs: [`c${index}.xhtml`], chars, parts,
@@ -38,6 +38,22 @@ describe("nextGuideStep", () => {
 
   it("restarts from the start chapter when the cursor no longer fits the Book", () => {
     expect(nextGuideStep(toc, { chapterIndex: 9, part: 0, totalParts: 1 }, 2)).toMatchObject({ chapterIndex: 2, part: 0 });
+  });
+});
+
+describe("cursors from an older part count", () => {
+  it("continues from the matching share of the chapter, repeating rather than skipping", () => {
+    // Chapter 3 now has 3 parts; the cursor was cut for 2.
+    expect(nextGuideStep(toc, { chapterIndex: 2, part: 0, totalParts: 2 })).toMatchObject({ chapterIndex: 2, part: 1 });
+    expect(nextGuideStep(toc, { chapterIndex: 2, part: 1, totalParts: 2 })).toMatchObject({ chapterIndex: 3, part: 0 });
+    // Chapter 1 now has 2 parts; the cursor was cut for 3.
+    expect(nextGuideStep(toc, { chapterIndex: 0, part: 0, totalParts: 3 })).toMatchObject({ chapterIndex: 0, part: 0 });
+    expect(nextGuideStep(toc, { chapterIndex: 0, part: 1, totalParts: 3 })).toMatchObject({ chapterIndex: 0, part: 1 });
+  });
+
+  it("counts the old steps of a whole chapter as the whole chapter", () => {
+    const steps = [0, 1].map((part) => ({ chapterIndex: 2, part, totalParts: 2 }));
+    expect(guideTocProgress(toc, steps, ["c2.xhtml"])["c2.xhtml"]).toMatchObject({ covered: 3, totalParts: 3 });
   });
 });
 
@@ -101,5 +117,26 @@ describe("guideTocProgress", () => {
   it("counts a part read twice once", () => {
     const step = { chapterIndex: 2, part: 0, totalParts: 3 };
     expect(guideTocProgress(toc, [step, step], ["c2.xhtml"])["c2.xhtml"]).toMatchObject({ covered: 1 });
+  });
+});
+
+describe("dueRecapChapter", () => {
+  const steps = [
+    { chapterIndex: 0, part: 0, totalParts: 2 },
+    { chapterIndex: 0, part: 1, totalParts: 2 },
+    { chapterIndex: 2, part: 0, totalParts: 3, skim: true as const },
+    { chapterIndex: 3, part: 0, totalParts: 1 },
+  ];
+
+  it("is the first chapter the guide finished without a recap", () => {
+    expect(dueRecapChapter(toc, steps, new Set())).toBe(0);
+    expect(dueRecapChapter(toc, steps, new Set([0]))).toBe(2);
+    expect(dueRecapChapter(toc, steps, new Set([0, 2]))).toBe(3);
+    expect(dueRecapChapter(toc, steps, new Set([0, 2, 3]))).toBeNull();
+  });
+
+  it("waits for the last part of a chapter", () => {
+    expect(dueRecapChapter(toc, steps.slice(0, 1), new Set())).toBeNull();
+    expect(dueRecapChapter(toc, [{ chapterIndex: 2, part: 1, totalParts: 3 }], new Set())).toBeNull();
   });
 });

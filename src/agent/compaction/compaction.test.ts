@@ -266,9 +266,10 @@ describe("serializeConversation", () => {
     expect(text).toContain("[Tool result search_in_book]: 3 hits");
   });
 
-  it("drops thinking, Book text from read_chapter, and the Book snapshot", () => {
+  it("drops thinking, Book text from read_chapter, the Book snapshot and chapter recaps", () => {
     const messages = [
       { role: "custom", customType: "bookSnapshot", content: "snapshot", display: false, timestamp: 0 },
+      { role: "custom", customType: "guideRecap", content: "Chapter recap", display: true, timestamp: 1 },
       { role: "assistant", content: [{ type: "thinking", thinking: "pondering" }, { type: "toolCall", id: "t", name: "read_chapter", arguments: { chapterIndex: 0 } }], timestamp: 2 },
       { role: "toolResult", toolCallId: "t", toolName: "read_chapter", content: [{ type: "text", text: "chapter text" }], isError: false, timestamp: 3 },
     ] as AgentMessage[];

@@ -1321,51 +1321,134 @@ export function bookToc(book: ParsedBook): BookTocEntry[] {
   }));
 }
 
+// Cost of cutting a chapter before a block (see `chapterWindows`).
+const CUT_BEFORE_SECTION = 0;
+const CUT_BEFORE_SUBSECTION = 0.25;
+const CUT_AT_PARAGRAPH = 1;
+const CUT_AFTER_HEADING = 50;
+// Weight of a part's squared relative deviation from the chapter's mean part size.
+const PART_IMBALANCE_WEIGHT = 4;
+// Cost of one part more than the minimal count.
+const EXTRA_PART = 0.75;
+
+const HEADING = /^(#{1,6}) /;
+const SCENE_BREAK = /^[*\-_·•◇◆○●※~～＊\s]{3,}$/u;
+
+interface WindowBlock {
+  text: string;
+  /** Cost of a cut just before this block. */
+  cut: number;
+}
+
 /**
- * Paragraph-aligned window packing (design §7): split the markdown on
- * `\n\n` into blocks, greedily pack blocks into windows of at most
- * `CHAPTER_PART_CHARS` (+2 accounting for the `\n\n` join separator), and
- * hard-split only a single block that alone exceeds the limit. Windows joined
+ * The chapter as packable blocks: its `\n\n` paragraphs, with a block longer
+ * than `CHAPTER_PART_CHARS` (e.g. a huge `<pre>`) hard-split into full-size
+ * pieces and a residual piece. A full piece fills a window alone, so pieces
+ * never join each other and every join of two blocks is an original `\n\n`.
+ */
+function windowBlocks(markdown: string): WindowBlock[] {
+  const blocks: WindowBlock[] = [];
+  let afterHeading = false;
+  for (const text of markdown.split("\n\n")) {
+    if (!text) continue;
+    const heading = HEADING.exec(text);
+    const cut = afterHeading
+      ? CUT_AFTER_HEADING
+      : heading
+        ? heading[1].length <= 2 ? CUT_BEFORE_SECTION : CUT_BEFORE_SUBSECTION
+        : SCENE_BREAK.test(text) ? CUT_BEFORE_SUBSECTION : CUT_AT_PARAGRAPH;
+    afterHeading = !!heading;
+    if (text.length <= CHAPTER_PART_CHARS) {
+      blocks.push({ text, cut });
+      continue;
+    }
+    for (let start = 0; start < text.length; start += CHAPTER_PART_CHARS) {
+      blocks.push({ text: text.slice(start, start + CHAPTER_PART_CHARS), cut: start === 0 ? cut : 0 });
+    }
+  }
+  return blocks;
+}
+
+/** The fewest windows the blocks pack into, in order (greedy is optimal). */
+function minimalWindowCount(blocks: readonly WindowBlock[]): number {
+  let count = 0;
+  let length = -1;
+  for (const block of blocks) {
+    if (length >= 0 && length + 2 + block.text.length <= CHAPTER_PART_CHARS) {
+      length += 2 + block.text.length;
+    } else {
+      count += 1;
+      length = block.text.length;
+    }
+  }
+  return count;
+}
+
+/**
+ * The cheapest split of `blocks` into exactly `count` windows of at most
+ * `CHAPTER_PART_CHARS`, by dynamic programming over (windows, blocks): the
+ * cut costs plus the size imbalance. Returns the window start indices.
+ */
+function cheapestSplit(blocks: readonly WindowBlock[], count: number): { cost: number; starts: number[] } | null {
+  const offsets = [0];
+  for (const block of blocks) offsets.push(offsets[offsets.length - 1] + block.text.length + 2);
+  const windowLength = (from: number, to: number) => offsets[to] - offsets[from] - 2;
+  const target = windowLength(0, blocks.length) / count;
+  const n = blocks.length;
+  // cost[k][j]: blocks [0, j) in k windows; from[k][j]: where the k-th window starts.
+  const cost = Array.from({ length: count + 1 }, () => new Array<number>(n + 1).fill(Infinity));
+  const from = Array.from({ length: count + 1 }, () => new Array<number>(n + 1).fill(-1));
+  cost[0][0] = 0;
+  for (let k = 1; k <= count; k += 1) {
+    for (let j = k; j <= n; j += 1) {
+      // k windows hold blocks [0, j), and the blocks after j fit in the rest.
+      if (windowLength(0, j) > k * (CHAPTER_PART_CHARS + 2) - 2) break;
+      if (j < n && windowLength(j, n) > (count - k) * (CHAPTER_PART_CHARS + 2) - 2) continue;
+      for (let i = j - 1; i >= k - 1; i -= 1) {
+        const length = windowLength(i, j);
+        if (length > CHAPTER_PART_CHARS) break;
+        if (cost[k - 1][i] === Infinity) continue;
+        const deviation = (length - target) / target;
+        const value = cost[k - 1][i] + (i > 0 ? blocks[i].cut : 0) + PART_IMBALANCE_WEIGHT * deviation * deviation;
+        if (value < cost[k][j]) {
+          cost[k][j] = value;
+          from[k][j] = i;
+        }
+      }
+    }
+  }
+  if (cost[count][n] === Infinity) return null;
+  const starts: number[] = [];
+  for (let k = count, j = n; k > 0; k -= 1) {
+    j = from[k][j];
+    starts.unshift(j);
+  }
+  return { cost: cost[count][n], starts };
+}
+
+/**
+ * Section-aligned window packing: split the markdown on `\n\n` into blocks
+ * and cut it into windows of at most `CHAPTER_PART_CHARS` (+2 accounting for
+ * the `\n\n` join separator) where a reader would pause. A cut just before a
+ * heading or scene break is cheap, one right after a heading is near
+ * forbidden, and parts of a chapter should be about the same size; the
+ * minimal part count may grow by one when that buys better cuts. Only a
+ * single block that alone exceeds the limit is hard-split. Windows joined
  * back with `\n\n` reproduce the original markdown at every block boundary
  * that was NOT introduced by a hard split: the pieces of an oversized block
  * are exact consecutive slices of it (the residual final piece keeps packing
  * with following blocks). Every window is complete Markdown.
  */
 export function chapterWindows(markdown: string): string[] {
-  const blocks = markdown.split("\n\n");
-  const windows: string[] = [];
-  let current = "";
-  const seal = () => {
-    if (current) windows.push(current);
-    current = "";
-  };
-  for (const block of blocks) {
-    if (!block) continue;
-    if (block.length > CHAPTER_PART_CHARS) {
-      // Oversized single block (e.g. a huge <pre>): hard-split into full-size
-      // windows; the residual final piece becomes `current` so following
-      // blocks can pack with it instead of wasting a near-empty window.
-      seal();
-      const fullPieces = Math.floor(block.length / CHAPTER_PART_CHARS);
-      for (let piece = 0; piece < fullPieces; piece += 1) {
-        windows.push(block.slice(piece * CHAPTER_PART_CHARS, (piece + 1) * CHAPTER_PART_CHARS));
-      }
-      current = block.slice(fullPieces * CHAPTER_PART_CHARS);
-      continue;
-    }
-    if (!current) {
-      current = block;
-      continue;
-    }
-    if (current.length + 2 + block.length <= CHAPTER_PART_CHARS) {
-      current = `${current}\n\n${block}`;
-    } else {
-      windows.push(current);
-      current = block;
-    }
-  }
-  seal();
-  return windows.length ? windows : [""];
+  const blocks = windowBlocks(markdown);
+  if (!blocks.length) return [""];
+  const minimal = minimalWindowCount(blocks);
+  if (minimal === 1) return [blocks.map((block) => block.text).join("\n\n")];
+  const fewest = cheapestSplit(blocks, minimal)!;
+  const more = minimal < blocks.length ? cheapestSplit(blocks, minimal + 1) : null;
+  const { starts } = more && more.cost + EXTRA_PART < fewest.cost ? more : fewest;
+  return starts.map((start, index) =>
+    blocks.slice(start, starts[index + 1] ?? blocks.length).map((block) => block.text).join("\n\n"));
 }
 
 // The TOC reports part counts on every prompt; pack each chapter once.
