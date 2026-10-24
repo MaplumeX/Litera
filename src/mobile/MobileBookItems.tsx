@@ -21,7 +21,7 @@ interface MobileBookItemProps {
 }
 
 /** "35% read", "Finished" or "Not started": the one line under a cover. */
-function useProgressCaption(book: BookRecord, opening: boolean): string {
+export function useProgressCaption(book: BookRecord, opening: boolean): string {
   const { t } = useT();
   if (opening) return t("library.opening");
   if (book.readingStatus === "finished") return t("library.status.finished");

@@ -507,8 +507,7 @@ export const en: { [K in MessageKey]: string } = {
   "agent.chatgptSignedInNoEmail": "Signed in",
   "agent.chatgptSignOut": "Sign out",
 
-  "mobile.menu": "Menu",
-  "mobile.drawer": "Library menu",
+  "mobile.menu": "More options",
   "mobile.bookActions": "Actions for “{title}”",
   "mobile.toc": "Contents",
   "mobile.annotations": "Annotations",
@@ -536,6 +535,7 @@ export const en: { [K in MessageKey]: string } = {
   "mobile.order": "Order",
   "mobile.readPct": "{pct}% read",
   "mobile.notStarted": "Not started",
+  "mobile.startReading": "Start reading",
   "mobile.readingSettings": "Reading settings",
   "mobile.moreSettings": "More settings",
   "mobile.night": "Night",

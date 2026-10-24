@@ -12,6 +12,7 @@ import {
   Sun,
   Type,
   Undo2,
+  X,
   type LucideIcon,
 } from "lucide-react";
 import { ReaderView, type SelectionCapture } from "@/components/ReaderView";
@@ -32,10 +33,11 @@ import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { AppBarIconButton, MobileAppBar } from "@/mobile/MobileAppBar";
 import { AssistantSheet } from "@/mobile/AssistantSheet";
-import { MobileSheet } from "@/mobile/MobileSheet";
+import { MobileDrawer } from "@/mobile/MobileDrawer";
 import { ReaderQuickSettings } from "@/mobile/ReaderQuickSettings";
 
-export type ReaderPanel = "toc" | "search" | "annotations";
+export type ReaderPanel = "toc" | "search" | "annotations" | "settings";
+type DrawerPanel = Extract<ReaderPanel, "toc" | "annotations">;
 
 /** An icon over a short label: the bottom toolbar's entries. */
 function ToolbarTab({
@@ -165,8 +167,10 @@ interface MobileReaderPageProps {
  * The phone's Reader: the Book edge to edge with a running head and foot,
  * tap zones and swipes to turn pages, and a middle tap for the toolbars: an
  * app bar on top, progress and the reader's tools at the bottom (contents,
- * notes, assistant, day/night, reading settings). The assistant is a bottom
- * sheet.
+ * notes, assistant, day/night, reading settings, which open in the toolbar
+ * itself). The assistant is a bottom
+ * sheet; contents and notes share a drawer from the left; search turns the
+ * app bar into its field over a page of results.
  */
 export function MobileReaderPage({
   session,
@@ -184,7 +188,14 @@ export function MobileReaderPage({
   const chatRef = useRef<ChatPanelHandle>(null);
   const pendingCaptureRef = useRef<SelectionCapture | null>(null);
   const pendingQuoteRef = useRef<{ href: string; quote: string } | null>(null);
-  const [quickSettingsOpen, setQuickSettingsOpen] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const searching = panel === "search";
+  const quickSettingsOpen = panel === "settings" && chromeVisible;
+  // The drawer keeps its tab while it slides out after closing.
+  const drawerPanel = panel === "toc" || panel === "annotations" ? panel : null;
+  const lastDrawerPanelRef = useRef<DrawerPanel>("toc");
+  if (drawerPanel) lastDrawerPanelRef.current = drawerPanel;
+  const drawerTab = drawerPanel ?? lastDrawerPanelRef.current;
   const [footerSettings] = useReaderFooter();
 
   // "Ask" on a selection: open the sheet with the passage attached.
@@ -235,18 +246,20 @@ export function MobileReaderPage({
     return () => cancelAnimationFrame(frame);
   }, [readerRef, snap]);
 
+  useEffect(() => {
+    if (searching) searchInputRef.current?.focus();
+  }, [searching]);
+
   const jumpAndClose = async (cfi: string, fraction?: number) => {
     await session.jumpToCfi(cfi, fraction);
     onPanelChange(null);
   };
 
   const bookTitle = session.bookTitle;
-  const panelTitle =
-    panel === "toc"
-      ? t("mobile.toc")
-      : panel === "search"
-        ? t("search.title")
-        : t("mobile.annotations");
+  const drawerTabs: { value: DrawerPanel; label: string }[] = [
+    { value: "toc", label: t("mobile.toc") },
+    { value: "annotations", label: t("mobile.annotations") },
+  ];
   const dark = session.resolvedTheme === "dark";
   const paginated = session.readerFlow === "paginated";
   const reserveFooter = !paginated && footerSettings.enabled &&
@@ -274,9 +287,13 @@ export function MobileReaderPage({
             initialCfi={currentBook?.lastCfi}
             onBookReady={session.handleBookReady}
             onHistoryChange={session.setReaderHistory}
-            keysDisabled={snap === "full"}
+            keysDisabled={snap === "full" || searching}
             stylesCss={session.stylesCss}
-            onMiddleTap={onToggleChrome}
+            onMiddleTap={() => {
+              // Hiding the toolbars puts the "Aa" settings away with them.
+              if (panel === "settings") onPanelChange(null);
+              onToggleChrome();
+            }}
           />
         )}
         {/* The running head stays in the paginated top margin. */}
@@ -355,7 +372,21 @@ export function MobileReaderPage({
               !chromeVisible && "invisible translate-y-full",
             )}
           >
-            <MobileProgressRow session={session} />
+            {/* The "Aa" settings stand in for the progress row, over the tabs. */}
+            {quickSettingsOpen ? (
+              <ReaderQuickSettings
+                styleState={session.styleState}
+                onTypographyChange={session.handleTypographyChange}
+                flow={session.readerFlow}
+                onFlowChange={session.setReaderFlow}
+                onMoreSettings={() => {
+                  onPanelChange(null);
+                  onOpenTypography();
+                }}
+              />
+            ) : (
+              <MobileProgressRow session={session} />
+            )}
             <nav className="grid grid-cols-5 px-1 pb-1">
               <ToolbarTab icon={List} label={t("mobile.toc")} onClick={() => onPanelChange("toc")} />
               <ToolbarTab
@@ -377,26 +408,12 @@ export function MobileReaderPage({
               <ToolbarTab
                 icon={Type}
                 label={t("mobile.readingSettings")}
-                onClick={() => setQuickSettingsOpen(true)}
+                pressed={quickSettingsOpen}
+                onClick={() => onPanelChange(quickSettingsOpen ? null : "settings")}
               />
             </nav>
           </div>
       </>
-
-      <ReaderQuickSettings
-        open={quickSettingsOpen}
-        onOpenChange={setQuickSettingsOpen}
-        styleState={session.styleState}
-        onTypographyChange={session.handleTypographyChange}
-        theme={session.globalTheme}
-        onThemeChange={session.setGlobalTheme}
-        flow={session.readerFlow}
-        onFlowChange={session.setReaderFlow}
-        onMoreSettings={() => {
-          setQuickSettingsOpen(false);
-          onOpenTypography();
-        }}
-      />
 
       {fileData && (
         <AssistantSheet
@@ -409,52 +426,108 @@ export function MobileReaderPage({
         />
       )}
 
-      <MobileSheet
-        open={panel !== null}
+      {searching && (
+        <div className="absolute inset-0 z-30 flex flex-col bg-background m-enter-fade">
+          <MobileAppBar>
+            <AppBarIconButton label={t("mobile.closeSearch")} onClick={() => onPanelChange(null)}>
+              <ArrowLeft />
+            </AppBarIconButton>
+            <input
+              ref={searchInputRef}
+              type="search"
+              enterKeyHint="search"
+              placeholder={t("search.placeholder")}
+              aria-label={t("search.label")}
+              value={bookSearch.query}
+              onChange={(event) => bookSearch.setQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter") return;
+                // Search now rather than after the pause, and put the keyboard away.
+                event.preventDefault();
+                if (bookSearch.status === "idle") bookSearch.submit(1);
+                event.currentTarget.blur();
+              }}
+              className="h-12 min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-muted-foreground [&::-webkit-search-cancel-button]:hidden"
+            />
+            {bookSearch.query && (
+              <AppBarIconButton
+                label={t("search.clear")}
+                onClick={() => {
+                  bookSearch.reset();
+                  searchInputRef.current?.focus();
+                }}
+              >
+                <X />
+              </AppBarIconButton>
+            )}
+          </MobileAppBar>
+          <div className="min-h-0 flex-1 pt-2 pb-[var(--safe-bottom)]">
+            <BookSearchPanel
+              showField={false}
+              query={bookSearch.query}
+              onQueryChange={bookSearch.setQuery}
+              onSubmit={bookSearch.submit}
+              onStep={bookSearch.step}
+              onSelect={(hit) => {
+                bookSearch.select(hit);
+                onPanelChange(null);
+              }}
+              onClear={bookSearch.reset}
+              results={bookSearch.results}
+              status={bookSearch.status}
+              activeCfi={bookSearch.activeCfi}
+              focusToken={0}
+            />
+          </div>
+        </div>
+      )}
+
+      <MobileDrawer
+        open={drawerPanel !== null}
         onOpenChange={(open) => {
           if (!open) onPanelChange(null);
         }}
-        title={panelTitle}
-        className="h-[85vh]"
-      >
-        {panel === "toc" && (
-          <div className="flex h-full flex-col">
-            <div className="flex justify-end px-2">
+        title={drawerTab === "toc" ? t("mobile.toc") : t("mobile.annotations")}
+        header={
+          <div className="flex shrink-0 items-center gap-1 px-3 pb-2">
+            <div role="tablist" className="flex min-w-0 flex-1 gap-1">
+              {drawerTabs.map((tab) => (
+                <button
+                  key={tab.value}
+                  type="button"
+                  role="tab"
+                  aria-selected={drawerTab === tab.value}
+                  onClick={() => onPanelChange(tab.value)}
+                  className={cn(
+                    "h-10 min-w-0 truncate rounded-full px-4 text-[0.9375rem] transition-colors active:bg-foreground/5 motion-reduce:transition-none",
+                    drawerTab === tab.value ? "bg-secondary font-medium text-secondary-foreground" : "text-foreground/80",
+                  )}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+            {drawerTab === "toc" && (
               <TocSidebarActions
                 onExpandAll={session.handleTocExpandAll}
                 onCollapseAll={session.handleTocCollapseAll}
               />
-            </div>
-            <TocSidebar
-              toc={toc}
-              currentHref={progress.chapterHref}
-              expanded={session.tocExpanded}
-              onToggle={session.handleTocToggle}
-              onGoTo={(href) => {
-                session.goToChapterHref(href);
-                onPanelChange(null);
-              }}
-            />
+            )}
           </div>
-        )}
-        {panel === "search" && (
-          <BookSearchPanel
-            query={bookSearch.query}
-            onQueryChange={bookSearch.setQuery}
-            onSubmit={bookSearch.submit}
-            onStep={bookSearch.step}
-            onSelect={(hit) => {
-              bookSearch.select(hit);
+        }
+      >
+        {drawerTab === "toc" ? (
+          <TocSidebar
+            toc={toc}
+            currentHref={progress.chapterHref}
+            expanded={session.tocExpanded}
+            onToggle={session.handleTocToggle}
+            onGoTo={(href) => {
+              session.goToChapterHref(href);
               onPanelChange(null);
             }}
-            onClear={bookSearch.reset}
-            results={bookSearch.results}
-            status={bookSearch.status}
-            activeCfi={bookSearch.activeCfi}
-            focusToken={0}
           />
-        )}
-        {panel === "annotations" && (
+        ) : (
           <AnnotationsSidebar
             bookmarks={annotations.bookmarks}
             highlights={annotations.highlights}
@@ -465,7 +538,7 @@ export function MobileReaderPage({
             onDeleteHighlight={session.handleDeleteHighlight}
           />
         )}
-      </MobileSheet>
+      </MobileDrawer>
     </div>
   );
 }

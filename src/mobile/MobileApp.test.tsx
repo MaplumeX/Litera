@@ -165,7 +165,7 @@ let downloadSize: number | null;
 let incomingResult: ImportBookResult | undefined;
 
 function setupInvoke() {
-  invokeMock.mockImplementation((cmd: string) => {
+  invokeMock.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
     switch (cmd) {
       case "list_books":
         return Promise.resolve(books);
@@ -192,6 +192,14 @@ function setupInvoke() {
         return Promise.resolve(downloadSize);
       case "import_incoming_book":
         return Promise.resolve(incomingResult);
+      case "update_book_curation": {
+        const target = books.find((item) => item.id === args?.bookId);
+        return Promise.resolve({
+          ...target,
+          ...(args?.readingStatus != null && { readingStatus: args.readingStatus }),
+          ...(args?.starred != null && { starred: args.starred }),
+        });
+      }
       default:
         return Promise.resolve(undefined);
     }
@@ -351,6 +359,68 @@ describe("MobileApp — navigation", () => {
     expect(screen.queryByRole("button", { name: t("reader.backToLibrary") })).toBeNull();
     expect(bridge.api.setImmersive).toHaveBeenLastCalledWith(true);
   });
+
+  it("shows a Book's sheet on long-press: star and status apply in place, other actions close it", async () => {
+    const screen = await renderApp();
+    const shelf = screen.container.querySelector('[data-shelf="main"]') as HTMLElement;
+    fireEvent.contextMenu(within(shelf).getAllByTitle("第一本书")[0]);
+    const sheet = await screen.findByRole("dialog", { name: t("mobile.bookActions", { title: "第一本书" }) });
+
+    const star = within(sheet).getByRole("button", { name: t("library.star") });
+    expect(star.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(star);
+    await waitFor(() => expect(star.getAttribute("aria-pressed")).toBe("true"));
+
+    const paused = within(sheet).getByRole("radio", { name: t("library.status.paused") });
+    fireEvent.click(paused);
+    await waitFor(() => expect(paused.getAttribute("aria-checked")).toBe("true"));
+    expect(screen.getByRole("dialog", { name: t("mobile.bookActions", { title: "第一本书" }) })).toBeTruthy();
+
+    fireEvent.click(within(sheet).getByRole("button", { name: t("library.details") }));
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: t("mobile.bookActions", { title: "第一本书" }) })).toBeNull(),
+    );
+  });
+
+  it("changes sort and view from the app bar menu, which stays open for the next choice", async () => {
+    const screen = await renderApp();
+    fireEvent.pointerDown(screen.getByRole("button", { name: t("mobile.sortAndView") }));
+    const list = await screen.findByRole("menuitemradio", { name: t("library.viewList") });
+    expect(list.getAttribute("aria-checked")).toBe("false");
+
+    fireEvent.click(list);
+    expect(screen.getByRole("menuitemradio", { name: t("library.viewList") }).getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByRole("menu")).toBeTruthy();
+    expect(screen.container.querySelector('[data-shelf="main"]')?.className).not.toContain("grid");
+  });
+
+  it("searches the Book from the app bar, and Back closes the search before the toolbars", async () => {
+    const screen = await renderApp();
+    await openBook(screen);
+    fireEvent.click(screen.getByText("middle-tap"));
+
+    fireEvent.click(screen.getByRole("button", { name: t("search.title") }));
+    const field = screen.getByRole("searchbox", { name: t("search.label") });
+    expect(document.activeElement).toBe(field);
+    expect(screen.queryByRole("dialog")).toBeNull();
+
+    await back();
+    expect(screen.queryByRole("searchbox")).toBeNull();
+    expect(screen.getByRole("button", { name: t("reader.backToLibrary") })).toBeTruthy();
+  });
+
+  it("keeps contents and notes in one drawer, switched by tabs", async () => {
+    const screen = await renderApp();
+    await openBook(screen);
+    fireEvent.click(screen.getByText("middle-tap"));
+
+    fireEvent.click(screen.getByRole("button", { name: t("mobile.annotations") }));
+    const drawer = await screen.findByRole("dialog", { name: t("mobile.annotations") });
+    expect(within(drawer).getByRole("tab", { name: t("mobile.annotations") }).getAttribute("aria-selected")).toBe("true");
+
+    fireEvent.click(within(drawer).getByRole("tab", { name: t("mobile.toc") }));
+    expect(screen.getByRole("dialog", { name: t("mobile.toc") })).toBeTruthy();
+  });
 });
 
 describe("MobileApp — system bars", () => {
@@ -411,12 +481,12 @@ describe("MobileApp — system bars", () => {
 });
 
 describe("MobileApp — reading settings", () => {
-  it("changes the text size from the reader's settings sheet", async () => {
+  it("changes the text size from the reader's settings in the toolbar", async () => {
     const screen = await renderApp();
     await openBook(screen);
     fireEvent.click(screen.getByText("middle-tap"));
     fireEvent.click(screen.getByRole("button", { name: t("mobile.readingSettings") }));
-    const sheet = await screen.findByRole("dialog", { name: t("mobile.readingSettings") });
+    const sheet = await screen.findByRole("region", { name: t("mobile.readingSettings") });
 
     readerHandle.setStyles.mockClear();
     fireEvent.click(
@@ -435,7 +505,7 @@ describe("MobileApp — reading settings", () => {
     await openBook(screen);
     fireEvent.click(screen.getByText("middle-tap"));
     fireEvent.click(screen.getByRole("button", { name: t("mobile.readingSettings") }));
-    const sheet = await screen.findByRole("dialog", { name: t("mobile.readingSettings") });
+    const sheet = await screen.findByRole("region", { name: t("mobile.readingSettings") });
 
     fireEvent.click(within(sheet).getByRole("button", { name: new RegExp(`^${t("settings.font")}:`) }));
     expect(within(sheet).getAllByRole("radio").map((option) => option.textContent)).toEqual([
@@ -465,6 +535,30 @@ describe("MobileApp — reading settings", () => {
     expect(screen.getByRole("button", { name: t("mobile.device") })).toBeTruthy();
     await back();
     await waitFor(() => expect(screen.queryByRole("dialog", { name: t("settings.title") })).toBeNull());
+  });
+
+  it("opens the settings in place of the progress row, without covering the page", async () => {
+    const screen = await renderApp();
+    await openBook(screen);
+    fireEvent.click(screen.getByText("middle-tap"));
+    const aa = screen.getByRole("button", { name: t("mobile.readingSettings") });
+
+    fireEvent.click(aa);
+    expect(screen.getByRole("region", { name: t("mobile.readingSettings") })).toBeTruthy();
+    expect(screen.queryByRole("slider", { name: t("reader.progress") })).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(aa.getAttribute("aria-pressed")).toBe("true");
+
+    // Back puts the settings away and leaves the toolbars up.
+    await back();
+    expect(screen.queryByRole("region", { name: t("mobile.readingSettings") })).toBeNull();
+    expect(screen.getByRole("slider", { name: t("reader.progress") })).toBeTruthy();
+
+    // Hiding the toolbars closes the settings too.
+    fireEvent.click(aa);
+    fireEvent.click(screen.getByText("middle-tap"));
+    fireEvent.click(screen.getByText("middle-tap"));
+    expect(screen.queryByRole("region", { name: t("mobile.readingSettings") })).toBeNull();
   });
 });
 
@@ -681,7 +775,7 @@ describe("MobileApp — Sync lifecycle", () => {
 });
 
 describe("MobileApp — volume keys and settings", () => {
-  it("configures the footer from reading settings and reserves space during scrolled reading", async () => {
+  it("configures the footer from Settings and reserves space during scrolled reading", async () => {
     localStorage.setItem(READER_FLOW_KEY, "scrolled");
     const screen = await renderApp();
     await openBook(screen);
@@ -690,9 +784,14 @@ describe("MobileApp — volume keys and settings", () => {
     expect(within(reader).getByTestId("reader-footer")).toBeTruthy();
     expect(page.style.paddingBottom).toBe("3rem");
 
+    // The footer lives in Settings, a step back from the typography page.
     fireEvent.click(screen.getByText("middle-tap"));
     fireEvent.click(screen.getByRole("button", { name: t("mobile.readingSettings") }));
-    const settings = await screen.findByRole("dialog", { name: t("mobile.readingSettings") });
+    fireEvent.click(await screen.findByRole("button", { name: t("mobile.moreSettings") }));
+    await screen.findByRole("dialog", { name: t("settings.typography") });
+    await back();
+    fireEvent.click(await screen.findByRole("button", { name: t("reader.footer.title") }));
+    const settings = await screen.findByRole("dialog", { name: t("reader.footer.title") });
     fireEvent.click(within(settings).getByRole("switch", { name: t("reader.footer.show") }));
     expect(within(reader).queryByTestId("reader-footer")).toBeNull();
     expect(page.style.paddingBottom).toBe("");
@@ -727,8 +826,8 @@ describe("MobileApp — volume keys and settings", () => {
 
   it("offers the phone's own settings and none of the desktop window controls", async () => {
     const screen = await renderApp();
-    fireEvent.click(screen.getByRole("button", { name: t("mobile.menu") }));
-    fireEvent.click(await screen.findByRole("button", { name: t("library.settings") }));
+    fireEvent.pointerDown(screen.getByRole("button", { name: t("mobile.menu") }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: t("library.settings") }));
     fireEvent.click(await screen.findByRole("button", { name: t("mobile.device") }));
 
     const volume = screen.getByRole("switch", { name: t("mobile.volumeKeys") });

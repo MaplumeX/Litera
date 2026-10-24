@@ -311,13 +311,17 @@ export default function MobileApp() {
     setSettingsOpen(false);
   }, [session.flushReadingState]);
 
-  // Back closes the innermost layer: a dialog or the selection, then the
-  // assistant sheet, then the reader toolbars, then the Reader itself. On
+  // Back closes the innermost layer: a dialog, the search, the "Aa" settings or the selection,
+  // then the assistant sheet, then the reader toolbars, then the Reader itself. On
   // the Library it closes the search, then leaves the app.
   const handleBack = () => {
     commitBackPreview();
     if (closeTopOverlay()) return;
     if (page === "reader") {
+      if (panel === "search" || panel === "settings") {
+        setPanel(null);
+        return;
+      }
       if (session.readerRef.current?.dismissSelection()) return;
       if (snap !== "collapsed") {
         handleSnapChange("collapsed");
@@ -356,7 +360,7 @@ export default function MobileApp() {
     const element = pageElementRef.current;
     if (!element) return null;
     if (page === "trash") return { element, kind: "page" };
-    if (page !== "reader" || snap !== "collapsed" || chromeVisible) return null;
+    if (page !== "reader" || snap !== "collapsed" || chromeVisible || panel === "search") return null;
     if (session.readerRef.current?.hasSelection()) return null;
     return { element, kind: "page" };
   };
