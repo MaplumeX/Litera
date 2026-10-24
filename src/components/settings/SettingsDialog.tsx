@@ -108,7 +108,6 @@ const ALIGN_LABEL_KEYS: Record<(typeof TEXT_ALIGNS)[number]["value"], MessageKey
 const STEPPER_ROWS: { key: ContinuousKey; labelKey: MessageKey }[] = [
   { key: "fontSize", labelKey: "settings.slider.fontSize" },
   { key: "lineHeight", labelKey: "settings.slider.lineHeight" },
-  { key: "contentWidth", labelKey: "settings.slider.contentWidth" },
   { key: "pagePadding", labelKey: "settings.slider.pagePadding" },
   { key: "letterSpacing", labelKey: "settings.slider.letterSpacing" },
   { key: "paragraphSpacing", labelKey: "settings.slider.paragraphSpacing" },

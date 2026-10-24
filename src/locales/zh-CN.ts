@@ -279,7 +279,6 @@ export const zhCN = {
   "settings.override.on": "开",
   "settings.slider.fontSize": "字体大小",
   "settings.slider.lineHeight": "行距",
-  "settings.slider.contentWidth": "版心宽度",
   "settings.slider.pagePadding": "左右内边距",
   "settings.slider.letterSpacing": "字间距",
   "settings.slider.paragraphSpacing": "段距",
