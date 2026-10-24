@@ -36,6 +36,9 @@ export const tauriSessionPort: SessionPort = {
     notifySyncActivity();
     return leafId;
   },
-  delete(bookId, sessionId) { return invoke("delete_agent_session", { bookId, sessionId }); },
+  async delete(bookId, sessionId) {
+    await invoke("delete_agent_session", { bookId, sessionId });
+    notifySyncActivity();
+  },
 };
 

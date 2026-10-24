@@ -20,13 +20,17 @@ async function harness() {
   const events: AgentEvent[] = [];
   let stored = session([first]);
   let lists = 0;
+  let deleted = false;
   const sessions: SessionPort = {
     create: async () => stored,
     list: async () => {
       lists += 1;
-      return [];
+      return deleted ? [] : [{ id: "session-1", title: "first question", createdAt: "", updatedAt: "" }];
     },
-    load: async () => stored,
+    load: async () => {
+      if (deleted) throw new Error("Unknown session");
+      return stored;
+    },
     setLeaf: async () => stored,
     delete: async () => {},
     append: async () => null,
@@ -50,6 +54,9 @@ async function harness() {
     lists: () => lists,
     setStored: (next: DecodedPiSession) => {
       stored = next;
+    },
+    deleteElsewhere: () => {
+      deleted = true;
     },
   };
 }
@@ -76,5 +83,17 @@ describe("LiteraAgentRuntime after a Sync pass", () => {
 
     expect(lists()).toBe(before + 1);
     expect(events.some((event) => event.type === "session_switched")).toBe(false);
+  });
+
+  it("closes the open session when another device deleted it", async () => {
+    const { runtime, events, deleteElsewhere } = await harness();
+    deleteElsewhere();
+
+    await runtime.refreshAfterSync();
+
+    expect(events.find((event) => event.type === "session_deleted")).toMatchObject({
+      bookId: "book",
+      sessionId: "session-1",
+    });
   });
 });

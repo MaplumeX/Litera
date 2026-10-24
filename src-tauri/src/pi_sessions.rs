@@ -123,10 +123,13 @@ impl PiSessionStore {
                 }
             }
         }
-        if matches.len() != 1 {
-            return Err(AppError::invalid_input("Unknown or duplicate session"));
+        // Kept apart: "Unknown session" is how a merge learns the session is
+        // new to this device.
+        match matches.len() {
+            0 => Err(AppError::invalid_input("Unknown session")),
+            1 => Ok(matches.remove(0)),
+            _ => Err(AppError::invalid_input("Duplicate session")),
         }
-        Ok(matches.remove(0))
     }
 
     pub fn create(&self, book_id: &str) -> AppResult<LoadedPiSession> {
@@ -402,6 +405,35 @@ impl PiSessionStore {
             }
         }
         Ok(())
+    }
+
+    /// Delete a session another device deleted, unless it changed here since
+    /// the last sync (`expected_hash` is the content hash Sync last saw), in
+    /// which case it stays and uploads again. Returns whether it was deleted.
+    pub fn delete_if_unchanged(
+        &self,
+        book_id: &str,
+        session_id: &str,
+        expected_hash: &str,
+    ) -> AppResult<bool> {
+        let _guard = self
+            .gate
+            .lock()
+            .map_err(|_| AppError::storage_io("Session lock is poisoned"))?;
+        let path = self.find_file(book_id, session_id)?;
+        let bytes = fs::read(&path)
+            .map_err(|error| AppError::storage_io(format!("Failed to read session: {error}")))?;
+        if crate::library::sha256_hex(&bytes) != expected_hash {
+            return Ok(false);
+        }
+        fs::remove_file(&path)
+            .map_err(|error| AppError::storage_io(format!("Failed to delete session: {error}")))?;
+        if let Err(error) = fs::remove_file(leaf_sidecar_path(&path)) {
+            if error.kind() != std::io::ErrorKind::NotFound {
+                eprintln!("[sessions] Failed to delete leaf sidecar for {session_id}: {error}");
+            }
+        }
+        Ok(true)
     }
 
     /// A local session file located for the Sync Backend.
@@ -1658,6 +1690,26 @@ mod sync_merge_tests {
         let summaries = store.list("book-1").unwrap();
         assert_eq!(summaries.len(), 1);
         assert_eq!(summaries[0].id, "session42");
+    }
+
+    #[test]
+    fn merging_an_unseen_session_next_to_existing_ones_creates_it_locally() {
+        let (_temp, store) = store();
+        store.create("book-1").unwrap();
+        let remote = format!(
+            "{}\n{}\n",
+            serde_json::to_string(&json!({
+                "type": "session", "version": 3, "id": "session42",
+                "timestamp": "2026-01-01T00:00:00Z", "cwd": "",
+            }))
+            .unwrap(),
+            serde_json::to_string(&message("entry001", None, "from another device")).unwrap(),
+        );
+
+        store.merge_remote_session("book-1", &remote).unwrap();
+
+        assert_eq!(store.load("book-1", "session42").unwrap().entries.len(), 1);
+        assert_eq!(store.list("book-1").unwrap().len(), 2);
     }
 
     #[test]

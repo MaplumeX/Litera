@@ -52,7 +52,11 @@ export function useAgentBridge(bookId: string) {
     });
     queueMicrotask(() => embeddedAgentRuntime.syncBook(bookIdRef.current));
     const onSessionsSynced = () => {
-      void embeddedAgentRuntime.refreshAfterSync().catch((error) =>
+      // The list carries a request id: the reducer drops unrequested lists,
+      // which used to hide sessions another device created.
+      const requestId = id("list-sessions");
+      dispatch({ type: "session_list_requested", requestId });
+      void embeddedAgentRuntime.refreshAfterSync(requestId).catch((error) =>
         console.error("refresh synced sessions error:", error));
     };
     window.addEventListener("litera:sessions-synced", onSessionsSynced);
