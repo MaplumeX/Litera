@@ -281,7 +281,6 @@ export const en: { [K in MessageKey]: string } = {
   "settings.override.on": "On",
   "settings.slider.fontSize": "Font size",
   "settings.slider.lineHeight": "Line height",
-  "settings.slider.contentWidth": "Content width",
   "settings.slider.pagePadding": "Side padding",
   "settings.slider.letterSpacing": "Letter spacing",
   "settings.slider.paragraphSpacing": "Paragraph spacing",
