@@ -26,6 +26,7 @@ import {
   type WheelPagingState,
 } from "@/lib/reader-paging";
 import type { ReaderFlow } from "@/lib/reader-flow";
+import { hideUntilFontsReady } from "@/lib/reader-font-gate";
 import { opensImageViewer, readerImageAt, type ReaderImage } from "@/lib/reader-images";
 import {
   QUOTE_FLASH_MS,
@@ -784,6 +785,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         unbindDoc = undefined;
         const doc = (e as CustomEvent<{ doc?: Document }>).detail?.doc;
         if (!doc) return;
+        void hideUntilFontsReady(doc);
         const unbindPointer = bindPointerPaging(
           doc,
           (ev) => pageLocalX(ev.clientX, pageWidthOf(doc)),

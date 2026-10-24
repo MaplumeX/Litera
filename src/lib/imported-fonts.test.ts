@@ -17,6 +17,8 @@ import {
   importFonts,
   importedFontFaceCss,
   importedFontFamilies,
+  primeImportedFonts,
+  refreshImportedFonts,
   type ImportedFont,
 } from "./imported-fonts";
 
@@ -36,6 +38,21 @@ beforeEach(() => {
   invokeMock.mockReset();
   pickFontsMock.mockReset();
   document.getElementById("litera-imported-fonts")?.remove();
+  localStorage.clear();
+});
+
+describe("primeImportedFonts", () => {
+  it("declares the faces cached by the last refresh without waiting on the backend", async () => {
+    invokeMock.mockResolvedValue([font({ family: "霞鹜文楷" })]);
+    await refreshImportedFonts();
+    document.getElementById("litera-imported-fonts")?.remove();
+
+    primeImportedFonts();
+
+    expect(document.getElementById("litera-imported-fonts")?.textContent).toContain(
+      'font-family: "霞鹜文楷"',
+    );
+  });
 });
 
 describe("importedFontFaceCss", () => {
