@@ -19,6 +19,8 @@ import { cn } from "@/lib/utils";
 import { useIncomingBooks } from "@/lib/use-incoming-books";
 import { useLibraryShelf, type LibraryShelf } from "@/lib/use-library-shelf";
 import { usePlatformLifecycle } from "@/lib/use-platform-lifecycle";
+import { useAutoUpdateCheck } from "@/lib/app-update";
+import { UpdateBanner } from "@/components/UpdateBanner";
 import { useReaderSession, type DownloadDecision } from "@/lib/use-reader-session";
 import { useSyncScheduler } from "@/lib/use-sync-scheduler";
 import { useSystemInsets } from "@/lib/use-system-insets";
@@ -174,6 +176,7 @@ export default function MobileApp() {
   const shelfRef = useRef<LibraryShelf | null>(null);
 
   const syncScheduler = useSyncScheduler({ transferBookFiles: () => bookFilesAllowed() });
+  useAutoUpdateCheck();
 
   // On mobile data with Wi-Fi only on: a Book that isn't on the phone says
   // how big it is and lets the reader decide; a newer file for a Book that
@@ -483,23 +486,23 @@ export default function MobileApp() {
           />
         )}
       </div>
-      {(session.persistenceError || syncScheduler.persistentFailure) && (
-        <div className="pointer-events-none fixed inset-x-0 bottom-[calc(var(--safe-bottom)+5.5rem)] z-40 flex flex-col gap-2 px-4">
-          {session.persistenceError && (
-            <Banner
-              alert
-              message={t("reader.persistFailed", { message: session.persistenceError })}
-              onDismiss={session.clearPersistenceError}
-            />
-          )}
-          {syncScheduler.persistentFailure && (
-            <Banner
-              message={t("sync.failureNotice", { message: syncScheduler.persistentFailure })}
-              onDismiss={syncScheduler.clearPersistentFailure}
-            />
-          )}
-        </div>
-      )}
+      {/* Always mounted: the update snackbar shows itself when there is one. */}
+      <div className="pointer-events-none fixed inset-x-0 bottom-[calc(var(--safe-bottom)+5.5rem)] z-40 flex flex-col gap-2 px-4">
+        {session.persistenceError && (
+          <Banner
+            alert
+            message={t("reader.persistFailed", { message: session.persistenceError })}
+            onDismiss={session.clearPersistenceError}
+          />
+        )}
+        {syncScheduler.persistentFailure && (
+          <Banner
+            message={t("sync.failureNotice", { message: syncScheduler.persistentFailure })}
+            onDismiss={syncScheduler.clearPersistentFailure}
+          />
+        )}
+        <UpdateBanner variant="snackbar" beforeRestart={session.flushReadingState} />
+      </div>
       <SettingsDialog
         layout="page"
         initialSection={settingsSection}
@@ -514,6 +517,7 @@ export default function MobileApp() {
         theme={session.globalTheme}
         onThemeChange={session.setGlobalTheme}
         onReaderFlowChange={session.setReaderFlow}
+        beforeUpdateRestart={session.flushReadingState}
         deviceSettings={<DeviceSettings settings={mobileSettings} onChange={updateMobileSettings} />}
       />
       <BookImportConfirmDialog

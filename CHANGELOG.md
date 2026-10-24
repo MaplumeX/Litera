@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **自动检查更新**：Litera 启动时会检查 GitHub 上有没有新版本（每天最多一次），有的话在顶部提示。桌面端点「立即更新」即可在应用内下载安装并自动重启，重启前会先保存阅读进度；Android 端会打开发行页下载新的 APK。可以在设置 → 关于里关掉自动检查，或随时手动「检查更新」。
+
 ## [0.6.0] - 2026-10-24
 
 ### Added

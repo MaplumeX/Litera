@@ -43,6 +43,8 @@ import { TypographyPreview } from "@/components/settings/TypographyPreview";
 import { ImportedFontsSection } from "@/components/settings/ImportedFontsSection";
 import { GuidedStyleSection } from "@/components/settings/GuidedStyleSection";
 import { ReaderFooterSettingsForm } from "@/components/settings/ReaderFooterSettingsForm";
+import { UpdateSettings } from "@/components/settings/UpdateSettings";
+import { RELEASES_URL } from "@/lib/app-update";
 import { importedFontFamilies, useImportedFonts } from "@/lib/imported-fonts";
 import { platformBridge } from "@/lib/platform-bridge";
 import { cn } from "@/lib/utils";
@@ -89,7 +91,8 @@ const SECTIONS: { id: SettingsSection; labelKey: MessageKey; icon: LucideIcon }[
 ];
 
 const ABOUT_REPO_URL = "https://github.com/MaplumeX/Litera";
-const ABOUT_RELEASES_URL = "https://github.com/MaplumeX/Litera/releases";
+
+const noopAsync = async () => {};
 
 const THEME_LABEL_KEYS: Record<(typeof THEMES)[number], MessageKey> = {
   light: "settings.theme.light",
@@ -144,6 +147,8 @@ export interface SettingsDialogProps {
   onThemeChange: (theme: string) => void;
   /** Told when the page layout (paginated / scrolled) changes, so an open Book follows. */
   onReaderFlowChange?: (flow: ReaderFlow) => void;
+  /** Flushes unsaved reading state before an app update restarts the app. */
+  beforeUpdateRestart?: () => Promise<void>;
   /**
    * "page" fills the screen as an Android settings screen: a list of the
    * sections, each opening as its own page (the mobile shell); "dialog" is
@@ -589,6 +594,7 @@ export function SettingsDialog({
   theme,
   onThemeChange,
   onReaderFlowChange,
+  beforeUpdateRestart = noopAsync,
   layout = "dialog",
   initialSection,
   deviceSettings,
@@ -1037,6 +1043,7 @@ export function SettingsDialog({
                       </span>
                     </div>
                   </div>
+                  <UpdateSettings beforeRestart={beforeUpdateRestart} />
                   <div className="flex flex-col items-start gap-1">
                     <Button
                       type="button"
@@ -1050,7 +1057,7 @@ export function SettingsDialog({
                       type="button"
                       variant="link"
                       className="h-auto px-0"
-                      onClick={() => openAboutUrl(ABOUT_RELEASES_URL)}
+                      onClick={() => openAboutUrl(RELEASES_URL)}
                     >
                       {t("settings.about.releases")}
                     </Button>

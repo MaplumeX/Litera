@@ -115,6 +115,8 @@ cargo test --manifest-path src-tauri/Cargo.toml
 npm run tauri build       # production bundle
 ```
 
+`tauri build` signs the in-app updater bundles, so it needs the updater private key in `TAURI_SIGNING_PRIVATE_KEY` (the key itself or a path to it) and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. Release CI reads both from repository secrets; the matching public key is in `tauri.conf.json`. Keep a backup of the private key: installed apps only accept updates signed with it.
+
 EPUB rendering comes from [foliate-js](https://github.com/johnfactotum/foliate-js) (`src/foliate-js`). The assistant runtime is [Pi](https://github.com/badlogic/pi-mono) running inside the WebView — there is no sidecar process.
 
 ### Android
