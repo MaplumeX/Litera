@@ -879,10 +879,12 @@ impl LibraryStore {
     }
 
     /// Paths of the stored EPUB and cover for a book. The cover may not
-    /// exist on disk (coverless book, or not yet downloaded).
+    /// exist on disk (coverless book, or not yet downloaded). A legacy
+    /// book's `cover.png` is returned when it has no `cover.jpg`.
     pub fn book_files(&self, book_id: &str) -> AppResult<(PathBuf, PathBuf)> {
         let dir = self.book_dir(book_id)?;
-        Ok((dir.join("book.epub"), dir.join("cover.jpg")))
+        let cover = dir.join(staged_cover_name(&dir).unwrap_or("cover.jpg"));
+        Ok((dir.join("book.epub"), cover))
     }
 
     /// Whether a cover file is present for the book (best effort).

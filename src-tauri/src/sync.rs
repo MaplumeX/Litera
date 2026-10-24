@@ -2756,6 +2756,40 @@ mod file_sync_tests {
     }
 
     #[test]
+    fn a_legacy_png_cover_is_found_and_uploaded() {
+        let (_dir, store) = temp_store();
+        let book_id = imported_book(&store);
+        // Books imported before covers were compressed to JPEG keep cover.png.
+        let (epub_path, _) = store.book_files(&book_id).expect("files");
+        let png_path = epub_path.with_file_name("cover.png");
+        fs::write(&png_path, b"png-cover").expect("write png cover");
+        let epub_hash = store
+            .read_library_public()
+            .expect("library")
+            .books
+            .iter()
+            .find(|book| book.id == book_id)
+            .and_then(|book| book.content_hash.clone())
+            .expect("hash");
+        // The EPUB went out earlier, but the cover never did.
+        let state = SyncState {
+            book_revisions: [(
+                book_id.clone(),
+                BookRevisionState { file_revision: Some(epub_hash), cover_revision: None },
+            )]
+            .into_iter()
+            .collect(),
+            bulk_upload_confirmed: true,
+            ..SyncState::default()
+        };
+
+        assert!(store.has_local_cover(&book_id));
+        let pending = pending_uploads(&store, &state).expect("pending");
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].cover_path.as_deref(), Some(png_path.as_path()));
+    }
+
+    #[test]
     fn a_unchanged_book_and_cover_are_not_pending() {
         let (_dir, store) = temp_store();
         let book_id = imported_book(&store);
