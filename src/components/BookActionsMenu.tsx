@@ -37,8 +37,8 @@ import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 export interface BookActionHandlers {
-  /** The Book's title, for a host that names it (the mobile action sheet). */
-  title?: string;
+  /** The Book's id, for a host that looks the Book up (the mobile action sheet). */
+  bookId?: string;
   onOpen: () => void;
   onDetails: () => void;
   onDelete: () => void;
@@ -85,29 +85,6 @@ const CONTEXT_PARTS: MenuParts = {
   SubContent: ContextMenuSubContent,
 };
 
-/** Touch-sized rows for the mobile shell's action sheet. */
-const SHEET_PARTS: MenuParts = {
-  Item: ({ onSelect, variant, disabled, children }) => (
-    <button
-      type="button"
-      disabled={disabled}
-      onClick={onSelect}
-      className={cn(
-        "flex min-h-12 w-full items-center gap-3 px-4 text-left text-sm transition-colors active:bg-accent disabled:opacity-50",
-        variant === "destructive" && "text-destructive",
-      )}
-    >
-      {children}
-    </button>
-  ),
-  Separator: () => <div role="separator" className="my-1 h-px bg-border" />,
-  Sub: ({ children }) => <div role="group">{children}</div>,
-  SubTrigger: ({ children }) => (
-    <div className="px-4 pt-3 pb-1 text-xs font-medium text-muted-foreground">{children}</div>
-  ),
-  SubContent: ({ children }) => <div className="pl-2">{children}</div>,
-};
-
 /**
  * Set by the mobile shell: a long-press (the touch context menu) or the ⋮
  * button hands the Book's actions to it, to show as a bottom sheet, instead
@@ -115,11 +92,6 @@ const SHEET_PARTS: MenuParts = {
  */
 const BookActionSheetContext = createContext<((actions: BookActionHandlers) => void) | null>(null);
 export const BookActionSheetProvider = BookActionSheetContext.Provider;
-
-/** The actions as sheet rows; the host closes the sheet after a row is picked. */
-export function BookActionSheetItems(handlers: BookActionHandlers) {
-  return <BookActionItems parts={SHEET_PARTS} {...handlers} />;
-}
 
 function BookActionItems({
   parts: { Item, Separator, Sub, SubTrigger, SubContent },

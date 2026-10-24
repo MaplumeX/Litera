@@ -20,6 +20,8 @@ interface BookSearchPanelProps {
   activeCfi: string | null;
   /** Bumped by Ctrl/⌘+F: focus and select the field again. */
   focusToken: number;
+  /** False when the field lives elsewhere (the phone's app bar). */
+  showField?: boolean;
 }
 
 /** Find in the Book: a field, a running count, and matches grouped by chapter. */
@@ -34,6 +36,7 @@ export function BookSearchPanel({
   status,
   activeCfi,
   focusToken,
+  showField = true,
 }: BookSearchPanelProps) {
   const { t } = useT();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -71,49 +74,51 @@ export function BookSearchPanel({
   return (
     <div className="flex h-full w-full flex-col overflow-hidden">
       <div className="px-3 pb-2">
-        <div className="relative">
-          <Search
-            className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"
-            aria-hidden
-          />
-          <Input
-            ref={inputRef}
-            type="search"
-            value={query}
-            placeholder={t("search.placeholder")}
-            aria-label={t("search.label")}
-            className="h-8 pr-8 pl-8 [&::-webkit-search-cancel-button]:hidden"
-            onChange={(event) => onQueryChange(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                onSubmit(event.shiftKey ? -1 : 1);
-              } else if (event.key === "Escape" && query) {
-                // First Esc clears the field; the next one closes the panel.
-                event.preventDefault();
-                event.stopPropagation();
-                onClear();
-              }
-            }}
-          />
-          {query && (
-            <Button
-              type="button"
-              size="icon-xs"
-              variant="ghost"
-              className="absolute top-1/2 right-1 -translate-y-1/2"
-              aria-label={t("search.clear")}
-              onClick={() => {
-                onClear();
-                inputRef.current?.focus();
+        {showField && (
+          <div className="relative">
+            <Search
+              className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"
+              aria-hidden
+            />
+            <Input
+              ref={inputRef}
+              type="search"
+              value={query}
+              placeholder={t("search.placeholder")}
+              aria-label={t("search.label")}
+              className="h-8 pr-8 pl-8 [&::-webkit-search-cancel-button]:hidden"
+              onChange={(event) => onQueryChange(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  onSubmit(event.shiftKey ? -1 : 1);
+                } else if (event.key === "Escape" && query) {
+                  // First Esc clears the field; the next one closes the panel.
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onClear();
+                }
               }}
-            >
-              <X />
-            </Button>
-          )}
-        </div>
+            />
+            {query && (
+              <Button
+                type="button"
+                size="icon-xs"
+                variant="ghost"
+                className="absolute top-1/2 right-1 -translate-y-1/2"
+                aria-label={t("search.clear")}
+                onClick={() => {
+                  onClear();
+                  inputRef.current?.focus();
+                }}
+              >
+                <X />
+              </Button>
+            )}
+          </div>
+        )}
         {summary && (
-          <div className="mt-2 flex h-6 items-center gap-1">
+          <div className={cn("flex h-6 items-center gap-1", showField && "mt-2")}>
             <span
               className="min-w-0 flex-1 truncate text-xs text-muted-foreground tabular-nums"
               aria-live="polite"

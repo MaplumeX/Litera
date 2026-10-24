@@ -505,8 +505,7 @@ export const zhCN = {
   "agent.chatgptSignedInNoEmail": "已登录",
   "agent.chatgptSignOut": "退出登录",
 
-  "mobile.menu": "菜单",
-  "mobile.drawer": "书库菜单",
+  "mobile.menu": "更多选项",
   "mobile.bookActions": "《{title}》的操作",
   "mobile.toc": "目录",
   "mobile.annotations": "标注",
@@ -534,6 +533,7 @@ export const zhCN = {
   "mobile.order": "顺序",
   "mobile.readPct": "已读 {pct}%",
   "mobile.notStarted": "未开始",
+  "mobile.startReading": "开始阅读",
   "mobile.readingSettings": "阅读设置",
   "mobile.moreSettings": "更多设置",
   "mobile.night": "夜间",

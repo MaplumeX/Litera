@@ -1,27 +1,31 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Dialog as DialogPrimitive } from "radix-ui";
+import { useEffect, useRef, useState } from "react";
+import { DropdownMenu as DropdownMenuPrimitive } from "radix-ui";
 import {
   ArrowLeft,
   Check,
-  Menu,
+  EllipsisVertical,
   Plus,
   Search,
   Settings,
   SlidersHorizontal,
   Trash2,
   X,
-  type LucideIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { bookActions } from "@/components/BookCard";
 import { BookDetailsDialog } from "@/components/BookDetailsDialog";
 import { SORT_OPTIONS, STATUS_OPTIONS } from "@/components/LibraryShelfToolbar";
 import { BookImportNotices } from "@/components/BookImportFeedback";
-import {
-  BookActionSheetItems,
-  BookActionSheetProvider,
-  type BookActionHandlers,
-} from "@/components/BookActionsMenu";
+import { BookActionSheetProvider, type BookActionHandlers } from "@/components/BookActionsMenu";
 import type { BookRecord } from "@/types/library";
 import type { LibraryShelf } from "@/lib/use-library-shelf";
 import type { LibrarySortOrder } from "@/lib/library-shelf";
@@ -30,8 +34,7 @@ import { useT, type MessageKey } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { AppBarIconButton, MobileAppBar } from "@/mobile/MobileAppBar";
 import { MobileBookRow, MobileBookTile, MobileResumeCard } from "@/mobile/MobileBookItems";
-import { MobileSheet } from "@/mobile/MobileSheet";
-import { useSwipeDismiss } from "@/mobile/swipe-dismiss";
+import { MobileBookActionSheet } from "@/mobile/MobileBookActionSheet";
 
 interface MobileLibraryPageProps {
   shelf: LibraryShelf;
@@ -44,43 +47,8 @@ interface MobileLibraryPageProps {
   onSearchOpenChange: (open: boolean) => void;
 }
 
-/** A row in a bottom sheet or the drawer: icon, label, an optional trailing part. */
-function SheetRow({
-  icon: Icon,
-  label,
-  trailing,
-  selected,
-  onClick,
-  disabled,
-  ...aria
-}: {
-  icon?: LucideIcon;
-  label: string;
-  trailing?: ReactNode;
-  selected?: boolean;
-  onClick: () => void;
-  disabled?: boolean;
-  "aria-label"?: string;
-  "aria-checked"?: boolean;
-  role?: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className={cn(
-        "flex min-h-12 w-full items-center gap-4 px-6 text-left text-[0.9375rem] transition-colors active:bg-foreground/5 disabled:opacity-50",
-        selected && "font-medium",
-      )}
-      {...aria}
-    >
-      {Icon && <Icon className="size-5 shrink-0 text-muted-foreground" aria-hidden />}
-      <span className="min-w-0 flex-1 truncate">{label}</span>
-      {trailing}
-    </button>
-  );
-}
+/** An app bar menu's row: a 48dp touch target. */
+const MENU_ITEM = "min-h-12 gap-4 px-4 text-[0.9375rem]";
 
 const ORDER_OPTIONS: { value: LibrarySortOrder; labelKey: MessageKey }[] = [
   { value: "asc", labelKey: "library.sortAscending" },
@@ -92,8 +60,11 @@ const VIEW_OPTIONS: { value: LibraryViewMode; labelKey: MessageKey }[] = [
   { value: "list", labelKey: "library.viewList" },
 ];
 
-/** A titled group of choices in a bottom sheet, the picked one ticked. */
-function SheetRadioGroup<T extends string>({
+/**
+ * A titled group of choices in a menu, the picked one ticked. Picking keeps
+ * the menu open, so sort, order and view can all change in one visit.
+ */
+function MenuRadioGroup<T extends string>({
   label,
   value,
   options,
@@ -106,28 +77,34 @@ function SheetRadioGroup<T extends string>({
 }) {
   const { t } = useT();
   return (
-    <div role="radiogroup" aria-label={label}>
-      <div className="px-6 pt-3 pb-1 text-xs font-medium text-muted-foreground">{label}</div>
+    <DropdownMenuRadioGroup aria-label={label} value={value} onValueChange={(next) => onChange(next as T)}>
+      <DropdownMenuLabel className="px-4 pt-2 pb-1 text-xs font-medium text-muted-foreground">{label}</DropdownMenuLabel>
       {options.map((option) => (
-        <SheetRow
+        <DropdownMenuPrimitive.RadioItem
           key={option.value}
-          role="radio"
-          aria-checked={value === option.value}
-          label={t(option.labelKey)}
-          selected={value === option.value}
-          trailing={value === option.value && <Check className="size-5 text-primary" aria-hidden />}
-          onClick={() => onChange(option.value)}
-        />
+          value={option.value}
+          onSelect={(event) => event.preventDefault()}
+          className={cn(
+            "relative flex cursor-default items-center rounded-sm outline-hidden select-none focus:bg-accent focus:text-accent-foreground data-[state=checked]:font-medium",
+            MENU_ITEM,
+          )}
+        >
+          <span className="min-w-0 flex-1 truncate">{t(option.labelKey)}</span>
+          <DropdownMenuPrimitive.ItemIndicator>
+            <Check className="size-5 text-primary" aria-hidden />
+          </DropdownMenuPrimitive.ItemIndicator>
+        </DropdownMenuPrimitive.RadioItem>
       ))}
-    </div>
+    </DropdownMenuRadioGroup>
   );
 }
 
 /**
  * The phone's Library, laid out like other Android readers: a top app bar
- * (menu, search, sort), filter chips, the Books you're reading as cards,
- * then the shelf; a floating button imports. The drawer holds Trash and
- * Settings; a long-press on a Book opens its actions as a bottom sheet.
+ * (search, sort and view menu, overflow menu), filter chips, the Books you're reading as
+ * cards, then the shelf; a floating button imports. The overflow menu holds
+ * Trash and Settings; a long-press on a Book opens its actions as a bottom
+ * sheet.
  */
 export function MobileLibraryPage({
   shelf,
@@ -139,17 +116,10 @@ export function MobileLibraryPage({
   onSearchOpenChange,
 }: MobileLibraryPageProps) {
   const { t } = useT();
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [sortOpen, setSortOpen] = useState(false);
-  const [actions, setActions] = useState<BookActionHandlers | null>(null);
+  // The Book whose sheet is up, looked up on every render so it shows the
+  // star and status as they change (and closes if the Book goes).
+  const [actionsBookId, setActionsBookId] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
-  // The drawer closes with a swipe left as well as a tap on the scrim.
-  const drawerScrimRef = useRef<HTMLDivElement>(null);
-  const drawerSwipeRef = useSwipeDismiss<HTMLDivElement>({
-    direction: "left",
-    onDismiss: () => setDrawerOpen(false),
-    scrimRef: drawerScrimRef,
-  });
   const {
     books,
     loaded,
@@ -180,6 +150,9 @@ export function MobileLibraryPage({
       onChangeStatus: (target, status) => void shelf.handleChangeStatus(target, status),
     });
 
+  const actionsBook = (actionsBookId && books.find((book) => book.id === actionsBookId)) || null;
+  const openActionSheet = (actions: BookActionHandlers) => setActionsBookId(actions.bookId ?? null);
+
   const itemProps = (book: BookRecord) => ({
     book,
     actions: actionsFor(book),
@@ -188,10 +161,7 @@ export function MobileLibraryPage({
     coverRev: coverRev[book.id],
   });
 
-  const handleImport = () => {
-    setDrawerOpen(false);
-    void shelf.handleImport();
-  };
+  const handleImport = () => void shelf.handleImport();
 
   const closeSearch = () => onSearchOpenChange(false);
 
@@ -220,15 +190,6 @@ export function MobileLibraryPage({
         </MobileAppBar>
       ) : (
         <MobileAppBar
-          navigation={
-            <AppBarIconButton
-              label={t("mobile.menu")}
-              aria-expanded={drawerOpen}
-              onClick={() => setDrawerOpen(true)}
-            >
-              <Menu />
-            </AppBarIconButton>
-          }
           title={t("mobile.shelf")}
           actions={
             <>
@@ -236,10 +197,56 @@ export function MobileLibraryPage({
                 <Search />
               </AppBarIconButton>
               {books.length > 0 && (
-                <AppBarIconButton label={t("mobile.sortAndView")} onClick={() => setSortOpen(true)}>
-                  <SlidersHorizontal />
-                </AppBarIconButton>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <AppBarIconButton label={t("mobile.sortAndView")}>
+                      <SlidersHorizontal />
+                    </AppBarIconButton>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="min-w-52 py-1">
+                    <MenuRadioGroup
+                      label={t("library.sort")}
+                      value={shelf.sort}
+                      options={SORT_OPTIONS}
+                      onChange={shelf.handleSortChange}
+                    />
+                    <DropdownMenuSeparator />
+                    <MenuRadioGroup
+                      label={t("mobile.order")}
+                      value={shelf.order}
+                      options={ORDER_OPTIONS}
+                      onChange={shelf.handleOrderChange}
+                    />
+                    <DropdownMenuSeparator />
+                    <MenuRadioGroup
+                      label={t("mobile.view")}
+                      value={view}
+                      options={VIEW_OPTIONS}
+                      onChange={shelf.handleViewChange}
+                    />
+                  </DropdownMenuContent>
+                </DropdownMenu>
               )}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <AppBarIconButton label={t("mobile.menu")}>
+                    <EllipsisVertical />
+                  </AppBarIconButton>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="min-w-48 py-2">
+                  <DropdownMenuItem className={MENU_ITEM} disabled={busy} onSelect={onOpenTrash}>
+                    <Trash2 className="size-5" aria-hidden />
+                    <span className="min-w-0 flex-1 truncate">{t("library.trash")}</span>
+                    {shelf.trashEntries.length > 0 && (
+                      <span className="text-sm text-muted-foreground tabular-nums">{shelf.trashEntries.length}</span>
+                    )}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem className={MENU_ITEM} onSelect={onOpenSettings}>
+                    <Settings className="size-5" aria-hidden />
+                    <span className="min-w-0 flex-1 truncate">{t("library.settings")}</span>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </>
           }
         />
@@ -288,7 +295,7 @@ export function MobileLibraryPage({
         actionDisabled={importing}
       />
 
-      <BookActionSheetProvider value={setActions}>
+      <BookActionSheetProvider value={openActionSheet}>
         {/* Bottom padding clears the floating import button. */}
         <div className="min-h-0 flex-1 overflow-y-auto pb-[calc(var(--safe-bottom)+6rem)]">
           {!loaded || (books.length === 0 && loadError) ? null : books.length === 0 ? (
@@ -363,97 +370,12 @@ export function MobileLibraryPage({
         </button>
       )}
 
-      <DialogPrimitive.Root open={drawerOpen} onOpenChange={setDrawerOpen}>
-        <DialogPrimitive.Portal>
-          {/* Drawer and scrim stop at the status bar, so it stays the page's. */}
-          <DialogPrimitive.Overlay
-            ref={drawerScrimRef}
-            className="fixed inset-x-0 top-[var(--safe-top)] bottom-0 z-50 m-fade bg-black/40"
-          />
-          <DialogPrimitive.Content
-            ref={drawerSwipeRef}
-            aria-describedby={undefined}
-            className="fixed top-[var(--safe-top)] bottom-0 left-0 z-50 flex w-[80%] max-w-xs flex-col rounded-r-2xl bg-background pt-4 pb-[var(--safe-bottom)] shadow-float outline-none m-drawer"
-          >
-            <DialogPrimitive.Title className="px-6 pb-4 text-xl font-medium">Litera</DialogPrimitive.Title>
-            <nav aria-label={t("mobile.drawer")} className="flex flex-col">
-              <SheetRow
-                icon={Plus}
-                label={importing ? t("library.importing") : t("library.importBooks")}
-                onClick={handleImport}
-                disabled={busy}
-              />
-              <SheetRow
-                icon={Trash2}
-                label={t("library.trash")}
-                aria-label={t("library.trash")}
-                trailing={
-                  shelf.trashEntries.length > 0 && (
-                    <span className="text-sm text-muted-foreground tabular-nums">{shelf.trashEntries.length}</span>
-                  )
-                }
-                onClick={() => {
-                  setDrawerOpen(false);
-                  onOpenTrash();
-                }}
-                disabled={busy}
-              />
-              <div role="separator" className="mx-6 my-2 h-px bg-border" />
-              <SheetRow
-                icon={Settings}
-                label={t("library.settings")}
-                onClick={() => {
-                  setDrawerOpen(false);
-                  onOpenSettings();
-                }}
-              />
-            </nav>
-          </DialogPrimitive.Content>
-        </DialogPrimitive.Portal>
-      </DialogPrimitive.Root>
-
-      <MobileSheet open={sortOpen} onOpenChange={setSortOpen} title={t("mobile.sortAndView")}>
-        <div className="pb-3">
-          <SheetRadioGroup
-            label={t("library.sort")}
-            value={shelf.sort}
-            options={SORT_OPTIONS}
-            onChange={shelf.handleSortChange}
-          />
-          <SheetRadioGroup
-            label={t("mobile.order")}
-            value={shelf.order}
-            options={ORDER_OPTIONS}
-            onChange={shelf.handleOrderChange}
-          />
-          <SheetRadioGroup
-            label={t("mobile.view")}
-            value={view}
-            options={VIEW_OPTIONS}
-            onChange={shelf.handleViewChange}
-          />
-        </div>
-      </MobileSheet>
-
-      <MobileSheet
-        open={actions !== null}
-        onOpenChange={(open) => {
-          if (!open) setActions(null);
-        }}
-        title={t("mobile.bookActions", { title: actions?.title ?? "" })}
-      >
-        {actions && (
-          <div
-            className="pb-2"
-            onClick={(event) => {
-              // Picking a row closes the sheet; the row's own handler runs too.
-              if ((event.target as Element).closest("button:not(:disabled)")) setActions(null);
-            }}
-          >
-            <BookActionSheetItems {...actions} />
-          </div>
-        )}
-      </MobileSheet>
+      <MobileBookActionSheet
+        book={actionsBook}
+        actions={actionsBook && actionsFor(actionsBook)}
+        coverRev={actionsBook ? coverRev[actionsBook.id] : undefined}
+        onClose={() => setActionsBookId(null)}
+      />
 
       <BookDetailsDialog
         book={shelf.detailsBook}

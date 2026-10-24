@@ -162,6 +162,11 @@ export interface ReaderViewHandle {
   dismissSelection: () => boolean;
   /** Whether `dismissSelection` would close something (Back's preview asks first). */
   hasSelection: () => boolean;
+  /**
+   * Keep the selection's start in view through the next resize, in place of
+   * the page's start (the mobile shell shrinks the page to open the assistant).
+   */
+  anchorToSelection: () => void;
 }
 
 interface ReaderViewProps {
@@ -1501,6 +1506,19 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       return true;
     }, [clearIframeSelection]);
     const hasSelection = useCallback(() => selectionOpenRef.current, []);
+    const anchorToSelection = useCallback(() => {
+      const selection = lastSelectionDocRef.current?.getSelection();
+      if (!selection?.rangeCount) return;
+      const range = selection.getRangeAt(0).cloneRange();
+      range.collapse(true);
+      const view = viewRef.current as unknown as FoliateAnnotator | null;
+      // The page doesn't turn: this isn't the reader reading on.
+      suppressUserRelocateRef.current += 1;
+      const done = () => {
+        suppressUserRelocateRef.current = Math.max(0, suppressUserRelocateRef.current - 1);
+      };
+      void Promise.resolve(view?.renderer?.scrollToAnchor?.(range, false)).then(done, done);
+    }, []);
 
     useImperativeHandle(
       ref,
@@ -1537,6 +1555,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         advanceTtsSection,
         dismissSelection,
         hasSelection,
+        anchorToSelection,
       }),
       [
         prev,
@@ -1571,6 +1590,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         advanceTtsSection,
         dismissSelection,
         hasSelection,
+        anchorToSelection,
       ],
     );
 

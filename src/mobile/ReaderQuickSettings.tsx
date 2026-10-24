@@ -2,7 +2,6 @@ import { useState, type ReactNode } from "react";
 import { ArrowLeft, Check, ChevronRight, Minus, Plus } from "lucide-react";
 import {
   DEFAULT_FONT_FAMILY,
-  THEMES,
   TYPOGRAPHY_RANGES,
   type ContinuousKey,
   type ReaderStyleState,
@@ -14,14 +13,6 @@ import { importedFontFamilies, useImportedFonts } from "@/lib/imported-fonts";
 import { saveReaderFlow, type ReaderFlow } from "@/lib/reader-flow";
 import { useT, type MessageKey } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
-import { MobileSheet } from "@/mobile/MobileSheet";
-import { ReaderFooterSettingsForm } from "@/components/settings/ReaderFooterSettingsForm";
-
-const THEME_LABEL_KEYS: Record<(typeof THEMES)[number], MessageKey> = {
-  light: "settings.theme.light",
-  dark: "settings.theme.dark",
-  system: "settings.theme.system",
-};
 
 /** Coarser than the desktop sliders: one tap should be a visible change. */
 const STEPPERS: { key: ContinuousKey; labelKey: MessageKey; step: number; digits: number }[] = [
@@ -32,7 +23,7 @@ const STEPPERS: { key: ContinuousKey; labelKey: MessageKey; step: number; digits
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="flex min-h-14 items-center gap-4 px-6">
+    <div className="flex min-h-12 items-center gap-4 px-6">
       <span className="w-12 shrink-0 text-sm text-muted-foreground">{label}</span>
       <div className="flex min-w-0 flex-1 justify-end">{children}</div>
     </div>
@@ -160,7 +151,7 @@ function FontList({
 }) {
   const { t } = useT();
   return (
-    <div className="pb-2">
+    <div>
       <button
         type="button"
         onClick={onBack}
@@ -199,26 +190,20 @@ function FontList({
 
 /**
  * The reader's "Aa" panel: the handful of settings people change while
- * reading (size, spacing, margins, typeface, day/night, page turn), as in
- * other Android readers. Everything else is one tap away in Settings.
+ * reading (size, spacing, margins, page turn, typeface), as in other Android
+ * readers. It takes the bottom toolbar's place rather than covering the
+ * page, so every change shows on the text as it's made. Day/night is on the
+ * toolbar; everything else is one tap away in Settings.
  */
 export function ReaderQuickSettings({
-  open,
-  onOpenChange,
   styleState,
   onTypographyChange,
-  theme,
-  onThemeChange,
   flow,
   onFlowChange,
   onMoreSettings,
 }: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
   styleState: ReaderStyleState;
   onTypographyChange: (key: TypographyKey, value: number | string | boolean) => void;
-  theme: string;
-  onThemeChange: (theme: string) => void;
   flow: ReaderFlow;
   onFlowChange: (flow: ReaderFlow) => void;
   onMoreSettings: () => void;
@@ -229,13 +214,9 @@ export function ReaderQuickSettings({
   const fontFamily = styleState.fontFamily;
   const fontLabel = isGenericFontFamily(fontFamily) ? t("settings.font.default") : fontFamily;
   return (
-    <MobileSheet
-      open={open}
-      onOpenChange={(next) => {
-        if (!next) setFontListOpen(false);
-        onOpenChange(next);
-      }}
-      title={t("mobile.readingSettings")}
+    <section
+      aria-label={t("mobile.readingSettings")}
+      className="max-h-[60vh] overflow-y-auto overscroll-contain py-2 m-enter-fade"
     >
       {fontListOpen ? (
         <FontList
@@ -248,7 +229,7 @@ export function ReaderQuickSettings({
           onBack={() => setFontListOpen(false)}
         />
       ) : (
-        <div className="pt-1 pb-2">
+        <>
           {STEPPERS.map((row) => {
             const range = TYPOGRAPHY_RANGES[row.key];
             const value = Number(styleState[row.key]);
@@ -269,30 +250,6 @@ export function ReaderQuickSettings({
               </Row>
             );
           })}
-          <Row label={t("settings.font")}>
-            <button
-              type="button"
-              aria-label={`${t("settings.font")}: ${fontLabel}`}
-              onClick={() => setFontListOpen(true)}
-              className="flex h-11 w-full min-w-0 items-center gap-2 rounded-full bg-muted pr-3 pl-4 text-sm transition-colors active:bg-foreground/10"
-            >
-              <span
-                className="min-w-0 flex-1 truncate text-left"
-                style={{ fontFamily: cssFontFamily(fontFamily) }}
-              >
-                {fontLabel}
-              </span>
-              <ChevronRight className="size-5 shrink-0 text-muted-foreground" aria-hidden />
-            </button>
-          </Row>
-          <Row label={t("settings.theme")}>
-            <Segmented
-              label={t("settings.theme")}
-              value={theme}
-              options={THEMES.map((value) => ({ value: value as string, label: t(THEME_LABEL_KEYS[value]) }))}
-              onChange={onThemeChange}
-            />
-          </Row>
           <Row label={t("mobile.pageTurn")}>
             <Segmented
               label={t("mobile.pageTurn")}
@@ -307,20 +264,34 @@ export function ReaderQuickSettings({
               }}
             />
           </Row>
-          <section className="mx-6 my-3 border-t pt-3" aria-label={t("reader.footer.title")}>
-            <h3 className="mb-1 text-sm text-muted-foreground">{t("reader.footer.title")}</h3>
-            <ReaderFooterSettingsForm />
-          </section>
-          <button
-            type="button"
-            onClick={onMoreSettings}
-            className="mt-1 flex min-h-12 w-full items-center gap-2 px-6 text-left text-sm transition-colors active:bg-foreground/5"
-          >
-            <span className="flex-1">{t("mobile.moreSettings")}</span>
-            <ChevronRight className="size-5 text-muted-foreground" aria-hidden />
-          </button>
-        </div>
+          <Row label={t("settings.font")}>
+            <div className="flex w-full min-w-0 items-center gap-2">
+              <button
+                type="button"
+                aria-label={`${t("settings.font")}: ${fontLabel}`}
+                onClick={() => setFontListOpen(true)}
+                className="flex h-11 min-w-0 flex-1 items-center gap-2 rounded-full bg-muted pr-3 pl-4 text-sm transition-colors active:bg-foreground/10"
+              >
+                <span
+                  className="min-w-0 flex-1 truncate text-left"
+                  style={{ fontFamily: cssFontFamily(fontFamily) }}
+                >
+                  {fontLabel}
+                </span>
+                <ChevronRight className="size-5 shrink-0 text-muted-foreground" aria-hidden />
+              </button>
+              <button
+                type="button"
+                onClick={onMoreSettings}
+                className="flex h-11 shrink-0 items-center gap-1 rounded-full pr-2 pl-3 text-sm transition-colors active:bg-foreground/5"
+              >
+                <span>{t("mobile.moreSettings")}</span>
+                <ChevronRight className="size-5 text-muted-foreground" aria-hidden />
+              </button>
+            </div>
+          </Row>
+        </>
       )}
-    </MobileSheet>
+    </section>
   );
 }
