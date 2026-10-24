@@ -242,18 +242,22 @@ export function BookCard({
             </button>
           )}
         </div>
-        {book.author && (
-          <p className="mt-0.5 line-clamp-1 text-xs text-muted-foreground">
-            {book.author}
-          </p>
-        )}
-        {!selectMode && onChangeStatus && (
-          <BookStatusMenu
-            book={book}
-            onChange={(choice) => onChangeStatus(book, choice)}
-            statusFilter={statusFilter}
-            className="mt-1"
-          />
+        {/* The status chip shares the author's line, so a quiet (hidden) chip
+            costs the card no height. */}
+        {(book.author || (!selectMode && onChangeStatus)) && (
+          <div className="mt-0.5 flex min-h-4 items-center gap-1.5">
+            <p className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+              {book.author}
+            </p>
+            {!selectMode && onChangeStatus && (
+              <BookStatusMenu
+                book={book}
+                onChange={(choice) => onChangeStatus(book, choice)}
+                statusFilter={statusFilter}
+                className="h-[18px] shrink-0 px-1.5"
+              />
+            )}
+          </div>
         )}
       </div>
     </div>
