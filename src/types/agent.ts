@@ -103,10 +103,26 @@ export interface CompactionNotice {
 }
 
 /**
- * One visible item in the transcript, index-aligned with `branchAnchors`.
- * `notice` items are transcript markers, not chat turns.
+ * Inline transcript marker for a chapter recap in a Guided session, where the
+ * recap entry sits on the branch: what the model keeps of a finished chapter.
  */
-export type AgentMessage = UserMessage | AssistantChatMessage | CompactionNotice;
+export interface GuideRecapMarker {
+  role: "recap";
+  chapterIndex: number;
+  chapterTitle?: string;
+  text: string;
+}
+
+/**
+ * One visible item in the transcript, index-aligned with `branchAnchors`.
+ * `notice` and `recap` items are transcript markers, not chat turns.
+ */
+export type AgentMessage = UserMessage | AssistantChatMessage | CompactionNotice | GuideRecapMarker;
+
+/** Transcript markers are not chat turns. */
+export function isTranscriptMarker(message: AgentMessage): message is CompactionNotice | GuideRecapMarker {
+  return message.role === "notice" || message.role === "recap";
+}
 
 type EventEnvelope = {
   version: number;
@@ -134,6 +150,9 @@ export type AgentEvent = EventEnvelope & (
   | ({ type: "compaction_started"; reason: "budget" | "overflow" } & SessionCorrelation)
   | ({ type: "compaction_completed"; messages: AgentMessage[]; anchors: string[]; navigation: Record<string, AnchorBranchInfo> } & SessionCorrelation)
   | ({ type: "compaction_failed"; aborted: boolean } & SessionCorrelation)
+  // A chapter recap was written after a guided turn, in the same background
+  // task as context maintenance.
+  | ({ type: "guide_recap_added"; messages: AgentMessage[]; anchors: string[]; navigation: Record<string, AnchorBranchInfo> } & SessionCorrelation)
   | ({ type: "retry_scheduled"; attempt: number; maxAttempts: number; delayMs: number } & PromptCorrelation)
   | ({ type: "prompt_end"; messages?: AgentMessage[]; anchors?: string[]; navigation?: Record<string, AnchorBranchInfo> } & PromptCorrelation)
   | ({ type: "prompt_aborted"; messages?: AgentMessage[]; anchors?: string[]; navigation?: Record<string, AnchorBranchInfo> } & PromptCorrelation & RequestCorrelation)

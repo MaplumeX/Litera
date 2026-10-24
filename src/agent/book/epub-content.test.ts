@@ -496,6 +496,23 @@ describe("browser EPUB projection", () => {
     expect(searchBook(flat, ["exact phrase"])[0].chapterTitle).toBe("Opening");
   });
 
+  it("reports the read_chapter part that holds each hit", () => {
+    // Links make the Markdown longer than the plain text, and the parts are
+    // cut at sections, so a hit's part cannot come from its plain-text offset.
+    const link = '<a href="https://example.com/a/very/long/link/target/that/only/the/markdown/carries">see</a>';
+    const paragraphs = Array.from({ length: 40 }, (_, index) =>
+      `${index % 10 === 0 ? `<h2>Section ${index / 10}</h2>` : ""}<p>marker${index}x ${"word ".repeat(80)}${link}</p>`).join("");
+    const files = hierarchyFiles('<ol><li><a href="text/vol1.xhtml">One</a></li></ol>', {
+      "text/vol1.xhtml": `<html><body>${paragraphs}</body></html>`,
+    });
+    const book = parseEpub(pack(files));
+    expect(readChapter(book, 0).totalParts).toBeGreaterThan(1);
+    for (let index = 0; index < 40; index += 1) {
+      const [hit] = searchBook(book, [`marker${index}x`]);
+      expect(readChapter(book, 0, hit.part).text, `marker${index}x`).toContain(`marker${index}x`);
+    }
+  });
+
   it("deduplicates multi-query hits and supports deterministic partial matching", () => {
     const book = parseEpub(epub({ nav: true }));
     expect(book.trigramIndex.get("ome")).toEqual([1]);
@@ -583,13 +600,53 @@ describe("markdownText", () => {
 });
 
 describe("chapterWindows", () => {
-  it("greedily packs paragraph blocks into <=12k windows and rejoins exactly", () => {
+  it("packs paragraph blocks into <=12k windows of about equal size and rejoins exactly", () => {
     const paragraphs = ["a".repeat(6000), "b".repeat(5000), "c".repeat(2000)];
     const markdown = paragraphs.join("\n\n");
     const windows = chapterWindows(markdown);
-    expect(windows).toEqual([`${paragraphs[0]}\n\n${paragraphs[1]}`, paragraphs[2]]);
+    expect(windows).toEqual([paragraphs[0], `${paragraphs[1]}\n\n${paragraphs[2]}`]);
     windows.forEach((window) => expect(window.length).toBeLessThanOrEqual(12_000));
     expect(windows.join("\n\n")).toBe(markdown);
+  });
+
+  it("cuts just before a section heading rather than mid-section", () => {
+    const paragraph = (char: string) => char.repeat(1_000);
+    const first = Array.from({ length: 7 }, () => paragraph("a"));
+    const second = ["## Second", ...Array.from({ length: 8 }, () => paragraph("b"))];
+    const markdown = [...first, ...second].join("\n\n");
+    const windows = chapterWindows(markdown);
+    expect(windows).toHaveLength(2);
+    expect(windows[1].startsWith("## Second")).toBe(true);
+    expect(windows.join("\n\n")).toBe(markdown);
+  });
+
+  it("never leaves a heading at the end of a part", () => {
+    const blocks = ["a".repeat(5_990), "### Next", "b".repeat(6_000), "c".repeat(5_000)];
+    const markdown = blocks.join("\n\n");
+    const windows = chapterWindows(markdown);
+    windows.forEach((window) => expect(window.split("\n\n").pop()?.startsWith("#")).toBe(false));
+    expect(windows.join("\n\n")).toBe(markdown);
+  });
+
+  it("cuts at a scene break when there are no headings", () => {
+    const markdown = ["a".repeat(4_000), "a".repeat(4_000), "* * *", "b".repeat(4_000), "b".repeat(4_000)].join("\n\n");
+    expect(chapterWindows(markdown)[1].startsWith("* * *")).toBe(true);
+  });
+
+  it("adds one part when that lets every cut fall on a section boundary", () => {
+    // Greedy packing needs only two parts, but either two-part cut is mid-section.
+    const section = (title: string, char: string) => [`## ${title}`, ...Array.from({ length: 7 }, () => char.repeat(1_000))];
+    const markdown = [...section("One", "a"), ...section("Two", "b"), ...section("Three", "c")].join("\n\n");
+    expect(markdown.length).toBeLessThan(24_000);
+    const windows = chapterWindows(markdown);
+    expect(windows).toHaveLength(3);
+    expect(windows.map((window) => window.slice(0, 6))).toEqual(["## One", "## Two", "## Thr"]);
+  });
+
+  it("does not add a part when the greedy count already cuts on sections", () => {
+    const section = (title: string, char: string) => [`## ${title}`, ...Array.from({ length: 10 }, () => char.repeat(1_000))];
+    const markdown = [...section("One", "a"), ...section("Two", "b")].join("\n\n");
+    expect(chapterWindows(markdown)).toHaveLength(2);
   });
 
   it("packs a single block that exactly fits the limit into one window", () => {

@@ -14,15 +14,15 @@ const toc=[
   {index:1,label:"Two",ancestors:[],depth:0,hrefs:["two.xhtml"],chars:100,parts:1},
 ];
 
-function setup(kind?:SessionKind,guidedStyle:string|null=null){
-  let current=session(kind);const batches:PiSessionEntry[][]=[];const systemPrompts:Array<string|undefined>=[];const created:Array<SessionKind|undefined>=[];const events:AgentEvent[]=[];
+function setup(kind?:SessionKind,guidedStyle:string|null=null,responses=["retelling","title","retelling two","title"]){
+  let current=session(kind);const batches:PiSessionEntry[][]=[];const systemPrompts:Array<string|undefined>=[];const requests:string[]=[];const created:Array<SessionKind|undefined>=[];const events:AgentEvent[]=[];
   const sessions:SessionPort={create:async(_book,requested)=>{created.push(requested);current=session(requested);return current;},list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,entries)=>{batches.push(entries);return entries.at(-1)?.id??null;}};
   const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:2}),toc:async()=>toc,readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:2,text:"chapter"}),search:async()=>[],close:()=>{}};
-  const faux=createFauxCore({tokensPerSecond:10_000});faux.setResponses([fauxAssistantMessage("retelling"),fauxAssistantMessage("title"),fauxAssistantMessage("retelling two"),fauxAssistantMessage("title")]);
+  const faux=createFauxCore({tokensPerSecond:10_000});faux.setResponses(responses.map((text)=>fauxAssistantMessage(text)));
   const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret",thinkingLevel:"off"};
-  const runtime=new LiteraAgentRuntime({sessions,book,loadGuidedStyle:()=>guidedStyle,loadConfig:async()=>config,loadStream:async()=>((requestModel,context,options)=>{systemPrompts.push(getCurrentSystemPrompt(context.messages));return faux.streamSimple(requestModel,context,options);})});
+  const runtime=new LiteraAgentRuntime({sessions,book,loadGuidedStyle:()=>guidedStyle,loadConfig:async()=>config,loadStream:async()=>((requestModel,context,options)=>{systemPrompts.push(getCurrentSystemPrompt(context.messages));requests.push(JSON.stringify(context.messages));return faux.streamSimple(requestModel,context,options);})});
   runtime.subscribe((event)=>{events.push(event);});
-  return {runtime,batches,systemPrompts,created,events};
+  return {runtime,batches,systemPrompts,requests,created,events};
 }
 
 describe("Guided sessions in the runtime",()=>{
@@ -80,6 +80,36 @@ describe("Guided sessions in the runtime",()=>{
     expect(systemPrompts[0]).toBe(`${SYSTEM_PROMPT}\n\n${guidedPrompt("Use a table for every part.")}`);
     expect(systemPrompts[0]).toContain("Continue button");
     expect(systemPrompts[0]).not.toContain("Cover the part completely");
+  });
+
+  it("writes a recap once the guide finishes a chapter and keeps it in the next step's context",async()=>{
+    const {runtime,batches,requests,events}=setup(undefined,null,["part one retold","title","part two retold","The chapter in short.","chapter two retold"]);
+    await runtime.openBook("book",new ArrayBuffer(1));
+    await runtime.newSession(undefined,"guided");
+    await runtime.prompt("Guided reading: One (part 1/2)",{guide:{chapterIndex:0,part:0,totalParts:2}});
+    await new Promise((resolve)=>setTimeout(resolve,20));// flush the fire-and-forget title task
+    await runtime.settled();
+    expect(batches.flat().some((entry)=>entry.customType==="guideRecap")).toBe(false);
+    await runtime.prompt("Guided reading: One (part 2/2)",{guide:{chapterIndex:0,part:1,totalParts:2}});
+    await runtime.settled();
+    const recapRequest=requests.at(-1)!;
+    expect(recapRequest).toContain("part one retold");
+    expect(recapRequest).toContain("part two retold");
+    const recap=batches.at(-1)![0];
+    expect(recap).toMatchObject({type:"custom_message",customType:"guideRecap",details:{chapterIndex:0,chapterTitle:"One",text:"The chapter in short."}});
+    expect(events.find((event)=>event.type==="guide_recap_added")).toMatchObject({messages:expect.arrayContaining([{role:"recap",chapterIndex:0,chapterTitle:"One",text:"The chapter in short."}])});
+    await runtime.prompt("Guided reading: Two",{guide:{chapterIndex:1,part:0,totalParts:1}});
+    expect(requests.at(-1)).toContain("Chapter recap (chapterIndex 0");
+  });
+
+  it("writes no recap in an ordinary Session",async()=>{
+    const {runtime,batches,requests}=setup(undefined,null,["answer","title"]);
+    await runtime.openBook("book",new ArrayBuffer(1));
+    await runtime.prompt("question",{});
+    await new Promise((resolve)=>setTimeout(resolve,20));
+    await runtime.settled();
+    expect(requests).toHaveLength(2);
+    expect(batches.flat().some((entry)=>entry.customType==="guideRecap")).toBe(false);
   });
 
   it("keeps ordinary Sessions on the default prompt",async()=>{

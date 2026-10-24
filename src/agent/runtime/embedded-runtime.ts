@@ -6,10 +6,11 @@ import { BookWorkerClient, chapterAside, chapterForHref, formatBookSnapshot, typ
 import { contextBudget, estimateBranchTokens, generateSummary, prepareCompaction, preparePrune } from "@/agent/compaction/compaction";
 import { createGuardedNativeFetch } from "@/agent/transport/native-fetch";
 import { validateMindmapParams } from "@/agent/runtime/mindmap";
-import { guidedPrompt, guideStepContext, guideTocProgress, nextGuideStep, resolveGuideStep, skipChapterStep, type GuideChapterProgress } from "@/agent/runtime/guide";
+import { dueRecapChapter, guidedPrompt, guideStepContext, guideTocProgress, nextGuideStep, resolveGuideStep, skipChapterStep, type GuideChapterProgress } from "@/agent/runtime/guide";
+import { generateChapterRecap, guideRecapContext } from "@/agent/runtime/recap";
 import { resolveRuntimeModel } from "@/agent/runtime/model-resolution";
 import { classifyPromptError } from "@/agent/runtime/prompt-error";
-import { activeBranch, branchLeafId, guideCursor, branchNavigation, contextBranch, convertPiContextToLlm, newEntry, piContextMessages, sessionConfig, sessionNavigation, visibleMessageEntries, visibleMessages, type DecodedPiSession, type PiSessionEntry, type SessionConfig } from "@/agent/sessions/pi-session";
+import { activeBranch, branchLeafId, GUIDE_RECAP, guideCursor, guidedTurns, guideRecapChapters, isGuideRecapEntry, branchNavigation, contextBranch, convertPiContextToLlm, newEntry, piContextMessages, sessionConfig, sessionNavigation, visibleMessageEntries, visibleMessages, type DecodedPiSession, type PiSessionEntry, type SessionConfig } from "@/agent/sessions/pi-session";
 import { restoreImageRefs, withImageRefs } from "@/agent/sessions/image-refs";
 import { tauriSessionPort, type SessionPort } from "@/agent/sessions/session-port";
 import { invokeErrorMessage } from "@/lib/app-error";
@@ -87,7 +88,7 @@ const RETRY_POLICY={enabled:true,maxRetries:3,baseDelayMs:500};
 const EDIT_TARGET_ERROR="Edited message is not a visible user message";
 const TITLE_PROMPT="Generate a short session title for the conversation below, in the user's language, at most 20 characters. Output only the title text itself: no quotes, no prefix, no explanation.";
 /** True when the leaf has only advanced past `leaf` through maintenance entries (Pruning, Compaction). */
-function onlyMaintenanceSince(session:DecodedPiSession,leaf:string|null):boolean{const byId=new Map(session.entries.map((entry)=>[entry.id,entry]));let current=session.leafId;while(current!==leaf){const entry=current?byId.get(current):undefined;if(!entry||(entry.type!=="context_prune"&&entry.type!=="compaction"))return false;current=entry.parentId;}return true;}
+function onlyMaintenanceSince(session:DecodedPiSession,leaf:string|null):boolean{const byId=new Map(session.entries.map((entry)=>[entry.id,entry]));let current=session.leafId;while(current!==leaf){const entry=current?byId.get(current):undefined;if(!entry||(entry.type!=="context_prune"&&entry.type!=="compaction"&&!isGuideRecapEntry(entry)))return false;current=entry.parentId;}return true;}
 const emptyUsage=()=>({input:0,output:0,cacheRead:0,cacheWrite:0,totalTokens:0,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}});
 function errorAssistant(model:{api:AssistantMessage["api"];provider:string;id:string},error:unknown):AssistantMessage{return{role:"assistant",content:[],api:model.api,provider:model.provider,model:model.id,usage:emptyUsage(),stopReason:"error",errorMessage:error instanceof Error?error.message:String(error),timestamp:Date.now()};}
 
@@ -298,11 +299,45 @@ export class LiteraAgentRuntime {
     }catch(error){console.warn("Session title generation failed",error);}
   }
 
-  /** Run `maintainContext` in the background; the next prompt awaits it. */
+  /**
+   * Run the work after a turn in the background: a due chapter recap in a
+   * Guided session, then `maintainContext`. The next prompt awaits it.
+   */
   private startMaintenance(agent:Agent,session:DecodedPiSession,bookId:string){
     const abort=new AbortController();
-    const done=this.maintainContext(agent,session,bookId,abort.signal).then(()=>{},()=>{}).finally(()=>{if(this.maintenance?.abort===abort)this.maintenance=null;});
+    const run=async()=>{if(session.header.kind==="guided")await this.writeDueRecap(agent,session,bookId,abort.signal);await this.maintainContext(agent,session,bookId,abort.signal);};
+    const done=run().then(()=>{},()=>{}).finally(()=>{if(this.maintenance?.abort===abort)this.maintenance=null;});
     this.maintenance={abort,done};
+  }
+
+  /**
+   * Record a recap of the first chapter the guide finished without one (at
+   * most one per run, so older Sessions catch up a chapter per turn). The
+   * recap stays in the model context for the rest of the Session. Failures
+   * are logged and swallowed; the chapter is due again after the next turn.
+   */
+  private async writeDueRecap(agent:Agent,session:DecodedPiSession,bookId:string,signal:AbortSignal){
+    const live=()=>!signal.aborted&&this.bookId===bookId&&this.session===session;
+    try{
+      const toc=await this.bookCall(bookId,()=>this.book.toc());
+      const turns=guidedTurns(session);
+      const chapterIndex=dueRecapChapter(toc,turns.map((turn)=>turn.step),guideRecapChapters(session));
+      if(chapterIndex===null)return;
+      const retelling=turns.filter((turn)=>turn.step.chapterIndex===chapterIndex).map((turn)=>turn.text.trim()).filter(Boolean);
+      if(!retelling.length||!live())return;
+      const chapterTitle=toc.find((entry)=>entry.index===chapterIndex)?.label.trim()||undefined;
+      const metadata=await this.bookCall(bookId,()=>this.book.metadata());
+      const apiKey=await agent.getApiKey?.(agent.state.model.provider);
+      const text=await generateChapterRecap({bookTitle:metadata.title,chapterIndex,chapterTitle,retelling},agent.state.model,apiKey??"",signal,agent.streamFunction);
+      if(!live())return;
+      const content=guideRecapContext(chapterIndex,chapterTitle,text);const details={chapterIndex,...(chapterTitle?{chapterTitle}:{}),text};
+      const entry=newEntry("custom_message",session.leafId,{customType:GUIDE_RECAP,content,display:true,details});
+      session.leafId=await this.sessions.append(bookId,session.header.id,session.leafId,[entry]);session.entries.push(entry);
+      agent.state.messages.push({role:"custom",customType:GUIDE_RECAP,content,display:true,details,timestamp:Date.parse(entry.timestamp)} as PiMessage);
+      this.emit({type:"guide_recap_added",bookId,sessionId:session.header.id,messages:visibleMessages(session),...sessionNavigation(session)});
+    }catch(error){
+      if(!signal.aborted)console.warn("Chapter recap failed",error);
+    }
   }
 
   /**

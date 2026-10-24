@@ -172,6 +172,19 @@ describe("agentReducer", () => {
     expect(state.messages.map((message) => message.role)).toEqual(["user", "user", "notice"]);
   });
 
+  it("adds a chapter recap after the turn, or before the queued next step", () => {
+    const recap = { role: "recap", chapterIndex: 0, chapterTitle: "One", text: "gist" } as const;
+    let state = settledSession();
+    state = reduce(state, { version: 2, type: "guide_recap_added", ...compactionEvent, messages: [{ role: "user", content: "one" }, recap], anchors: ["u1", "r1"], navigation: {} });
+    expect(state.messages).toEqual([{ role: "user", content: "one" }, recap]);
+    expect(state.branchAnchors).toEqual(["u1", "r1"]);
+    state = settledSession();
+    state = agentReducer(state, { type: "prompt_queued", bookId: "book-a", promptId: "p" });
+    state = agentReducer(state, { type: "user_message", message: { role: "user", content: "two" } });
+    state = reduce(state, { version: 2, type: "guide_recap_added", ...compactionEvent, messages: [{ role: "user", content: "one" }, recap], anchors: ["u1", "r1"], navigation: {} });
+    expect(state.messages).toEqual([{ role: "user", content: "one" }, recap, { role: "user", content: "two" }]);
+  });
+
   it("shows a failed compaction until the next prompt, and hides an aborted one", () => {
     let state = settledSession();
     state = reduce(state, { version: 2, type: "compaction_failed", ...compactionEvent, aborted: false });

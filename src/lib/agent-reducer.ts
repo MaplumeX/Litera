@@ -136,6 +136,29 @@ function applyNavigation(
   };
 }
 
+/**
+ * A transcript marker written in the background (a compaction notice or a
+ * chapter recap) landed at the persisted leaf. Without a prompt the
+ * projection replaces the transcript. During one, the transcript also holds
+ * the optimistic question and streamed state the projection lacks; the
+ * marker is the projection's last item, so insert it at that position and
+ * keep the in-flight tail after it.
+ */
+function withLandedMarker(
+  base: AgentState,
+  event: { messages: AgentMessage[]; anchors: string[]; navigation: Record<string, AnchorBranchInfo> },
+  role: "notice" | "recap",
+): AgentState {
+  if (!base.promptId) return applyNavigation({ ...base, messages: event.messages }, event);
+  const markerIndex = event.messages.length - 1;
+  const marker = event.messages[markerIndex];
+  if (marker?.role !== role || base.messages.length < markerIndex) return base;
+  return applyNavigation({
+    ...base,
+    messages: [...base.messages.slice(0, markerIndex), marker, ...base.messages.slice(markerIndex)],
+  }, event);
+}
+
 function applyEvent(state: AgentState, event: AgentEvent): AgentState {
   if (event.version <= state.version) return state;
   const base = { ...state, version: event.version };
@@ -216,22 +239,9 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
         ? { ...base, compaction: { status: event.reason === "overflow" ? "recovering" : "compacting" } }
         : base;
     case "compaction_completed":
-      if (!matchesSession(base, event)) return base;
-      if (!base.promptId) return applyNavigation({ ...base, compaction: null, messages: event.messages }, event);
-      // During a prompt the transcript also holds the optimistic question and
-      // streamed state the projection lacks. The compaction entry sits at the
-      // persisted leaf, so its notice is the projection's last item: insert it
-      // at that position and keep the in-flight tail after it.
-      {
-        const noticeIndex = event.messages.length - 1;
-        const notice = event.messages[noticeIndex];
-        if (notice?.role !== "notice" || base.messages.length < noticeIndex) return { ...base, compaction: null };
-        return applyNavigation({
-          ...base,
-          compaction: null,
-          messages: [...base.messages.slice(0, noticeIndex), notice, ...base.messages.slice(noticeIndex)],
-        }, event);
-      }
+      return matchesSession(base, event) ? withLandedMarker({ ...base, compaction: null }, event, "notice") : base;
+    case "guide_recap_added":
+      return matchesSession(base, event) ? withLandedMarker(base, event, "recap") : base;
     case "compaction_failed":
       return matchesSession(base, event) ? { ...base, compaction: event.aborted ? null : { status: "failed" } } : base;
     case "retry_scheduled":

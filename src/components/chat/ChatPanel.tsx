@@ -29,9 +29,10 @@ import { SessionConfigDialog, type SessionConfigTarget } from "./SessionConfigDi
 import { SessionList } from "./SessionList";
 import { TypingIndicator } from "./TypingIndicator";
 import { CompactionNotice, CompactionStatus } from "./CompactionNotice";
+import { GuideRecap } from "./GuideRecap";
 import { ChatOutlineRail, userMessagePreview } from "./ChatOutlineRail";
 import { useT } from "@/lib/i18n";
-import type { GuideStep } from "@/types/agent";
+import { isTranscriptMarker, type GuideStep } from "@/types/agent";
 
 export interface ChatPanelHandle {
   fillInput: (text: string, chapterHref?: string) => void;
@@ -138,11 +139,11 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     const isStreaming = submitting || state.status === "prompting";
     const bookReady = state.status === "bookReady" || state.status === "prompting";
     const error = invokeError ?? state.error?.message ?? null;
-    // Notices are transcript markers, not chat turns: the regenerate/streaming
-    // affordances key off the last real chat message.
+    // Notices and recaps are transcript markers, not chat turns: the
+    // regenerate/streaming affordances key off the last real chat message.
     let lastChatIndex = -1;
     for (let i = state.messages.length - 1; i >= 0; i -= 1) {
-      if (state.messages[i].role !== "notice") { lastChatIndex = i; break; }
+      if (!isTranscriptMarker(state.messages[i])) { lastChatIndex = i; break; }
     }
     const lastChatMessage = lastChatIndex >= 0 ? state.messages[lastChatIndex] : undefined;
     const userMessageTocItems = state.messages.flatMap((message, index) =>
@@ -709,6 +710,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                   />
                 )}
                 {message.role === "notice" && <CompactionNotice notice={message} />}
+                {message.role === "recap" && <GuideRecap recap={message} />}
               </div>
             ))}
             {isStreaming && (!lastChatMessage || lastChatMessage.role === "user") && (

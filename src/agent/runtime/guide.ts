@@ -37,6 +37,8 @@ A skim step is the exception to completeness: the reader chose to move fast, so 
 Start directly, with no preamble, and do not ask whether to continue; the reader has a Continue button. Write in the language of the step label.
 
 Messages without a guided step are the reader's side questions: answer them normally. They do not advance the reading.
+
+When the guide finishes a chapter, a chapter recap of it is added to the conversation. Recaps stay with you for the rest of the book, after the retellings themselves are gone: use them to connect back to earlier chapters.
 </guided_reading>`;
 }
 
@@ -57,6 +59,19 @@ function firstChapterFrom(toc: readonly BookTocEntry[], startIndex: number): Boo
 }
 
 /**
+ * The parts of `entry` a step covered. A step cut for another part count
+ * (the Book's parts were cut differently when it was sent) maps onto the
+ * same share of the chapter.
+ */
+function coveredParts(entry: BookTocEntry, step: GuideStep): { first: number; last: number } {
+  const parts = Math.max(1, entry.parts);
+  const scale = step.totalParts > 0 ? parts / step.totalParts : 1;
+  const first = Math.min(parts - 1, Math.floor(step.part * scale));
+  const last = step.skim ? parts - 1 : Math.min(parts - 1, Math.ceil((step.part + 1) * scale) - 1);
+  return { first, last: Math.max(first, last) };
+}
+
+/**
  * The step after `cursor`: the next part of its chapter, else the first part
  * of the next chapter with text (a skim covers the rest of its chapter).
  * Before the first step (or when the cursor no longer fits the Book), start
@@ -72,7 +87,13 @@ export function nextGuideStep(
     const start = firstChapterFrom(toc, startIndex ?? 0);
     return start ? stepAt(start, 0) : null;
   }
-  const reached = cursor.skim ? current.parts - 1 : cursor.part;
+  // Of a step cut for another part count, continue from the part it ended in,
+  // so text may repeat but is never skipped.
+  const reached = cursor.skim
+    ? current.parts - 1
+    : cursor.totalParts === current.parts
+      ? cursor.part
+      : Math.floor(((cursor.part + 1) * current.parts) / cursor.totalParts) - 1;
   if (reached + 1 < current.parts) return stepAt(current, reached + 1);
   const next = firstChapterFrom(toc, current.index + 1);
   return next ? stepAt(next, 0) : null;
@@ -112,6 +133,39 @@ export interface GuideChapterProgress {
 }
 
 /**
+ * The parts covered per chapter by `steps` (oldest first), and the chapters
+ * in the order the steps finished them.
+ */
+function chapterCoverage(toc: readonly BookTocEntry[], steps: readonly GuideStep[]) {
+  const chapters = new Map<number, { parts: Set<number>; skimmed: boolean }>();
+  const finished: number[] = [];
+  for (const step of steps) {
+    const entry = toc.find((candidate) => candidate.index === step.chapterIndex);
+    if (!entry) continue;
+    const chapter = chapters.get(entry.index) ?? { parts: new Set<number>(), skimmed: false };
+    const { first, last } = coveredParts(entry, step);
+    for (let part = first; part <= last; part += 1) chapter.parts.add(part);
+    if (step.skim) chapter.skimmed = true;
+    chapters.set(entry.index, chapter);
+    if (chapter.parts.size >= Math.max(1, entry.parts) && !finished.includes(entry.index)) finished.push(entry.index);
+  }
+  return { chapters, finished };
+}
+
+/**
+ * The chapter due for a recap: the first one the guided steps (oldest first)
+ * finished, every part retold or skimmed, that has no recap yet. Null when
+ * none is due.
+ */
+export function dueRecapChapter(
+  toc: readonly BookTocEntry[],
+  steps: readonly GuideStep[],
+  recapped: ReadonlySet<number>,
+): number | null {
+  return chapterCoverage(toc, steps).finished.find((index) => !recapped.has(index)) ?? null;
+}
+
+/**
  * Guide progress per TOC href, from the guided steps on the active branch
  * (oldest first). Hrefs whose chapter the guide has not reached are absent.
  */
@@ -120,16 +174,7 @@ export function guideTocProgress(
   steps: readonly GuideStep[],
   hrefs: readonly string[],
 ): Record<string, GuideChapterProgress> {
-  const byChapter = new Map<number, { parts: Set<number>; skimmed: boolean }>();
-  for (const step of steps) {
-    const entry = toc.find((candidate) => candidate.index === step.chapterIndex);
-    if (!entry) continue;
-    const chapter = byChapter.get(entry.index) ?? { parts: new Set<number>(), skimmed: false };
-    const last = step.skim ? entry.parts - 1 : step.part;
-    for (let part = step.part; part <= last && part < entry.parts; part += 1) chapter.parts.add(part);
-    if (step.skim) chapter.skimmed = true;
-    byChapter.set(entry.index, chapter);
-  }
+  const byChapter = chapterCoverage(toc, steps).chapters;
   const currentIndex = steps[steps.length - 1]?.chapterIndex;
   const progress: Record<string, GuideChapterProgress> = {};
   for (const href of hrefs) {
