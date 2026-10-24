@@ -249,7 +249,7 @@ export function MobileLibraryPage({
         <div
           role="radiogroup"
           aria-label={t("library.statusFilter")}
-          className="flex shrink-0 gap-2 overflow-x-auto px-4 pt-1 pb-3 [scrollbar-width:none]"
+          className="flex shrink-0 gap-2 overflow-x-auto px-4 pt-1 pb-3 no-scrollbar"
         >
           {STATUS_OPTIONS.map((option) => {
             const active = option.value === statusFilter;
@@ -320,7 +320,7 @@ export function MobileLibraryPage({
                   {/* One card fills the width; more peek in from the right and snap. */}
                   <div
                     data-shelf="recent"
-                    className="flex snap-x snap-mandatory gap-3 overflow-x-auto scroll-px-4 px-4 pb-2 [scrollbar-width:none]"
+                    className="flex snap-x snap-mandatory gap-3 overflow-x-auto scroll-px-4 px-4 pb-2 no-scrollbar"
                   >
                     {recents.map((book) => (
                       <div
