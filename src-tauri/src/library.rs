@@ -2252,6 +2252,7 @@ fn initialize_root(root: &Path) -> AppResult<()> {
                 stage_orphaned_book_directories(root, &data)?;
                 recover_import_transactions(root, &data)?;
                 validate_library_files(root, &data)?;
+                migrate_legacy_covers(root);
                 // Retention runs last: every recovery path has already had its
                 // chance to bring a still-referenced book back.
                 purge_expired_trash(root)?;
@@ -2628,6 +2629,64 @@ fn backfilled_reading_status(last_fraction: Option<f64>) -> &'static str {
         Some(fraction) if fraction >= FINISH_FRACTION => "finished",
         Some(fraction) if fraction > 0.0 => "reading",
         _ => "unread",
+    }
+}
+
+/// Re-encode the `cover.png` of books imported before covers were
+/// compressed into the `cover.jpg` every other path (sync download, metadata
+/// edits) uses, then drop the PNG. Best effort: a book that fails keeps its
+/// PNG, which the store still accepts.
+fn migrate_legacy_covers(root: &Path) {
+    let library_path = root.join("library.json");
+    // Re-read: the recovery steps before this may have rewritten the file.
+    let mut data = match read_library_file(root, &library_path) {
+        Ok(data) => data,
+        Err(error) => {
+            eprintln!("[library] Legacy cover migration skipped: {error}");
+            return;
+        }
+    };
+    let mut migrated = Vec::new();
+    for book in &mut data.books {
+        let book_dir = root.join("books").join(&book.id);
+        let cover_png = book_dir.join("cover.png");
+        if Path::new(&book.cover_path) != cover_png {
+            continue;
+        }
+        let cover_jpg = book_dir.join("cover.jpg");
+        // An interrupted earlier run may already have written the JPEG.
+        if !cover_jpg.is_file() {
+            let written = fs::read(&cover_png)
+                .map_err(|error| {
+                    AppError::storage_io(format!("Failed to read legacy cover: {error}"))
+                })
+                .and_then(|raw| atomic_write(&cover_jpg, &compress_cover(&raw), "migrated cover"));
+            if let Err(error) = written {
+                eprintln!("[library] Legacy cover migration failed for book {}: {error}", book.id);
+                continue;
+            }
+        }
+        book.cover_path = cover_jpg.to_string_lossy().into_owned();
+        migrated.push(cover_png);
+    }
+    if migrated.is_empty() {
+        return;
+    }
+    let written = serde_json::to_vec_pretty(&data)
+        .map_err(|error| AppError::storage_io(format!("Failed to serialize library: {error}")))
+        .and_then(|json| recoverable_atomic_write(&library_path, &json, "library.json"));
+    if let Err(error) = written {
+        // The records still name cover.png, so the PNGs must stay.
+        eprintln!("[library] Legacy cover migration not committed: {error}");
+        return;
+    }
+    for cover_png in migrated {
+        if let Err(error) = fs::remove_file(&cover_png) {
+            eprintln!(
+                "[library] Migrated legacy cover cleanup failed ({}): {error}",
+                cover_png.display()
+            );
+        }
     }
 }
 
@@ -6281,6 +6340,45 @@ mod tests {
         let stale_stem = stale_name.trim_end_matches(TRASH_DESCRIPTOR_SUFFIX);
         assert!(!trash_root_of(&root).join(stale_stem).exists());
         assert!(!stale_descriptor.exists());
+    }
+
+    #[test]
+    fn a_legacy_png_cover_is_migrated_to_jpeg_on_startup() {
+        let (directory, store) = test_store();
+        let root = directory.path().to_path_buf();
+        let id = import_test_book(&store, Path::new("/source/png-cover.epub"));
+        // Books imported before covers were compressed to JPEG keep cover.png.
+        let book_dir = root.join("books").join(&id);
+        fs::remove_file(book_dir.join("cover.jpg")).expect("remove jpg cover");
+        fs::write(book_dir.join("cover.png"), make_png_bytes(40, 60, [0, 128, 0, 255]))
+            .expect("write png cover");
+        {
+            let mut library = store.read_library().expect("library");
+            let record = library
+                .books
+                .iter_mut()
+                .find(|book| book.id == id)
+                .expect("record");
+            record.cover_path = book_dir.join("cover.png").to_string_lossy().into_owned();
+            store.write_library(&library).expect("write library");
+        }
+
+        let reopened = LibraryStore::initialize(root.clone()).expect("reinit");
+
+        let record = reopened
+            .read_library()
+            .expect("library")
+            .books
+            .into_iter()
+            .find(|book| book.id == id)
+            .expect("record");
+        assert_eq!(Path::new(&record.cover_path), book_dir.join("cover.jpg"));
+        assert!(!book_dir.join("cover.png").exists());
+        let jpeg = fs::read(book_dir.join("cover.jpg")).expect("read jpg cover");
+        assert_eq!(
+            image::guess_format(&jpeg).expect("format"),
+            image::ImageFormat::Jpeg
+        );
     }
 
     #[test]

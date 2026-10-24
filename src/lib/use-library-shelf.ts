@@ -126,15 +126,16 @@ export function useLibraryShelf({ openingBookId = null }: { openingBookId?: stri
     };
   }, [refreshBooks, refreshTrash]);
 
-  // Synced books whose EPUB has not downloaded yet: fetch their cover on
-  // demand the first time the shelf renders them, so a new device's shelf
-  // looks right without downloading whole books. Attempted once per book
-  // per session; failures are silent (sync may not be configured).
+  // Books without a local cover: fetch it on demand the first time the
+  // shelf renders them, so a new device's shelf looks right without
+  // downloading whole books. Downloaded books are included too: a legacy
+  // book's cover may reach the Sync Backend only after its EPUB already
+  // came down here. Attempted once per book per session; failures are
+  // silent (sync may not be configured, or the book has no cover).
   const coverAttemptsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     const missing = books.filter(
       (book) =>
-        book.cached === false &&
         !book.coverPath &&
         !coverAttemptsRef.current.has(book.id),
     );
