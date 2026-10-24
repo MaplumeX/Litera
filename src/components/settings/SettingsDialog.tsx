@@ -595,9 +595,10 @@ export function SettingsDialog({
 }: SettingsDialogProps) {
   const { t, locale, setLocale } = useT();
   const page = layout === "page";
-  const sections = deviceSettings
-    ? SECTIONS
-    : SECTIONS.filter((item) => item.id !== "device");
+  // The reading footer only exists in the mobile reader.
+  const sections = SECTIONS.filter(
+    (item) => (item.id !== "device" || deviceSettings) && (item.id !== "footer" || page),
+  );
   const [section, setSection] = useState<SettingsSection>(initialSection ?? "typography");
   // Page layout only: the section list is showing rather than a section.
   const [listShown, setListShown] = useState(initialSection == null);
