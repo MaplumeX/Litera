@@ -18,6 +18,7 @@ const runtime = vi.hoisted(() => {
     renameSession: vi.fn(async () => {}),
     updateSessionConfig: vi.fn(async () => {}),
     switchBranchAtAnchor: vi.fn(async () => {}),
+    refreshAfterSync: vi.fn(async (_requestId?: string) => {}),
   };
 });
 
@@ -109,5 +110,24 @@ describe("useAgentBridge", () => {
       -1,
       expect.stringMatching(/^switch-branch-/),
     );
+  });
+
+  it("shows sessions another device created once a Sync pass lands", async () => {
+    let version = 10;
+    runtime.refreshAfterSync.mockImplementation(async (requestId?: string) => {
+      runtime.emit(event({
+        version: (version += 1),
+        type: "sessions_list",
+        bookId: "book-a",
+        requestId,
+        sessions: [{ id: "remote", title: "你好", createdAt: "2026-10-24T06:40:43Z", updatedAt: "2026-10-24T06:40:55Z" }],
+      }));
+    });
+    const { result } = renderHook(() => useAgentBridge("book-a"));
+
+    act(() => window.dispatchEvent(new CustomEvent("litera:sessions-synced")));
+
+    await waitFor(() =>
+      expect(result.current.state.sessions.map((session) => session.id)).toContain("remote"));
   });
 });

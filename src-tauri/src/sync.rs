@@ -1183,7 +1183,8 @@ pub struct BookRevisionState {
 }
 
 /// Session sync bookkeeping: what we last uploaded, and the backend etag we
-/// last saw for the session object.
+/// last saw for the session object. A `seen_etag` without a `content_hash`
+/// is an older version's record of a failed merge, retried once.
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionRevisionState {
@@ -1191,6 +1192,10 @@ pub struct SessionRevisionState {
     pub content_hash: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seen_etag: Option<String>,
+    /// Etag of a remote copy that failed to merge: not retried until the
+    /// object changes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failed_etag: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default)]
@@ -2828,10 +2833,17 @@ pub struct SessionSyncSummary {
     pub downloaded: u64,
     /// Sessions skipped because they could not be read or merged.
     pub skipped: u64,
+    /// Deletions carried across: local deletions removed from the Sync
+    /// Backend, plus sessions deleted here because another device did.
+    pub deleted: u64,
 }
 
 /// Upload locally changed sessions, download remote changes, and merge both
-/// sides (entry union by id, both branches kept).
+/// sides (entry union by id, both branches kept). Deletions travel as absence:
+/// a session this device synced before and no longer has is deleted from the
+/// Sync Backend, and one gone from the Sync Backend is deleted here — each
+/// only while the other side is unchanged since the last sync, so a
+/// conversation continued anywhere outlives its deletion.
 #[tauri::command]
 pub async fn sync_sessions(
     app: tauri::AppHandle,
@@ -2873,6 +2885,34 @@ async fn sync_sessions_with(
     };
 
     let mut summary = SessionSyncSummary::default();
+    // Keys whose session is gone on both sides: forgotten at the end.
+    let mut forgotten: Vec<String> = Vec::new();
+
+    // Deletions only apply to books in the Library: a book in the Trash took
+    // its Sessions along, and Restore must find them on the Sync Backend.
+    let library = store.clone();
+    let live_books: std::collections::HashSet<String> = run_sync_blocking(move || {
+        let mut live: std::collections::HashSet<String> = library
+            .read_library_public()?
+            .books
+            .into_iter()
+            .map(|book| book.id)
+            .collect();
+        live.extend(library.list_placeholders()?.into_iter().map(|book| book.id));
+        Ok(live)
+    })
+    .await?;
+    let listing_root = root.clone();
+    let local_before: std::collections::HashSet<String> = run_sync_blocking(move || {
+        let store = crate::pi_sessions::PiSessionStore::new(listing_root)?;
+        Ok(store
+            .list_all_session_files()?
+            .into_iter()
+            .map(|file| format!("{}/{}", file.book_id, file.session_id))
+            .collect())
+    })
+    .await?;
+    let mut remote_keys = std::collections::HashSet::new();
 
     let remote_objects: Vec<object_store::ObjectMeta> = object_store
         .list(Some(&ObjectPath::from(SESSION_OBJECT_PREFIX)))
@@ -2898,8 +2938,24 @@ async fn sync_sessions_with(
             continue;
         }
         let key = format!("{book_id}/{session_id}");
+        remote_keys.insert(key.clone());
         let mut entry = revision_of(&revisions, &key);
-        if entry.seen_etag.is_some() && entry.seen_etag == object.e_tag {
+        if entry.failed_etag.is_some() && entry.failed_etag == object.e_tag {
+            continue;
+        }
+        if entry.content_hash.is_some() && entry.seen_etag == object.e_tag {
+            // Synced before, untouched remotely since, gone here: deleted
+            // on this device. (A remote change instead revives it below.)
+            if !local_before.contains(&key)
+                && live_books.contains(book_id)
+            {
+                object_store
+                    .delete(&object.location)
+                    .await
+                    .map_err(map_object_store_error)?;
+                forgotten.push(key);
+                summary.deleted += 1;
+            }
             continue;
         }
         // Transport failures abort the pass (the backend is unreachable and
@@ -2925,9 +2981,10 @@ async fn sync_sessions_with(
             }
             Err(_) => Err(AppError::storage_corrupt("Synced session is not valid UTF-8")),
         };
-        entry.seen_etag = object.e_tag.clone();
         match merged {
             Ok(local_has_extra) => {
+                entry.seen_etag = object.e_tag.clone();
+                entry.failed_etag = None;
                 // Remote already holds everything: the merged local file
                 // counts as uploaded. Otherwise record the remote's hash, so
                 // the upload below sees a difference and pushes the union
@@ -2947,11 +3004,49 @@ async fn sync_sessions_with(
                 // One unreadable or unmergeable session must not fail every
                 // pass forever. Remember its etag so it is retried only once
                 // it changes; the local copy (if any) still uploads below.
+                entry.failed_etag = object.e_tag.clone();
                 eprintln!("[sync] Skipping remote session {location}: {}", error.message);
                 summary.skipped += 1;
             }
         }
         revisions.insert(key, entry);
+    }
+
+    // Gone from the Sync Backend: another device deleted the session.
+    for (key, entry) in &snapshot.session_revisions {
+        if remote_keys.contains(key) {
+            continue;
+        }
+        let (Some((book_id, session_id)), Some(hash)) = (key.split_once('/'), entry.content_hash.clone())
+        else {
+            continue;
+        };
+        if !live_books.contains(book_id) {
+            continue;
+        }
+        if !local_before.contains(key) {
+            forgotten.push(key.clone());
+            continue;
+        }
+        let delete_root = root.clone();
+        let (book_id, session_id) = (book_id.to_string(), session_id.to_string());
+        let deleted = run_sync_blocking(move || {
+            let store = crate::pi_sessions::PiSessionStore::new(delete_root)?;
+            store.delete_if_unchanged(&book_id, &session_id, &hash)
+        })
+        .await;
+        match deleted {
+            Ok(true) => {
+                forgotten.push(key.clone());
+                summary.deleted += 1;
+            }
+            // Changed here since: the upload below brings it back.
+            Ok(false) => {}
+            Err(error) => {
+                eprintln!("[sync] Skipping remote deletion of {key}: {}", error.message);
+                summary.skipped += 1;
+            }
+        }
     }
 
     let upload_root = root.clone();
@@ -2994,17 +3089,6 @@ async fn sync_sessions_with(
     // Expired book Tombstones release their objects — unless the book is
     // alive on this device after all (revived elsewhere), in which case the
     // Tombstone is simply dropped and the objects stay.
-    let live_books: std::collections::HashSet<String> = run_sync_blocking(move || {
-        let mut live: std::collections::HashSet<String> = store
-            .read_library_public()?
-            .books
-            .into_iter()
-            .map(|book| book.id)
-            .collect();
-        live.extend(store.list_placeholders()?.into_iter().map(|book| book.id));
-        Ok(live)
-    })
-    .await?;
     let mut released = Vec::new();
     for book_id in expired_book_tombstones(&snapshot) {
         if live_books.contains(&book_id) {
@@ -3020,6 +3104,9 @@ async fn sync_sessions_with(
     run_sync_blocking(move || {
         update_sync_state(&write_root, |state| {
             state.session_revisions.extend(revisions);
+            for key in &forgotten {
+                state.session_revisions.remove(key);
+            }
             state.tombstones.retain(|tombstone| {
                 !(tombstone.kind == "book"
                     && released.contains(&tombstone.book_id)
@@ -3620,6 +3707,142 @@ mod review_fix_tests {
             assert!(remote.head(&epub_object_key(&live.id, "rev")).await.is_ok());
             assert!(remote.head(&epub_object_key("gonebook", "rev")).await.is_err());
             assert!(read_sync_state(&a.root).expect("state").tombstones.is_empty());
+        });
+    }
+
+    /// Two devices sharing one live book and one synced session on it.
+    async fn shared_session(remote: &InMemory) -> (Device, Device, String, String) {
+        let a = device();
+        let b = device();
+        let book = imported(&a.store, b"shared").id;
+        assert_eq!(imported(&b.store, b"shared").id, book);
+        a.sessions.create(&book).expect("create");
+        let id = session_id(&a);
+        a.sessions
+            .append(&book, &id, None, vec![message("first001", None)])
+            .expect("append");
+        sync(&a, remote).await;
+        assert_eq!(sync(&b, remote).await.downloaded, 1);
+        (a, b, book, id)
+    }
+
+    fn has_session(device: &Device, session: &str) -> bool {
+        device
+            .sessions
+            .list_all_session_files()
+            .expect("files")
+            .iter()
+            .any(|file| file.session_id == session)
+    }
+
+    #[test]
+    fn a_session_deleted_on_one_device_is_deleted_everywhere() {
+        tauri::async_runtime::block_on(async {
+            let remote = InMemory::new();
+            let (a, b, book, id) = shared_session(&remote).await;
+
+            a.sessions.delete(&book, &id).expect("delete");
+            assert_eq!(sync(&a, &remote).await.deleted, 1);
+            assert!(remote.head(&session_object_key(&book, &id)).await.is_err());
+
+            assert_eq!(sync(&b, &remote).await.deleted, 1);
+            assert!(!has_session(&b, &id));
+
+            // Settled: nothing comes back on either side.
+            let quiet_a = sync(&a, &remote).await;
+            let quiet_b = sync(&b, &remote).await;
+            assert_eq!((quiet_a.deleted, quiet_b.deleted, quiet_a.uploaded, quiet_b.uploaded), (0, 0, 0, 0));
+            assert!(!has_session(&a, &id));
+        });
+    }
+
+    #[test]
+    fn a_session_continued_elsewhere_survives_its_deletion() {
+        tauri::async_runtime::block_on(async {
+            let remote = InMemory::new();
+            let (a, b, book, id) = shared_session(&remote).await;
+
+            a.sessions.delete(&book, &id).expect("delete");
+            sync(&a, &remote).await;
+            // B kept talking before it learned of the deletion: its edit wins.
+            b.sessions
+                .append(&book, &id, Some("first001"), vec![message("later001", Some("first001"))])
+                .expect("append b");
+            let summary = sync(&b, &remote).await;
+            assert_eq!((summary.deleted, summary.uploaded), (0, 1));
+
+            sync(&a, &remote).await;
+            assert!(has_session(&a, &id));
+        });
+    }
+
+    #[test]
+    fn a_remote_change_revives_a_session_deleted_here() {
+        tauri::async_runtime::block_on(async {
+            let remote = InMemory::new();
+            let (a, b, book, id) = shared_session(&remote).await;
+
+            b.sessions
+                .append(&book, &id, Some("first001"), vec![message("later001", Some("first001"))])
+                .expect("append b");
+            sync(&b, &remote).await;
+            a.sessions.delete(&book, &id).expect("delete");
+            sync(&a, &remote).await;
+
+            assert!(has_session(&a, &id));
+            assert!(remote.head(&session_object_key(&book, &id)).await.is_ok());
+        });
+    }
+
+    #[test]
+    fn sessions_of_a_book_missing_here_are_never_deleted_remotely() {
+        tauri::async_runtime::block_on(async {
+            let remote = InMemory::new();
+            let a = device();
+            // "book1" is not in the Library (say, in the Trash with its Sessions).
+            a.sessions.create("book1").expect("create");
+            let id = session_id(&a);
+            sync(&a, &remote).await;
+            a.sessions.delete("book1", &id).expect("delete");
+
+            assert_eq!(sync(&a, &remote).await.deleted, 0);
+            assert!(remote.head(&session_object_key("book1", &id)).await.is_ok());
+        });
+    }
+
+    #[test]
+    fn a_session_an_older_version_failed_to_merge_is_retried() {
+        tauri::async_runtime::block_on(async {
+            let remote = InMemory::new();
+            let (a, b, book, _) = shared_session(&remote).await;
+            a.sessions.create(&book).expect("create second");
+            let second = a
+                .sessions
+                .list_all_session_files()
+                .expect("files")
+                .into_iter()
+                .map(|file| file.session_id)
+                .find(|id| has_session(&a, id) && !has_session(&b, id))
+                .expect("second session");
+            sync(&a, &remote).await;
+            // What an older version left behind after failing to merge it:
+            // the etag remembered, nothing merged.
+            let etag = remote
+                .head(&session_object_key(&book, &second))
+                .await
+                .expect("head")
+                .e_tag;
+            update_sync_state(&b.root, |state| {
+                state.session_revisions.insert(
+                    format!("{book}/{second}"),
+                    SessionRevisionState { seen_etag: etag.clone(), ..Default::default() },
+                );
+                Ok(())
+            })
+            .expect("seed state");
+
+            assert_eq!(sync(&b, &remote).await.downloaded, 1);
+            assert!(has_session(&b, &second));
         });
     }
 }
