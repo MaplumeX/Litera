@@ -203,12 +203,14 @@ export function MobileReaderPage({
     (capture: SelectionCapture) => {
       if (snap === "collapsed") {
         pendingCaptureRef.current = capture;
+        // The page shrinks to make room: keep the asked passage on it.
+        readerRef.current?.anchorToSelection();
         onSnapChange("half");
         return;
       }
       chatRef.current?.fillInput(capture.text, capture.chapterHref);
     },
-    [onSnapChange, snap],
+    [onSnapChange, readerRef, snap],
   );
 
   useLayoutEffect(() => {
@@ -262,6 +264,11 @@ export function MobileReaderPage({
   ];
   const dark = session.resolvedTheme === "dark";
   const paginated = session.readerFlow === "paginated";
+  // With the assistant up, the Book lays itself out in the half above it
+  // rather than running on under the sheet. Only the settled snap counts:
+  // a drag moves the sheet over the page, and the keyboard pushes the sheet
+  // up without touching the page.
+  const assistantOpen = snap !== "collapsed";
   const reserveFooter = !paginated && footerSettings.enabled &&
     READER_FOOTER_POSITIONS.some((position) => footerSettings[position] !== "none");
 
@@ -271,7 +278,7 @@ export function MobileReaderPage({
           and doesn't reflow as the toolbars come and go. */}
       <div
         className="absolute inset-x-0 top-[var(--android-cutout-top,0px)] bottom-[var(--android-cutout-bottom,0px)]"
-        style={{ paddingBottom: reserveFooter ? "3rem" : undefined }}
+        style={{ paddingBottom: reserveFooter ? "3rem" : undefined, bottom: assistantOpen ? "50%" : undefined }}
       >
         {fileData && (
           <ReaderView

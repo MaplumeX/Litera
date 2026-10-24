@@ -98,6 +98,7 @@ const readerHandle = {
   ttsResume: vi.fn(() => undefined),
   ttsSetMark: vi.fn(),
   clearTtsHighlight: vi.fn(),
+  anchorToSelection: vi.fn(),
   advanceTtsSection: vi.fn(async () => undefined),
   dismissSelection: vi.fn(() => false),
   hasSelection: () => false,
@@ -576,6 +577,25 @@ describe("MobileApp — assistant sheet", () => {
 
     expect(sheet(screen).dataset.snap).toBe("half");
     expect(fillInput).toHaveBeenCalledWith("a passage", "ch1");
+    // The page shrinks above the sheet, holding on to the asked passage.
+    expect(readerHandle.anchorToSelection).toHaveBeenCalledOnce();
+  });
+
+  it("lays the Book out above the sheet while it's up, and over the whole screen once it's down", async () => {
+    const screen = await renderApp();
+    await openBook(screen);
+    const page = screen.getByTestId("reader-view").parentElement!;
+    expect(page.style.bottom).toBe("");
+
+    fireEvent.click(screen.getByText("middle-tap"));
+    fireEvent.click(screen.getByRole("button", { name: t("mobile.assistant") }));
+    expect(sheet(screen).dataset.snap).toBe("half");
+    expect(page.style.bottom).toBe("50%");
+    expect(readerHandle.anchorToSelection).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: t("mobile.assistant") }));
+    expect(sheet(screen).dataset.snap).toBe("collapsed");
+    expect(page.style.bottom).toBe("");
   });
 
   it("remembers full screen as the Book's Agent mode and reopens the Book that way", async () => {
