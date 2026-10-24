@@ -149,38 +149,50 @@
 /* --- 美化滚动条 ---
  * 适配 light/dark 两套主题，细圆角、半透明，hover 时加深。
  * 仅作用于主应用 DOM；阅读器内容处于 closed Shadow DOM 内，不受影响。
+ * 只在精确指针（桌面）下生效：触屏 WebView 一旦命中 ::-webkit-scrollbar
+ * 就会放弃系统的浮层滚动条（滚动时浮现、停下淡出），改画常驻滚动条。
  */
-* {
-  scrollbar-width: thin;
-  scrollbar-color: oklch(0.6 0 0 / 35%) transparent;
+@media (hover: hover) and (pointer: fine) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: oklch(0.6 0 0 / 35%) transparent;
+  }
+  .dark * {
+    scrollbar-color: oklch(0.8 0 0 / 30%) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  *::-webkit-scrollbar-thumb {
+    background-color: oklch(0.6 0 0 / 35%);
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  .dark *::-webkit-scrollbar-thumb {
+    background-color: oklch(0.8 0 0 / 30%);
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background-color: oklch(0.5 0 0 / 55%);
+  }
+  .dark *::-webkit-scrollbar-thumb:hover {
+    background-color: oklch(0.85 0 0 / 50%);
+  }
+  *::-webkit-scrollbar-corner {
+    background: transparent;
+  }
 }
-.dark * {
-  scrollbar-color: oklch(0.8 0 0 / 30%) transparent;
-}
-*::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-*::-webkit-scrollbar-track {
-  background: transparent;
-}
-*::-webkit-scrollbar-thumb {
-  background-color: oklch(0.6 0 0 / 35%);
-  border-radius: 9999px;
-  border: 2px solid transparent;
-  background-clip: padding-box;
-}
-.dark *::-webkit-scrollbar-thumb {
-  background-color: oklch(0.8 0 0 / 30%);
-}
-*::-webkit-scrollbar-thumb:hover {
-  background-color: oklch(0.5 0 0 / 55%);
-}
-.dark *::-webkit-scrollbar-thumb:hover {
-  background-color: oklch(0.85 0 0 / 50%);
-}
-*::-webkit-scrollbar-corner {
-  background: transparent;
+
+/* 横向滑动行（标签、书架卡片）：露出的半张卡片已提示可滑，不画滚动条。 */
+@utility no-scrollbar {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 @keyframes chat-typing {
@@ -220,23 +232,25 @@
 
 /* 对话消息流本身的滚动条：平时隐藏，指针移入消息流时才浮现，
  * 不在对话和书之间多画一道竖条。 */
-.chat-message-scroll {
-  scrollbar-color: transparent transparent;
-}
-.chat-message-scroll:hover {
-  scrollbar-color: oklch(0.6 0 0 / 35%) transparent;
-}
-.dark .chat-message-scroll:hover {
-  scrollbar-color: oklch(0.8 0 0 / 30%) transparent;
-}
-.chat-message-scroll::-webkit-scrollbar-thumb {
-  background-color: transparent;
-}
-.chat-message-scroll:hover::-webkit-scrollbar-thumb {
-  background-color: oklch(0.6 0 0 / 35%);
-}
-.dark .chat-message-scroll:hover::-webkit-scrollbar-thumb {
-  background-color: oklch(0.8 0 0 / 30%);
+@media (hover: hover) and (pointer: fine) {
+  .chat-message-scroll {
+    scrollbar-color: transparent transparent;
+  }
+  .chat-message-scroll:hover {
+    scrollbar-color: oklch(0.6 0 0 / 35%) transparent;
+  }
+  .dark .chat-message-scroll:hover {
+    scrollbar-color: oklch(0.8 0 0 / 30%) transparent;
+  }
+  .chat-message-scroll::-webkit-scrollbar-thumb {
+    background-color: transparent;
+  }
+  .chat-message-scroll:hover::-webkit-scrollbar-thumb {
+    background-color: oklch(0.6 0 0 / 35%);
+  }
+  .dark .chat-message-scroll:hover::-webkit-scrollbar-thumb {
+    background-color: oklch(0.8 0 0 / 30%);
+  }
 }
 
 /* 思维导图画布：markmap 内嵌样式把文字/圆圈/代码块颜色写死为浅色值
