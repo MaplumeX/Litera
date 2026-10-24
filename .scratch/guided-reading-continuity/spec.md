@@ -29,6 +29,7 @@ Guided reading promises a complete, coherent retelling of the Book. Two things w
 - **Context projection.** `contextBranch` keeps recap entries that a Compaction cut off, placing them right after the compaction summary in branch order. `serializeConversation` skips recaps, so a summary does not repeat them.
 - **Transcript.** Recaps are a new transcript marker (`role: "recap"`), anchored like compaction notices so edit indices stay aligned. Collapsed by default; shows the chapter title.
 - **Part cutting.** `chapterWindows` picks cuts by minimal cost with dynamic programming over the paragraph blocks, for the greedy (minimal) part count and that count + 1. Costs: before a heading of level 1–2 = 0, before a level 3–6 heading or scene break = 0.25, other paragraph boundary = 1, right after a heading = 50, inside a hard-split block = 0; plus a squared size-imbalance term per part and a penalty for the extra part. Windows still rejoin to the chapter Markdown. Single-window chapters are unchanged.
+- **Search hits.** A hit's `part` is the window that holds it (`partAt` in `epub-content.ts`): the flat-text offset is placed by its share of the chapter's comparison-form text, then the nearest window containing the match wins. It used to be the flat offset divided by `CHAPTER_PART_CHARS`, which pointed to the wrong part once Markdown and flat text drifted apart.
 - **Old cursors.** When a step's `totalParts` differs from the chapter's current part count, the next step maps the covered fraction onto the new parts, rounding so that text may repeat rather than be skipped.
 
 ## Issues
@@ -43,4 +44,3 @@ Guided reading promises a complete, coherent retelling of the Book. Two things w
 - Recaps shared across Sessions or Books (the persisted per-book retelling of guided-reading phase 2).
 - Recaps for chapters left part-way (skipped mid-chapter).
 - Editing or regenerating a recap by hand.
-- Search hits' `part` still comes from the flat-text offset, not from the windows.

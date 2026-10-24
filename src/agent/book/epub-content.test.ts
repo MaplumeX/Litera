@@ -496,6 +496,23 @@ describe("browser EPUB projection", () => {
     expect(searchBook(flat, ["exact phrase"])[0].chapterTitle).toBe("Opening");
   });
 
+  it("reports the read_chapter part that holds each hit", () => {
+    // Links make the Markdown longer than the plain text, and the parts are
+    // cut at sections, so a hit's part cannot come from its plain-text offset.
+    const link = '<a href="https://example.com/a/very/long/link/target/that/only/the/markdown/carries">see</a>';
+    const paragraphs = Array.from({ length: 40 }, (_, index) =>
+      `${index % 10 === 0 ? `<h2>Section ${index / 10}</h2>` : ""}<p>marker${index}x ${"word ".repeat(80)}${link}</p>`).join("");
+    const files = hierarchyFiles('<ol><li><a href="text/vol1.xhtml">One</a></li></ol>', {
+      "text/vol1.xhtml": `<html><body>${paragraphs}</body></html>`,
+    });
+    const book = parseEpub(pack(files));
+    expect(readChapter(book, 0).totalParts).toBeGreaterThan(1);
+    for (let index = 0; index < 40; index += 1) {
+      const [hit] = searchBook(book, [`marker${index}x`]);
+      expect(readChapter(book, 0, hit.part).text, `marker${index}x`).toContain(`marker${index}x`);
+    }
+  });
+
   it("deduplicates multi-query hits and supports deterministic partial matching", () => {
     const book = parseEpub(epub({ nav: true }));
     expect(book.trigramIndex.get("ome")).toEqual([1]);

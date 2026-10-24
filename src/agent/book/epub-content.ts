@@ -1550,10 +1550,64 @@ function pushHit(
   hits.push({
     chapterIndex,
     chapterTitle: chapterTitleOf(chapter),
-    part: Math.floor(offset / CHAPTER_PART_CHARS),
+    part: partAt(chapter, offset, matchLength),
     match,
     snippet: `${start ? "…" : ""}${chapter.text.slice(start, end)}${end < chapter.text.length ? "…" : ""}`,
   });
+}
+
+// Each window's plain text in comparison form, where it ends in the
+// chapter's comparison form, and the flat text's comparison-form source map;
+// built on the first hit in a chapter.
+const partTextCache = new WeakMap<Chapter, { texts: string[]; ends: number[]; flatMap: number[] }>();
+
+function partTexts(chapter: Chapter) {
+  const cached = partTextCache.get(chapter);
+  if (cached) return cached;
+  const texts = chapterParts(chapter).map((window) => normalizeForQuote(plainBlock(window)).text);
+  const ends: number[] = [];
+  texts.forEach((text, index) => ends.push((ends[index - 1] ?? 0) + text.length));
+  const value = { texts, ends, flatMap: texts.length > 1 ? normalizeForQuote(chapter.text).map : [] };
+  partTextCache.set(chapter, value);
+  return value;
+}
+
+/** How many entries of the ascending `map` are below `offset`. */
+function countBelow(map: readonly number[], offset: number): number {
+  let low = 0;
+  let high = map.length;
+  while (low < high) {
+    const middle = (low + high) >> 1;
+    if (map[middle] < offset) low = middle + 1;
+    else high = middle;
+  }
+  return low;
+}
+
+/**
+ * The read_chapter part holding the match at `offset` of the chapter's flat
+ * text. Search runs on the flat text while parts are cut from the Markdown,
+ * so the offset is first placed by its share of the comparison-form text,
+ * then the part is the one nearest that estimate whose text contains the
+ * match.
+ */
+function partAt(chapter: Chapter, offset: number, matchLength: number): number {
+  const { texts, ends, flatMap } = partTexts(chapter);
+  if (texts.length === 1) return 0;
+  const position = (countBelow(flatMap, offset) / (flatMap.length || 1)) * ends[ends.length - 1];
+  const estimate = Math.max(0, ends.findIndex((end) => position < end));
+  const needle = normalizeForQuote(chapter.text.slice(offset, offset + matchLength)).text;
+  if (!needle) return estimate;
+  let best = estimate;
+  let bestDistance = Infinity;
+  texts.forEach((text, part) => {
+    const distance = Math.abs(part - estimate);
+    if (distance < bestDistance && text.includes(needle)) {
+      best = part;
+      bestDistance = distance;
+    }
+  });
+  return best;
 }
 
 const QUOTE_PASSAGE_MAX_CHARS = 600;

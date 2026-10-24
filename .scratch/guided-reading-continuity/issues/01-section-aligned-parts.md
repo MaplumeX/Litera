@@ -14,3 +14,4 @@
 
 - `chapterWindows` in `src/agent/book/epub-content.ts` now runs a DP over the paragraph blocks for the greedy count and count + 1; costs are named constants next to it. Worst case measured: a 300k-character chapter of 20-character lines takes ~270 ms once (cached per chapter); normal chapters are near 0 ms.
 - Old cursors: `nextGuideStep` and the TOC progress map a step's covered share onto the current part count (`coveredParts` in `guide.ts`).
+- Fixed along the way: `search_in_book` hits now report the part that really holds them (`partAt`), not `offset / CHAPTER_PART_CHARS`.
