@@ -782,6 +782,48 @@ describe("buildOwnedChapters unit coverage", () => {
   });
 });
 
+describe("TOC parents with only a heading of their own", () => {
+  const file = "text/vol1.xhtml";
+  const nodes = (entries: Array<[string, string, number]>): NavNode[] =>
+    entries.map(([label, href, depth]) => ({ label, href, depth }));
+
+  it("join their first sub-entry instead of standing as a chapter", () => {
+    const chapters = buildOwnedChapters(
+      nodes([["一", `${file}#c1`, 0], ["一.1", `${file}#s1`, 1], ["一.2", `${file}#s2`, 1], ["二", "text/vol2.xhtml", 0], ["二.1", "text/vol2.xhtml#s1", 1]]),
+      [file, "text/vol2.xhtml"],
+      [
+        [{ anchorId: "c1", text: "一" }, { anchorId: "s1", text: "一.1 正文" }, { anchorId: "s2", text: "一.2 正文" }],
+        [{ text: "二" }, { anchorId: "s1", text: "二.1 正文" }],
+      ],
+    );
+    expect(chapters.map((chapter) => [chapter.label, chapter.text, chapter.hrefs])).toEqual([
+      ["一.1", "一一.1 正文", [`${file}#c1`, `${file}#s1`]],
+      ["一.2", "一.2 正文", [`${file}#s2`]],
+      ["二.1", "二二.1 正文", ["text/vol2.xhtml", "text/vol2.xhtml#s1"]],
+    ]);
+    expect(chapters[2].ancestors).toEqual(["二"]);
+  });
+
+  it("join through nested heading-only parents, on title pages of their own", () => {
+    const chapters = buildOwnedChapters(
+      nodes([["第一部", "text/part.xhtml", 0], ["第一章", `${file}#c1`, 1], ["1.1", `${file}#s1`, 2]]),
+      ["text/part.xhtml", file],
+      [[{ text: "第一部" }], [{ anchorId: "c1", text: "第一章" }, { anchorId: "s1", text: "正文" }]],
+    );
+    expect(chapters.map((chapter) => [chapter.label, chapter.text])).toEqual([["1.1", "第一部第一章正文"]]);
+  });
+
+  it("keep a lead longer than a heading, and a heading with no sub-entry chapter", () => {
+    const intro = "导".repeat(201);
+    const chapters = buildOwnedChapters(
+      nodes([["一", `${file}#c1`, 0], ["一.1", `${file}#s1`, 1], ["二", `${file}#c2`, 0], ["二.1", `${file}#gone`, 1], ["三", `${file}#c3`, 0]]),
+      [file],
+      [[{ anchorId: "c1", text: intro }, { anchorId: "s1", text: "一.1" }, { anchorId: "c2", text: "二" }, { anchorId: "c3", text: "三" }]],
+    );
+    expect(chapters.map((chapter) => [chapter.label, chapter.text])).toEqual([["一", intro], ["一.1", "一.1"], ["二", "二"], ["三", "三"]]);
+  });
+});
+
 describe("locateQuote", () => {
   const chapter = (label: string, markdown: string, href: string) => ({
     label,

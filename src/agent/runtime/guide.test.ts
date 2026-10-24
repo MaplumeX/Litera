@@ -57,6 +57,22 @@ describe("cursors from an older part count", () => {
   });
 });
 
+describe("cursors from older chapter indices", () => {
+  it("finds the chapter by its recorded title when the indices shifted", () => {
+    // "Chapter 3" was index 3 when the step was sent; it is index 2 now.
+    expect(nextGuideStep(toc, { chapterIndex: 3, part: 0, totalParts: 3, chapterTitle: "Chapter 3" })).toMatchObject({ chapterIndex: 2, part: 1 });
+    expect(guideTocProgress(toc, [{ chapterIndex: 3, part: 0, totalParts: 3, chapterTitle: "Chapter 3" }], ["c2.xhtml", "c3.xhtml"])).toEqual({
+      "c2.xhtml": { covered: 1, totalParts: 3, skimmed: false, current: true },
+    });
+  });
+
+  it("keeps the index when the title is missing or ambiguous", () => {
+    const twins = [chapter(0, 1, 1000, "Notes"), chapter(1, 1, 1000, "Notes"), chapter(2, 1)];
+    expect(nextGuideStep(twins, { chapterIndex: 2, part: 0, totalParts: 1, chapterTitle: "Notes" })).toBeNull();
+    expect(nextGuideStep(toc, { chapterIndex: 0, part: 1, totalParts: 2 })).toMatchObject({ chapterIndex: 2 });
+  });
+});
+
 describe("skims and skips", () => {
   it("moves past the whole chapter after a skim, whatever part it started at", () => {
     expect(nextGuideStep(toc, { chapterIndex: 2, part: 1, totalParts: 3, skim: true })).toMatchObject({ chapterIndex: 3, part: 0 });

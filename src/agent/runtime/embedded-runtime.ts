@@ -6,7 +6,7 @@ import { BookWorkerClient, chapterAside, chapterForHref, formatBookSnapshot, typ
 import { contextBudget, estimateBranchTokens, generateSummary, prepareCompaction, preparePrune } from "@/agent/compaction/compaction";
 import { createGuardedNativeFetch } from "@/agent/transport/native-fetch";
 import { validateMindmapParams } from "@/agent/runtime/mindmap";
-import { dueRecapChapter, guidedPrompt, guideStepContext, guideTocProgress, nextGuideStep, resolveGuideStep, skipChapterStep, type GuideChapterProgress } from "@/agent/runtime/guide";
+import { dueRecapChapter, guideChapterEntry, guidedPrompt, guideStepContext, guideTocProgress, nextGuideStep, resolveGuideStep, skipChapterStep, type GuideChapterProgress } from "@/agent/runtime/guide";
 import { generateChapterRecap, guideRecapContext } from "@/agent/runtime/recap";
 import { resolveRuntimeModel } from "@/agent/runtime/model-resolution";
 import { classifyPromptError } from "@/agent/runtime/prompt-error";
@@ -321,9 +321,10 @@ export class LiteraAgentRuntime {
     try{
       const toc=await this.bookCall(bookId,()=>this.book.toc());
       const turns=guidedTurns(session);
-      const chapterIndex=dueRecapChapter(toc,turns.map((turn)=>turn.step),guideRecapChapters(session));
+      const recapped=new Set(guideRecapChapters(session).flatMap((recap)=>{const entry=guideChapterEntry(toc,recap);return entry?[entry.index]:[];}));
+      const chapterIndex=dueRecapChapter(toc,turns.map((turn)=>turn.step),recapped);
       if(chapterIndex===null)return;
-      const retelling=turns.filter((turn)=>turn.step.chapterIndex===chapterIndex).map((turn)=>turn.text.trim()).filter(Boolean);
+      const retelling=turns.filter((turn)=>guideChapterEntry(toc,turn.step)?.index===chapterIndex).map((turn)=>turn.text.trim()).filter(Boolean);
       if(!retelling.length||!live())return;
       const chapterTitle=toc.find((entry)=>entry.index===chapterIndex)?.label.trim()||undefined;
       const metadata=await this.bookCall(bookId,()=>this.book.metadata());
