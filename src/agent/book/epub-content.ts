@@ -854,6 +854,13 @@ function anchorIdOf(element: XmlElement): string | undefined {
   return undefined;
 }
 
+/**
+ * Most a TOC parent's own text may hold (whitespace aside) and still be only
+ * its heading, so that it joins its first sub-entry rather than standing as a
+ * chapter. Never drops text: a longer lead stays a chapter.
+ */
+const PARENT_LEAD_MAX_CHARS = 200;
+
 function sameTarget(left: string, right: string): boolean {
   return hrefMatches(left, right) && hrefFragment(left) === hrefFragment(right);
 }
@@ -972,13 +979,37 @@ export function buildOwnedChapters(
   if (first) leadingFiles.forEach(({ href, text, markdown }) => addFileToBucket(first, href, text, markdown));
 
   const chapters: Chapter[] = [];
-  infos.forEach((info, global) => {
-    const bucket = buckets.get(global);
-    if (info.container || !bucket) return;
+  // A parent whose own text is only a heading (a volume title page, the lead
+  // before its first sub-entry's anchor) joins its first sub-entry's chapter
+  // instead of becoming a chapter of its own.
+  const push = (bucket: Bucket): void => {
     const text = bucket.texts.join("");
-    if (!text) return;
-    chapters.push({ label: bucket.label, ancestors: bucket.ancestors, depth: bucket.depth, hrefs: bucket.hrefs, text, markdown: bucket.markdowns.join("\n\n") || text });
+    if (text) chapters.push({ label: bucket.label, ancestors: bucket.ancestors, depth: bucket.depth, hrefs: bucket.hrefs, text, markdown: bucket.markdowns.join("\n\n") || text });
+  };
+  let lead: { depth: number; bucket: Bucket } | undefined;
+  infos.forEach((info, global) => {
+    const own = buckets.get(global);
+    if (info.container || !own) return;
+    // A parent with no sub-entry chapter after all keeps its own.
+    if (lead && info.node.depth <= lead.depth) push(lead.bucket);
+    const bucket = lead && info.node.depth > lead.depth
+      ? {
+          ...own,
+          hrefs: [...lead.bucket.hrefs.filter((href) => !own.hrefs.includes(href)), ...own.hrefs],
+          texts: [...lead.bucket.texts, ...own.texts],
+          markdowns: [...lead.bucket.markdowns, ...own.markdowns],
+        }
+      : own;
+    lead = undefined;
+    const next = infos[global + 1];
+    const parent = next !== undefined && next.node.depth > info.node.depth;
+    if (parent && bucket.texts.join("").replace(/\s+/g, "").length <= PARENT_LEAD_MAX_CHARS) {
+      lead = { depth: info.node.depth, bucket };
+      return;
+    }
+    push(bucket);
   });
+  if (lead) push(lead.bucket);
   if (chapters.length) return chapters;
   // Empty or entirely unresolvable TOC: one chapter per spine file, as before.
   return spineHrefs.flatMap((href, index) => {

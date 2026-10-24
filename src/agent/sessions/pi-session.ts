@@ -650,11 +650,11 @@ export function guidedTurns(session: DecodedPiSession): Array<{ step: GuideStep;
 }
 
 /** The chapters with a recap on the active branch. */
-export function guideRecapChapters(session: DecodedPiSession): Set<number> {
-  return new Set(activeBranch(session).flatMap((entry) => {
+export function guideRecapChapters(session: DecodedPiSession): Array<{ chapterIndex: number; chapterTitle?: string }> {
+  return activeBranch(session).flatMap((entry) => {
     const recap = decodeRecap(entry);
-    return recap ? [recap.chapterIndex] : [];
-  }));
+    return recap ? [{ chapterIndex: recap.chapterIndex, ...(recap.chapterTitle ? { chapterTitle: recap.chapterTitle } : {}) }] : [];
+  });
 }
 
 export function newEntry(type: string, parentId: string | null, fields: Record<string, unknown>): PiSessionEntry {

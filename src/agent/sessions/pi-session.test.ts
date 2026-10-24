@@ -621,8 +621,8 @@ describe("guided sessions", () => {
     const session = makeSession([step("u1", null, 2), entry("a1", "u1", "assistant", "retelling"), recap("r1", "a1", 4, "The gist.")], "r1");
     expect(visibleMessages(session)[2]).toEqual({ role: "recap", chapterIndex: 4, chapterTitle: "Chapter 5", text: "The gist." });
     expect(visibleMessageEntries(session).map((item) => item.id)).toEqual(["u1", "a1", "r1"]);
-    expect(guideRecapChapters(session)).toEqual(new Set([4]));
-    expect(guideRecapChapters(makeSession([step("u1", null, 2), entry("a1", "u1", "assistant", "retelling")], "a1")).size).toBe(0);
+    expect(guideRecapChapters(session)).toEqual([{ chapterIndex: 4, chapterTitle: "Chapter 5" }]);
+    expect(guideRecapChapters(makeSession([step("u1", null, 2), entry("a1", "u1", "assistant", "retelling")], "a1"))).toEqual([]);
   });
 
   it("keeps recaps that a compaction cut off in the model context, right after the summary", () => {

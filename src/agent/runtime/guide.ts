@@ -53,6 +53,22 @@ function stepAt(entry: BookTocEntry, part: number): GuideStep {
   };
 }
 
+/**
+ * The TOC entry a recorded step or recap meant. Chapter indices shift when the
+ * Book's chapters are cut differently than when it was recorded; the recorded
+ * title then finds the chapter, when exactly one entry carries it.
+ */
+export function guideChapterEntry(
+  toc: readonly BookTocEntry[],
+  chapter: { chapterIndex: number; chapterTitle?: string },
+): BookTocEntry | undefined {
+  const atIndex = toc.find((entry) => entry.index === chapter.chapterIndex);
+  const title = chapter.chapterTitle?.trim();
+  if (!title || atIndex?.label.trim() === title) return atIndex;
+  const titled = toc.filter((entry) => entry.label.trim() === title);
+  return titled.length === 1 ? titled[0] : atIndex;
+}
+
 /** Chapters with no text of their own (e.g. a volume heading) are not retold. */
 function firstChapterFrom(toc: readonly BookTocEntry[], startIndex: number): BookTocEntry | undefined {
   return toc.find((entry) => entry.index >= startIndex && entry.chars > 0);
@@ -82,7 +98,7 @@ export function nextGuideStep(
   cursor: GuideStep | null,
   startIndex?: number,
 ): GuideStep | null {
-  const current = cursor ? toc.find((entry) => entry.index === cursor.chapterIndex) : undefined;
+  const current = cursor ? guideChapterEntry(toc, cursor) : undefined;
   if (!cursor || !current) {
     const start = firstChapterFrom(toc, startIndex ?? 0);
     return start ? stepAt(start, 0) : null;
@@ -101,7 +117,7 @@ export function nextGuideStep(
 
 /** The step as the open Book defines it, or null when it does not fit. */
 export function resolveGuideStep(toc: readonly BookTocEntry[], step: GuideStep): GuideStep | null {
-  const entry = toc.find((candidate) => candidate.index === step.chapterIndex);
+  const entry = guideChapterEntry(toc, step);
   if (!entry || !Number.isInteger(step.part) || step.part < 0 || step.part >= Math.max(1, entry.parts)) return null;
   const resolved = stepAt(entry, step.part);
   return step.skim ? { ...resolved, skim: true } : resolved;
@@ -140,7 +156,7 @@ function chapterCoverage(toc: readonly BookTocEntry[], steps: readonly GuideStep
   const chapters = new Map<number, { parts: Set<number>; skimmed: boolean }>();
   const finished: number[] = [];
   for (const step of steps) {
-    const entry = toc.find((candidate) => candidate.index === step.chapterIndex);
+    const entry = guideChapterEntry(toc, step);
     if (!entry) continue;
     const chapter = chapters.get(entry.index) ?? { parts: new Set<number>(), skimmed: false };
     const { first, last } = coveredParts(entry, step);
@@ -175,7 +191,8 @@ export function guideTocProgress(
   hrefs: readonly string[],
 ): Record<string, GuideChapterProgress> {
   const byChapter = chapterCoverage(toc, steps).chapters;
-  const currentIndex = steps[steps.length - 1]?.chapterIndex;
+  const latest = steps[steps.length - 1];
+  const currentIndex = latest && guideChapterEntry(toc, latest)?.index;
   const progress: Record<string, GuideChapterProgress> = {};
   for (const href of hrefs) {
     const entry = chapterForHref(toc, href);
