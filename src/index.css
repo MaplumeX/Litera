@@ -230,6 +230,22 @@
   display: none;
 }
 
+/* 长对话：屏幕外的消息跳过样式、布局和绘制，消息再多，面板动画和页面切换
+ * 也只为看得见的那几条付出代价。auto 记住每条上次渲染出的真实高度。 */
+.chat-message-offscreen {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 160px;
+}
+
+/* 手机上收起的助手面板仍挂载（保住草稿和会话），但不再参与渲染；
+ * allow-discrete 让收起时内容留到滑出动画结束。 */
+.assistant-sheet-body {
+  transition: content-visibility var(--motion-enter) allow-discrete;
+}
+[data-snap="collapsed"] > .assistant-sheet-body {
+  content-visibility: hidden;
+}
+
 /* 对话消息流本身的滚动条：平时隐藏，指针移入消息流时才浮现，
  * 不在对话和书之间多画一道竖条。 */
 @media (hover: hover) and (pointer: fine) {

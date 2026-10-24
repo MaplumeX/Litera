@@ -669,7 +669,12 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                   if (element) userMessageRefs.current.set(index, element);
                   else userMessageRefs.current.delete(index);
                 }}
-                className={message.role === "user" ? "scroll-mt-3" : undefined}
+                className={cn(
+                  message.role === "user" && "scroll-mt-3",
+                  // The last two stay laid out so following the bottom never
+                  // lands on a size estimate.
+                  index < state.messages.length - 2 && "chat-message-offscreen",
+                ) || undefined}
                 data-user-message-index={message.role === "user" ? index : undefined}
               >
                 {message.role === "user" && (
