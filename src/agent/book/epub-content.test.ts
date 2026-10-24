@@ -958,7 +958,7 @@ describe("footnotes", () => {
       ["text/c1.xhtml"],
       [["一", "text/c1.xhtml"]],
     );
-    expect(readChapter(book, 0).text).toBe("见第二节与9。\n\n第二节内容");
+    expect(readChapter(book, 0).text).toBe("见第二节与<sup>9</sup>。\n\n第二节内容");
   });
 
   it("locates quotes whether or not they carry footnote markers", () => {
@@ -971,5 +971,89 @@ describe("footnotes", () => {
     );
     expect(locateQuote(book, 0, "吾生也有涯，而知也无涯").status).toBe("verified");
     expect(locateQuote(book, 0, "吾生也有涯[^1]，而知也无涯").status).toBe("verified");
+  });
+
+  it("recognizes plain bracketed links paired with backlinks as footnotes", () => {
+    const book = footnoteBook(
+      {
+        "text/c1.xhtml": `<html ${EPUB_NS}><body><p>正文甲<a id="r1" href="#n1">[1]</a>，正文乙<a id="r2" href="notes.xhtml#n2">〔2〕</a>。</p><p><a id="n1" href="#r1">[1]</a>本章注一。</p></body></html>`,
+        "text/notes.xhtml": `<html ${EPUB_NS}><body><h1>注释</h1><p id="n2"><a href="c1.xhtml#r2">〔2〕</a>书末注二。</p></body></html>`,
+      },
+      ["text/c1.xhtml", "text/notes.xhtml"],
+      [["一", "text/c1.xhtml"], ["注释", "text/notes.xhtml"]],
+    );
+    const { text } = readChapter(book, 0);
+    expect(text).toContain("正文甲[^1]，正文乙[^2]。");
+    expect(text).toContain("[^1]: 本章注一。\n[^2]: 书末注二。");
+  });
+
+  it("recognizes circled, 注-prefixed and footnote-classed image references", () => {
+    const book = footnoteBook(
+      {
+        "text/c1.xhtml": `<html ${EPUB_NS}><body><p>甲<a href="#a">①</a>乙<a href="#b">注2</a>丙<a class="duokan-footnote" href="#c"><img src="note.png" alt="注"/></a></p><ol class="duokan-footnote-content"><li id="a">注A</li><li id="b">注B</li><li id="c">注C</li></ol></body></html>`,
+      },
+      ["text/c1.xhtml"],
+      [["一", "text/c1.xhtml"]],
+    );
+    const { text } = readChapter(book, 0);
+    expect(text).toContain("甲[^①]乙[^注2]丙[^c]");
+    expect(text).toContain("[^①]: 注A\n[^注2]: 注B\n[^c]: 注C");
+  });
+
+  it("does not treat plain marker links to headings or parenthesized references as footnotes", () => {
+    const book = footnoteBook(
+      {
+        "text/c1.xhtml": `<html ${EPUB_NS}><body><p>见<a href="#s1">[1]</a>与式<a href="#eq1">(1)</a>。</p><h2 id="s1">第一节</h2><p id="eq1">E = mc2</p></body></html>`,
+      },
+      ["text/c1.xhtml"],
+      [["一", "text/c1.xhtml"]],
+    );
+    const { text } = readChapter(book, 0);
+    expect(text).toContain("见[1]与式(1)。");
+    expect(text).not.toContain("[^");
+  });
+});
+
+describe("rich inline content", () => {
+  function singleFileBook(body: string): ParsedBook {
+    return parseEpub(pack(baseFiles(
+      '<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="c1" href="text/c1.xhtml" media-type="application/xhtml+xml"/>',
+      '<itemref idref="c1"/>',
+      {
+        "nav.xhtml": '<html xmlns:epub="http://www.idpf.org/2007/ops"><body><nav epub:type="toc"><a href="text/c1.xhtml">一</a></nav></body></html>',
+        "text/c1.xhtml": `<html xmlns="http://www.w3.org/1999/xhtml" xmlns:m="http://www.w3.org/1998/Math/MathML"><body>${body}</body></html>`,
+      },
+    )));
+  }
+
+  it("keeps superscripts, subscripts and external links, leaving in-book links as text", () => {
+    expect(markdownText('<html><body><p>H<sub>2</sub>O 与 x<sup>2</sup>，见<a href="https://example.com/a b">官网</a>、<a href="ch2.xhtml#s">第二章</a>与<a href="https://example.com">https://example.com</a>。</p></body></html>'))
+      .toBe("H<sub>2</sub>O 与 x<sup>2</sup>，见[官网](https://example.com/a%20b)、第二章与https://example.com。");
+  });
+
+  it("repeats rowspan cells in every row they cover", () => {
+    const html = `<html><body><table><tr><th>地区</th><th>年份</th><th>人口</th></tr>
+      <tr><td rowspan="2">华东</td><td>1990</td><td>1</td></tr><tr><td>2000</td><td>2</td></tr>
+      <tr><td>华北</td><td rowspan="0" colspan="2">缺</td></tr><tr><td>华南</td></tr></table></body></html>`;
+    expect(markdownText(html)).toBe(
+      "| 地区 | 年份 | 人口 |\n| --- | --- | --- |\n| 华东 | 1990 | 1 |\n| 华东 | 2000 | 2 |\n| 华北 | 缺 |  |\n| 华南 | 缺 |  |",
+    );
+  });
+
+  it("renders MathML as LaTeX, preferring a TeX annotation", () => {
+    const converted = '<math><mfrac><mi>a</mi><mrow><mi>b</mi><mo>+</mo><mn>1</mn></mrow></mfrac><mo>=</mo><msqrt><msup><mi>x</mi><mn>2</mn></msup></msqrt><mo>≤</mo><msubsup><mo>∑</mo><mrow><mi>i</mi><mo>=</mo><mn>1</mn></mrow><mi>n</mi></msubsup><msub><mi>α</mi><mi>i</mi></msub></math>';
+    expect(markdownText(`<html><body><p>式 ${converted} 成立。</p></body></html>`))
+      .toBe("式 $\\frac{a}{b+1}=\\sqrt{x^2}\\le\\sum_{i=1}^n\\alpha_i$ 成立。");
+    const annotated = '<m:math display="block"><m:semantics><m:mi>E</m:mi><m:annotation encoding="application/x-tex">E = mc^2</m:annotation></m:semantics></m:math>';
+    expect(markdownText(`<html xmlns:m="http://www.w3.org/1998/Math/MathML"><body><p>${annotated}</p></body></html>`)).toBe("$$E = mc^2$$");
+  });
+
+  it("keeps the chapter's Markdown structure around the new markup and searches the flat math text", () => {
+    const book = singleFileBook('<h2>一节</h2><p>能量 <m:math><m:mi>E</m:mi><m:mo>=</m:mo><m:mi>m</m:mi><m:msup><m:mi>c</m:mi><m:mn>2</m:mn></m:msup></m:math>，水 H<sub>2</sub>O，<a href="https://example.com">链接</a>。</p><table><tr><td rowspan="2">甲</td><td>1</td></tr><tr><td>2</td></tr></table>');
+    const { text } = readChapter(book, 0);
+    expect(text).toBe("## 一节\n\n能量 $E=mc^2$，水 H<sub>2</sub>O，[链接](https://example.com)。\n\n| 甲 | 1 |\n| --- | --- |\n| 甲 | 2 |");
+    expect(book.chapters[0].text).toContain("能量 E=mc2，水 H2O，链接。");
+    expect(searchBook(book, ["E=mc2"])).toHaveLength(1);
+    expect(locateQuote(book, 0, "水 H<sub>2</sub>O，[链接](https://example.com)").status).toBe("verified");
   });
 });
