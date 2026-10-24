@@ -1023,6 +1023,50 @@ describe("footnotes", () => {
     expect(last).toContain("[^*]: 注乙");
   });
 
+  it("leaves same-chapter notes out of the chapter Markdown so they never fill a part of their own", () => {
+    const paragraph = "正文段落。".repeat(500);
+    const notes = Array.from({ length: 40 }, (_, index) => `<aside epub:type="footnote" id="n${index}">${`第${index}条注释。`.repeat(60)}</aside>`).join("");
+    const refs = Array.from({ length: 40 }, (_, index) => `<p>${paragraph}<a epub:type="noteref" href="#n${index}">${index}</a></p>`).join("");
+    const book = footnoteBook(
+      { "text/c1.xhtml": `<html ${EPUB_NS}><body>${refs}${notes}</body></html>` },
+      ["text/c1.xhtml"],
+      [["一", "text/c1.xhtml"]],
+    );
+    const { totalParts } = readChapter(book, 0);
+    const parts = Array.from({ length: totalParts }, (_, part) => readChapter(book, 0, part).text);
+    expect(book.chapters[0].markdown).not.toContain("注释。");
+    parts.forEach((text) => {
+      expect(text).toContain("正文段落。");
+      expect(text.length).toBeLessThanOrEqual(CHAPTER_PART_CHARS + 2);
+    });
+    expect(parts.join("\n").match(/^\[\^\d+\]: /gm)).toHaveLength(40);
+    expect(book.chapters[0].text).toContain("第39条注释。");
+    expect(locateQuote(book, 0, "第39条注释。第39条注释。").status).toBe("verified");
+  });
+
+  it("keeps notes in place when a TOC entry puts them in another chapter of the same file", () => {
+    const book = footnoteBook(
+      {
+        "text/c1.xhtml": `<html ${EPUB_NS}><body><p>正文<a epub:type="noteref" href="#n1">1</a>。</p><h2 id="notes">注释</h2><aside epub:type="footnote" id="n1">注一。</aside></body></html>`,
+      },
+      ["text/c1.xhtml"],
+      [["一", "text/c1.xhtml"], ["注释", "text/c1.xhtml#notes"]],
+    );
+    expect(readChapter(book, 0).text).toBe("正文[^1]。\n\n[^1]: 注一。");
+    expect(readChapter(book, 1).text).toBe("## 注释\n\n注一。");
+  });
+
+  it("keeps an unmarked paragraph a superscript link points at", () => {
+    const book = footnoteBook(
+      {
+        "text/c1.xhtml": `<html ${EPUB_NS}><body><p>见<sup><a href="#p2">2</a></sup>。</p><p id="p2">第二段正文。</p></body></html>`,
+      },
+      ["text/c1.xhtml"],
+      [["一", "text/c1.xhtml"]],
+    );
+    expect(readChapter(book, 0).text).toBe("见[^2]。\n\n第二段正文。\n\n[^2]: 第二段正文。");
+  });
+
   it("gives distinct labels to different notes sharing the same marker text", () => {
     const book = footnoteBook(
       {

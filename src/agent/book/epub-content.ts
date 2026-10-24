@@ -216,6 +216,7 @@ interface MarkdownItem {
 
 /** Markdown projection walk for one element subtree. */
 function walkElement(element: XmlElement, state: MarkdownWalk): void {
+  if (isMovedNote(element)) return;
   const tag = elementTag(element);
   if (tag === "pre") {
     let raw = "";
@@ -307,6 +308,7 @@ function inlineNode(node: XmlNode): string {
   if (type === 3 || type === 4) return node.nodeValue ?? "";
   if (type !== 1) return "";
   const element = node as XmlElement;
+  if (isMovedNote(element)) return "";
   const label = noterefLabel(element);
   if (label) return `[^${label}]`;
   if (isMathElement(element)) return markup(mathMarkdown(element));
@@ -346,6 +348,7 @@ function listBlocks(list: XmlElement, ordered: boolean): string[] {
     if (child.nodeType !== 1) continue;
     const element = child as XmlElement;
     const tag = elementTag(element);
+    if (isMovedNote(element)) continue;
     if (tag === "li") items.push(listItem(element));
     else if (tag === "ul" || tag === "ol") items.push(...listBlocks(element, tag === "ol").map((text) => ({ text, nested: [] })));
   }
@@ -576,6 +579,7 @@ function markdownEvents(root: XmlElement): MarkdownEvent[] {
     }
     if (type !== 1) return;
     const element = node as XmlElement;
+    if (isMovedNote(element)) return;
     const anchor = anchorIdOf(element);
     if (anchor !== undefined) {
       flushInline();
@@ -727,7 +731,8 @@ function spineSegments(source: string, root: XmlElement | null, fileHref: string
   try {
     if (!root) return [{ text: htmlText(source) }];
     // `guard` is the flat text minus footnote reference marks, which the
-    // Markdown projection renders as `[^label]` instead of their own text.
+    // Markdown projection renders as `[^label]` instead of their own text,
+    // and minus moved notes, which it leaves out.
     const flats: Array<{ anchorId?: string; text: string; guard: string }> = [];
     const anchorIds: string[] = [];
     let parts: string[] = [];
@@ -752,6 +757,11 @@ function spineSegments(source: string, root: XmlElement | null, fileHref: string
       const element = node as XmlElement;
       if (noterefLabel(element)) {
         // Flat text keeps the mark verbatim for search and the trigram index.
+        parts.push(element.textContent ?? "");
+        return;
+      }
+      if (isMovedNote(element)) {
+        // Search keeps the note text; the Markdown projection drops it.
         parts.push(element.textContent ?? "");
         return;
       }
@@ -1025,12 +1035,23 @@ const NOTEREF_ATTR = "data-litera-noteref";
 const NOTE_ATTR = "data-litera-note";
 /** Set on a link from a note back to its reference; stripped from definitions. */
 const BACKLINK_ATTR = "data-litera-backlink";
+/**
+ * Set on a note read in the same chapter as its reference: the Markdown
+ * projection leaves it out, since read_chapter appends it as a definition.
+ */
+const MOVED_NOTE_ATTR = "data-litera-moved-note";
+/** `epub:type`/`role` values naming an element a note or a notes section. */
+const NOTE_TYPES = new Set(["footnote", "footnotes", "endnote", "endnotes", "rearnote", "rearnotes", "note", "doc-footnote", "doc-endnote", "doc-endnotes"]);
 const FOOTNOTE_REF = /\[\^[^\]\s]+\]/g;
 const FOOTNOTE_LABEL_MAX_CHARS = 12;
 const NOTE_BLOCK_TAGS = new Set(["li", "dd", "dt", "td"]);
 
 function noterefLabel(element: XmlElement): string {
   return element.getAttribute?.(NOTEREF_ATTR) ?? "";
+}
+
+function isMovedNote(element: XmlElement): boolean {
+  return !!element.getAttribute?.(MOVED_NOTE_ATTR);
 }
 
 function withoutFootnoteRefs(text: string): string {
@@ -1113,6 +1134,29 @@ function insideAtomicBlock(element: XmlElement): boolean {
   return false;
 }
 
+/**
+ * True when a note block carries a note's own marks — an aside, a backlink,
+ * or a note `epub:type`/`role`/class on it or an ancestor — so leaving it out
+ * of the Markdown never drops body text a reference merely links to.
+ */
+function isMarkedNote(note: XmlElement): boolean {
+  if (elementTag(note) === "aside") return true;
+  if (Array.from(note.getElementsByTagName("a")).some((link) => link.getAttribute(BACKLINK_ATTR))) return true;
+  for (let node: XmlElement | null = note; node && node.nodeType === 1; node = node.parentNode as XmlElement | null) {
+    const tag = elementTag(node);
+    if (tag === "body" || tag === "html") return false;
+    if (linkTypes(node).some((type) => NOTE_TYPES.has(type)) || hasNoteClass(node)) return true;
+  }
+  return false;
+}
+
+function hasAncestor(element: XmlElement, match: (node: XmlElement) => boolean): boolean {
+  for (let node = element.parentNode as XmlElement | null; node && node.nodeType === 1; node = node.parentNode as XmlElement | null) {
+    if (match(node)) return true;
+  }
+  return false;
+}
+
 /** One-line Markdown of a note body with its backlinks removed. */
 function footnoteDefinition(note: XmlElement, noteHref: string): string {
   const clone = note.cloneNode(true) as XmlElement;
@@ -1131,7 +1175,10 @@ function footnoteDefinition(note: XmlElement, noteHref: string): string {
  * element; of a reference/backlink pair pointing at each other, the one
  * earlier in reading order is the reference.
  */
-function annotateFootnotes(docs: ReadonlyArray<{ href: string; root: XmlElement }>): Map<string, Map<string, string>> {
+function annotateFootnotes(
+  docs: ReadonlyArray<{ href: string; root: XmlElement }>,
+  toc: readonly NavNode[] = [],
+): Map<string, Map<string, string>> {
   const definitions = new Map<string, Map<string, string>>();
   try {
     const docIndex = new Map(docs.map((doc, index) => [decodedPath(doc.href), index]));
@@ -1147,6 +1194,35 @@ function annotateFootnotes(docs: ReadonlyArray<{ href: string; root: XmlElement 
         idIndexes.set(index, ids);
       }
       return ids.get(id);
+    };
+    const orders = new Map<number, Map<XmlElement, number>>();
+    const orderOf = (index: number, element: XmlElement): number => {
+      let order = orders.get(index);
+      if (!order) {
+        order = new Map(Array.from(docs[index].root.getElementsByTagName("*")).map((node, position) => [node, position]));
+        orders.set(index, order);
+      }
+      return order.get(element) ?? -1;
+    };
+    // Document positions of the TOC anchors that start a chapter inside each file.
+    const starts = new Map<number, number[]>();
+    const chapterStarts = (index: number): number[] => {
+      let found = starts.get(index);
+      if (!found) {
+        found = toc.flatMap((node) => {
+          const fragment = hrefFragment(node.href);
+          if (!fragment || !hrefMatches(node.href, docs[index].href)) return [];
+          const target = elementById(index, fragment) ?? elementById(index, decodedPath(fragment));
+          return target ? [orderOf(index, target)] : [];
+        });
+        starts.set(index, found);
+      }
+      return found;
+    };
+    /** True when no TOC anchor falls between the two, so they read in the same chapter. */
+    const sameChapter = (index: number, left: XmlElement, right: XmlElement): boolean => {
+      const [from, to] = [orderOf(index, left), orderOf(index, right)].sort((a, b) => a - b);
+      return from >= 0 && !chapterStarts(index).some((start) => start > from && start <= to);
     };
     const linkTarget = (doc: number, link: XmlElement): { target: XmlElement; targetDoc: number } | undefined => {
       const href = link.getAttribute("href") ?? "";
@@ -1183,6 +1259,7 @@ function annotateFootnotes(docs: ReadonlyArray<{ href: string; root: XmlElement 
     const labels = new Map<number, { byLabel: Set<string>; byTarget: Map<XmlElement, string> }>();
     const pending: Array<{ element: XmlElement; label: string }> = [];
     const notes = new Set<XmlElement>();
+    const moved = new Set<XmlElement>();
     for (const ref of refs) {
       let docLabels = labels.get(ref.doc);
       if (!docLabels) {
@@ -1210,6 +1287,18 @@ function annotateFootnotes(docs: ReadonlyArray<{ href: string; root: XmlElement 
           const href = docs[ref.doc].href;
           if (!definitions.has(href)) definitions.set(href, new Map());
           definitions.get(href)!.set(label, definition);
+          // A note read alongside its reference reaches the agent as the
+          // definition only; a note elsewhere (a notes chapter) stays put.
+          if (
+            ref.targetDoc === ref.doc &&
+            isNoteLike(note) &&
+            isMarkedNote(note) &&
+            elementTag(note) !== "td" &&
+            !hasAncestor(note, (node) => elementTag(node) === "table") &&
+            note !== ref.element &&
+            !hasAncestor(ref.element, (node) => node === note) &&
+            sameChapter(ref.doc, ref.element, note)
+          ) moved.add(note);
         }
       }
       pending.push({ element: ref.element, label });
@@ -1218,6 +1307,7 @@ function annotateFootnotes(docs: ReadonlyArray<{ href: string; root: XmlElement 
     // Mark last: a failure above leaves the documents untouched.
     for (const { element, label } of pending) element.setAttribute(NOTEREF_ATTR, label);
     for (const note of notes) note.setAttribute(NOTE_ATTR, "1");
+    for (const note of moved) note.setAttribute(MOVED_NOTE_ATTR, "1");
   } catch {
     // Footnotes are an enhancement; on any failure the text reads as before.
     definitions.clear();
@@ -1284,7 +1374,7 @@ export function parseEpub(buffer: ArrayBuffer): ParsedBook {
   const footnotes = annotateFootnotes(spineHrefs.flatMap((href, index) => {
     const root = roots[index];
     return root ? [{ href, root }] : [];
-  }));
+  }), toc);
   const segments = spineHrefs.map((href, index) => spineSegments(sources[index], roots[index], href));
   const chapters = withFootnotes(buildOwnedChapters(toc, spineHrefs, segments), footnotes);
   return {
@@ -1367,8 +1457,27 @@ const SCENE_BREAK = /^[*\-_·•◇◆○●※~～＊\s]{3,}$/u;
 
 interface WindowBlock {
   text: string;
+  /**
+   * Room the block takes in a window: its text plus the definitions
+   * read_chapter appends for its footnote references, capped at a full window.
+   */
+  size: number;
   /** Cost of a cut just before this block. */
   cut: number;
+}
+
+/** Length of the `[^label]: definition` lines read_chapter appends for the references in `text`. */
+function definitionsLength(text: string, footnotes: ReadonlyMap<string, string> | undefined): number {
+  if (!footnotes?.size) return 0;
+  let length = 0;
+  const seen = new Set<string>();
+  for (const [ref] of text.matchAll(FOOTNOTE_REF)) {
+    const definition = footnotes.get(ref.slice(2, -1));
+    if (definition === undefined || seen.has(ref)) continue;
+    seen.add(ref);
+    length += ref.length + 3 + definition.length;
+  }
+  return length;
 }
 
 /**
@@ -1376,8 +1485,11 @@ interface WindowBlock {
  * than `CHAPTER_PART_CHARS` (e.g. a huge `<pre>`) hard-split into full-size
  * pieces and a residual piece. A full piece fills a window alone, so pieces
  * never join each other and every join of two blocks is an original `\n\n`.
+ * A block's size counts the footnote definitions it brings along.
  */
-function windowBlocks(markdown: string): WindowBlock[] {
+function windowBlocks(markdown: string, footnotes?: ReadonlyMap<string, string>): WindowBlock[] {
+  const block = (text: string, cut: number): WindowBlock =>
+    ({ text, size: Math.min(CHAPTER_PART_CHARS, text.length + definitionsLength(text, footnotes)), cut });
   const blocks: WindowBlock[] = [];
   let afterHeading = false;
   for (const text of markdown.split("\n\n")) {
@@ -1390,11 +1502,11 @@ function windowBlocks(markdown: string): WindowBlock[] {
         : SCENE_BREAK.test(text) ? CUT_BEFORE_SUBSECTION : CUT_AT_PARAGRAPH;
     afterHeading = !!heading;
     if (text.length <= CHAPTER_PART_CHARS) {
-      blocks.push({ text, cut });
+      blocks.push(block(text, cut));
       continue;
     }
     for (let start = 0; start < text.length; start += CHAPTER_PART_CHARS) {
-      blocks.push({ text: text.slice(start, start + CHAPTER_PART_CHARS), cut: start === 0 ? cut : 0 });
+      blocks.push(block(text.slice(start, start + CHAPTER_PART_CHARS), start === 0 ? cut : 0));
     }
   }
   return blocks;
@@ -1405,11 +1517,11 @@ function minimalWindowCount(blocks: readonly WindowBlock[]): number {
   let count = 0;
   let length = -1;
   for (const block of blocks) {
-    if (length >= 0 && length + 2 + block.text.length <= CHAPTER_PART_CHARS) {
-      length += 2 + block.text.length;
+    if (length >= 0 && length + 2 + block.size <= CHAPTER_PART_CHARS) {
+      length += 2 + block.size;
     } else {
       count += 1;
-      length = block.text.length;
+      length = block.size;
     }
   }
   return count;
@@ -1422,7 +1534,7 @@ function minimalWindowCount(blocks: readonly WindowBlock[]): number {
  */
 function cheapestSplit(blocks: readonly WindowBlock[], count: number): { cost: number; starts: number[] } | null {
   const offsets = [0];
-  for (const block of blocks) offsets.push(offsets[offsets.length - 1] + block.text.length + 2);
+  for (const block of blocks) offsets.push(offsets[offsets.length - 1] + block.size + 2);
   const windowLength = (from: number, to: number) => offsets[to] - offsets[from] - 2;
   const target = windowLength(0, blocks.length) / count;
   const n = blocks.length;
@@ -1468,10 +1580,12 @@ function cheapestSplit(blocks: readonly WindowBlock[], count: number): { cost: n
  * back with `\n\n` reproduce the original markdown at every block boundary
  * that was NOT introduced by a hard split: the pieces of an oversized block
  * are exact consecutive slices of it (the residual final piece keeps packing
- * with following blocks). Every window is complete Markdown.
+ * with following blocks). Every window is complete Markdown. With the
+ * chapter's `footnotes`, the definitions each window gets appended count
+ * toward its size.
  */
-export function chapterWindows(markdown: string): string[] {
-  const blocks = windowBlocks(markdown);
+export function chapterWindows(markdown: string, footnotes?: ReadonlyMap<string, string>): string[] {
+  const blocks = windowBlocks(markdown, footnotes);
   if (!blocks.length) return [""];
   const minimal = minimalWindowCount(blocks);
   if (minimal === 1) return [blocks.map((block) => block.text).join("\n\n")];
@@ -1491,7 +1605,7 @@ function chapterParts(chapter: Chapter): string[] {
   if (cached) return cached;
   let windows: string[];
   try {
-    windows = chapterWindows(chapter.markdown);
+    windows = chapterWindows(chapter.markdown, chapter.footnotes);
   } catch {
     // Defensive: if packing ever fails, degrade to flat-text hard slicing.
     windows = Array.from(
@@ -1718,7 +1832,8 @@ function matchInBlock(block: string, segments: readonly string[]): { start: numb
 }
 
 function locateInChapter(chapter: Chapter, segments: readonly string[]): Pick<QuoteLocation, "passage" | "matchStart" | "matchEnd"> | null {
-  for (const block of chapter.markdown.split(/\n{2,}/)) {
+  // Footnote definitions too: read_chapter shows notes only as those.
+  for (const block of [...chapter.markdown.split(/\n{2,}/), ...(chapter.footnotes?.values() ?? [])]) {
     const plain = plainBlock(block).trim();
     const match = matchInBlock(plain, segments);
     if (!match) continue;
