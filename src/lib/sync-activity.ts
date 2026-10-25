@@ -4,23 +4,33 @@
  * scheduler debounces these into a push. Pure pub/sub — no Tauri, no state.
  */
 
-const listeners = new Set<() => void>();
+export interface SyncActivity {
+  /**
+   * A discrete user action (an Annotation, a deletion, a metadata edit) that
+   * should reach other devices soon, rather than a stream of small changes
+   * (page turns, assistant messages) that is best batched.
+   */
+  prompt: boolean;
+}
+
+const listeners = new Set<(activity: SyncActivity) => void>();
 /** Whether local changes happened since the last sync pass started. */
 let unsynced = false;
 
 /** Notify that synced data changed locally and should eventually push. */
-export function notifySyncActivity(): void {
+export function notifySyncActivity(options: { prompt?: boolean } = {}): void {
   unsynced = true;
+  const activity: SyncActivity = { prompt: options.prompt ?? false };
   for (const listener of listeners) {
     try {
-      listener();
+      listener(activity);
     } catch (error) {
       console.error("sync activity listener failed:", error);
     }
   }
 }
 
-export function subscribeSyncActivity(listener: () => void): () => void {
+export function subscribeSyncActivity(listener: (activity: SyncActivity) => void): () => void {
   listeners.add(listener);
   return () => {
     listeners.delete(listener);

@@ -82,7 +82,7 @@ export function useReadingStatus({ onError }: { onError: (error: unknown) => voi
         starred: null,
       });
       open.status = "finished";
-      notifySyncActivity();
+      notifySyncActivity({ prompt: true });
     } catch (error) {
       onError(error);
     }

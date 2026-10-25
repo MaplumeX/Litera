@@ -121,7 +121,7 @@ export function BookDetailsDialog({
       // shelf card's status menu, and `update_book_metadata` replaces every
       // text field, so folding it in would risk clearing the star.
       const updated = await invoke<BookRecord>("update_book_metadata", args);
-      notifySyncActivity();
+      notifySyncActivity({ prompt: true });
       onSaved(updated, Boolean(coverBytes));
       onOpenChange(false);
     } catch (err) {

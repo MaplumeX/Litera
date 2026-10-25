@@ -40,6 +40,7 @@ import { invokeErrorMessage } from "@/lib/app-error";
 import { epubBytesFromIpc } from "@/lib/ipc-bytes";
 import { createLatestSerializedTaskController } from "@/lib/latest-serialized-task";
 import { notifySyncActivity } from "@/lib/sync-activity";
+import { pullBeforeOpen } from "@/lib/sync-runner";
 import { useT } from "@/lib/i18n";
 import { isReaderMode, type ReaderMode } from "@/lib/reader-mode";
 import { isReaderLayout } from "@/lib/reader-layout";
@@ -298,7 +299,7 @@ export function useReaderSession(options: UseReaderSessionOptions = {}) {
         // `base` is what this edit started from: the backend keeps entries a
         // Sync wrote since then, and only counts our own removals as deletions.
         await invoke("save_annotations", { bookId, data: next, base });
-        notifySyncActivity();
+        notifySyncActivity({ prompt: true });
       } catch (error) {
         reportPersistenceError(error);
         throw error;
@@ -332,6 +333,9 @@ export function useReaderSession(options: UseReaderSessionOptions = {}) {
       await flushReadingState();
       const decision = (await beforeDownloadRef.current?.(bookId)) ?? "download";
       if (decision === "cancel") return null;
+      // Open where another device left off: take its position, Annotations,
+      // and any newer file revision first.
+      await pullBeforeOpen();
       // A synced book that isn't cached locally downloads on demand; for
       // cached books this is a cheap no-op.
       if (decision === "download") await invoke("sync_download_book_file", { bookId });

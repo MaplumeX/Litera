@@ -6,6 +6,7 @@ import type { BookOpenContext, BookRecord, ImportBookResult } from "@/types/libr
 import type { IncomingBook, PlatformEvent, PlatformEvents } from "@/lib/platform-bridge";
 import { t } from "@/lib/i18n";
 import { notifySyncActivity } from "@/lib/sync-activity";
+import { SYNC_RETURN_MIN_INTERVAL_MS } from "@/lib/use-sync-scheduler";
 import { MOBILE_SETTINGS_KEY } from "@/lib/mobile-settings";
 import { READER_FLOW_KEY } from "@/lib/reader-flow";
 import { READER_FOOTER_KEY } from "@/lib/reader-footer";
@@ -721,12 +722,19 @@ describe("MobileApp — Sync lifecycle", () => {
     await renderApp();
     await waitFor(() => expect(calls("sync_export_local_manifest")).toHaveLength(1)); // startup
     await waitFor(() => expect(calls("sync_note_result")).toHaveLength(1));
+    // Away long enough that returning is worth a pull.
+    const now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now + SYNC_RETURN_MIN_INTERVAL_MS);
 
-    await act(async () => {
-      emit("lifecycle", { state: "foreground" });
-    });
+    try {
+      await act(async () => {
+        emit("lifecycle", { state: "foreground" });
+      });
 
-    await waitFor(() => expect(calls("sync_export_local_manifest")).toHaveLength(2));
+      await waitFor(() => expect(calls("sync_export_local_manifest")).toHaveLength(2));
+    } finally {
+      clock.mockRestore();
+    }
   });
 
   it("pushes pending changes, without book files, when the app goes to the background", async () => {

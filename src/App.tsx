@@ -259,7 +259,7 @@ function App() {
   usePlatformLifecycle({
     flush: flushReadingState,
     flushKosync: kosync.flush,
-    syncNow: syncScheduler.syncNow,
+    syncOnReturn: syncScheduler.syncOnReturn,
   });
 
   // Escape closes overlay drawers. Page turning lives in ReaderView

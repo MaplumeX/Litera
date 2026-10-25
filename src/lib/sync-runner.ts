@@ -33,20 +33,72 @@ export function runSyncOnce(options: { uploadFiles?: boolean } = {}): Promise<vo
   // Passes never overlap — the scheduler, "Sync now" in Settings, and the
   // pre-exit push all queue here. Two concurrent passes would race on the
   // same local sync state and Manifest.
-  const run = passQueue.catch(() => {}).then(() => runPass(options));
+  passesPending += 1;
+  const run = passQueue
+    .catch(() => {})
+    .then(() => runPass(options))
+    .finally(() => {
+      passesPending -= 1;
+    });
   passQueue = run;
   return run;
 }
 
 let passQueue: Promise<void> = Promise.resolve();
+/** Passes queued or running. */
+let passesPending = 0;
+/** When the last pass finished without error (ms since epoch). */
+let lastPassSucceededAt: number | null = null;
 
 async function runPass(options: { uploadFiles?: boolean }): Promise<void> {
   const activity = takeUnsyncedActivity();
   try {
     await runPassSteps(options);
+    lastPassSucceededAt = Date.now();
   } catch (error) {
     activity.restore();
     throw error;
+  }
+}
+
+/** A pass that finished this recently counts as current when opening a Book. */
+export const PULL_BEFORE_OPEN_FRESH_MS = 30_000;
+/** How long opening a Book may wait on its pull. */
+export const PULL_BEFORE_OPEN_TIMEOUT_MS = 3_000;
+
+/**
+ * Pull before opening a Book, so it opens at the position (and with the
+ * Annotations) another device left it at. Waits on a pass already underway
+ * instead of queueing another, skips when a pass just finished, and is
+ * bounded by `timeoutMs` so an unreachable Sync Backend only delays opening
+ * briefly. Never throws.
+ */
+export async function pullBeforeOpen(
+  timeoutMs: number = PULL_BEFORE_OPEN_TIMEOUT_MS,
+): Promise<void> {
+  if (
+    passesPending === 0 &&
+    lastPassSucceededAt !== null &&
+    Date.now() - lastPassSucceededAt < PULL_BEFORE_OPEN_FRESH_MS
+  ) {
+    return;
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const config = await invoke<{ enabled: boolean } | null>("get_sync_config");
+    if (!config?.enabled) return;
+    // Book files can be large: they go with the scheduler's next pass.
+    const pass = passesPending > 0 ? passQueue : runSyncOnce({ uploadFiles: false });
+    await Promise.race([
+      pass,
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, timeoutMs);
+      }),
+    ]);
+  } catch (error) {
+    console.warn("Sync before opening a book failed:", error);
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 
