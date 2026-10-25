@@ -1,14 +1,16 @@
-import { useState } from "react";
+import { useState, type KeyboardEvent } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { Check, CloudOff, Star } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, CloudOff, Star } from "lucide-react";
 import type { BookRecord, ReadingStatus } from "@/types/library";
 import { BookStatusMenu } from "@/components/BookStatusMenu";
 import { cn } from "@/lib/utils";
-import { useT } from "@/lib/i18n";
+import { useT, type MessageKey } from "@/lib/i18n";
 import {
   formatLibraryTimestamp,
   progressPercent,
   withCoverRevision,
+  type LibrarySortKey,
+  type LibrarySortOrder,
   type LibraryStatusFilter,
 } from "@/lib/library-shelf";
 import {
@@ -29,6 +31,8 @@ interface BookCardProps {
   selectMode?: boolean;
   selected?: boolean;
   onToggleSelect?: (bookId: string) => void;
+  /** Shift-click in select mode: select the run from the last clicked book. */
+  onSelectRange?: (bookId: string) => void;
   openDisabled?: boolean;
   /** Enter select mode with this book already selected. */
   onEnterSelect?: (bookId: string) => void;
@@ -122,6 +126,7 @@ export function BookCard({
   selectMode = false,
   selected = false,
   onToggleSelect,
+  onSelectRange,
   openDisabled = false,
   onEnterSelect,
   coverRev,
@@ -151,7 +156,8 @@ export function BookCard({
         )}
         onClick={(e) => {
           if (selectMode) {
-            onToggleSelect?.(book.id);
+            if (e.shiftKey && onSelectRange) onSelectRange(book.id);
+            else onToggleSelect?.(book.id);
             return;
           }
           // Ctrl/⌘-click starts a selection, as in a file manager.
@@ -267,6 +273,123 @@ export function BookCard({
   return <BookActionContext {...actions}>{card}</BookActionContext>;
 }
 
+/** Column widths the list rows and their header share, so the columns line up. */
+const LIST_COLUMNS = {
+  select: "w-5 shrink-0",
+  cover: "w-10 shrink-0",
+  series: "hidden w-32 shrink-0 md:block",
+  progress: "w-24 shrink-0",
+  cache: "w-20 shrink-0",
+  opened: "hidden w-36 shrink-0 md:block",
+  // Status chip, star, and ⋮: reserved even when empty (select mode) so the
+  // columns before it do not shift.
+  trailing: "flex w-36 shrink-0 items-center justify-end gap-1",
+  status: "flex w-[5.5rem] min-w-0 justify-start",
+} as const;
+
+const ROW_STEPS: Record<string, number> = { ArrowDown: 1, ArrowUp: -1 };
+
+/**
+ * Arrow keys, Home and End move focus between the list's rows. Attach to the
+ * element holding the rows; keys from portaled menus are left alone.
+ */
+export function handleBookListKeyDown(event: KeyboardEvent<HTMLElement>) {
+  const { key, currentTarget, target } = event;
+  if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+  if (!(key in ROW_STEPS) && key !== "Home" && key !== "End") return;
+  if (!(target instanceof HTMLElement) || !currentTarget.contains(target)) return;
+  const rows = Array.from(currentTarget.querySelectorAll<HTMLElement>("[data-row-main]"));
+  const current = target.closest("[data-book-row]")?.querySelector<HTMLElement>("[data-row-main]");
+  const index = current ? rows.indexOf(current) : -1;
+  if (index < 0) return;
+  const next =
+    key === "Home"
+      ? 0
+      : key === "End"
+        ? rows.length - 1
+        : Math.min(rows.length - 1, Math.max(0, index + ROW_STEPS[key]));
+  event.preventDefault();
+  rows[next]?.focus();
+}
+
+const LIST_SORT_COLUMNS = {
+  title: "library.sort.title",
+  author: "library.sort.author",
+  progress: "library.sort.progress",
+  recent: "library.sort.recent",
+} as const satisfies Partial<Record<LibrarySortKey, MessageKey>>;
+
+/**
+ * The list view's column header. The sortable labels set the shelf's sort:
+ * a new key starts in its natural direction, the active key flips.
+ */
+export function BookListHeader({
+  sort,
+  order,
+  onSortChange,
+  onOrderChange,
+  selectMode = false,
+  cacheColumn = false,
+}: {
+  sort: LibrarySortKey;
+  order: LibrarySortOrder;
+  onSortChange: (value: string) => void;
+  onOrderChange: (order: LibrarySortOrder) => void;
+  selectMode?: boolean;
+  cacheColumn?: boolean;
+}) {
+  const { t } = useT();
+  const sortButton = (key: keyof typeof LIST_SORT_COLUMNS) => {
+    const active = sort === key;
+    const Arrow = order === "asc" ? ArrowUp : ArrowDown;
+    return (
+      <button
+        type="button"
+        data-sort-column={key}
+        className={cn(
+          "inline-flex items-center gap-0.5 rounded-sm hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+          active && "text-foreground",
+        )}
+        onClick={() => {
+          if (active) onOrderChange(order === "asc" ? "desc" : "asc");
+          else onSortChange(key);
+        }}
+      >
+        {t(LIST_SORT_COLUMNS[key])}
+        {active && (
+          <>
+            <Arrow className="size-3" aria-hidden />
+            <span className="sr-only">
+              , {t(order === "asc" ? "library.orderAsc" : "library.orderDesc")}
+            </span>
+          </>
+        )}
+      </button>
+    );
+  };
+
+  return (
+    <div className="sticky top-0 z-10 flex h-8 items-center gap-3 border-b bg-background px-2 text-xs text-muted-foreground">
+      <div className="flex min-w-0 flex-1 items-center gap-3">
+        {selectMode && <span className={LIST_COLUMNS.select} />}
+        <span className={LIST_COLUMNS.cover} />
+        <span className="flex min-w-0 flex-1 items-center gap-1.5">
+          {sortButton("title")}
+          <span aria-hidden>·</span>
+          {sortButton("author")}
+        </span>
+        <span className={cn(LIST_COLUMNS.series, "truncate text-right")}>
+          {t("library.fieldSeries")}
+        </span>
+        <span className={LIST_COLUMNS.progress}>{sortButton("progress")}</span>
+        {cacheColumn && <span className={LIST_COLUMNS.cache} />}
+        <span className={cn(LIST_COLUMNS.opened, "text-right")}>{sortButton("recent")}</span>
+      </div>
+      <span className={LIST_COLUMNS.trailing} />
+    </div>
+  );
+}
+
 interface BookListRowProps {
   book: BookRecord;
   onOpen: (bookId: string) => void | Promise<void>;
@@ -279,6 +402,8 @@ interface BookListRowProps {
   selectMode?: boolean;
   selected?: boolean;
   onToggleSelect?: (bookId: string) => void;
+  /** Shift-click in select mode: select the run from the last clicked book. */
+  onSelectRange?: (bookId: string) => void;
   openDisabled?: boolean;
   /** Enter select mode with this book already selected. */
   onEnterSelect?: (bookId: string) => void;
@@ -300,6 +425,7 @@ export function BookListRow({
   selectMode = false,
   selected = false,
   onToggleSelect,
+  onSelectRange,
   openDisabled = false,
   onEnterSelect,
   coverRev,
@@ -322,17 +448,20 @@ export function BookListRow({
 
   const row = (
     <div
+      data-book-row
       className={cn(
-        "group flex items-center gap-3 rounded-lg px-2 py-2 transition-colors hover:bg-muted/70",
+        "group flex items-center gap-3 rounded-md px-2 py-1.5 transition-colors hover:bg-muted/70 motion-reduce:transition-none",
         selectMode && selected && "ring-1 ring-primary",
       )}
     >
       <button
         type="button"
-        className="flex min-w-0 flex-1 items-center gap-3 text-left"
+        data-row-main
+        className="flex min-w-0 flex-1 scroll-mt-10 items-center gap-3 rounded-sm text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
         onClick={(e) => {
           if (selectMode) {
-            onToggleSelect?.(book.id);
+            if (e.shiftKey && onSelectRange) onSelectRange(book.id);
+            else onToggleSelect?.(book.id);
             return;
           }
           // Ctrl/⌘-click starts a selection, as in a file manager.
@@ -342,13 +471,25 @@ export function BookListRow({
           }
           void onOpen(book.id);
         }}
+        // Space starts a selection with this book; in select mode the
+        // button's own Space click toggles it. The click fires on keyup, so
+        // that is where it is suppressed.
+        onKeyDown={(e) => {
+          if (e.key === " " && !selectMode && onEnterSelect) e.preventDefault();
+        }}
+        onKeyUp={(e) => {
+          if (e.key !== " " || selectMode || !onEnterSelect) return;
+          e.preventDefault();
+          onEnterSelect(book.id);
+        }}
         disabled={(opening || openDisabled) && !selectMode}
         aria-pressed={selectMode ? selected : undefined}
       >
         {selectMode && (
           <span
             className={cn(
-              "flex h-5 w-5 shrink-0 items-center justify-center rounded-sm border",
+              LIST_COLUMNS.select,
+              "flex h-5 items-center justify-center rounded-sm border",
               selected
                 ? "bg-primary text-primary-foreground"
                 : "bg-background text-transparent",
@@ -357,7 +498,7 @@ export function BookListRow({
             <Check className="size-3" />
           </span>
         )}
-        <span className="h-14 w-10 shrink-0 overflow-hidden rounded-cover bg-muted shadow-cover">
+        <span className={cn(LIST_COLUMNS.cover, "h-14 overflow-hidden rounded-cover bg-muted shadow-cover")}>
           <BookCoverImage book={book} coverRev={coverRev} small />
         </span>
         <span className="min-w-0 flex-1">
@@ -371,18 +512,30 @@ export function BookListRow({
         {/* Always rendered so rows keep their columns aligned when a book has
             no series. */}
         <span
-          className="hidden w-32 shrink-0 truncate text-right text-xs text-muted-foreground md:block"
+          className={cn(LIST_COLUMNS.series, "truncate text-right text-xs text-muted-foreground")}
           title={book.series || undefined}
         >
           {book.series}
         </span>
-        <span className="w-12 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
-          {pct == null ? t("library.noProgress") : `${pct}%`}
+        <span className={cn(LIST_COLUMNS.progress, "flex items-center gap-2 text-xs tabular-nums text-muted-foreground")}>
+          {pct == null ? (
+            t("library.noProgress")
+          ) : (
+            <>
+              <span className="h-1 flex-1 overflow-hidden rounded-full bg-foreground/10">
+                <span
+                  className="block h-full rounded-full bg-primary"
+                  style={{ width: `${pct}%` }}
+                />
+              </span>
+              <span className="w-8 shrink-0 text-right">{`${pct}%`}</span>
+            </>
+          )}
         </span>
         {cacheColumn && (
           <span
             data-cache-cell
-            className="flex w-20 shrink-0 items-center justify-end gap-1 text-xs text-muted-foreground"
+            className={cn(LIST_COLUMNS.cache, "flex items-center justify-end gap-1 text-xs text-muted-foreground")}
             title={uncached ? t("library.notCached") : undefined}
           >
             {uncached && (
@@ -393,36 +546,40 @@ export function BookListRow({
             )}
           </span>
         )}
-        <span className="hidden w-36 shrink-0 truncate text-right text-xs text-muted-foreground md:block">
+        <span className={cn(LIST_COLUMNS.opened, "truncate text-right text-xs text-muted-foreground")}>
           {book.lastOpenedAt
             ? formatLibraryTimestamp(book.lastOpenedAt, locale)
             : t("library.neverOpened")}
         </span>
       </button>
-      {!selectMode && onChangeStatus && (
-        <BookStatusMenu
-          book={book}
-          onChange={(choice) => onChangeStatus(book, choice)}
-          statusFilter={statusFilter}
-        />
-      )}
-      {!selectMode && onToggleStar && (
-        <button
-          type="button"
-          className={cn(
-            "shrink-0 rounded-sm p-1 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-            starred
-              ? "text-foreground"
-              : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100",
-          )}
-          aria-label={t(starred ? "library.unstar" : "library.star")}
-          aria-pressed={starred}
-          onClick={() => onToggleStar(book)}
-        >
-          <Star className={cn("size-3.5", starred && "fill-current")} />
-        </button>
-      )}
-      {!selectMode && <BookActionDropdown {...actions} />}
+      <div className={LIST_COLUMNS.trailing}>
+        {!selectMode && onChangeStatus && (
+          <span className={LIST_COLUMNS.status}>
+            <BookStatusMenu
+              book={book}
+              onChange={(choice) => onChangeStatus(book, choice)}
+              statusFilter={statusFilter}
+            />
+          </span>
+        )}
+        {!selectMode && onToggleStar && (
+          <button
+            type="button"
+            className={cn(
+              "shrink-0 rounded-sm p-1 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+              starred
+                ? "text-foreground"
+                : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100",
+            )}
+            aria-label={t(starred ? "library.unstar" : "library.star")}
+            aria-pressed={starred}
+            onClick={() => onToggleStar(book)}
+          >
+            <Star className={cn("size-3.5", starred && "fill-current")} />
+          </button>
+        )}
+        {!selectMode && <BookActionDropdown {...actions} />}
+      </div>
     </div>
   );
 

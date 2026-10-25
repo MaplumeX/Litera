@@ -709,6 +709,102 @@ describe("LibraryView", () => {
     expect(container.querySelectorAll("[data-cache-cell]")).toHaveLength(0);
   });
 
+  describe("list view", () => {
+    const alpha: BookRecord = {
+      ...book,
+      id: "a",
+      title: "Alpha",
+      lastOpenedAt: "2026-01-01T00:00:00+00:00",
+    };
+    const mid: BookRecord = {
+      ...book,
+      id: "m",
+      title: "Middle",
+      lastOpenedAt: "2026-03-01T00:00:00+00:00",
+    };
+    const zeta: BookRecord = {
+      ...book,
+      id: "z",
+      title: "Zeta",
+      lastOpenedAt: "2026-06-01T00:00:00+00:00",
+    };
+
+    /** Row titles in shelf order. */
+    function rowTitles(): string[] {
+      return Array.from(mainShelf().querySelectorAll("[data-row-main]")).map(
+        (el) => el.querySelector(".block.truncate")?.textContent ?? "",
+      );
+    }
+
+    function rowMain(title: string): HTMLElement {
+      const found = Array.from(
+        mainShelf().querySelectorAll<HTMLElement>("[data-row-main]"),
+      ).find((el) => el.textContent?.includes(title));
+      if (!found) throw new Error(`no row ${title}`);
+      return found;
+    }
+
+    async function renderList(onOpenBook = vi.fn()) {
+      localStorage.setItem(LIBRARY_VIEW_KEY, "list");
+      setupInvoke({ list_books: () => [zeta, alpha, mid] });
+      const utils = render(<LibraryView onOpenBook={onOpenBook} onOpenSettings={() => {}} />);
+      await waitFor(() => expect(rowTitles()).toHaveLength(3));
+      return utils;
+    }
+
+    function headerButton(key: string): HTMLElement {
+      return mainShelf().querySelector(`[data-sort-column="${key}"]`) as HTMLElement;
+    }
+
+    it("sorts by a header column and flips the active column's direction", async () => {
+      await renderList();
+      expect(rowTitles()).toEqual(["Zeta", "Middle", "Alpha"]);
+
+      fireEvent.click(headerButton("title"));
+      await waitFor(() => expect(rowTitles()).toEqual(["Alpha", "Middle", "Zeta"]));
+      expect(localStorage.getItem(LIBRARY_SORT_KEY)).toBe("title");
+      expect(localStorage.getItem(LIBRARY_SORT_ORDER_KEY)).toBe("asc");
+
+      fireEvent.click(headerButton("title"));
+      await waitFor(() => expect(rowTitles()).toEqual(["Zeta", "Middle", "Alpha"]));
+      expect(localStorage.getItem(LIBRARY_SORT_ORDER_KEY)).toBe("desc");
+    });
+
+    it("moves focus between rows with the arrow keys, Home and End", async () => {
+      await renderList();
+      const first = rowMain("Zeta");
+      first.focus();
+      fireEvent.keyDown(first, { key: "ArrowDown" });
+      expect(document.activeElement).toBe(rowMain("Middle"));
+      fireEvent.keyDown(document.activeElement!, { key: "End" });
+      expect(document.activeElement).toBe(rowMain("Alpha"));
+      fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
+      expect(document.activeElement).toBe(rowMain("Alpha"));
+      fireEvent.keyDown(document.activeElement!, { key: "Home" });
+      expect(document.activeElement).toBe(first);
+      fireEvent.keyDown(first, { key: "ArrowUp" });
+      expect(document.activeElement).toBe(first);
+    });
+
+    it("starts a selection with Space instead of opening the book", async () => {
+      const onOpenBook = vi.fn();
+      const { findByText } = await renderList(onOpenBook);
+      const row = rowMain("Middle");
+      fireEvent.keyDown(row, { key: " " });
+      fireEvent.keyUp(row, { key: " " });
+      expect(await findByText("已选 1")).toBeTruthy();
+      expect(onOpenBook).not.toHaveBeenCalled();
+    });
+
+    it("selects the run from the last clicked row with Shift-click", async () => {
+      const { findByText } = await renderList();
+      ctrlClick(rowMain("Zeta"));
+      expect(await findByText("已选 1")).toBeTruthy();
+      fireEvent.click(rowMain("Alpha"), { shiftKey: true });
+      expect(await findByText("已选 3")).toBeTruthy();
+    });
+  });
+
   it("does not flash the empty state before the library loads", async () => {
     let resolveBooks: (books: BookRecord[]) => void = () => {};
     invokeMock.mockImplementation((cmd: string) => {

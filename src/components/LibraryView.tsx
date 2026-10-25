@@ -10,7 +10,13 @@ import {
 } from "@/components/WindowControls";
 import { PanelLeft, Plus, Settings, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { BookCard, BookListRow, BookResumeTile } from "@/components/BookCard";
+import {
+  BookCard,
+  BookListHeader,
+  BookListRow,
+  BookResumeTile,
+  handleBookListKeyDown,
+} from "@/components/BookCard";
 import { BookDetailsDialog } from "@/components/BookDetailsDialog";
 import { TrashDialog } from "@/components/TrashDialog";
 import {
@@ -114,6 +120,7 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
     handleEnterSelect,
     handleSelectAll,
     handleToggleSelect,
+    handleSelectRange,
     handleBatchStar,
     handleBatchStatus,
     requestDelete,
@@ -242,6 +249,7 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
     deleteDisabled: busy,
     selectMode,
     onToggleSelect: handleToggleSelect,
+    onSelectRange: handleSelectRange,
     onEnterSelect: handleEnterSelect,
     openDisabled: importing,
     statusFilter,
@@ -491,18 +499,31 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
                     </section>
                   )}
                   {view === "list" ? (
-                    <div data-shelf="main" className="flex flex-col gap-2">
-                      {visible.map((book) => (
-                        <BookListRow
-                          key={book.id}
-                          book={book}
-                          opening={openingBookId === book.id}
-                          selected={selectedIds.has(book.id)}
-                          coverRev={coverRev[book.id]}
-                          cacheColumn={cacheColumn}
-                          {...bookProps}
-                        />
-                      ))}
+                    <div data-shelf="main">
+                      <BookListHeader
+                        sort={sort}
+                        order={order}
+                        onSortChange={handleSortChange}
+                        onOrderChange={handleOrderChange}
+                        selectMode={selectMode}
+                        cacheColumn={cacheColumn}
+                      />
+                      <div
+                        className="flex flex-col divide-y divide-border/50"
+                        onKeyDown={handleBookListKeyDown}
+                      >
+                        {visible.map((book) => (
+                          <BookListRow
+                            key={book.id}
+                            book={book}
+                            opening={openingBookId === book.id}
+                            selected={selectedIds.has(book.id)}
+                            coverRev={coverRev[book.id]}
+                            cacheColumn={cacheColumn}
+                            {...bookProps}
+                          />
+                        ))}
+                      </div>
                     </div>
                   ) : (
                     <div data-shelf="main" className="grid grid-cols-[repeat(auto-fill,140px)] justify-between gap-x-6 gap-y-8">
