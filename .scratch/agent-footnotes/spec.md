@@ -19,9 +19,9 @@
 
 ### 识别规则
 
-候选链接是带 `#fragment` 的 `<a>`，且满足其一：`epub:type` 含 `noteref`、`role="doc-noteref"`、父元素是 `<sup>`、唯一的元素子节点是 `<sup>`。`epub:type`/`role` 为 backlink 的排除。
+候选链接是带 `#fragment` 的 `<a>`，且满足其一：`epub:type` 含 `noteref`、`role="doc-noteref"`、父元素是 `<sup>`（或经过只包着该链接的 `small`/`span`/`font` 等行内包装到达 `<sup>`，如 calibre 转换的 `<sup><small><a>(13)</a></small></sup>`）、唯一的元素子节点是 `<sup>`。`epub:type`/`role` 为 backlink 的排除。
 
-候选必须能解析到存在的目标元素。互相指向的一对候选（注号 ↔ 回链），阅读顺序在前者是注号，在后者是回链。
+候选必须能解析到存在的目标元素。互相指向的一对候选（注号 ↔ 回链），阅读顺序在前者是注号，在后者是回链。指向注号所在 `<sup>` 内部（如其中只带 id 的空 `<span>`）的链接也算回链。目标是放在注释段落前的空锚点（`<span id/><p>注释</p>`）时，注释取其后的块。
 
 ### 不变的部分
 
