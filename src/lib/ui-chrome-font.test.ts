@@ -1,16 +1,21 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  CHAT_FONT_FAMILY_KEY,
+  CHAT_FONT_FOLLOWS_UI,
   DEFAULT_UI_FONT_FAMILY,
   DEFAULT_UI_FONT_SIZE,
   UI_FONT_FAMILY_KEY,
   UI_FONT_SIZE_KEY,
+  applyChatFont,
   applyUiChrome,
   chromeFontStack,
+  loadChatFontFamily,
   loadUiFontFamily,
   loadUiFontSize,
   parseUiFontFamily,
   parseUiFontSize,
+  saveChatFontFamily,
   saveUiFontFamily,
   saveUiFontSize,
 } from "./ui-chrome-font";
@@ -18,8 +23,10 @@ import {
 afterEach(() => {
   localStorage.removeItem(UI_FONT_SIZE_KEY);
   localStorage.removeItem(UI_FONT_FAMILY_KEY);
+  localStorage.removeItem(CHAT_FONT_FAMILY_KEY);
   document.documentElement.style.fontSize = "";
   document.documentElement.style.removeProperty("--font-sans");
+  document.documentElement.style.removeProperty("--font-chat");
   vi.restoreAllMocks();
 });
 
@@ -137,5 +144,30 @@ describe("applyUiChrome", () => {
     expect(document.documentElement.style.getPropertyValue("--font-sans")).toBe(
       chromeFontStack(DEFAULT_UI_FONT_FAMILY),
     );
+  });
+});
+
+describe("chat font", () => {
+  it("follows the interface font until one is saved", () => {
+    expect(loadChatFontFamily()).toBe(CHAT_FONT_FOLLOWS_UI);
+    saveChatFontFamily("LXGW WenKai");
+    expect(localStorage.getItem(CHAT_FONT_FAMILY_KEY)).toBe("LXGW WenKai");
+    expect(loadChatFontFamily()).toBe("LXGW WenKai");
+    saveChatFontFamily(CHAT_FONT_FOLLOWS_UI);
+    expect(localStorage.getItem(CHAT_FONT_FAMILY_KEY)).toBeNull();
+  });
+
+  it("ignores an invalid stored family", () => {
+    localStorage.setItem(CHAT_FONT_FAMILY_KEY, "evil;font");
+    expect(loadChatFontFamily()).toBe(CHAT_FONT_FOLLOWS_UI);
+  });
+
+  it("sets --font-chat for a face and clears it to follow the interface", () => {
+    applyChatFont("LXGW WenKai");
+    expect(document.documentElement.style.getPropertyValue("--font-chat")).toBe(
+      chromeFontStack("LXGW WenKai"),
+    );
+    applyChatFont(CHAT_FONT_FOLLOWS_UI);
+    expect(document.documentElement.style.getPropertyValue("--font-chat")).toBe("");
   });
 });

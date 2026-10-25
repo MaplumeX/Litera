@@ -7,6 +7,7 @@ import { setLocale } from "@/lib/i18n";
 import { DEFAULT_READER_MODE_KEY } from "@/lib/reader-mode";
 import { AUTO_CHECK_UPDATES_KEY, resetAppUpdateForTests } from "@/lib/app-update";
 import {
+  CHAT_FONT_FAMILY_KEY,
   DEFAULT_UI_FONT_FAMILY,
   UI_FONT_FAMILY_KEY,
   UI_FONT_SIZE_KEY,
@@ -100,8 +101,10 @@ afterEach(() => {
   localStorage.removeItem(DEFAULT_READER_MODE_KEY);
   localStorage.removeItem(UI_FONT_SIZE_KEY);
   localStorage.removeItem(UI_FONT_FAMILY_KEY);
+  localStorage.removeItem(CHAT_FONT_FAMILY_KEY);
   document.documentElement.style.fontSize = "";
   document.documentElement.style.removeProperty("--font-sans");
+  document.documentElement.style.removeProperty("--font-chat");
   invokeMock.mockClear();
   getVersionMock.mockReset();
   getVersionMock.mockImplementation(() => Promise.resolve("0.2.0"));
@@ -999,7 +1002,7 @@ describe("SettingsDialog", () => {
 
     expect(getByText("界面字体")).toBeTruthy();
     expect(getByText("界面字号")).toBeTruthy();
-    expect(getByRole("combobox").textContent).toContain("Geist");
+    expect(getByRole("combobox", { name: "界面字体" }).textContent).toContain("Geist");
     const sizeSlider = getByRole("slider", { name: "界面字号" });
     expect(sizeSlider.getAttribute("aria-valuenow")).toBe("16");
     expect(sizeSlider.getAttribute("aria-valuemin")).toBe("12");
@@ -1007,7 +1010,7 @@ describe("SettingsDialog", () => {
     expect(getByText("16px")).toBeTruthy();
 
     act(() => {
-      getByRole("combobox").click();
+      getByRole("combobox", { name: "界面字体" }).click();
     });
     const geist = await waitFor(() => getByRole("option", { name: "Geist" }));
     const named = await waitFor(() => getByRole("option", { name: "Noto Sans CJK SC" }));
@@ -1088,7 +1091,7 @@ describe("SettingsDialog", () => {
       getByRole("button", { name: "外观" }).click();
     });
     expect(await findByText("不可用")).toBeTruthy();
-    expect(getByRole("combobox").textContent).toContain("MissingChromeFont");
+    expect(getByRole("combobox", { name: "界面字体" }).textContent).toContain("MissingChromeFont");
     expect(localStorage.getItem(UI_FONT_FAMILY_KEY)).toBe("MissingChromeFont");
   });
 
@@ -1112,12 +1115,60 @@ describe("SettingsDialog", () => {
       getByRole("button", { name: "外观" }).click();
     });
     act(() => {
-      getByRole("combobox").click();
+      getByRole("combobox", { name: "界面字体" }).click();
     });
     await waitFor(() => getByRole("option", { name: "Noto Sans CJK SC" }));
     fireEvent.change(getByPlaceholderText("搜索字体…"), { target: { value: "Noto" } });
     expect(await findByRole("option", { name: "Noto Sans CJK SC" })).toBeTruthy();
     expect(queryByRole("option", { name: "衬线" })).toBeNull();
+  });
+
+  it("sets the chat font apart from the interface font", async () => {
+    const { getByRole } = render(
+      <SettingsDialog
+        open
+        onClose={noop}
+        bookTitle={null}
+        hasBook={false}
+        styleState={styleState}
+        onTypographyChange={noop}
+        onRestoreDefault={noop}
+        overriddenKeys={[]}
+        theme="light"
+        onThemeChange={noop}
+      />,
+    );
+
+    act(() => {
+      getByRole("button", { name: "外观" }).click();
+    });
+    const chatPicker = getByRole("combobox", { name: "聊天字体" });
+    expect(chatPicker.textContent).toContain("跟随界面字体");
+    const uiStack = document.documentElement.style.getPropertyValue("--font-sans");
+
+    act(() => {
+      chatPicker.click();
+    });
+    const named = await waitFor(() => getByRole("option", { name: "Noto Sans CJK SC" }));
+    act(() => {
+      named.click();
+    });
+    expect(document.documentElement.style.getPropertyValue("--font-chat")).toBe(
+      chromeFontStack("Noto Sans CJK SC"),
+    );
+    expect(document.documentElement.style.getPropertyValue("--font-sans")).toBe(uiStack);
+    expect(localStorage.getItem(CHAT_FONT_FAMILY_KEY)).toBe("Noto Sans CJK SC");
+    expect(localStorage.getItem(UI_FONT_FAMILY_KEY)).toBeNull();
+
+    act(() => {
+      getByRole("combobox", { name: "聊天字体" }).click();
+    });
+    const follow = await waitFor(() => getByRole("option", { name: "跟随界面字体" }));
+    act(() => {
+      follow.click();
+    });
+    expect(document.documentElement.style.getPropertyValue("--font-chat")).toBe("");
+    expect(localStorage.getItem(CHAT_FONT_FAMILY_KEY)).toBeNull();
   });
 
   it("persists the default reader mode to localStorage only", () => {

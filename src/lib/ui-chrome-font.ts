@@ -2,8 +2,11 @@ import { cssFontFamily, isFontFamily, isGenericFontFamily } from "@/lib/reader-s
 
 export const UI_FONT_SIZE_KEY = "litera.uiFontSize";
 export const UI_FONT_FAMILY_KEY = "litera.uiFontFamily";
+export const CHAT_FONT_FAMILY_KEY = "litera.chatFontFamily";
 export const DEFAULT_UI_FONT_SIZE = 16;
 export const DEFAULT_UI_FONT_FAMILY = "Geist Variable";
+/** The assistant chat follows the interface font until one is picked for it. */
+export const CHAT_FONT_FOLLOWS_UI = "";
 export const UI_FONT_SIZE_RANGE = { min: 12, max: 20, step: 1 };
 
 const CHROME_FALLBACKS = [
@@ -38,6 +41,13 @@ export function parseUiFontFamily(value: unknown): string {
   return trimmed;
 }
 
+export function parseChatFontFamily(value: unknown): string {
+  if (typeof value !== "string") return CHAT_FONT_FOLLOWS_UI;
+  const trimmed = value.trim();
+  if (!isFontFamily(trimmed)) return CHAT_FONT_FOLLOWS_UI;
+  return trimmed;
+}
+
 export function loadUiFontSize(): number {
   try {
     if (typeof localStorage === "undefined") return DEFAULT_UI_FONT_SIZE;
@@ -56,6 +66,15 @@ export function loadUiFontFamily(): string {
   }
 }
 
+export function loadChatFontFamily(): string {
+  try {
+    if (typeof localStorage === "undefined") return CHAT_FONT_FOLLOWS_UI;
+    return parseChatFontFamily(localStorage.getItem(CHAT_FONT_FAMILY_KEY));
+  } catch {
+    return CHAT_FONT_FOLLOWS_UI;
+  }
+}
+
 export function saveUiFontSize(px: number): void {
   try {
     if (typeof localStorage === "undefined") return;
@@ -69,6 +88,17 @@ export function saveUiFontFamily(name: string): void {
   try {
     if (typeof localStorage === "undefined") return;
     localStorage.setItem(UI_FONT_FAMILY_KEY, parseUiFontFamily(name));
+  } catch {
+    // private mode / quota
+  }
+}
+
+export function saveChatFontFamily(name: string): void {
+  try {
+    if (typeof localStorage === "undefined") return;
+    const family = parseChatFontFamily(name);
+    if (family === CHAT_FONT_FOLLOWS_UI) localStorage.removeItem(CHAT_FONT_FAMILY_KEY);
+    else localStorage.setItem(CHAT_FONT_FAMILY_KEY, family);
   } catch {
     // private mode / quota
   }
@@ -96,4 +126,13 @@ export function applyUiChrome(size: number, family: string): void {
   const fam = parseUiFontFamily(family);
   document.documentElement.style.fontSize = `${px}px`;
   document.documentElement.style.setProperty("--font-sans", chromeFontStack(fam));
+}
+
+/** Points --font-chat at its own stack, or clears it so it falls back to --font-sans. */
+export function applyChatFont(family: string): void {
+  if (typeof document === "undefined") return;
+  const fam = parseChatFontFamily(family);
+  const root = document.documentElement.style;
+  if (fam === CHAT_FONT_FOLLOWS_UI) root.removeProperty("--font-chat");
+  else root.setProperty("--font-chat", chromeFontStack(fam));
 }

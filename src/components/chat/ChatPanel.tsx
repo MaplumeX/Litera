@@ -659,7 +659,10 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
             docked beside the book it is a card. */}
         <div
           data-testid="chat-panel"
-          className={cn("relative flex h-full min-h-0", isWorkspace ? "bg-background" : "bg-card")}
+          className={cn(
+            "relative flex h-full min-h-0 font-chat",
+            isWorkspace ? "bg-background" : "bg-card",
+          )}
         >
           {isWorkspace && (
             <div

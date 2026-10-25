@@ -258,6 +258,8 @@ export const zhCN = {
   "settings.theme.system": "跟随系统",
   "settings.chrome.font": "界面字体",
   "settings.chrome.fontSize": "界面字号",
+  "settings.chrome.chatFont": "聊天字体",
+  "settings.font.followUi": "跟随界面字体",
   "settings.font.geist": "Geist",
   "settings.font.default": "默认",
   "settings.font.search": "搜索字体…",
