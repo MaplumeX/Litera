@@ -985,16 +985,32 @@ describe("LibraryView — synced covers on demand", () => {
     expect(await findByText("Synced In Book")).toBeTruthy();
   });
 
-  it("does not request covers for cached books", async () => {
+  it("requests a missing cover for a cached book", async () => {
+    // A legacy book's cover can reach the Sync Backend after its EPUB came down.
+    const coversFetched = vi.fn(() => false);
     setupInvoke({
       list_books: () => [{ ...book, cached: true }],
+      sync_ensure_cover: () => coversFetched(),
     });
 
     render(<LibraryView onOpenBook={() => {}} onOpenSettings={() => {}} />);
 
     await waitFor(() => {
-      expect(invokeMock.mock.calls.some(([cmd]) => cmd === "sync_ensure_cover")).toBe(false);
+      expect(coversFetched).toHaveBeenCalledTimes(1);
     });
+  });
+
+  it("does not request covers for books that have one", async () => {
+    setupInvoke({
+      list_books: () => [{ ...book, cached: true, coverPath: "/tmp/cover.jpg" }],
+    });
+
+    render(<LibraryView onOpenBook={() => {}} onOpenSettings={() => {}} />);
+
+    await waitFor(() => {
+      expect(invokeMock.mock.calls.some(([cmd]) => cmd === "list_books")).toBe(true);
+    });
+    expect(invokeMock.mock.calls.some(([cmd]) => cmd === "sync_ensure_cover")).toBe(false);
   });
 });
 
