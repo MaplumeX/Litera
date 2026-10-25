@@ -212,7 +212,12 @@ export function useLibraryShelf({ openingBookId = null }: { openingBookId?: stri
     [books, requestDelete],
   );
 
+  // The last book clicked into or out of the selection: Shift-click
+  // selects the run of visible books from it to the clicked one.
+  const selectAnchorRef = useRef<string | null>(null);
+
   const handleToggleSelect = useCallback((bookId: string) => {
+    selectAnchorRef.current = bookId;
     setSelectedIds((current) => {
       const next = new Set(current);
       if (next.has(bookId)) next.delete(bookId);
@@ -412,9 +417,26 @@ export function useLibraryShelf({ openingBookId = null }: { openingBookId?: stri
   const busy = importing || openingBookId !== null;
 
   const handleEnterSelect = useCallback((bookId?: string) => {
+    selectAnchorRef.current = bookId ?? null;
     setSelectMode(true);
     setSelectedIds(new Set(bookId ? [bookId] : []));
   }, []);
+
+  /** Add the visible books between the anchor and `bookId` to the selection. */
+  const handleSelectRange = useCallback(
+    (bookId: string) => {
+      const ids = visible.map((book) => book.id);
+      const from = selectAnchorRef.current ? ids.indexOf(selectAnchorRef.current) : -1;
+      const to = ids.indexOf(bookId);
+      if (from < 0 || to < 0) {
+        handleToggleSelect(bookId);
+        return;
+      }
+      const run = ids.slice(Math.min(from, to), Math.max(from, to) + 1);
+      setSelectedIds((current) => new Set([...current, ...run]));
+    },
+    [handleToggleSelect, visible],
+  );
 
   const handleSelectAll = useCallback(() => {
     setSelectedIds(new Set(visible.map((book) => book.id)));
@@ -466,6 +488,7 @@ export function useLibraryShelf({ openingBookId = null }: { openingBookId?: stri
     handleEnterSelect,
     handleSelectAll,
     handleToggleSelect,
+    handleSelectRange,
     handleBatchStar,
     handleBatchStatus,
     // Book actions
