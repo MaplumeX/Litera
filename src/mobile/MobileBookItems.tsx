@@ -93,7 +93,7 @@ export function MobileBookTile({ book, actions, opening, disabled, coverRev }: M
             </span>
           )}
         </span>
-        <span className="line-clamp-2 text-[0.8125rem] leading-[1.125rem] font-medium">{book.title}</span>
+        <span className="line-clamp-2 min-h-[2.25rem] text-[0.8125rem] leading-[1.125rem] font-medium">{book.title}</span>
         <span className="-mt-1 truncate text-[0.6875rem] text-muted-foreground tabular-nums">{caption}</span>
       </button>
     </BookActionContext>
