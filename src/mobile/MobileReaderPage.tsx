@@ -197,6 +197,16 @@ export function MobileReaderPage({
   if (drawerPanel) lastDrawerPanelRef.current = drawerPanel;
   const drawerTab = drawerPanel ?? lastDrawerPanelRef.current;
   const [footerSettings] = useReaderFooter();
+  // The assistant's peek bar rides above the bottom toolbar while it shows.
+  const bottomBarRef = useRef<HTMLDivElement>(null);
+  const [bottomBarHeight, setBottomBarHeight] = useState(0);
+  useLayoutEffect(() => {
+    const bar = bottomBarRef.current;
+    if (!bar) return;
+    const observer = new ResizeObserver(() => setBottomBarHeight(bar.offsetHeight));
+    observer.observe(bar);
+    return () => observer.disconnect();
+  }, []);
 
   // "Ask" on a selection: open the sheet with the passage attached.
   const handleSelectionCapture = useCallback(
@@ -369,6 +379,7 @@ export function MobileReaderPage({
             />
           </div>
           <div
+            ref={bottomBarRef}
             role="toolbar"
             aria-label={t("reader.progress")}
             aria-hidden={!chromeVisible}
@@ -430,6 +441,7 @@ export function MobileReaderPage({
           bookId={fileData.bookId}
           currentChapterHref={progress.chapterHref}
           onOpenQuote={handleOpenQuote}
+          peekOffset={chromeVisible ? `${bottomBarHeight}px` : undefined}
         />
       )}
 

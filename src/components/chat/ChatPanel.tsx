@@ -33,6 +33,7 @@ import { GuideRecap } from "./GuideRecap";
 import { ChatOutlineRail, userMessagePreview } from "./ChatOutlineRail";
 import { useT } from "@/lib/i18n";
 import { isTranscriptMarker, type GuideStep } from "@/types/agent";
+import { chatActivity, type ChatActivity } from "@/lib/chat-activity";
 
 export interface ChatPanelHandle {
   fillInput: (text: string, chapterHref?: string) => void;
@@ -54,6 +55,8 @@ interface ChatPanelProps {
   /** Workspace variant: whether the session rail shows. The host owns the
    * toggle (the reader titlebar); defaults to open. */
   sessionRailOpen?: boolean;
+  /** Called when the answer starts, ends, or its opening changes. */
+  onActivityChange?: (activity: ChatActivity) => void;
 }
 
 export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
@@ -68,6 +71,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       sessionRailOpen,
       preferGuidedSession = false,
       onGuideStepsChange,
+      onActivityChange,
     },
     ref,
   ) {
@@ -146,6 +150,12 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       if (!isTranscriptMarker(state.messages[i])) { lastChatIndex = i; break; }
     }
     const lastChatMessage = lastChatIndex >= 0 ? state.messages[lastChatIndex] : undefined;
+    // The preview stops changing once the answer outgrows it, so a long
+    // answer reports a handful of times, not once per token.
+    const activity = chatActivity(state.messages, isStreaming);
+    useEffect(() => {
+      onActivityChange?.({ answering: activity.answering, preview: activity.preview, failed: activity.failed });
+    }, [onActivityChange, activity.answering, activity.preview, activity.failed]);
     const userMessageTocItems = state.messages.flatMap((message, index) =>
       message.role === "user"
         ? [{ messageIndex: index, preview: userMessagePreview(message.content) }]
