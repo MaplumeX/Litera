@@ -97,7 +97,7 @@ export function SessionList({
       className={
         isRail
           ? // Set apart from the conversation by tone, like the library sidebar.
-            "flex h-full min-h-0 w-[240px] shrink-0 flex-col bg-sidebar"
+            "flex h-full min-h-0 w-full flex-col bg-sidebar"
           : "flex max-h-[min(60vh,28rem)] min-h-0 flex-col"
       }
     >

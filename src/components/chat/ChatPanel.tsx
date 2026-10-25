@@ -6,6 +6,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type PointerEvent as ReactPointerEvent,
 } from "react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -32,6 +33,11 @@ import { CompactionNotice, CompactionStatus } from "./CompactionNotice";
 import { GuideRecap } from "./GuideRecap";
 import { ChatOutlineRail, userMessagePreview } from "./ChatOutlineRail";
 import { useT } from "@/lib/i18n";
+import {
+  clampSessionRailWidth,
+  loadSessionRailWidth,
+  saveSessionRailWidth,
+} from "@/lib/session-rail-width";
 import { isTranscriptMarker, type GuideStep } from "@/types/agent";
 import { chatActivity, type ChatActivity } from "@/lib/chat-activity";
 
@@ -120,6 +126,10 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     const [showSessionList, setShowSessionList] = useState(false);
     const isWorkspace = variant === "workspace";
     const railOpen = sessionRailOpen ?? true;
+    const [railWidth, setRailWidth] = useState(loadSessionRailWidth);
+    const railResizeRef = useRef<{ startX: number; startWidth: number; maxWidth: number } | null>(
+      null,
+    );
     const [showConfig, setShowConfig] = useState(false);
     const [submitting, setSubmitting] = useState(false);
     const [invokeError, setInvokeError] = useState<string | null>(null);
@@ -559,6 +569,43 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 
     useImperativeHandle(ref, () => ({ fillInput }), [fillInput]);
 
+    // Leave the conversation at least half the panel while dragging the rail.
+    const startRailResize = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
+      if (e.button !== 0) return;
+      const panel = e.currentTarget.parentElement;
+      const panelWidth = panel?.getBoundingClientRect().width ?? window.innerWidth;
+      railResizeRef.current = {
+        startX: e.clientX,
+        startWidth: railWidth,
+        maxWidth: panelWidth / 2,
+      };
+      e.currentTarget.setPointerCapture?.(e.pointerId);
+    }, [railWidth]);
+
+    const onRailResizeMove = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
+      const state = railResizeRef.current;
+      if (!state) return;
+      setRailWidth(
+        clampSessionRailWidth(state.startWidth + (e.clientX - state.startX), state.maxWidth),
+      );
+    }, []);
+
+    const endRailResize = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
+      const state = railResizeRef.current;
+      if (!state) return;
+      railResizeRef.current = null;
+      const next = clampSessionRailWidth(
+        state.startWidth + (e.clientX - state.startX),
+        state.maxWidth,
+      );
+      setRailWidth(next);
+      saveSessionRailWidth(next);
+    }, []);
+
+    const cancelRailResize = useCallback(() => {
+      railResizeRef.current = null;
+    }, []);
+
     const sessionList = (
       <SessionList
         layout={isWorkspace ? "rail" : "popover"}
@@ -622,9 +669,23 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                   ? "h-full min-h-0 shrink-0 overflow-hidden"
                   : "h-full w-0 overflow-hidden"
               }
+              style={railOpen ? { width: railWidth } : undefined}
             >
               {sessionList}
             </div>
+          )}
+          {isWorkspace && railOpen && (
+            <div
+              className="absolute inset-y-0 z-10 w-1.5 cursor-col-resize touch-none select-none bg-transparent hover:bg-primary/30"
+              style={{ left: railWidth - 3 }}
+              role="separator"
+              aria-orientation="vertical"
+              aria-label={t("chat.resizeSessions")}
+              onPointerDown={startRailResize}
+              onPointerMove={onRailResizeMove}
+              onPointerUp={endRailResize}
+              onPointerCancel={cancelRailResize}
+            />
           )}
           <div className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col">
           {/* No header of its own: the titlebar names the book, and the session

@@ -330,6 +330,7 @@ export const en: { [K in MessageKey]: string } = {
 
   "chat.title": "Reading assistant",
   "chat.sessions": "Sessions",
+  "chat.resizeSessions": "Resize sessions",
   "chat.messageToc": "Conversation outline",
   "chat.messageTocItem": "Jump to question {number}: {preview}",
   "chat.manageModels": "Manage models & providers…",

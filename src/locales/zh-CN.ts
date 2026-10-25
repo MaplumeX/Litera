@@ -328,6 +328,7 @@ export const zhCN = {
 
   "chat.title": "阅读助手",
   "chat.sessions": "会话列表",
+  "chat.resizeSessions": "调整会话列表宽度",
   "chat.messageToc": "对话目录",
   "chat.messageTocItem": "跳转到第 {number} 条提问：{preview}",
   "chat.manageModels": "管理模型与服务商…",
