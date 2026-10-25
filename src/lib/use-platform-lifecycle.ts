@@ -11,7 +11,7 @@ import { pushBeforeLeaving } from "@/lib/sync-runner";
 export function usePlatformLifecycle(options: {
   flush: () => Promise<void>;
   flushKosync: () => Promise<void>;
-  syncNow: () => Promise<void>;
+  syncOnReturn: () => void;
 }) {
   const optionsRef = useRef(options);
   optionsRef.current = options;
@@ -19,9 +19,9 @@ export function usePlatformLifecycle(options: {
   useEffect(
     () =>
       platformBridge.listen("lifecycle", ({ state }) => {
-        const { flush, flushKosync, syncNow } = optionsRef.current;
+        const { flush, flushKosync, syncOnReturn } = optionsRef.current;
         if (state === "foreground") {
-          void syncNow();
+          syncOnReturn();
           return;
         }
         void (async () => {

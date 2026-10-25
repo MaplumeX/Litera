@@ -4,7 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   SYNC_DEBOUNCE_MS,
   SYNC_FAILURE_THRESHOLD,
+  SYNC_MAX_WAIT_MS,
   SYNC_PERIODIC_MS,
+  SYNC_PROMPT_DEBOUNCE_MS,
+  SYNC_RETURN_MIN_INTERVAL_MS,
   useSyncScheduler,
 } from "./use-sync-scheduler";
 import { notifySyncActivity } from "./sync-activity";
@@ -143,6 +146,76 @@ describe("useSyncScheduler", () => {
 
     expect(syncRuns()).toBe(2);
     expect(result.current.persistentFailure).toBeNull();
+  });
+
+  it("pushes a discrete action sooner, even when steady activity follows", async () => {
+    setupSync({ enabled: true });
+    renderHook(() => useSyncScheduler());
+    await flush();
+    expect(syncRuns()).toBe(1);
+
+    notifySyncActivity({ prompt: true });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(SYNC_PROMPT_DEBOUNCE_MS / 2);
+    });
+    notifySyncActivity();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(SYNC_PROMPT_DEBOUNCE_MS / 2);
+    });
+    await flush();
+
+    expect(syncRuns()).toBe(2);
+  });
+
+  it("pushes steady activity by the max wait, however long it keeps going", async () => {
+    setupSync({ enabled: true });
+    renderHook(() => useSyncScheduler());
+    await flush();
+    expect(syncRuns()).toBe(1);
+
+    // A page turn every 10s never lets the debounce settle.
+    const step = 10_000;
+    for (let elapsed = 0; elapsed < SYNC_MAX_WAIT_MS; elapsed += step) {
+      notifySyncActivity();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(step);
+      });
+    }
+    await flush();
+
+    expect(syncRuns()).toBe(2);
+  });
+
+  it("pulls when the window regains focus", async () => {
+    setupSync({ enabled: true });
+    renderHook(() => useSyncScheduler());
+    await flush();
+    expect(syncRuns()).toBe(1);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(SYNC_RETURN_MIN_INTERVAL_MS);
+    });
+
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    await flush();
+
+    expect(syncRuns()).toBe(2);
+  });
+
+  it("skips the pull on return right after a pass started", async () => {
+    setupSync({ enabled: true });
+    const { result } = renderHook(() => useSyncScheduler());
+    await flush();
+    expect(syncRuns()).toBe(1);
+
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      result.current.syncOnReturn();
+    });
+    await flush();
+
+    expect(syncRuns()).toBe(1);
   });
 
   it("re-syncs periodically during long sessions", async () => {

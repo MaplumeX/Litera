@@ -299,7 +299,7 @@ export default function MobileApp() {
   usePlatformLifecycle({
     flush: session.flushReadingState,
     flushKosync: session.kosync.flush,
-    syncNow: syncScheduler.syncNow,
+    syncOnReturn: syncScheduler.syncOnReturn,
   });
 
   const handleCloseSettings = useCallback(async () => {

@@ -1,6 +1,11 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { runSyncOnce, syncBeforeExit } from "./sync-runner";
+import {
+  PULL_BEFORE_OPEN_FRESH_MS,
+  pullBeforeOpen,
+  runSyncOnce,
+  syncBeforeExit,
+} from "./sync-runner";
 import { hasUnsyncedActivity, notifySyncActivity } from "./sync-activity";
 
 const invokeMock = vi.fn();
@@ -303,6 +308,85 @@ describe("pass serialization", () => {
 
     await expect(first).rejects.toThrow("offline");
     await expect(second).resolves.toBeUndefined();
+  });
+});
+
+describe("pullBeforeOpen", () => {
+  function setupEnabledStore(): Store {
+    const store = setupStore();
+    const base = invokeMock.getMockImplementation()!;
+    invokeMock.mockImplementation((cmd: string, args?: Record<string, unknown>) =>
+      cmd === "get_sync_config" ? Promise.resolve({ enabled: true }) : base(cmd, args),
+    );
+    return store;
+  }
+
+  function passCount(): number {
+    return invokeMock.mock.calls.filter(([cmd]) => cmd === "sync_export_local_manifest").length;
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("pulls without book files when no pass ran recently", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    setupEnabledStore();
+    await runSyncOnce();
+    vi.setSystemTime(Date.now() + PULL_BEFORE_OPEN_FRESH_MS + 1);
+    invokeMock.mockClear();
+
+    await pullBeforeOpen(1_000);
+
+    expect(passCount()).toBe(1);
+    expect(invokeMock.mock.calls.map(([cmd]) => cmd)).not.toContain("sync_upload_book_files");
+  });
+
+  it("skips the pull right after a pass finished", async () => {
+    setupEnabledStore();
+    await runSyncOnce();
+    invokeMock.mockClear();
+
+    await pullBeforeOpen(1_000);
+
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+
+  it("waits on a pass already underway instead of queueing another", async () => {
+    setupEnabledStore();
+    const running = runSyncOnce();
+
+    await pullBeforeOpen(1_000);
+    await running;
+
+    expect(passCount()).toBe(1);
+  });
+
+  it("does nothing when Sync is off", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + PULL_BEFORE_OPEN_FRESH_MS + 1);
+    setupStore();
+    const base = invokeMock.getMockImplementation()!;
+    invokeMock.mockImplementation((cmd: string, args?: Record<string, unknown>) =>
+      cmd === "get_sync_config" ? Promise.resolve({ enabled: false }) : base(cmd, args),
+    );
+
+    await pullBeforeOpen(1_000);
+
+    expect(passCount()).toBe(0);
+  });
+
+  it("never fails the open when the pull fails", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.now() + PULL_BEFORE_OPEN_FRESH_MS + 1);
+    invokeMock.mockImplementation((cmd: string) =>
+      cmd === "get_sync_config"
+        ? Promise.resolve({ enabled: true })
+        : Promise.reject(new Error("offline")),
+    );
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await expect(pullBeforeOpen(1_000)).resolves.toBeUndefined();
   });
 });
 

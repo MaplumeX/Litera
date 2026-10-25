@@ -67,7 +67,7 @@ export function useBookImport() {
         onNotice: pushNotice,
         suppressDuplicateNotice: options?.suppressDuplicateNotice,
       });
-      if (ids.length > 0) notifySyncActivity();
+      if (ids.length > 0) notifySyncActivity({ prompt: true });
       return ids;
     },
     [askConfirm, pushNotice],
@@ -98,7 +98,7 @@ export function useBookImport() {
         return await runIncoming(await platformBridge.pickBooks());
       }
       const results = await invoke<ImportBookResult[]>("import_book");
-      if (results.length > 0) notifySyncActivity();
+      if (results.length > 0) notifySyncActivity({ prompt: true });
       return await processImportResults(results, {
         askConfirm,
         onNotice: pushNotice,

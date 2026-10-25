@@ -186,7 +186,7 @@ export function useLibraryShelf({ openingBookId = null }: { openingBookId?: stri
     for (const book of targets) {
       try {
         await invoke("delete_book", { bookId: book.id });
-        notifySyncActivity();
+        notifySyncActivity({ prompt: true });
       } catch (err) {
         console.error("delete error:", err);
         failures.push(book.title);
@@ -274,7 +274,7 @@ export function useLibraryShelf({ openingBookId = null }: { openingBookId?: stri
       }
       if (updated.size > 0) {
         setBooks((current) => current.map((item) => updated.get(item.id) ?? item));
-        notifySyncActivity();
+        notifySyncActivity({ prompt: true });
       }
       if (failures.length === 0) return;
       pushNotice({
@@ -316,7 +316,7 @@ export function useLibraryShelf({ openingBookId = null }: { openingBookId?: stri
       try {
         await invoke("restore_trashed_book", { entryId: entry.entryId });
         // Restoring revokes the Book Tombstone, so the revival reaches Sync.
-        notifySyncActivity();
+        notifySyncActivity({ prompt: true });
         await refreshBooks();
         await refreshTrash();
       } catch (err) {
