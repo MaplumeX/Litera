@@ -29,6 +29,7 @@ export const en: { [K in MessageKey]: string } = {
   "window.minimize": "Minimize",
   "window.maximize": "Maximize",
   "window.close": "Close window",
+  "window.closing": "Saving and syncing before closing…",
 
   "reader.persistFailed": "Failed to save reading progress: {message}",
   "reader.openFailed": "Failed to open book: {message}",

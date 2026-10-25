@@ -18,6 +18,7 @@ import {
   BookText,
   ChevronLeft,
   List,
+  Loader2,
   MessageSquare,
   PanelLeft,
   Pause,
@@ -204,6 +205,9 @@ function App() {
   const pendingCaptureRef = useRef<SelectionCapture | null>(null);
   const pendingQuoteRef = useRef<{ href: string; quote: string } | null>(null);
   const closingRef = useRef(false);
+  // Closing waits on the final save and Sync push (up to several seconds);
+  // say so, or the close button looks broken.
+  const [closing, setClosing] = useState(false);
 
   useEffect(() => {
     let disposed = false;
@@ -213,6 +217,7 @@ function App() {
         event.preventDefault();
         if (closingRef.current) return;
         closingRef.current = true;
+        setClosing(true);
         let timeout: ReturnType<typeof setTimeout> | undefined;
         try {
           const outcome = await Promise.race([
@@ -227,6 +232,7 @@ function App() {
         } catch (error) {
           reportPersistenceError(error);
           closingRef.current = false;
+          setClosing(false);
           return;
         } finally {
           if (timeout) clearTimeout(timeout);
@@ -241,6 +247,7 @@ function App() {
         } catch (error) {
           reportPersistenceError(error);
           closingRef.current = false;
+          setClosing(false);
         }
       })
       .then((cleanup) => {
@@ -697,6 +704,17 @@ function App() {
   if (view === "library") {
     return (
       <main className="flex h-screen flex-col bg-background text-foreground">
+      {closing && (
+        <div
+          role="status"
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-background/70 backdrop-blur-sm"
+        >
+          <div className="flex items-center gap-2 rounded-lg border bg-popover px-4 py-3 text-sm text-popover-foreground shadow-lg">
+            <Loader2 className="size-4 animate-spin" />
+            {t("window.closing")}
+          </div>
+        </div>
+      )}
         <PersistenceErrorBanner
           message={session.persistenceError}
           onDismiss={session.clearPersistenceError}
