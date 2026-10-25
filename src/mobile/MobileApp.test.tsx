@@ -144,6 +144,7 @@ vi.mock("@/components/chat/ChatPanel", async () => {
 });
 
 import MobileApp from "./MobileApp";
+import { APP_BAR_HEIGHT } from "./MobileAppBar";
 
 function book(overrides: Partial<BookRecord> = {}): BookRecord {
   return {
@@ -596,6 +597,20 @@ describe("MobileApp — assistant sheet", () => {
     fireEvent.click(screen.getByRole("button", { name: t("mobile.assistant") }));
     expect(sheet(screen).dataset.snap).toBe("collapsed");
     expect(page.style.bottom).toBe("");
+  });
+
+  it("keeps the Book below the top bar while the sheet is up, and under it otherwise", async () => {
+    const screen = await renderApp();
+    await openBook(screen);
+    const page = screen.getByTestId("reader-view").parentElement!;
+
+    fireEvent.click(screen.getByText("middle-tap"));
+    expect(page.style.top).toBe("");
+    fireEvent.click(screen.getByRole("button", { name: t("mobile.assistant") }));
+    expect(page.style.top).toBe(APP_BAR_HEIGHT);
+
+    fireEvent.click(screen.getByText("middle-tap"));
+    expect(page.style.top).toBe("");
   });
 
   it("remembers full screen as the Book's Agent mode and reopens the Book that way", async () => {

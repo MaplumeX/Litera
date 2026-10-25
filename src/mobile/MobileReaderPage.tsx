@@ -31,7 +31,7 @@ import { shortBookTitle } from "@/lib/book-title";
 import { READER_FOOTER_POSITIONS, useReaderFooter } from "@/lib/reader-footer";
 import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
-import { AppBarIconButton, MobileAppBar } from "@/mobile/MobileAppBar";
+import { APP_BAR_HEIGHT, AppBarIconButton, MobileAppBar } from "@/mobile/MobileAppBar";
 import { AssistantSheet } from "@/mobile/AssistantSheet";
 import { MobileDrawer } from "@/mobile/MobileDrawer";
 import { ReaderQuickSettings } from "@/mobile/ReaderQuickSettings";
@@ -275,7 +275,8 @@ export function MobileReaderPage({
   const dark = session.resolvedTheme === "dark";
   const paginated = session.readerFlow === "paginated";
   // With the assistant up, the Book lays itself out in the half above it
-  // rather than running on under the sheet. Only the settled snap counts:
+  // rather than running on under the sheet, and below the top bar while it
+  // shows: that half is all the page there is. Only the settled snap counts:
   // a drag moves the sheet over the page, and the keyboard pushes the sheet
   // up without touching the page.
   const assistantOpen = snap !== "collapsed";
@@ -288,7 +289,11 @@ export function MobileReaderPage({
           and doesn't reflow as the toolbars come and go. */}
       <div
         className="absolute inset-x-0 top-[var(--android-cutout-top,0px)] bottom-[var(--android-cutout-bottom,0px)]"
-        style={{ paddingBottom: reserveFooter ? "3rem" : undefined, bottom: assistantOpen ? "50%" : undefined }}
+        style={{
+          paddingBottom: reserveFooter ? "3rem" : undefined,
+          top: assistantOpen && chromeVisible ? APP_BAR_HEIGHT : undefined,
+          bottom: assistantOpen ? "50%" : undefined,
+        }}
       >
         {fileData && (
           <ReaderView
