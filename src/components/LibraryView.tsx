@@ -446,7 +446,7 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
               actionDisabled={importing}
             />
 
-            <div className="flex-1 overflow-y-auto px-6 pb-6 pt-2">
+            <div className="flex-1 overflow-y-auto px-6 pb-6">
               {!loaded || (books.length === 0 && loadError) ? null : books.length === 0 ? (
                 <div className="flex h-full items-center justify-center">
                   <div className="text-center space-y-3">
@@ -479,7 +479,7 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
                   </div>
                 </div>
               ) : (
-                <div className="space-y-6">
+                <div className="space-y-6 pt-2">
                   {recents.length > 0 && (
                     <section>
                       <h2 className="mb-1 text-sm font-medium">
