@@ -27,6 +27,7 @@ export const zhCN = {
   "window.minimize": "最小化",
   "window.maximize": "最大化",
   "window.close": "关闭窗口",
+  "window.closing": "正在保存并同步，即将关闭…",
 
   "reader.persistFailed": "阅读状态保存失败：{message}",
   "reader.openFailed": "打开书籍失败: {message}",
