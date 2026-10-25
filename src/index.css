@@ -91,6 +91,8 @@
 /* Non-inline so .font-sans / --default-font-family stay var(--font-sans). */
 @theme {
   --font-sans: "Geist Variable", "PingFang SC", "Microsoft YaHei", "Noto Sans SC", ui-sans-serif, system-ui, sans-serif;
+  /* The assistant chat; overridden on <html> when the reader picks its own face. */
+  --font-chat: var(--font-sans);
 }
 
 @theme inline {

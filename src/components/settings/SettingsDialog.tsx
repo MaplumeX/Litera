@@ -69,11 +69,15 @@ import {
   type ReaderMode,
 } from "@/lib/reader-mode";
 import {
+  CHAT_FONT_FOLLOWS_UI,
   DEFAULT_UI_FONT_FAMILY,
   UI_FONT_SIZE_RANGE,
+  applyChatFont,
   applyUiChrome,
+  loadChatFontFamily,
   loadUiFontFamily,
   loadUiFontSize,
+  saveChatFontFamily,
   saveUiFontFamily,
   saveUiFontSize,
 } from "@/lib/ui-chrome-font";
@@ -316,10 +320,15 @@ function FontFamilyPicker({
   value,
   onChange,
   includeGeist = false,
+  followUi = false,
+  ariaLabel,
 }: {
   value: string;
   onChange: (value: string) => void;
   includeGeist?: boolean;
+  /** Offer "same as interface" (the empty value) as the first choice. */
+  followUi?: boolean;
+  ariaLabel?: string;
 }) {
   const { t } = useT();
   const [open, setOpen] = useState(false);
@@ -352,13 +361,17 @@ function FontFamilyPicker({
     return true;
   });
   const isGeist = value === DEFAULT_UI_FONT_FAMILY;
+  const followsUi = followUi && value === CHAT_FONT_FOLLOWS_UI;
   const missing =
     loaded &&
+    !followsUi &&
     !isGenericFontFamily(value) &&
     !(includeGeist && isGeist) &&
     !imported.includes(value) &&
     !listedSystem.includes(value);
-  const selectedLabel = isGenericFontFamily(value)
+  const selectedLabel = followsUi
+    ? t("settings.font.followUi")
+    : isGenericFontFamily(value)
     ? t("settings.font.default")
     : includeGeist && isGeist
       ? t("settings.font.geist")
@@ -373,6 +386,7 @@ function FontFamilyPicker({
           size="sm"
           role="combobox"
           aria-expanded={open}
+          aria-label={ariaLabel}
           className="w-full justify-between font-normal"
         >
           <span className="min-w-0 truncate" style={{ fontFamily: cssFontFamily(value) }}>
@@ -397,6 +411,20 @@ function FontFamilyPicker({
           <CommandList>
             <CommandEmpty>{t("settings.font.empty")}</CommandEmpty>
             <CommandGroup>
+              {followUi && (
+                <CommandItem
+                  value={t("settings.font.followUi")}
+                  onSelect={() => {
+                    onChange(CHAT_FONT_FOLLOWS_UI);
+                    setOpen(false);
+                  }}
+                >
+                  <CheckIcon
+                    className={cn("size-4", followsUi ? "opacity-100" : "opacity-0")}
+                  />
+                  {t("settings.font.followUi")}
+                </CommandItem>
+              )}
               {includeGeist && (
                 <CommandItem
                   key={DEFAULT_UI_FONT_FAMILY}
@@ -620,6 +648,7 @@ export function SettingsDialog({
   const [readerFlow, setReaderFlow] = useState(loadReaderFlow);
   const [uiFontFamily, setUiFontFamily] = useState(loadUiFontFamily);
   const [uiFontSize, setUiFontSize] = useState(loadUiFontSize);
+  const [chatFontFamily, setChatFontFamily] = useState(loadChatFontFamily);
   const [version, setVersion] = useState<string | null>(null);
 
   useEffect(() => {
@@ -636,6 +665,7 @@ export function SettingsDialog({
     setReaderFlow(loadReaderFlow());
     setUiFontFamily(loadUiFontFamily());
     setUiFontSize(loadUiFontSize());
+    setChatFontFamily(loadChatFontFamily());
   }, [open]);
 
   useEffect(() => {
@@ -937,6 +967,7 @@ export function SettingsDialog({
                   <PresetRow label={t("settings.chrome.font")} contentClassName="w-full">
                     <FontFamilyPicker
                       includeGeist
+                      ariaLabel={t("settings.chrome.font")}
                       value={uiFontFamily}
                       onChange={(name) => {
                         saveUiFontFamily(name);
@@ -968,6 +999,19 @@ export function SettingsDialog({
                       }}
                     />
                   </div>
+                  <PresetRow label={t("settings.chrome.chatFont")} contentClassName="w-full">
+                    <FontFamilyPicker
+                      includeGeist
+                      followUi
+                      ariaLabel={t("settings.chrome.chatFont")}
+                      value={chatFontFamily}
+                      onChange={(name) => {
+                        saveChatFontFamily(name);
+                        setChatFontFamily(name);
+                        applyChatFont(name);
+                      }}
+                    />
+                  </PresetRow>
                   <PresetRow label={t("settings.language")}>
                     <SegmentedControl
                       value={locale}

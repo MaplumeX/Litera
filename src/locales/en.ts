@@ -260,6 +260,8 @@ export const en: { [K in MessageKey]: string } = {
   "settings.theme.system": "System",
   "settings.chrome.font": "Interface font",
   "settings.chrome.fontSize": "Interface size",
+  "settings.chrome.chatFont": "Chat font",
+  "settings.font.followUi": "Same as interface",
   "settings.font.geist": "Geist",
   "settings.font.default": "Default",
   "settings.font.search": "Search fonts…",
