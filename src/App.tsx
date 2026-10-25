@@ -723,7 +723,6 @@ function App() {
           message={syncScheduler.persistentFailure}
           onDismiss={syncScheduler.clearPersistentFailure}
         />
-        <UpdateBanner beforeRestart={flushReadingState} />
         <BookImportNotices
           notices={bookImport.notices}
           dismissNotice={bookImport.dismissNotice}
@@ -735,6 +734,7 @@ function App() {
           openingBookId={session.openingBookId}
           onOpenSettings={() => setSettingsOpen(true)}
         />
+        <UpdateBanner beforeRestart={flushReadingState} />
         {settingsDialog}
         <BookImportConfirmDialog
           confirmOpen={bookImport.confirmOpen}
@@ -755,7 +755,6 @@ function App() {
         message={syncScheduler.persistentFailure}
         onDismiss={syncScheduler.clearPersistentFailure}
       />
-      <UpdateBanner beforeRestart={flushReadingState} />
       <BookImportNotices
         notices={bookImport.notices}
         dismissNotice={bookImport.dismissNotice}
@@ -1047,6 +1046,7 @@ function App() {
           />
         )}
       </div>
+      <UpdateBanner beforeRestart={flushReadingState} />
       {settingsDialog}
       <BookImportConfirmDialog
         confirmOpen={bookImport.confirmOpen}

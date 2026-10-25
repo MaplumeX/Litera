@@ -9,15 +9,16 @@ import {
 } from "@/lib/app-update";
 
 /**
- * Announces a new release and carries its download and install. A strip under
- * the desktop titlebar, a snackbar on the phone. `beforeRestart` flushes
+ * Announces a new release and carries its download and install. A card floating
+ * just under the titlebar's right end on the desktop, so it never pushes the
+ * titlebar down; a snackbar on the phone. `beforeRestart` flushes
  * unsaved reading state before the app restarts into the new version.
  */
 export function UpdateBanner({
-  variant = "strip",
+  variant = "card",
   beforeRestart,
 }: {
-  variant?: "strip" | "snackbar";
+  variant?: "card" | "snackbar";
   beforeRestart: () => Promise<void>;
 }) {
   const { t } = useT();
@@ -53,10 +54,10 @@ export function UpdateBanner({
         "flex items-center gap-2 text-sm",
         snackbar
           ? "m-rise pointer-events-auto rounded-lg bg-foreground py-1.5 pr-1.5 pl-4 text-background shadow-float"
-          : "gap-3 border-b border-border bg-muted px-4 py-2 text-muted-foreground",
+          : "m-rise fixed top-14 right-4 z-40 w-[22rem] max-w-[calc(100vw-2rem)] rounded-lg border bg-popover py-1.5 pr-1.5 pl-4 text-popover-foreground shadow-float",
       )}
     >
-      <span className={cn("min-w-0 flex-1", snackbar && "py-1.5")}>{message}</span>
+      <span className="min-w-0 flex-1 py-1.5">{message}</span>
       {actions && (
         <>
           <Button size="sm" variant="ghost" className={ghost} onClick={dismissUpdate}>
