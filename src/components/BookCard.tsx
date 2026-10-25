@@ -219,7 +219,7 @@ export function BookCard({
 
       <div className="px-1">
         <div className="flex items-start gap-1">
-          <p className="line-clamp-2 min-w-0 flex-1 text-sm font-medium leading-tight">
+          <p className="line-clamp-2 min-h-[2.5em] min-w-0 flex-1 text-sm font-medium leading-tight">
             {book.title}
           </p>
           {!selectMode && onToggleStar && (
