@@ -25,6 +25,9 @@ export const AppBarIconButton = forwardRef<
   );
 });
 
+/** The app bar's full height: the status bar it runs behind plus its 56dp row. */
+export const APP_BAR_HEIGHT = "calc(var(--safe-top) + 3.5rem)";
+
 /**
  * The top app bar: it starts under the status bar (its background runs up
  * behind it), a 56dp row with the navigation icon, the title and actions.
