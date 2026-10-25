@@ -323,7 +323,7 @@ function inlineNode(node: XmlNode): string {
   if (tag === "strong" || tag === "b") return text ? `**${text}**` : text;
   if (tag === "del" || tag === "s" || tag === "strike") return text ? `~~${text}~~` : text;
   // A superscript holding only a footnote mark stays the bare `[^label]`.
-  if (tag === "sup" || tag === "sub") return withoutFootnoteRefs(text).trim() ? `${markup(`<${tag}>`)}${text}${markup(`</${tag}>`)}` : text;
+  if (tag === "sup" || tag === "sub") return withoutFootnoteRefs(text).trim() ? `${markup(`<${tag}>`)}${text}${markup(`</${tag}>`)}` : text.trim();
   if (tag === "a") return linkMarkdown(element, text);
   return text;
 }
@@ -854,7 +854,7 @@ function parseNcx(files: Record<string, Uint8Array>, ncx: ManifestItem): NavNode
 
 function anchorIdOf(element: XmlElement): string | undefined {
   // A footnote reference is never a TOC target; anchoring it would split its paragraph.
-  if (noterefLabel(element) || element.getAttribute?.(NOTE_ATTR)) return undefined;
+  if (noterefLabel(element) || element.getAttribute?.(NOTE_ATTR) || element.getAttribute?.(NOTE_MARK_ATTR)) return undefined;
   const id = element.getAttribute("id");
   if (id) return id;
   if (elementTag(element) === "a") {
@@ -1040,6 +1040,8 @@ const BACKLINK_ATTR = "data-litera-backlink";
  * projection leaves it out, since read_chapter appends it as a definition.
  */
 const MOVED_NOTE_ATTR = "data-litera-moved-note";
+/** Set on an element inside a reference's superscript, e.g. an id-only `<span>`; never an anchor either. */
+const NOTE_MARK_ATTR = "data-litera-note-mark";
 /** `epub:type`/`role` values naming an element a note or a notes section. */
 const NOTE_TYPES = new Set(["footnote", "footnotes", "endnote", "endnotes", "rearnote", "rearnotes", "note", "doc-footnote", "doc-endnote", "doc-endnotes"]);
 const FOOTNOTE_REF = /\[\^[^\]\s]+\]/g;
@@ -1077,6 +1079,27 @@ const NOTE_CLASS = /foot-?note|note-?ref|endnote|fnref|(?:^|[\s_-])(?:fn|note)(?
 /** A plain-link note must be short and must not be a section (headings) or the whole document. */
 const NOTE_MAX_CHARS = 4000;
 
+/** Inline formatting that may sit between a superscript and its link, e.g. calibre's `<sup><small><a><font><u>`. */
+const NOTE_WRAPPER_TAGS = new Set(["small", "span", "font", "b", "i", "em", "strong", "u"]);
+
+function compactText(node: XmlNode): string {
+  return (node.textContent ?? "").replace(/\s+/g, "");
+}
+
+/**
+ * The superscript a link is set in: its `<sup>` parent, or a `<sup>` reached
+ * through inline wrappers that hold nothing but the link's text.
+ */
+function noteSuperscript(element: XmlElement): XmlElement | undefined {
+  const text = compactText(element);
+  for (let node = element.parentNode as XmlElement | null; node && node.nodeType === 1; node = node.parentNode as XmlElement | null) {
+    const tag = elementTag(node);
+    if (tag === "sup") return node === element.parentNode || compactText(node) === text ? node : undefined;
+    if (!NOTE_WRAPPER_TAGS.has(tag) || compactText(node) !== text) return undefined;
+  }
+  return undefined;
+}
+
 function hasNoteClass(element: XmlElement | null): boolean {
   return !!element && element.nodeType === 1 && NOTE_CLASS.test(element.getAttribute("class") ?? "");
 }
@@ -1091,7 +1114,7 @@ function hasNoteClass(element: XmlElement | null): boolean {
 function noterefShape(element: XmlElement): "strong" | "weak" | null {
   if (!(element.getAttribute("href") ?? "").includes("#") || isBacklinkType(element)) return null;
   if (linkTypes(element).some((type) => type === "noteref" || type === "doc-noteref")) return "strong";
-  if (elementTag(element.parentNode as XmlNode) === "sup") return "strong";
+  if (noteSuperscript(element)) return "strong";
   const children = Array.from(element.childNodes).filter((child) => child.nodeType === 1 || ((child.nodeType === 3 || child.nodeType === 4) && child.nodeValue?.trim()));
   if (children.length === 1 && elementTag(children[0]) === "sup") return "strong";
   if (NOTE_MARKER.test((element.textContent ?? "").replace(/\s+/g, ""))) return "weak";
@@ -1115,12 +1138,24 @@ function footnoteLabel(text: string, id: string): string {
 
 /** The note body a reference points at: the target, or its nearest block ancestor when the target is inline. */
 function noteBlockOf(target: XmlElement): XmlElement {
+  // An empty anchor set before the note (`<span id="n1"/><p>…</p>`) stands for the block after it.
+  const next = nextElementSibling(target);
+  if (next && isMarkdownBlockRoot(next) && !target.childNodes.length) return noteBlockOf(next);
   let node: XmlElement | null = target;
   while (node && node.nodeType === 1) {
     if (isMarkdownBlockRoot(node) || NOTE_BLOCK_TAGS.has(elementTag(node))) return node;
     node = node.parentNode as XmlElement | null;
   }
   return target;
+}
+
+/** The next element sibling, skipping whitespace-only text; null past any other content. */
+function nextElementSibling(element: XmlElement): XmlElement | null {
+  for (let node = element.nextSibling; node; node = node.nextSibling) {
+    if (node.nodeType === 1) return node as XmlElement;
+    if ((node.nodeType === 3 || node.nodeType === 4) && node.nodeValue?.trim()) return null;
+  }
+  return null;
 }
 
 /**
@@ -1234,6 +1269,8 @@ function annotateFootnotes(
     interface Candidate { element: XmlElement; doc: number; order: number; target: XmlElement; targetDoc: number }
     const candidates: Candidate[] = [];
     const candidateOf = new Map<XmlElement, Candidate>();
+    // The whole mark of each candidate: its superscript, or the link itself.
+    const candidateOfMark = new Map<XmlElement, Candidate>();
     docs.forEach((doc, index) => {
       for (const link of Array.from(doc.root.getElementsByTagName("a"))) {
         if (isBacklinkType(link)) link.setAttribute(BACKLINK_ATTR, "1");
@@ -1244,13 +1281,18 @@ function annotateFootnotes(
         const candidate = { element: link, doc: index, order: candidates.length, ...resolved };
         candidates.push(candidate);
         candidateOf.set(link, candidate);
+        candidateOfMark.set(noteSuperscript(link) ?? link, candidate);
       }
     });
-    const isBacklink = (candidate: Candidate): boolean =>
-      [candidate.target, ...Array.from(candidate.target.getElementsByTagName("a"))].some((element) => {
-        const other = candidateOf.get(element);
-        return other !== undefined && other.order < candidate.order;
-      });
+    // A link pointing into an earlier reference's mark (e.g. an id on a `<span>` inside its `<sup>`) is a backlink.
+    const isBacklink = (candidate: Candidate): boolean => {
+      const earlier = (other: Candidate | undefined) => other !== undefined && other.order < candidate.order;
+      if (Array.from(candidate.target.getElementsByTagName("a")).some((element) => earlier(candidateOf.get(element)))) return true;
+      for (let node: XmlNode | null = candidate.target; node && node.nodeType === 1; node = node.parentNode) {
+        if (earlier(candidateOf.get(node as XmlElement)) || earlier(candidateOfMark.get(node as XmlElement))) return true;
+      }
+      return false;
+    };
     const refs = candidates.filter((candidate) => {
       if (!isBacklink(candidate)) return true;
       candidate.element.setAttribute(BACKLINK_ATTR, "1");
@@ -1276,8 +1318,10 @@ function annotateFootnotes(
         const note = noteBlockOf(ref.target);
         // Any link in the note pointing back at the reference (or its enclosing block) is a backlink.
         const refBlock = noteBlockOf(ref.element);
+        const mark = noteSuperscript(ref.element) ?? ref.element;
         for (const link of Array.from(note.getElementsByTagName("a"))) {
           const back = linkTarget(ref.targetDoc, link)?.target;
+          if (back && hasAncestor(back, (node) => node === mark)) link.setAttribute(BACKLINK_ATTR, "1");
           for (let node: XmlNode | null = ref.element; back && node; node = node === refBlock ? null : node.parentNode) {
             if (node === back) link.setAttribute(BACKLINK_ATTR, "1");
           }
@@ -1305,7 +1349,11 @@ function annotateFootnotes(
       if (insideAtomicBlock(ref.target)) notes.add(ref.target);
     }
     // Mark last: a failure above leaves the documents untouched.
-    for (const { element, label } of pending) element.setAttribute(NOTEREF_ATTR, label);
+    for (const { element, label } of pending) {
+      element.setAttribute(NOTEREF_ATTR, label);
+      const superscript = noteSuperscript(element);
+      if (superscript) [superscript, ...Array.from(superscript.getElementsByTagName("*"))].forEach((node) => node.setAttribute(NOTE_MARK_ATTR, "1"));
+    }
     for (const note of notes) note.setAttribute(NOTE_ATTR, "1");
     for (const note of moved) note.setAttribute(MOVED_NOTE_ATTR, "1");
   } catch {

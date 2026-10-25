@@ -1143,6 +1143,28 @@ describe("footnotes", () => {
     expect(text).toContain("[^①]: 注A\n[^注2]: 注B\n[^c]: 注C");
   });
 
+  it("recognizes a superscript reference wrapped in inline formatting and a note anchored by an empty span before it", () => {
+    const ref = (id: string, target: string, mark: string) =>
+      `<sup><span id="${id}"></span> <small><a href="#${target}"><font size="2"><u>${mark}</u></font></a></small></sup>`;
+    const note = (id: string, back: string, mark: string, body: string) =>
+      `<p id="${id}"><a href="#${back}"><u>${mark}</u></a> ${body}</p>`;
+    const book = footnoteBook(
+      {
+        "text/c1.xhtml": `<html ${EPUB_NS}><body><p>社会必要劳动时间${ref("r13", "n13", "(13)")}。良好的意图${ref("r174", "n174", "[174]")}。</p><p>商品<sup><small><a href="#x">见</a></small>下文</sup>。</p><p id="x">下文。</p>${note("n13", "r13", "(13)", "见本卷第52页。")}<span id="n174"></span>
+<p><a href="#r174"><u>[174]</u></a> 套用圣经后典。</p></body></html>`,
+      },
+      ["text/c1.xhtml"],
+      [["一", "text/c1.xhtml"]],
+    );
+    const { text } = readChapter(book, 0);
+    expect(text).toContain("社会必要劳动时间[^13]。良好的意图[^174]。");
+    expect(text).toContain("[^13]: 见本卷第52页。\n[^174]: 套用圣经后典。");
+    const body = text.slice(0, text.indexOf("[^13]: "));
+    expect(body).not.toContain("见本卷第52页。");
+    expect(body).not.toContain("套用圣经后典。");
+    expect(text).not.toContain("[^见]");
+  });
+
   it("does not treat plain marker links to headings or parenthesized references as footnotes", () => {
     const book = footnoteBook(
       {
