@@ -589,7 +589,9 @@ function ModelCombobox({
         setOpen(next);
         if (!next) setQuery("");
       }}
-      modal={false}
+      // Modal: it renders inside a Dialog, whose scroll lock would otherwise
+      // swallow wheel events over the portalled (outside-the-dialog) list.
+      modal
     >
       <PopoverTrigger asChild>
         <Button
