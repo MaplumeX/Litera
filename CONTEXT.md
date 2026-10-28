@@ -32,12 +32,16 @@ _Avoid_: Chat, conversation (too generic)
 A Session in which the assistant takes the reader through the Book part by part, in order, explaining each part in full. Fixed at creation; a book can have several, next to ordinary Sessions. Side questions in it do not move the reading on.
 _Avoid_: Tutor mode, read-along, guided mode
 
+**Guided step**:
+One step of a Guided session: a part of a chapter by default, or a range of blocks (a chapter's paragraphs) the reader picked, which may cross chapters. It always starts right after the Guide cursor, so the reading never leaves gaps.
+_Avoid_: Lesson, chunk
+
 **Guide cursor**:
-The chapter part a Guided session has reached: the latest guided step on the Session's active branch. Derived, never stored; skipping or picking a chapter only changes the next step until it is sent.
+The block a Guided session has reached: the end of the latest guided step on the Session's active branch. Derived, never stored; skipping or picking a chapter only changes the next step until it is sent.
 _Avoid_: Bookmark, reading position (that is the Book's)
 
 **Chapter recap**:
-A short account of one chapter, written by the assistant when a Guided session finishes the chapter (every part retold or skimmed) and recorded on the Session's branch. The model keeps every recap in its context for the rest of the Session, past Compaction; the transcript shows it as a collapsible marker. Belongs to the Session, not the Book.
+A short account of one chapter, written by the assistant when a Guided session finishes the chapter (every part retold or skimmed) and recorded on the Session's branch. Chapters that one Guided step finishes together share one recap. The model keeps every recap in its context for the rest of the Session, past Compaction; the transcript shows it as a collapsible marker. Belongs to the Session, not the Book.
 _Avoid_: Chapter summary, notes
 
 **Compaction**:

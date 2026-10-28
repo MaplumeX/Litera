@@ -25,6 +25,7 @@ import { ChatInput } from "./ChatInput";
 import { CitationContext, type CitationActions } from "./Citation";
 import { ModelSwitcher } from "./ModelSwitcher";
 import { EmptyState } from "./EmptyState";
+import { GuideRangePicker } from "./GuideRangePicker";
 import { GuideBar, guideStepLabel } from "./GuideBar";
 import { SessionConfigDialog, type SessionConfigTarget } from "./SessionConfigDialog";
 import { SessionList } from "./SessionList";
@@ -38,11 +39,13 @@ import {
   loadSessionRailWidth,
   saveSessionRailWidth,
 } from "@/lib/session-rail-width";
-import { isTranscriptMarker, type GuideStep } from "@/types/agent";
+import { isTranscriptMarker, type GuideSelection, type GuideStep } from "@/types/agent";
 import { chatActivity, type ChatActivity } from "@/lib/chat-activity";
 
 export interface ChatPanelHandle {
   fillInput: (text: string, chapterHref?: string) => void;
+  /** In a Guided session: send the next step up to the block a selection ends in. */
+  guideTo: (selection: GuideSelection) => void;
 }
 
 interface ChatPanelProps {
@@ -90,6 +93,10 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       newSession,
       nextGuideStep,
       guideStepAfterChapter,
+      guideSkimStep,
+      guideOutline,
+      guideStepTo,
+      guideStepToSelection,
       guideStepAt,
       prompt,
       editPrompt,
@@ -181,6 +188,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     // the guide is.
     const [pickedStep, setPickedStep] = useState<GuideStep | null | undefined>(undefined);
     const nextStep = pickedStep !== undefined ? pickedStep : computedStep;
+    const [rangePickerOpen, setRangePickerOpen] = useState(false);
     const showOutlineRail = isWorkspace && userMessageTocItems.length >= 2;
 
     const clearMessageTocJumpTimer = useCallback(() => {
@@ -409,6 +417,34 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       }
     }, [guideStepAfterChapter, isStreaming, nextStep]);
 
+    const handleGuideSkim = useCallback(async () => {
+      if (!nextStep || isStreaming) return;
+      setInvokeError(null);
+      try {
+        const skim = await guideSkimStep(nextStep);
+        if (skim) await sendGuideStep(skim);
+      } catch (error) {
+        setInvokeError(String(error));
+      }
+    }, [guideSkimStep, isStreaming, nextStep, sendGuideStep]);
+
+    const loadGuideOutline = useCallback(
+      (after?: number) => (nextStep ? guideOutline(nextStep, after) : Promise.resolve({ chapters: [], more: null })),
+      [guideOutline, nextStep],
+    );
+
+    const handleGuideRangePick = useCallback(async (to: { chapterIndex: number; block: number }, skim: boolean) => {
+      if (!nextStep || isStreaming) return;
+      setRangePickerOpen(false);
+      setInvokeError(null);
+      try {
+        const step = await guideStepTo(nextStep, to, skim);
+        if (step) await sendGuideStep(step);
+      } catch (error) {
+        setInvokeError(String(error));
+      }
+    }, [guideStepTo, isStreaming, nextStep, sendGuideStep]);
+
     const handleAbort = useCallback(async () => {
       setInvokeError(null);
       try {
@@ -567,7 +603,23 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       inputRef.current?.focus();
     }, []);
 
-    useImperativeHandle(ref, () => ({ fillInput }), [fillInput]);
+    const guideTo = useCallback(async (selection: GuideSelection) => {
+      if (!isGuided || !nextStep) return;
+      if (isStreaming) {
+        setInvokeError(t("chat.guide.selectionBusy"));
+        return;
+      }
+      setInvokeError(null);
+      try {
+        const result = await guideStepToSelection(nextStep, selection);
+        if ("step" in result) await sendGuideStep(result.step);
+        else setInvokeError(t(result.error === "before" ? "chat.guide.selectionBefore" : "chat.guide.selectionNotFound"));
+      } catch (error) {
+        setInvokeError(String(error));
+      }
+    }, [guideStepToSelection, isGuided, isStreaming, nextStep, sendGuideStep, t]);
+
+    useImperativeHandle(ref, () => ({ fillInput, guideTo: (selection) => void guideTo(selection) }), [fillInput, guideTo]);
 
     // Leave the conversation at least half the panel while dragging the rail.
     const startRailResize = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
@@ -840,8 +892,18 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
               started={guideStarted}
               disabled={isStreaming}
               onContinue={() => { if (nextStep) void sendGuideStep(nextStep); }}
-              onSkim={() => { if (nextStep) void sendGuideStep({ ...nextStep, skim: true }); }}
+              onSkim={() => void handleGuideSkim()}
               onSkip={() => void handleGuideSkip()}
+              onPick={() => setRangePickerOpen(true)}
+            />
+          )}
+          {isGuided && bookReady && nextStep && (
+            <GuideRangePicker
+              open={rangePickerOpen}
+              onOpenChange={setRangePickerOpen}
+              step={nextStep}
+              loadOutline={loadGuideOutline}
+              onPick={(to, skim) => void handleGuideRangePick(to, skim)}
             />
           )}
           <ChatInput

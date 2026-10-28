@@ -1,6 +1,8 @@
 /// <reference lib="webworker" />
 import {
   bookToc,
+  guideBlocks,
+  locateGuideBlock,
   locateQuote,
   parseEpub,
   readChapter,
@@ -8,6 +10,7 @@ import {
   searchBook,
   type ParsedBook,
 } from "./epub-content";
+import type { GuideSelectionHints } from "./book-content";
 import { prepareModelImage } from "./model-image";
 
 interface WorkerRequest {
@@ -32,7 +35,12 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
     } else if (method === "toc") {
       result = bookToc(book);
     } else if (method === "readChapter") {
-      result = readChapter(book, Number(args[0]), Number(args[1] ?? 0));
+      const range = args[2] as { fromBlock: number; toBlock: number } | undefined;
+      result = readChapter(book, Number(args[0]), Number(args[1] ?? 0), range && { fromBlock: Number(range.fromBlock), toBlock: Number(range.toBlock) });
+    } else if (method === "guideBlocks") {
+      result = guideBlocks(book, Number(args[0]));
+    } else if (method === "locateGuideBlock") {
+      result = locateGuideBlock(book, Number(args[0]), String(args[1] ?? ""), (args[2] ?? {}) as GuideSelectionHints);
     } else if (method === "search") {
       result = searchBook(book, args[0] as string[]);
     } else if (method === "readImage") {

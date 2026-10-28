@@ -7,12 +7,19 @@ import { MarkdownText } from "./AssistantMessage";
 
 /**
  * Transcript marker for a chapter recap in a Guided session: where the guide
- * finished a chapter, what the assistant keeps of it. Collapsed by default.
+ * finished a chapter (or, in one step, several), what the assistant keeps of
+ * it. Collapsed by default.
  */
 export function GuideRecap({ recap }: { recap: GuideRecapMarker }) {
   const { t } = useT();
   const [expanded, setExpanded] = useState(false);
   const title = recap.chapterTitle ?? translate("chat.guide.chapterFallback", { number: recap.chapterIndex + 1 });
+  const label = recap.throughChapterIndex === undefined
+    ? t("chat.guide.recap", { title })
+    : t("chat.guide.recapRange", {
+        from: title,
+        to: recap.throughChapterTitle ?? translate("chat.guide.chapterFallback", { number: recap.throughChapterIndex + 1 }),
+      });
   return (
     <div data-testid="guide-recap" className="py-1 text-xs text-muted-foreground">
       <button
@@ -25,7 +32,7 @@ export function GuideRecap({ recap }: { recap: GuideRecapMarker }) {
         <span className="h-px flex-1 bg-border" aria-hidden />
         <span className="flex min-w-0 items-center gap-1">
           <BookMarked className="h-3 w-3 shrink-0" aria-hidden />
-          <span className="truncate">{t("chat.guide.recap", { title })}</span>
+          <span className="truncate">{label}</span>
           <ChevronRight
             className={cn("h-3 w-3 shrink-0 transition-transform duration-150", expanded && "rotate-90")}
             aria-hidden

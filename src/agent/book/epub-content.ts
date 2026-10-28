@@ -5,6 +5,8 @@ import {
   hrefMatches,
   type BookMetadata,
   type BookTocEntry,
+  type GuideBlock,
+  type GuideSelectionHints,
   type QuoteLocation,
   type SearchHit,
 } from "./book-content";
@@ -1479,15 +1481,20 @@ function buildTrigramIndex(chapters: readonly Chapter[]): Map<string, number[]> 
 }
 
 export function bookToc(book: ParsedBook): BookTocEntry[] {
-  return book.chapters.map((chapter, index) => ({
-    index,
-    label: chapter.label,
-    ancestors: chapter.ancestors,
-    depth: chapter.depth,
-    hrefs: chapter.hrefs,
-    chars: chapter.markdown.length,
-    parts: chapterParts(chapter).length,
-  }));
+  return book.chapters.map((chapter, index) => {
+    const { blocks, partStarts } = layoutOf(chapter);
+    return {
+      index,
+      label: chapter.label,
+      ancestors: chapter.ancestors,
+      depth: chapter.depth,
+      hrefs: chapter.hrefs,
+      chars: chapter.markdown.length,
+      parts: partStarts.length,
+      blocks: blocks.length,
+      partStarts,
+    };
+  });
 }
 
 // Cost of cutting a chapter before a block (see `chapterWindows`).
@@ -1542,7 +1549,8 @@ function windowBlocks(markdown: string, footnotes?: ReadonlyMap<string, string>)
   let afterHeading = false;
   for (const text of markdown.split("\n\n")) {
     if (!text) continue;
-    const heading = HEADING.exec(text);
+    // A block after a stray third line break starts with "\n".
+    const heading = HEADING.exec(text.trimStart());
     const cut = afterHeading
       ? CUT_AFTER_HEADING
       : heading
@@ -1633,44 +1641,94 @@ function cheapestSplit(blocks: readonly WindowBlock[], count: number): { cost: n
  * toward its size.
  */
 export function chapterWindows(markdown: string, footnotes?: ReadonlyMap<string, string>): string[] {
-  const blocks = windowBlocks(markdown, footnotes);
+  const { blocks, partStarts } = chapterLayout(markdown, footnotes);
   if (!blocks.length) return [""];
+  return partStarts.map((start, index) => blocks.slice(start, partStarts[index + 1] ?? blocks.length).join("\n\n"));
+}
+
+/**
+ * A chapter as `chapterWindows` cuts it: its blocks (the `\n\n` paragraphs,
+ * oversize ones hard-split) and the first block of each part. A Guided
+ * session's ranges count these blocks.
+ */
+export interface ChapterLayout {
+  blocks: string[];
+  partStarts: number[];
+}
+
+function chapterLayout(markdown: string, footnotes?: ReadonlyMap<string, string>): ChapterLayout {
+  const blocks = windowBlocks(markdown, footnotes);
+  const texts = blocks.map((block) => block.text);
   const minimal = minimalWindowCount(blocks);
-  if (minimal === 1) return [blocks.map((block) => block.text).join("\n\n")];
+  if (minimal <= 1) return { blocks: texts, partStarts: [0] };
   const fewest = cheapestSplit(blocks, minimal)!;
   const more = minimal < blocks.length ? cheapestSplit(blocks, minimal + 1) : null;
   const { starts } = more && more.cost + EXTRA_PART < fewest.cost ? more : fewest;
-  return starts.map((start, index) =>
-    blocks.slice(start, starts[index + 1] ?? blocks.length).map((block) => block.text).join("\n\n"));
+  return { blocks: texts, partStarts: starts };
 }
 
 // The TOC reports part counts on every prompt; pack each chapter once.
-const partsCache = new WeakMap<Chapter, string[]>();
+const layoutCache = new WeakMap<Chapter, ChapterLayout>();
 
-/** The read_chapter windows of one chapter, cached per parsed chapter. */
-function chapterParts(chapter: Chapter): string[] {
-  const cached = partsCache.get(chapter);
+/** The blocks and parts of one chapter, cached per parsed chapter. */
+function layoutOf(chapter: Chapter): ChapterLayout {
+  const cached = layoutCache.get(chapter);
   if (cached) return cached;
-  let windows: string[];
+  let layout: ChapterLayout;
   try {
-    windows = chapterWindows(chapter.markdown, chapter.footnotes);
+    layout = chapterLayout(chapter.markdown, chapter.footnotes);
   } catch {
     // Defensive: if packing ever fails, degrade to flat-text hard slicing.
-    windows = Array.from(
+    const blocks = Array.from(
       { length: Math.max(1, Math.ceil(chapter.text.length / CHAPTER_PART_CHARS)) },
       (_, part) => chapter.text.slice(part * CHAPTER_PART_CHARS, (part + 1) * CHAPTER_PART_CHARS),
     );
+    layout = { blocks, partStarts: blocks.map((_, index) => index) };
   }
-  partsCache.set(chapter, windows);
-  return windows;
+  layoutCache.set(chapter, layout);
+  return layout;
 }
 
-export function readChapter(book: ParsedBook, chapterIndex: number, rawPart = 0) {
+/** The read_chapter windows of one chapter. */
+function chapterParts(chapter: Chapter): string[] {
+  const { blocks, partStarts } = layoutOf(chapter);
+  if (!blocks.length) return [""];
+  return partStarts.map((start, index) => blocks.slice(start, partStarts[index + 1] ?? blocks.length).join("\n\n"));
+}
+
+/** The part holding `block`. */
+function partOfBlock(partStarts: readonly number[], block: number): number {
+  let part = 0;
+  while (part + 1 < partStarts.length && partStarts[part + 1] <= block) part += 1;
+  return part;
+}
+
+/**
+ * One part of a chapter, or with `range` its blocks `fromBlock` to `toBlock`
+ * (inclusive). A range never runs past the end of the part it starts in, so
+ * a read stays within `CHAPTER_PART_CHARS`; the result names the blocks it
+ * holds.
+ */
+export function readChapter(book: ParsedBook, chapterIndex: number, rawPart = 0, range?: { fromBlock: number; toBlock: number }) {
   const chapter = book.chapters[chapterIndex];
   if (!chapter) throw new Error("Chapter index is out of range");
-  const windows = chapterParts(chapter);
-  const totalParts = windows.length;
-  const part = Math.min(Math.max(0, Math.trunc(rawPart) || 0), totalParts - 1);
+  const { blocks, partStarts } = layoutOf(chapter);
+  const totalParts = partStarts.length;
+  const lastBlock = Math.max(0, blocks.length - 1);
+  const block = (value: number) => Math.min(Math.max(0, Math.trunc(value) || 0), lastBlock);
+  const partEnd = (part: number) => Math.max(partStarts[part], (partStarts[part + 1] ?? blocks.length) - 1);
+  let part: number;
+  let fromBlock: number;
+  let toBlock: number;
+  if (range) {
+    fromBlock = block(range.fromBlock);
+    part = partOfBlock(partStarts, fromBlock);
+    toBlock = Math.min(Math.max(fromBlock, block(range.toBlock)), partEnd(part));
+  } else {
+    part = Math.min(Math.max(0, Math.trunc(rawPart) || 0), totalParts - 1);
+    fromBlock = partStarts[part];
+    toBlock = partEnd(part);
+  }
   const chapterTitle = chapterTitleOf(chapter);
   return {
     chapterIndex,
@@ -1678,8 +1736,39 @@ export function readChapter(book: ParsedBook, chapterIndex: number, rawPart = 0)
     ...(chapterTitle ? { chapterTitle } : {}),
     part,
     totalParts,
-    text: withFootnoteDefinitions(finalMarkdown(windows[part]), chapter.footnotes),
+    fromBlock,
+    toBlock,
+    totalBlocks: blocks.length,
+    text: withFootnoteDefinitions(finalMarkdown(blocks.slice(fromBlock, toBlock + 1).join("\n\n")), chapter.footnotes),
   };
+}
+
+/** Length of a block's opening text kept to find it again (see `GuideBlock`). */
+export const GUIDE_SNIPPET_CHARS = 60;
+
+function blockPlainText(text: string): string {
+  return plainBlock(finalMarkdown(text)).replace(/\s+/g, " ").trim();
+}
+
+/** The blocks of a chapter, as a Guided session picks and finds them. */
+export function guideBlocks(book: ParsedBook, chapterIndex: number): GuideBlock[] {
+  const chapter = book.chapters[chapterIndex];
+  if (!chapter) throw new Error("Chapter index is out of range");
+  const { blocks, partStarts } = layoutOf(chapter);
+  return blocks.map((text, index) => {
+    const markdown = finalMarkdown(text);
+    const heading = HEADING.exec(markdown.trimStart());
+    const plain = blockPlainText(text);
+    const alts = [...markdown.matchAll(IMAGE_PLACEHOLDER)].map((match) => match[1].trim()).filter(Boolean);
+    const image = !plain && markdown.match(IMAGE_PLACEHOLDER) !== null;
+    return {
+      snippet: (image ? alts.join(" ") : plain).slice(0, GUIDE_SNIPPET_CHARS),
+      chars: markdown.length,
+      heading: heading ? heading[1].length : 0,
+      part: partOfBlock(partStarts, index),
+      ...(image ? { kind: "image" as const } : !plain ? { kind: "blank" as const } : {}),
+    };
+  });
 }
 
 function chapterTitleOf(chapter: Chapter): string | undefined {
@@ -1925,4 +2014,34 @@ export function locateQuote(book: ParsedBook, chapterIndex: number, quote: strin
     };
   }
   return { status: "unverified", chapterIndex: cited };
+}
+
+/**
+ * The block a reader's selection ends in. Matched like a quote: first by the
+ * page's whole paragraph around the selection's end (`hints.paragraph`),
+ * which is rarely ambiguous, then by the selection's last line. Looks in
+ * chapter `chapterIndex` first, then in the rest of the Book. Null when no
+ * block holds it.
+ */
+export function locateGuideBlock(
+  book: ParsedBook,
+  chapterIndex: number,
+  selection: string,
+  hints: GuideSelectionHints = {},
+): { chapterIndex: number; block: number } | null {
+  const lastLine = selection.split("\n").map((line) => line.trim()).filter(Boolean).pop() ?? "";
+  const targets = [hints.paragraph ?? "", lastLine].map((text) => normalizeForQuote(text).text).filter(Boolean);
+  const order = book.chapters.map((_, index) => index).filter((index) => index !== chapterIndex);
+  if (book.chapters[chapterIndex]) order.unshift(chapterIndex);
+  for (const target of targets) {
+    for (const index of order) {
+      const matches = layoutOf(book.chapters[index]).blocks
+        .map((text, block) => (matchInBlock(plainBlock(text), [target]) ? block : -1))
+        .filter((block) => block >= 0);
+      if (!matches.length) continue;
+      const from = hints.after?.chapterIndex === index ? hints.after.block : 0;
+      return { chapterIndex: index, block: matches.find((block) => block >= from) ?? matches[0] };
+    }
+  }
+  return null;
 }

@@ -27,12 +27,14 @@ import type { QuoteLocation } from "@/agent/book/book-content";
 import type { SheetSnap } from "@/lib/assistant-sheet";
 import type { ReaderSession } from "@/lib/use-reader-session";
 import { quoteTargetHref } from "@/lib/toc-items";
+import { useGuideBookMarks } from "@/lib/use-guide-book-marks";
 import { shortBookTitle } from "@/lib/book-title";
 import { READER_FOOTER_POSITIONS, useReaderFooter } from "@/lib/reader-footer";
 import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { APP_BAR_HEIGHT, AppBarIconButton, MobileAppBar } from "@/mobile/MobileAppBar";
 import { AssistantSheet } from "@/mobile/AssistantSheet";
+import type { GuideSelection, GuideStep } from "@/types/agent";
 import { MobileDrawer } from "@/mobile/MobileDrawer";
 import { ReaderQuickSettings } from "@/mobile/ReaderQuickSettings";
 
@@ -223,6 +225,22 @@ export function MobileReaderPage({
     [onSnapChange, readerRef, snap],
   );
 
+  // In a Guided session, "Guide up to here" on a selection sends the step at
+  // once; the sheet comes up to half to show the answer.
+  const [guideSteps, setGuideSteps] = useState<GuideStep[] | null>(null);
+  const guided = guideSteps !== null;
+  const { progress: guideProgress, marks: guideMarks } = useGuideBookMarks(guideSteps, toc);
+  const handleGuideTo = useCallback(
+    (selection: GuideSelection) => {
+      if (snap === "collapsed") {
+        readerRef.current?.anchorToSelection();
+        onSnapChange("half");
+      }
+      chatRef.current?.guideTo(selection);
+    },
+    [onSnapChange, readerRef, snap],
+  );
+
   useLayoutEffect(() => {
     if (snap === "collapsed") return;
     const pending = pendingCaptureRef.current;
@@ -301,6 +319,8 @@ export function MobileReaderPage({
             fileData={fileData}
             onRelocate={session.handleRelocate}
             onSelectionCapture={handleSelectionCapture}
+            onGuideTo={guided ? handleGuideTo : undefined}
+            guideMarks={guideMarks}
             onHighlight={session.handleAddHighlight}
             onUpdateHighlight={session.handleUpdateHighlight}
             onDeleteHighlight={session.handleDeleteHighlight}
@@ -447,6 +467,7 @@ export function MobileReaderPage({
           currentChapterHref={progress.chapterHref}
           onOpenQuote={handleOpenQuote}
           peekOffset={chromeVisible ? `${bottomBarHeight}px` : undefined}
+          onGuideStepsChange={setGuideSteps}
         />
       )}
 
@@ -550,6 +571,7 @@ export function MobileReaderPage({
               session.goToChapterHref(href);
               onPanelChange(null);
             }}
+            guideProgress={guideProgress}
           />
         ) : (
           <AnnotationsSidebar

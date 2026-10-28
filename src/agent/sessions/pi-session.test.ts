@@ -583,6 +583,15 @@ describe("guided sessions", () => {
     expect(decodeGuide({ chapterIndex: 1, part: 0, totalParts: 2, skim: "yes" })).not.toHaveProperty("skim");
   });
 
+  it("decodes the block range of a guided step, rejecting a malformed one", () => {
+    const range = { from: { chapterIndex: 1, chapterTitle: "One", block: 4, snippet: "It was" }, to: { chapterIndex: 3, block: 0 } };
+    expect(decodeGuide({ chapterIndex: 1, part: 1, totalParts: 2, range })).toEqual({ chapterIndex: 1, part: 1, totalParts: 2, range });
+    expect(decodeGuide({ chapterIndex: 1, part: 1, totalParts: 2, range: { from: { chapterIndex: 1, block: 4, snippet: 7 }, to: { chapterIndex: 1, block: 5 } } }))
+      .toEqual({ chapterIndex: 1, part: 1, totalParts: 2, range: { from: { chapterIndex: 1, block: 4 }, to: { chapterIndex: 1, block: 5 } } });
+    expect(decodeGuide({ chapterIndex: 1, part: 1, totalParts: 2, range: { from: { chapterIndex: 1, block: -1 }, to: { chapterIndex: 1, block: 5 } } })).toBeNull();
+    expect(decodeGuide({ chapterIndex: 1, part: 1, totalParts: 2, range: { from: { chapterIndex: 1, block: 4 } } })).toBeNull();
+  });
+
   it("puts the guide on visible user messages", () => {
     const session = makeSession([step("u1", null, 0), entry("a1", "u1", "assistant", "retelling")], "a1");
     expect(visibleMessages(session)[0]).toMatchObject({ role: "user", guide: { chapterIndex: 4, part: 0 } });
@@ -623,6 +632,15 @@ describe("guided sessions", () => {
     expect(visibleMessageEntries(session).map((item) => item.id)).toEqual(["u1", "a1", "r1"]);
     expect(guideRecapChapters(session)).toEqual([{ chapterIndex: 4, chapterTitle: "Chapter 5" }]);
     expect(guideRecapChapters(makeSession([step("u1", null, 2), entry("a1", "u1", "assistant", "retelling")], "a1"))).toEqual([]);
+  });
+
+  it("decodes a recap of several chapters, dropping a malformed range end", () => {
+    const grouped = { ...recap("r1", "a1", 4, "The gist."), details: { chapterIndex: 4, chapterTitle: "Chapter 5", throughChapterIndex: 6, throughChapterTitle: "Chapter 7", text: "The gist." } };
+    const session = makeSession([step("u1", null, 2), entry("a1", "u1", "assistant", "retelling"), grouped], "r1");
+    expect(visibleMessages(session)[2]).toEqual({ role: "recap", chapterIndex: 4, chapterTitle: "Chapter 5", throughChapterIndex: 6, throughChapterTitle: "Chapter 7", text: "The gist." });
+    expect(guideRecapChapters(session)).toEqual([{ chapterIndex: 4, chapterTitle: "Chapter 5", throughChapterIndex: 6, throughChapterTitle: "Chapter 7" }]);
+    const malformed = { ...grouped, details: { chapterIndex: 4, throughChapterIndex: 3, text: "The gist." } };
+    expect(guideRecapChapters(makeSession([step("u1", null, 2), entry("a1", "u1", "assistant", "retelling"), malformed], "r1"))).toEqual([{ chapterIndex: 4 }]);
   });
 
   it("keeps recaps that a compaction cut off in the model context, right after the summary", () => {

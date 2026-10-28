@@ -2,7 +2,7 @@ import { DOMParser } from "@xmldom/xmldom";
 import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 import { describe, expect, it } from "vitest";
 import { CHAPTER_PART_CHARS } from "./book-content";
-import { bookToc, buildOwnedChapters, chapterWindows, hrefFragment, locateQuote, markdownText, parseEpub, parseSpineSegments, readChapter, readImageFile, searchBook, stripFragment, type NavNode, type ParsedBook } from "./epub-content";
+import { bookToc, buildOwnedChapters, chapterWindows, GUIDE_SNIPPET_CHARS, guideBlocks, hrefFragment, locateGuideBlock, locateQuote, markdownText, parseEpub, parseSpineSegments, readChapter, readImageFile, searchBook, stripFragment, type NavNode, type ParsedBook } from "./epub-content";
 
 type FileMap = Record<string, string>;
 
@@ -620,6 +620,17 @@ describe("chapterWindows", () => {
     expect(windows.join("\n\n")).toBe(markdown);
   });
 
+  it("sees a section heading after a stray line break as a section start", () => {
+    const paragraph = (char: string) => char.repeat(1_000);
+    const first = Array.from({ length: 7 }, () => paragraph("a"));
+    const second = Array.from({ length: 8 }, () => paragraph("b"));
+    const markdown = `${first.join("\n\n")}\n\n\n## Second\n\n${second.join("\n\n")}`;
+    const windows = chapterWindows(markdown);
+    expect(windows).toHaveLength(2);
+    expect(windows[1].trimStart().startsWith("## Second")).toBe(true);
+    expect(windows.join("\n\n")).toBe(markdown);
+  });
+
   it("never leaves a heading at the end of a part", () => {
     const blocks = ["a".repeat(5_990), "### Next", "b".repeat(6_000), "c".repeat(5_000)];
     const markdown = blocks.join("\n\n");
@@ -721,6 +732,114 @@ describe("read_chapter structured Markdown (AC1/AC5)", () => {
     expect(parts.join("\n\n")).toBe(chapter.markdown);
     expect(readChapter(book, 0, 99).part).toBe(result.totalParts - 1);
     expect(bookToc(book)[0].chars).toBe(chapter.markdown.length);
+  });
+
+  it("reports each part's first block in the TOC and in read_chapter", () => {
+    const book = parseEpub(pack(longFiles()));
+    const entry = bookToc(book)[0];
+    expect(entry.blocks).toBe(11);
+    expect(entry.partStarts).toHaveLength(entry.parts);
+    expect(entry.partStarts[0]).toBe(0);
+    entry.partStarts.forEach((start, part) => {
+      expect(readChapter(book, 0, part)).toMatchObject({
+        fromBlock: start,
+        toBlock: (entry.partStarts[part + 1] ?? entry.blocks) - 1,
+        totalBlocks: 11,
+      });
+    });
+  });
+
+  it("reads an exact block range, cut at the end of the part it starts in", () => {
+    const book = parseEpub(pack(longFiles()));
+    const second = bookToc(book)[0].partStarts[1];
+    expect(readChapter(book, 0, 0, { fromBlock: 0, toBlock: 0 })).toMatchObject({ part: 0, fromBlock: 0, toBlock: 0, text: "start" });
+    expect(readChapter(book, 0, 0, { fromBlock: second, toBlock: second })).toMatchObject({ part: 1, fromBlock: second, toBlock: second, text: "a".repeat(5000) });
+    expect(readChapter(book, 0, 0, { fromBlock: 0, toBlock: 10 })).toMatchObject({ part: 0, fromBlock: 0, toBlock: second - 1 });
+    expect(readChapter(book, 0, 0, { fromBlock: 99, toBlock: 3 })).toMatchObject({ fromBlock: 10, toBlock: 10 });
+  });
+
+  it("lists a chapter's blocks for the guide", () => {
+    const book = parseEpub(pack(richFiles()));
+    expect(guideBlocks(book, 0)).toEqual([
+      { snippet: "Chapter One", chars: 13, heading: 1, part: 0 },
+      { snippet: "The quick brown fox runs into the strong city.", chars: 52, heading: 0, part: 0 },
+      { snippet: "Later", chars: 8, heading: 2, part: 0 },
+      { snippet: "A quoted line.", chars: 16, heading: 0, part: 0 },
+      { snippet: "first item second item", chars: 26, heading: 0, part: 0 },
+      { snippet: "ordered", chars: 10, heading: 0, part: 0 },
+      { snippet: "code line keep spacing", chars: 23, heading: 0, part: 0 },
+    ]);
+    const long = parseEpub(pack(longFiles()));
+    const blocks = guideBlocks(long, 0);
+    expect(blocks).toHaveLength(11);
+    expect(blocks[1].snippet).toBe("a".repeat(GUIDE_SNIPPET_CHARS));
+    expect(blocks.map((block) => block.part)).toEqual(
+      blocks.map((_, index) => bookToc(long)[0].partStarts.filter((start) => start <= index).length - 1),
+    );
+  });
+
+  it("finds the block a reader's selection ends in", () => {
+    const book = parseEpub(pack(richFiles()));
+    expect(locateGuideBlock(book, 0, "quick brown fox")).toEqual({ chapterIndex: 0, block: 1 });
+    // A selection over several paragraphs ends in the block of its last line.
+    expect(locateGuideBlock(book, 0, "brown fox runs into the strong city.\nLater\nA quoted line.")).toEqual({ chapterIndex: 0, block: 3 });
+    expect(locateGuideBlock(book, 0, "second  item")).toEqual({ chapterIndex: 0, block: 4 });
+    expect(locateGuideBlock(book, 0, "not in this book")).toBeNull();
+    expect(locateGuideBlock(book, 0, "  ")).toBeNull();
+  });
+
+  it("finds a short selection by its whole paragraph, and after the step's start when it repeats", () => {
+    const files = hierarchyFiles(flatNav(["One"], ["text/vol1.xhtml#a"]), {
+      "text/vol1.xhtml": '<html><body><p id="a">Local government matters.</p><p>Budgets of local government.</p><p>Local government again.</p><p>Local government again.</p></body></html>',
+    });
+    const book = parseEpub(pack(files));
+    expect(locateGuideBlock(book, 0, "government")).toEqual({ chapterIndex: 0, block: 0 });
+    expect(locateGuideBlock(book, 0, "government", { paragraph: "Budgets of local government." })).toEqual({ chapterIndex: 0, block: 1 });
+    // The same paragraph twice: the one at or after where the step starts.
+    expect(locateGuideBlock(book, 0, "again", { paragraph: "Local government again.", after: { chapterIndex: 0, block: 3 } })).toEqual({ chapterIndex: 0, block: 3 });
+    expect(locateGuideBlock(book, 0, "government", { after: { chapterIndex: 0, block: 1 } })).toEqual({ chapterIndex: 0, block: 1 });
+    // Nothing at or after the start: the first match, which the guide then refuses.
+    expect(locateGuideBlock(book, 0, "matters", { after: { chapterIndex: 0, block: 2 } })).toEqual({ chapterIndex: 0, block: 0 });
+  });
+
+  it("falls back to the selected text when the page's paragraph text does not match", () => {
+    const book = parseEpub(pack(richFiles()));
+    // The page shows a footnote number the chapter text keeps only as a marker.
+    expect(locateGuideBlock(book, 0, "brown fox", { paragraph: "The quick brown fox runs into the strong city.1" })).toEqual({ chapterIndex: 0, block: 1 });
+  });
+
+  it("looks for a selection in other chapters when the cited one lacks it", () => {
+    const files = hierarchyFiles(flatNav(["一", "二"], ["text/vol1.xhtml#a", "text/vol1.xhtml#b"]), {
+      "text/vol1.xhtml": "<html><body><p id=\"a\">Alpha text</p><p id=\"b\">Beta text</p><p>Gamma text</p></body></html>",
+    });
+    const book = parseEpub(pack(files));
+    expect(locateGuideBlock(book, 0, "Gamma text")).toEqual({ chapterIndex: 1, block: 1 });
+    expect(locateGuideBlock(book, -1, "Alpha")).toEqual({ chapterIndex: 0, block: 0 });
+  });
+
+  it("shows a guide block as plain text, an image by its alt text, and spots blank blocks", () => {
+    const files = hierarchyFiles(flatNav(["Pictures"], ["text/vol1.xhtml#p"]), {
+      "text/vol1.xhtml": '<html xmlns:epub="http://www.idpf.org/2007/ops"><body><h2 id="p">Pictures</h2><p><img src="map.png" alt="A map of the city"/></p><p><img src="x.png"/></p><p>See <b>the</b> map<a epub:type="noteref" href="#n1">1</a>.</p><aside epub:type="footnote" id="n1">A note.</aside></body></html>',
+    });
+    const book = parseEpub(pack(files));
+    const blocks = guideBlocks(book, 0);
+    expect(blocks.map(({ snippet, heading, kind }) => ({ snippet, heading, kind }))).toEqual([
+      { snippet: "Pictures", heading: 2, kind: undefined },
+      { snippet: "A map of the city", heading: 0, kind: "image" },
+      { snippet: "", heading: 0, kind: "image" },
+      { snippet: "See the map.", heading: 0, kind: undefined },
+    ]);
+  });
+
+  it("reads a guide block's heading even after a stray line break", () => {
+    const book = parseEpub(pack(richFiles()));
+    book.chapters[0].markdown = "Intro\n\n\n### Section\n\nBody\n\n\u00a0";
+    expect(guideBlocks(book, 0).map(({ snippet, heading, kind }) => ({ snippet, heading, kind }))).toEqual([
+      { snippet: "Intro", heading: 0, kind: undefined },
+      { snippet: "Section", heading: 3, kind: undefined },
+      { snippet: "Body", heading: 0, kind: undefined },
+      { snippet: "", heading: 0, kind: "blank" },
+    ]);
   });
 
   it("AC1: keeps structure in div/section-wrapped chapter bodies through the full pipeline", () => {

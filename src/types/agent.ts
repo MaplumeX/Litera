@@ -23,14 +23,40 @@ export type SessionKind = "guided";
  * step's user-message entry; the latest one on the active branch is the
  * guide cursor.
  */
+/** A block (Markdown paragraph) of a chapter, as a guided step's range names it. */
+export interface GuidePosition {
+  chapterIndex: number;
+  chapterTitle?: string;
+  /** 0-based block of the chapter (see `BookTocEntry.blocks`). */
+  block: number;
+  /** The block's opening text when the step was sent, to find it again if the blocks shift. */
+  snippet?: string;
+}
+
+/** A reader's selection to guide up to. */
+export interface GuideSelection {
+  text: string;
+  /** The text of the page's paragraph the selection ends in. */
+  paragraph?: string;
+  chapterHref?: string;
+}
+
+/**
+ * One guided step. Without `range` it covers part `part` of the chapter (a
+ * skim: `part` to the chapter's end). With `range` it covers exactly the
+ * blocks `from` to `to`, possibly across chapters, and `chapterIndex` /
+ * `part` name the part `from` is in.
+ */
 export interface GuideStep {
   chapterIndex: number;
   /** 0-based read_chapter part. */
   part: number;
   totalParts: number;
   chapterTitle?: string;
-  /** A skim: parts `part` to the chapter's end in one compressed pass. */
+  /** A compressed pass instead of a full retelling. */
   skim?: true;
+  /** The blocks covered, `to` inclusive. */
+  range?: { from: GuidePosition; to: GuidePosition };
 }
 
 export interface AgentSessionSummary {
@@ -110,6 +136,9 @@ export interface GuideRecapMarker {
   role: "recap";
   chapterIndex: number;
   chapterTitle?: string;
+  /** The last chapter of a recap that covers several, finished by one step. */
+  throughChapterIndex?: number;
+  throughChapterTitle?: string;
   text: string;
 }
 

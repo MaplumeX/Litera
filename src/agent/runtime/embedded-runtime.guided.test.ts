@@ -10,19 +10,20 @@ import type { AgentEvent, SessionKind } from "@/types/agent";
 const now="2026-08-14T00:00:00Z";
 function session(kind?:SessionKind):DecodedPiSession{return{header:{type:"session",version:3,id:"session-1",timestamp:now,cwd:"",...(kind?{kind}:{})},entries:[],leafId:null};}
 const toc=[
-  {index:0,label:"One",ancestors:[],depth:0,hrefs:["one.xhtml"],chars:100,parts:2},
-  {index:1,label:"Two",ancestors:[],depth:0,hrefs:["two.xhtml"],chars:100,parts:1},
+  {index:0,label:"One",ancestors:[],depth:0,hrefs:["one.xhtml"],chars:100,parts:2,blocks:4,partStarts:[0,2]},
+  {index:1,label:"Two",ancestors:[],depth:0,hrefs:["two.xhtml"],chars:100,parts:1,blocks:2,partStarts:[0]},
 ];
+const snippets:Record<number,string[]>={0:["a","b","c","d"],1:["e","f"]};
 
-function setup(kind?:SessionKind,guidedStyle:string|null=null,responses=["retelling","title","retelling two","title"]){
-  let current=session(kind);const batches:PiSessionEntry[][]=[];const systemPrompts:Array<string|undefined>=[];const requests:string[]=[];const created:Array<SessionKind|undefined>=[];const events:AgentEvent[]=[];
+function setup(kind?:SessionKind,guidedStyle:string|null=null,responses=["retelling","title","retelling two","title"],blocks:Record<number,string[]>=snippets){
+  let current=session(kind);const located:Array<[number,string,unknown]>=[];const batches:PiSessionEntry[][]=[];const systemPrompts:Array<string|undefined>=[];const requests:string[]=[];const created:Array<SessionKind|undefined>=[];const events:AgentEvent[]=[];
   const sessions:SessionPort={create:async(_book,requested)=>{created.push(requested);current=session(requested);return current;},list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,entries)=>{batches.push(entries);return entries.at(-1)?.id??null;}};
-  const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:2}),toc:async()=>toc,readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:2,text:"chapter"}),search:async()=>[],close:()=>{}};
+  const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:2}),toc:async()=>toc,readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:2,fromBlock:0,toBlock:1,totalBlocks:4,text:"chapter"}),guideBlocks:async(chapterIndex)=>(blocks[chapterIndex]??[]).map((snippet)=>({snippet,chars:10,heading:0,part:0})),locateGuideBlock:async(chapterIndex,selection,hints)=>{located.push([chapterIndex,selection,hints]);for(const [index,list] of Object.entries(blocks)){const block=list.indexOf(selection.trim());if(block>=0)return{chapterIndex:Number(index),block};}return null;},search:async()=>[],close:()=>{}};
   const faux=createFauxCore({tokensPerSecond:10_000});faux.setResponses(responses.map((text)=>fauxAssistantMessage(text)));
   const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret",thinkingLevel:"off"};
   const runtime=new LiteraAgentRuntime({sessions,book,loadGuidedStyle:()=>guidedStyle,loadConfig:async()=>config,loadStream:async()=>((requestModel,context,options)=>{systemPrompts.push(getCurrentSystemPrompt(context.messages));requests.push(JSON.stringify(context.messages));return faux.streamSimple(requestModel,context,options);})});
   runtime.subscribe((event)=>{events.push(event);});
-  return {runtime,batches,systemPrompts,requests,created,events};
+  return {runtime,batches,systemPrompts,requests,created,events,located};
 }
 
 describe("Guided sessions in the runtime",()=>{
@@ -59,6 +60,80 @@ describe("Guided sessions in the runtime",()=>{
     expect(context?.content).toContain("Call read_chapter with chapterIndex 0 and part 1");
     // The step is normalized against the open Book.
     expect(entries.at(-1)).toMatchObject({type:"message",guide:{chapterIndex:0,part:1,totalParts:2,chapterTitle:"One"}});
+  });
+
+  it("sends a range step with its exact reads and records the snippets of its ends",async()=>{
+    const {runtime,batches}=setup();
+    await runtime.openBook("book",new ArrayBuffer(1));
+    await runtime.newSession(undefined,"guided");
+    await runtime.prompt("step",{guide:{chapterIndex:0,part:0,totalParts:2,range:{from:{chapterIndex:0,block:1},to:{chapterIndex:1,block:0}}}});
+    const entries=batches[0];
+    const context=entries.find((entry)=>entry.type==="custom_message"&&entry.customType==="readingContext");
+    expect(context?.content).toContain("chapterIndex 0, fromBlock 1, toBlock 1; chapterIndex 0, fromBlock 2, toBlock 3; chapterIndex 1, fromBlock 0, toBlock 0");
+    expect(entries.at(-1)).toMatchObject({type:"message",guide:{range:{from:{chapterIndex:0,block:1,snippet:"b"},to:{chapterIndex:1,block:0,snippet:"e"}}}});
+    expect(await runtime.nextGuideStep()).toMatchObject({chapterIndex:1,range:{from:{block:1},to:{block:1}}});
+  });
+
+  it("finds a recorded range's blocks again by their snippets when the blocks shifted",async()=>{
+    const shifting={0:["a","b","c","d"],1:["e","f"]};
+    const {runtime}=setup(undefined,null,undefined,shifting);
+    await runtime.openBook("book",new ArrayBuffer(1));
+    await runtime.newSession(undefined,"guided");
+    const sessionId=(await runtime.listSessions())?.[0]?.id??"session-1";
+    await runtime.prompt("step",{guide:{chapterIndex:0,part:0,totalParts:2,range:{from:{chapterIndex:0,block:0},to:{chapterIndex:0,block:0}}}});
+    // A block now comes before "a": the step's end is block 1, not 0.
+    shifting[0]=["new","a","b","c"];
+    await runtime.openBook("book",new ArrayBuffer(1));
+    await runtime.switchSession(sessionId);
+    expect(await runtime.nextGuideStep()).toMatchObject({chapterIndex:0,part:1});
+  });
+
+  it("skims a range step from where it starts to its chapter's end",async()=>{
+    const {runtime}=setup();
+    await runtime.openBook("book",new ArrayBuffer(1));
+    await runtime.newSession(undefined,"guided");
+    expect(await runtime.guideSkimStep({chapterIndex:0,part:0,totalParts:2,range:{from:{chapterIndex:0,block:1},to:{chapterIndex:0,block:1}}}))
+      .toMatchObject({skim:true,range:{from:{block:1},to:{chapterIndex:0,block:3}}});
+  });
+
+  it("lists the blocks after a step's start for the picker, and builds the picked step",async()=>{
+    const {runtime}=setup();
+    await runtime.openBook("book",new ArrayBuffer(1));
+    await runtime.newSession(undefined,"guided");
+    const step={chapterIndex:0,part:1,totalParts:2};
+    expect(await runtime.guideOutline(step)).toEqual({
+      chapters:[
+        {chapterIndex:0,chapterTitle:"One",firstBlock:2,blocks:["c","d"].map((snippet)=>({snippet,chars:10,heading:0,part:0}))},
+        {chapterIndex:1,chapterTitle:"Two",firstBlock:0,blocks:["e","f"].map((snippet)=>({snippet,chars:10,heading:0,part:0}))},
+      ],
+      more:null,
+    });
+    expect(await runtime.guideStepTo(step,{chapterIndex:1,block:0},true)).toMatchObject({chapterIndex:0,part:1,skim:true,range:{from:{chapterIndex:0,block:2},to:{chapterIndex:1,block:0}}});
+    expect(await runtime.guideStepTo(step,{chapterIndex:0,block:1})).toBeNull();
+  });
+
+  it("builds the step up to a reader's selection, or says why it cannot",async()=>{
+    const {runtime,located}=setup();
+    await runtime.openBook("book",new ArrayBuffer(1));
+    await runtime.newSession(undefined,"guided");
+    const step={chapterIndex:0,part:1,totalParts:2};
+    expect(await runtime.guideStepToSelection(step,{text:"e",paragraph:"the e paragraph",chapterHref:"two.xhtml"})).toEqual({step:expect.objectContaining({chapterIndex:0,part:1,range:expect.objectContaining({to:expect.objectContaining({chapterIndex:1,block:0})})})});
+    // The page's paragraph and where the step starts go along to break ties.
+    expect(located[0]).toEqual([1,"e",{paragraph:"the e paragraph",after:{chapterIndex:0,block:2}}]);
+    expect(await runtime.guideStepToSelection(step,{text:"b",chapterHref:"one.xhtml"})).toEqual({error:"before"});
+    expect(await runtime.guideStepToSelection(step,{text:"zzz",chapterHref:"one.xhtml"})).toEqual({error:"notFound"});
+    expect(located.at(-1)).toEqual([0,"zzz",{after:{chapterIndex:0,block:2}}]);
+  });
+
+  it("gives the Book pane its marks per file, by the blocks' opening text",async()=>{
+    const {runtime}=setup(undefined,null,undefined,{0:["a a","b","c","d"],1:["e","f"]});
+    await runtime.openBook("book",new ArrayBuffer(1));
+    expect(await runtime.guidePageMarks([])).toEqual({});
+    const steps=[{chapterIndex:0,part:0,totalParts:2},{chapterIndex:0,part:1,totalParts:2,skim:true as const},{chapterIndex:1,part:0,totalParts:1,range:{from:{chapterIndex:1,block:0},to:{chapterIndex:1,block:0}}}];
+    expect(await runtime.guidePageMarks(steps)).toEqual({
+      "one.xhtml":{read:["aa","b"],skimmed:["c","d"]},
+      "two.xhtml":{read:["e"],skimmed:[],cursor:"e"},
+    });
   });
 
   it("refuses guided steps outside a Guided session or the Book",async()=>{
@@ -100,6 +175,26 @@ describe("Guided sessions in the runtime",()=>{
     expect(events.find((event)=>event.type==="guide_recap_added")).toMatchObject({messages:expect.arrayContaining([{role:"recap",chapterIndex:0,chapterTitle:"One",text:"The chapter in short."}])});
     await runtime.prompt("Guided reading: Two",{guide:{chapterIndex:1,part:0,totalParts:1}});
     expect(requests.at(-1)).toContain("Chapter recap (chapterIndex 0");
+  });
+
+  it("writes one recap for the chapters one step finished",async()=>{
+    const {runtime,batches,requests,events}=setup(undefined,null,["one retold","title","rest retold","Both chapters in short."]);
+    await runtime.openBook("book",new ArrayBuffer(1));
+    await runtime.newSession(undefined,"guided");
+    await runtime.prompt("step one",{guide:{chapterIndex:0,part:0,totalParts:2}});
+    await new Promise((resolve)=>setTimeout(resolve,20));
+    await runtime.settled();
+    await runtime.prompt("step two",{guide:{chapterIndex:0,part:1,totalParts:2,range:{from:{chapterIndex:0,block:2},to:{chapterIndex:1,block:1}}}});
+    await runtime.settled();
+    const recapRequest=requests.at(-1)!;
+    expect(recapRequest).toContain("one retold");
+    expect(recapRequest).toContain("rest retold");
+    expect(recapRequest).toContain("through chapterIndex 1");
+    const recaps=batches.flat().filter((entry)=>entry.customType==="guideRecap");
+    expect(recaps).toHaveLength(1);
+    expect(recaps[0]).toMatchObject({details:{chapterIndex:0,chapterTitle:"One",throughChapterIndex:1,throughChapterTitle:"Two",text:"Both chapters in short."}});
+    expect(recaps[0].content).toContain("Chapter recap (chapterIndex 0, \"One\" through chapterIndex 1, \"Two\")");
+    expect(events.find((event)=>event.type==="guide_recap_added")).toMatchObject({messages:expect.arrayContaining([expect.objectContaining({role:"recap",chapterIndex:0,throughChapterIndex:1})])});
   });
 
   it("writes no recap in an ordinary Session",async()=>{

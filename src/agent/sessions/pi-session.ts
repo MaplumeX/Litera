@@ -7,6 +7,8 @@ import type {
   AgentToolCall,
   AssistantBlock,
   BranchOption,
+  GuidePosition,
+  GuideRecapMarker,
   GuideStep,
   SessionKind,
 } from "@/types/agent";
@@ -54,18 +56,39 @@ function nonNegativeInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 0;
 }
 
+function decodeGuidePosition(value: unknown): GuidePosition | null {
+  const position = object(value);
+  if (!position || !nonNegativeInteger(position.chapterIndex) || !nonNegativeInteger(position.block)) return null;
+  const chapterTitle = string(position.chapterTitle);
+  const snippet = string(position.snippet);
+  return {
+    chapterIndex: position.chapterIndex,
+    ...(chapterTitle ? { chapterTitle } : {}),
+    block: position.block,
+    ...(snippet ? { snippet } : {}),
+  };
+}
+
 /** A persisted guided step, or null when absent or malformed. */
 export function decodeGuide(value: unknown): GuideStep | null {
   const guide = object(value);
   if (!guide || !nonNegativeInteger(guide.chapterIndex) || !nonNegativeInteger(guide.part)
     || !nonNegativeInteger(guide.totalParts) || guide.part >= guide.totalParts) return null;
   const chapterTitle = string(guide.chapterTitle);
+  let range: GuideStep["range"];
+  if (guide.range !== undefined) {
+    const from = decodeGuidePosition(object(guide.range)?.from);
+    const to = decodeGuidePosition(object(guide.range)?.to);
+    if (!from || !to) return null;
+    range = { from, to };
+  }
   return {
     chapterIndex: guide.chapterIndex,
     part: guide.part,
     totalParts: guide.totalParts,
     ...(chapterTitle ? { chapterTitle } : {}),
     ...(guide.skim === true ? { skim: true as const } : {}),
+    ...(range ? { range } : {}),
   };
 }
 
@@ -185,14 +208,28 @@ export function isGuideRecapEntry(entry: PiSessionEntry): boolean {
 
 export const GUIDE_RECAP = "guideRecap";
 
-/** A recap entry's chapter and reader-facing text, or null when malformed. */
-function decodeRecap(entry: PiSessionEntry): { chapterIndex: number; chapterTitle?: string; text: string } | null {
+/**
+ * A recap entry's chapters and reader-facing text, or null when malformed.
+ * A recap of several chapters names the last as `throughChapterIndex`; one
+ * not after the first is dropped.
+ */
+function decodeRecap(entry: PiSessionEntry): Omit<GuideRecapMarker, "role"> | null {
   if (!isGuideRecapEntry(entry)) return null;
   const details = object(entry.details);
   const text = string(details?.text);
   if (!details || !nonNegativeInteger(details.chapterIndex) || !text) return null;
   const chapterTitle = string(details.chapterTitle);
-  return { chapterIndex: details.chapterIndex, ...(chapterTitle ? { chapterTitle } : {}), text };
+  const through = nonNegativeInteger(details.throughChapterIndex) && details.throughChapterIndex > details.chapterIndex
+    ? details.throughChapterIndex
+    : undefined;
+  const throughChapterTitle = through !== undefined ? string(details.throughChapterTitle) : null;
+  return {
+    chapterIndex: details.chapterIndex,
+    ...(chapterTitle ? { chapterTitle } : {}),
+    ...(through !== undefined ? { throughChapterIndex: through } : {}),
+    ...(throughChapterTitle ? { throughChapterTitle } : {}),
+    text,
+  };
 }
 
 function prunedPlaceholder(toolName: string, args: Record<string, unknown> | undefined): string {
@@ -649,11 +686,13 @@ export function guidedTurns(session: DecodedPiSession): Array<{ step: GuideStep;
   return turns;
 }
 
-/** The chapters with a recap on the active branch. */
-export function guideRecapChapters(session: DecodedPiSession): Array<{ chapterIndex: number; chapterTitle?: string }> {
+/** The chapters of each recap on the active branch. */
+export function guideRecapChapters(session: DecodedPiSession): Array<Omit<GuideRecapMarker, "role" | "text">> {
   return activeBranch(session).flatMap((entry) => {
     const recap = decodeRecap(entry);
-    return recap ? [{ chapterIndex: recap.chapterIndex, ...(recap.chapterTitle ? { chapterTitle: recap.chapterTitle } : {}) }] : [];
+    if (!recap) return [];
+    const { text: _text, ...chapters } = recap;
+    return [chapters];
   });
 }
 
