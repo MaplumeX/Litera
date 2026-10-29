@@ -32,6 +32,7 @@ import { SessionList } from "./SessionList";
 import { TypingIndicator } from "./TypingIndicator";
 import { CompactionNotice, CompactionStatus } from "./CompactionNotice";
 import { GuideRecap } from "./GuideRecap";
+import { GuideStepMarker } from "./GuideStepMarker";
 import { ChatOutlineRail, userMessagePreview } from "./ChatOutlineRail";
 import { useT } from "@/lib/i18n";
 import {
@@ -406,6 +407,16 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         setSubmitting(false);
       }
     }, [bookId, isStreaming, prompt, scrollToBottom]);
+
+    // The assistant asked for a step ("带读第3章"): send it as Continue would.
+    const requestedGuideStep = state.requestedGuideStep;
+    const sentGuideRequestRef = useRef<typeof requestedGuideStep>(null);
+    useEffect(() => {
+      if (!requestedGuideStep || isStreaming || !isGuided || requestedGuideStep.sessionId !== state.sessionId) return;
+      if (sentGuideRequestRef.current === requestedGuideStep) return;
+      sentGuideRequestRef.current = requestedGuideStep;
+      void sendGuideStep(requestedGuideStep.step);
+    }, [isGuided, isStreaming, requestedGuideStep, sendGuideStep, state.sessionId]);
 
     const handleGuideSkip = useCallback(async () => {
       if (!nextStep || isStreaming) return;
@@ -803,33 +814,34 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                 ) || undefined}
                 data-user-message-index={message.role === "user" ? index : undefined}
               >
-                {message.role === "user" && (
-                  <MessageBubble
-                    message={message}
-                    editing={editingIndex === index}
-                    draft={editingIndex === index ? editDraft : message.content}
-                    onDraftChange={setEditDraft}
-                    onStartEdit={() => handleStartEdit(index)}
-                    onSave={() => void handleSaveEdit()}
-                    onCancel={handleCancelEdit}
-                    editDisabled={isStreaming}
-                    editable={!message.guide}
-                    branchSwitcher={(() => {
-                      const anchorId = state.branchAnchors[index];
-                      const info = anchorId !== undefined ? state.branchNavigation[anchorId] : undefined;
-                      if (!info || info.options.length <= 1 || info.activeIndex < 0) return undefined;
-                      return (
-                        <BranchSwitcher
-                          current={info.activeIndex + 1}
-                          total={info.options.length}
-                          disabled={isStreaming}
-                          onPrev={() => void handleSwitchBranch(info.options[info.activeIndex - 1].anchorId, -1)}
-                          onNext={() => void handleSwitchBranch(info.options[info.activeIndex + 1].anchorId, 1)}
-                        />
-                      );
-                    })()}
-                  />
-                )}
+                {message.role === "user" && (() => {
+                  const anchorId = state.branchAnchors[index];
+                  const info = anchorId !== undefined ? state.branchNavigation[anchorId] : undefined;
+                  const branchSwitcher = !info || info.options.length <= 1 || info.activeIndex < 0 ? undefined : (
+                    <BranchSwitcher
+                      current={info.activeIndex + 1}
+                      total={info.options.length}
+                      disabled={isStreaming}
+                      onPrev={() => void handleSwitchBranch(info.options[info.activeIndex - 1].anchorId, -1)}
+                      onNext={() => void handleSwitchBranch(info.options[info.activeIndex + 1].anchorId, 1)}
+                    />
+                  );
+                  // A guided step was sent for the reader, not typed: a marker, not their bubble.
+                  if (message.guide) return <GuideStepMarker label={message.content} step={message.guide} branchSwitcher={branchSwitcher} />;
+                  return (
+                    <MessageBubble
+                      message={message}
+                      editing={editingIndex === index}
+                      draft={editingIndex === index ? editDraft : message.content}
+                      onDraftChange={setEditDraft}
+                      onStartEdit={() => handleStartEdit(index)}
+                      onSave={() => void handleSaveEdit()}
+                      onCancel={handleCancelEdit}
+                      editDisabled={isStreaming}
+                      branchSwitcher={branchSwitcher}
+                    />
+                  );
+                })()}
                 {message.role === "assistant" && (
                   <AssistantMessage
                     message={message}

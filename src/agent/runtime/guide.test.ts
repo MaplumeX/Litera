@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { BookTocEntry } from "@/agent/book/book-content";
 import type { GuidePosition, GuideStep } from "@/types/agent";
-import { dueRecap, findGuideBlock, guidePageMarkPlan, recappedChapters, guideOutlinePlan, guideStepContext, guideStepTo, guideTocProgress, nextGuideStep, resolveGuideStep, skimGuideStep, skipChapterStep, stepChapters } from "./guide";
+import { dueRecap, findGuideBlock, guideBlockPage, guidedPrompt, guidePageMarkPlan, recappedChapters, guideOutlinePlan, guideStepContext, guideStepTo, guideTocProgress, nextGuideStep, requestedGuideStep, resolveGuideStep, skimGuideStep, skipChapterStep, stepChapters } from "./guide";
 
 // Every part holds three blocks.
 const chapter = (index: number, parts: number, chars = 1000, label = `Chapter ${index + 1}`): BookTocEntry => ({
@@ -334,5 +334,95 @@ describe("guidePageMarkPlan", () => {
 
   it("is empty before the first step", () => {
     expect(guidePageMarkPlan(toc, [])).toEqual([]);
+  });
+});
+
+describe("guideBlockPage", () => {
+  const blocks = [
+    { snippet: "Chapter 1", chars: 9, heading: 2, part: 0 },
+    { snippet: "First paragraph", chars: 300, heading: 0, part: 0 },
+    { snippet: "", chars: 0, heading: 0, part: 0, kind: "image" as const },
+    { snippet: "Second paragraph", chars: 200, heading: 0, part: 1 },
+  ];
+
+  it("numbers blocks from 0 and keeps heading levels and kinds only where they apply", () => {
+    expect(guideBlockPage(toc[0], blocks)).toEqual({
+      chapterIndex: 0, chapterTitle: "Chapter 1", totalBlocks: 4, next: null,
+      blocks: [
+        { block: 0, part: 0, chars: 9, snippet: "Chapter 1", heading: 2 },
+        { block: 1, part: 0, chars: 300, snippet: "First paragraph" },
+        { block: 2, part: 0, chars: 0, snippet: "", kind: "image" },
+        { block: 3, part: 1, chars: 200, snippet: "Second paragraph" },
+      ],
+    });
+  });
+
+  it("pages from fromBlock and says where the next page starts", () => {
+    const first = guideBlockPage(toc[0], blocks, 0, 3);
+    expect(first.blocks.map((block) => block.block)).toEqual([0, 1, 2]);
+    expect(first.next).toBe(3);
+    const second = guideBlockPage(toc[0], blocks, first.next!, 3);
+    expect(second.blocks.map((block) => block.block)).toEqual([3]);
+    expect(second.next).toBeNull();
+  });
+
+  it("returns no blocks past the chapter's end", () => {
+    expect(guideBlockPage(toc[0], blocks, 10)).toMatchObject({ blocks: [], next: null });
+  });
+});
+
+describe("requestedGuideStep", () => {
+  const cursor: GuideStep = { chapterIndex: 0, part: 0, totalParts: 2 };
+
+  it("takes the default step from the cursor, or from a chapter's start", () => {
+    expect(requestedGuideStep(toc, cursor, {})).toEqual({ step: { chapterIndex: 0, part: 1, totalParts: 2, chapterTitle: "Chapter 1" } });
+    expect(requestedGuideStep(toc, cursor, { chapterIndex: 2 })).toEqual({ step: { chapterIndex: 2, part: 0, totalParts: 3, chapterTitle: "Chapter 3" } });
+  });
+
+  it("starts at the next chapter with text when the named one has none", () => {
+    expect(requestedGuideStep(toc, null, { chapterIndex: 1 })).toMatchObject({ step: { chapterIndex: 2, part: 0 } });
+  });
+
+  it("ends at a block of the start's chapter, or of another chapter", () => {
+    expect(requestedGuideStep(toc, cursor, { chapterIndex: 2, toBlock: 1 })).toMatchObject({
+      step: { chapterIndex: 2, range: { from: { chapterIndex: 2, block: 0 }, to: { chapterIndex: 2, block: 1 } } },
+    });
+    expect(requestedGuideStep(toc, cursor, { toChapterIndex: 2, toBlock: 4 })).toMatchObject({
+      step: { chapterIndex: 0, range: { from: { chapterIndex: 0, block: 3 }, to: { chapterIndex: 2, block: 4 } } },
+    });
+  });
+
+  it("ends at a chapter's last block when only toChapterIndex is given", () => {
+    expect(requestedGuideStep(toc, null, { chapterIndex: 2, toChapterIndex: 2 })).toMatchObject({
+      step: { range: { from: { chapterIndex: 2, block: 0 }, to: { chapterIndex: 2, block: 8 } } },
+    });
+  });
+
+  it("skims the default range or the asked one", () => {
+    expect(requestedGuideStep(toc, null, { chapterIndex: 2, skim: true })).toEqual({ step: { chapterIndex: 2, part: 0, totalParts: 3, chapterTitle: "Chapter 3", skim: true } });
+    expect(requestedGuideStep(toc, null, { chapterIndex: 2, toBlock: 4, skim: true })).toMatchObject({ step: { skim: true, range: { to: { block: 4 } } } });
+  });
+
+  it("refuses unknown chapters, blocks outside the chapter, ends before the start, and the end of the book", () => {
+    expect(requestedGuideStep(toc, cursor, { chapterIndex: 9 })).toEqual({ error: "No chapter with chapterIndex 9" });
+    expect(requestedGuideStep(toc, cursor, { toChapterIndex: 9, toBlock: 0 })).toEqual({ error: "No chapter with chapterIndex 9" });
+    expect(requestedGuideStep(toc, cursor, { toBlock: 6 })).toMatchObject({ error: expect.stringContaining("blocks 0 to 5") });
+    expect(requestedGuideStep(toc, cursor, { toBlock: 1 })).toMatchObject({ error: expect.stringContaining("cannot go back") });
+    expect(requestedGuideStep(toc, { chapterIndex: 3, part: 0, totalParts: 1 }, {})).toEqual({ error: "The guide has reached the end of the book" });
+  });
+});
+
+describe("guidedPrompt", () => {
+  it("tells the model to start asked-for steps with guide_step, not to retell them itself", () => {
+    const prompt = guidedPrompt();
+    expect(prompt).toContain("call guide_step instead of retelling it yourself");
+    expect(prompt).toContain("list_guide_blocks");
+    expect(prompt).toContain("not by counting");
+    expect(prompt).toContain("cannot start mid-chapter");
+    expect(prompt).toContain("ask instead of guessing");
+  });
+
+  it("keeps the mechanics when the reader's style replaces the default", () => {
+    expect(guidedPrompt("Use a table.")).toContain("call guide_step");
   });
 });

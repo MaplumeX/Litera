@@ -36,7 +36,12 @@ A skim step is the exception to completeness: the reader chose to move fast, so 
 
 Start directly, with no preamble, and do not ask whether to continue; the reader has a Continue button. Write in the language of the step label.
 
-Messages without a guided step are the reader's side questions: answer them normally. They do not advance the reading.
+Messages without a guided step are the reader's side questions: answer them normally. They do not advance the reading, with one exception: when the reader asks to be guided through a place or a range ("带读第3章", "带读第三章的1-3段", "略读下一章", "读到这一节末尾"), call guide_step instead of retelling it yourself, then reply with one short line saying what comes next. The step is sent after your reply.
+- Find the chapter by its title and path in the TOC, not by counting: front matter and sub-sections are chapters of their own, so "第3章" is rarely chapterIndex 2. A chapter cut into sub-sections ends at its last sub-section.
+- Find paragraphs and section starts with list_guide_blocks; count only text blocks (not headings, images or blanks) as paragraphs.
+- Leave chapterIndex out to go on from where the guide is.
+- A step cannot start mid-chapter. For "第三章的5-7段", offer to read from the start of the chapter, or from where the guide is, to paragraph 7.
+- When the place is ambiguous, ask instead of guessing.
 
 When the guide finishes a chapter, a chapter recap of it is added to the conversation. Recaps stay with you for the rest of the book, after the retellings themselves are gone: use them to connect back to earlier chapters.
 </guided_reading>`;
@@ -495,4 +500,77 @@ export function guidePageMarkPlan(toc: readonly BookTocEntry[], steps: readonly 
       ...(cursor?.entry.index === entry.index ? { cursor: cursor.block } : {}),
     }];
   });
+}
+
+/** One page of a chapter's blocks for the model's `list_guide_blocks`. */
+export interface GuideBlockPage {
+  chapterIndex: number;
+  chapterTitle?: string;
+  totalBlocks: number;
+  blocks: Array<{ block: number; part: number; chars: number; snippet: string; heading?: number; kind?: "image" | "blank" }>;
+  /** Pass as `fromBlock` for the next page; null at the chapter's end. */
+  next: number | null;
+}
+
+/** Blocks `fromBlock` on of `entry` (at most `size`), numbered as read_chapter and guided steps number them. */
+export function guideBlockPage(
+  entry: BookTocEntry,
+  blocks: readonly GuideBlock[],
+  fromBlock = 0,
+  size = GUIDE_OUTLINE_BLOCKS,
+): GuideBlockPage {
+  const start = Math.max(0, Math.floor(fromBlock));
+  const end = Math.min(blocks.length, start + size);
+  const title = entry.label.trim();
+  return {
+    chapterIndex: entry.index,
+    ...(title ? { chapterTitle: title } : {}),
+    totalBlocks: blocks.length,
+    blocks: blocks.slice(start, end).map((block, offset) => ({
+      block: start + offset,
+      part: block.part,
+      chars: block.chars,
+      snippet: block.snippet,
+      ...(block.heading ? { heading: block.heading } : {}),
+      ...(block.kind ? { kind: block.kind } : {}),
+    })),
+    next: end < blocks.length ? end : null,
+  };
+}
+
+/** What the model's `guide_step` asks for. */
+export interface GuideStepRequest {
+  /** Start at this chapter's first block (as a TOC pick does); without it, at the Guide cursor. */
+  chapterIndex?: number;
+  /** End in this chapter: at `toBlock`, or at its last block. Defaults to the start's chapter. */
+  toChapterIndex?: number;
+  toBlock?: number;
+  skim?: boolean;
+}
+
+/**
+ * The guided step the model asked for, built as the reader's own picks build
+ * it: start at the Guide cursor or at a chapter's start, end at a block or a
+ * chapter's end, or take the default step. An error the model can act on otherwise.
+ */
+export function requestedGuideStep(
+  toc: readonly BookTocEntry[],
+  cursor: GuideStep | null,
+  request: GuideStepRequest,
+): { step: GuideStep } | { error: string } {
+  const chapter = (index: number) => toc.find((entry) => entry.index === index);
+  if (request.chapterIndex !== undefined && !chapter(request.chapterIndex)) return { error: `No chapter with chapterIndex ${request.chapterIndex}` };
+  const start = request.chapterIndex !== undefined ? nextGuideStep(toc, null, request.chapterIndex) : nextGuideStep(toc, cursor);
+  if (!start) return { error: request.chapterIndex !== undefined ? `No text from chapterIndex ${request.chapterIndex} to the end of the book` : "The guide has reached the end of the book" };
+  const from = guideStepStart(toc, start)!;
+  if (request.toBlock === undefined && request.toChapterIndex === undefined) {
+    const step = request.skim ? skimGuideStep(toc, start) : start;
+    return step ? { step } : { error: "The step does not fit the book" };
+  }
+  const end = chapter(request.toChapterIndex ?? from.chapterIndex);
+  if (!end) return { error: `No chapter with chapterIndex ${request.toChapterIndex}` };
+  const toBlock = request.toBlock ?? blockCount(end) - 1;
+  if (!validBlock(end, toBlock)) return { error: `chapterIndex ${end.index} has blocks 0 to ${blockCount(end) - 1}; toBlock ${toBlock} is not one of them` };
+  const step = guideStepTo(toc, start, { chapterIndex: end.index, block: toBlock }, request.skim);
+  return step ? { step } : { error: `The step would start at chapterIndex ${from.chapterIndex}, block ${from.block}, after the end you asked for (chapterIndex ${end.index}, block ${toBlock}). A step cannot go back or start mid-chapter.` };
 }

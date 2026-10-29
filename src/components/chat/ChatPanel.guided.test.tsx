@@ -114,6 +114,8 @@ describe("ChatPanel in a Guided session", () => {
     });
     const view = renderPanel();
     expect(await view.findByRole("button", { name: "继续：第三章 · 2/3" })).toBeTruthy();
+    // The sent step is a transcript marker, not the reader's bubble.
+    expect(view.getByTestId("guide-step").textContent).toBe("带读：第三章（第 1/3 部分）");
     expect(view.queryByRole("button", { name: "编辑" })).toBeNull();
   });
 
@@ -128,6 +130,27 @@ describe("ChatPanel in a Guided session", () => {
     fireEvent.click(view.getByRole("button", { name: "重新生成" }));
     await waitFor(() => expect(editPrompt).toHaveBeenCalled());
     expect(editPrompt.mock.calls[0][2]).toMatchObject({ guide: stepOne });
+  });
+
+  it("sends a step the assistant asked for once, as Continue would", async () => {
+    const requested = { sessionId: "guided-1", step: picked };
+    bridgeState = guidedState({ requestedGuideStep: requested });
+    const view = renderPanel();
+    await waitFor(() => expect(prompt).toHaveBeenCalledTimes(1));
+    const label = "带读：第三章（第 1–2 段）";
+    expect(prompt).toHaveBeenCalledWith(label, { guide: picked }, { role: "user", content: label, guide: picked });
+    view.rerender(<ChatPanel variant="workspace" currentChapterHref="OEBPS/ch3.xhtml" bookId="book-1" />);
+    await act(async () => {});
+    expect(prompt).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not send an asked step while answering or for another Session", async () => {
+    bridgeState = guidedState({ status: "prompting", promptId: "p", requestedGuideStep: { sessionId: "guided-1", step: picked } });
+    const view = renderPanel();
+    bridgeState = guidedState({ requestedGuideStep: { sessionId: "other", step: picked } });
+    view.rerender(<ChatPanel variant="workspace" currentChapterHref="OEBPS/ch3.xhtml" bookId="book-1" />);
+    await act(async () => {});
+    expect(prompt).not.toHaveBeenCalled();
   });
 
   it("skims the rest of the chapter in one step", async () => {

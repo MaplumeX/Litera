@@ -12,8 +12,6 @@ interface MessageBubbleProps {
   onSave: () => void;
   onCancel: () => void;
   editDisabled: boolean;
-  /** Guided steps are app-generated and cannot be edited. */
-  editable?: boolean;
   /** Optional branch switcher rendered in the reserved action row. */
   branchSwitcher?: ReactNode;
 }
@@ -27,7 +25,6 @@ export function MessageBubble({
   onSave,
   onCancel,
   editDisabled,
-  editable = true,
   branchSwitcher,
 }: MessageBubbleProps) {
   const { t } = useT();
@@ -85,7 +82,7 @@ export function MessageBubble({
               <Check className="h-3.5 w-3.5" />
             </button>
           </>
-        ) : editable && (
+        ) : (
           <button
             type="button"
             onClick={onStartEdit}

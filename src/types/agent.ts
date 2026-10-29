@@ -183,7 +183,8 @@ export type AgentEvent = EventEnvelope & (
   // task as context maintenance.
   | ({ type: "guide_recap_added"; messages: AgentMessage[]; anchors: string[]; navigation: Record<string, AnchorBranchInfo> } & SessionCorrelation)
   | ({ type: "retry_scheduled"; attempt: number; maxAttempts: number; delayMs: number } & PromptCorrelation)
-  | ({ type: "prompt_end"; messages?: AgentMessage[]; anchors?: string[]; navigation?: Record<string, AnchorBranchInfo> } & PromptCorrelation)
+  // `guideStep`: the guided step the model asked for (`guide_step`); the UI sends it next.
+  | ({ type: "prompt_end"; messages?: AgentMessage[]; anchors?: string[]; navigation?: Record<string, AnchorBranchInfo>; guideStep?: GuideStep } & PromptCorrelation)
   | ({ type: "prompt_aborted"; messages?: AgentMessage[]; anchors?: string[]; navigation?: Record<string, AnchorBranchInfo> } & PromptCorrelation & RequestCorrelation)
   | ({ type: "session_created"; kind?: SessionKind } & BookCorrelation & { sessionId: string } & RequestCorrelation)
   | ({ type: "session_switched"; messages: AgentMessage[]; anchors?: string[]; navigation?: Record<string, AnchorBranchInfo> } & BookCorrelation & { sessionId: string } & RequestCorrelation)

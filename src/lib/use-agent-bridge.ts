@@ -43,8 +43,13 @@ export function useAgentBridge(bookId: string) {
         pendingEditRef.current = null;
       }
       if (event.type === "prompt_end" || event.type === "prompt_aborted") {
-        void embeddedAgentRuntime.switchSession(event.sessionId).catch((error) =>
-          console.error("restore session history error:", error));
+        // A step the assistant asked for goes out once the history is restored,
+        // so the restore cannot land on top of the step's own prompt.
+        const guideStep = event.type === "prompt_end" ? event.guideStep : undefined;
+        const sessionId = event.sessionId;
+        void embeddedAgentRuntime.switchSession(sessionId)
+          .then(() => { if (guideStep) dispatch({ type: "guide_step_requested", sessionId, step: guideStep }); })
+          .catch((error) => console.error("restore session history error:", error));
         void listSessions().catch((error) => console.error("refresh sessions error:", error));
       } else if (event.type === "book_ready") {
         void listSessions().catch((error) => console.error("book ready sessions error:", error));

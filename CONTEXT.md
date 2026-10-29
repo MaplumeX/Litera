@@ -33,7 +33,7 @@ A Session in which the assistant takes the reader through the Book part by part,
 _Avoid_: Tutor mode, read-along, guided mode
 
 **Guided step**:
-One step of a Guided session: a part of a chapter by default, or a range of blocks (a chapter's paragraphs) the reader picked, which may cross chapters. It always starts right after the Guide cursor, so the reading never leaves gaps.
+One step of a Guided session: a part of a chapter by default, or a range of blocks (a chapter's paragraphs) the reader picked, which may cross chapters. It starts right after the Guide cursor, or at the start of a chapter the reader picked, never mid-chapter. The reader picks it in the GuideBar or the book, or asks the assistant ("带读第3章"), which asks for the step and sends it after its reply.
 _Avoid_: Lesson, chunk
 
 **Guide cursor**:

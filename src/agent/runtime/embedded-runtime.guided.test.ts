@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createFauxCore, fauxAssistantMessage, getCurrentSystemPrompt } from "@earendil-works/pi-ai";
+import { createFauxCore, fauxAssistantMessage, fauxToolCall, getCurrentSystemPrompt } from "@earendil-works/pi-ai";
 import { LiteraAgentRuntime, SYSTEM_PROMPT, type RuntimeConfig } from "./embedded-runtime";
 import { GUIDED_PROMPT, guidedPrompt } from "./guide";
 import type { BookContentPort } from "@/agent/book/book-content";
@@ -15,16 +15,87 @@ const toc=[
 ];
 const snippets:Record<number,string[]>={0:["a","b","c","d"],1:["e","f"]};
 
-function setup(kind?:SessionKind,guidedStyle:string|null=null,responses=["retelling","title","retelling two","title"],blocks:Record<number,string[]>=snippets){
+function setup(kind?:SessionKind,guidedStyle:string|null=null,responses:Array<string|ReturnType<typeof fauxAssistantMessage>>=["retelling","title","retelling two","title"],blocks:Record<number,string[]>=snippets){
   let current=session(kind);const located:Array<[number,string,unknown]>=[];const batches:PiSessionEntry[][]=[];const systemPrompts:Array<string|undefined>=[];const requests:string[]=[];const created:Array<SessionKind|undefined>=[];const events:AgentEvent[]=[];
   const sessions:SessionPort={create:async(_book,requested)=>{created.push(requested);current=session(requested);return current;},list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,entries)=>{batches.push(entries);return entries.at(-1)?.id??null;}};
   const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:2}),toc:async()=>toc,readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:2,fromBlock:0,toBlock:1,totalBlocks:4,text:"chapter"}),guideBlocks:async(chapterIndex)=>(blocks[chapterIndex]??[]).map((snippet)=>({snippet,chars:10,heading:0,part:0})),locateGuideBlock:async(chapterIndex,selection,hints)=>{located.push([chapterIndex,selection,hints]);for(const [index,list] of Object.entries(blocks)){const block=list.indexOf(selection.trim());if(block>=0)return{chapterIndex:Number(index),block};}return null;},search:async()=>[],close:()=>{}};
-  const faux=createFauxCore({tokensPerSecond:10_000});faux.setResponses(responses.map((text)=>fauxAssistantMessage(text)));
+  const faux=createFauxCore({tokensPerSecond:10_000});faux.setResponses(responses.map((response)=>typeof response==="string"?fauxAssistantMessage(response):response));const tools:string[][]=[];
   const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret",thinkingLevel:"off"};
-  const runtime=new LiteraAgentRuntime({sessions,book,loadGuidedStyle:()=>guidedStyle,loadConfig:async()=>config,loadStream:async()=>((requestModel,context,options)=>{systemPrompts.push(getCurrentSystemPrompt(context.messages));requests.push(JSON.stringify(context.messages));return faux.streamSimple(requestModel,context,options);})});
+  const runtime=new LiteraAgentRuntime({sessions,book,loadGuidedStyle:()=>guidedStyle,loadConfig:async()=>config,loadStream:async()=>((requestModel,context,options)=>{systemPrompts.push(getCurrentSystemPrompt(context.messages));const system=context.messages[0] as {role:string;toolsAdded?:Array<{name:string}>};tools.push(system.role==="system"?(system.toolsAdded??[]).map((tool)=>tool.name):[]);requests.push(JSON.stringify(context.messages));return faux.streamSimple(requestModel,context,options);})});
   runtime.subscribe((event)=>{events.push(event);});
-  return {runtime,batches,systemPrompts,requests,created,events,located};
+  return {runtime,batches,systemPrompts,requests,created,events,located,tools};
 }
+
+function guideStepResults(batches:PiSessionEntry[][]){return batches.flat().flatMap((entry)=>{const message=entry.type==="message"?entry.message as {role?:string;toolName?:string;isError?:boolean;content?:Array<{type?:string;text?:string}>}:undefined;return message?.role==="toolResult"&&message.toolName==="guide_step"?[{isError:message.isError===true,text:message.content?.find((block)=>block.type==="text")?.text??""}]:[];});}
+
+describe("guide_step in the runtime",()=>{
+  it("offers guide_step only in Guided sessions",async()=>{
+    const plain=setup(undefined,null,["answer","title"]);
+    await plain.runtime.openBook("book",new ArrayBuffer(1));
+    await plain.runtime.prompt("question",{});
+    expect(plain.tools[0]).toContain("list_guide_blocks");
+    expect(plain.tools[0]).not.toContain("guide_step");
+    const guided=setup(undefined,null,["answer","title"]);
+    await guided.runtime.openBook("book",new ArrayBuffer(1));
+    await guided.runtime.newSession(undefined,"guided");
+    await guided.runtime.prompt("question",{});
+    expect(guided.tools[0]).toContain("guide_step");
+  });
+
+  it("hands the asked step to the UI on prompt_end, and the turn stays a side question",async()=>{
+    const {runtime,batches,events}=setup(undefined,null,[fauxAssistantMessage([fauxToolCall("guide_step",{chapterIndex:0,toBlock:2}),fauxToolCall("guide_step",{chapterIndex:1,toBlock:0})],{stopReason:"toolUse"}),"好，接下来带读第二章第 1 段。","title"]);
+    await runtime.openBook("book",new ArrayBuffer(1));
+    await runtime.newSession(undefined,"guided");
+    await runtime.prompt("带读第二章第一段",{});
+    // A later call replaces an earlier one.
+    expect(events.find((event)=>event.type==="prompt_end")).toMatchObject({guideStep:{chapterIndex:1,range:{from:{chapterIndex:1,block:0},to:{chapterIndex:1,block:0}}}});
+    expect(guideStepResults(batches).map((result)=>result.isError)).toEqual([false,false]);
+    const user=batches.flat().find((entry)=>entry.type==="message"&&(entry.message as {role?:string}).role==="user");
+    expect(user).not.toHaveProperty("guide");
+    expect(await runtime.nextGuideStep()).toMatchObject({chapterIndex:0,part:0});
+  });
+
+  it("lets the model find a chapter and its paragraphs, then ask for the step",async()=>{
+    const {runtime,batches,events}=setup(undefined,null,[
+      fauxAssistantMessage(fauxToolCall("get_toc",{}),{stopReason:"toolUse"}),
+      fauxAssistantMessage(fauxToolCall("list_guide_blocks",{chapterIndex:1}),{stopReason:"toolUse"}),
+      fauxAssistantMessage(fauxToolCall("guide_step",{chapterIndex:1,toBlock:1}),{stopReason:"toolUse"}),
+      "好，接下来带读 Two 的第 1-2 段。","title",
+    ]);
+    await runtime.openBook("book",new ArrayBuffer(1));
+    await runtime.newSession(undefined,"guided");
+    await runtime.prompt("带读 Two 的前两段",{});
+    expect(JSON.parse(batches.flat().flatMap((entry)=>{const message=entry.type==="message"?entry.message as {role?:string;toolName?:string;content?:Array<{type?:string;text?:string}>}:undefined;return message?.role==="toolResult"&&message.toolName==="list_guide_blocks"?[message.content?.[0]?.text??""]:[];})[0])).toMatchObject({chapterIndex:1,totalBlocks:2,blocks:[{block:0,snippet:"e"},{block:1,snippet:"f"}]});
+    expect(events.find((event)=>event.type==="prompt_end")).toMatchObject({guideStep:{chapterIndex:1,part:0}});
+  });
+
+  it("starts at the Guide cursor without a chapter",async()=>{
+    const {runtime,events}=setup(undefined,null,["retelling","title",fauxAssistantMessage(fauxToolCall("guide_step",{toBlock:3}),{stopReason:"toolUse"}),"好。"]);
+    await runtime.openBook("book",new ArrayBuffer(1));
+    await runtime.newSession(undefined,"guided");
+    await runtime.prompt("step",{guide:{chapterIndex:0,part:0,totalParts:2}});
+    await runtime.prompt("读完这一章",{});
+    expect(events.filter((event)=>event.type==="prompt_end").at(-1)).toMatchObject({guideStep:{chapterIndex:0,part:1}});
+  });
+
+  it("returns an error the model can act on, and hands no step to the UI",async()=>{
+    const {runtime,batches,events}=setup(undefined,null,[fauxAssistantMessage(fauxToolCall("guide_step",{chapterIndex:9}),{stopReason:"toolUse"}),"没有这一章。","title"]);
+    await runtime.openBook("book",new ArrayBuffer(1));
+    await runtime.newSession(undefined,"guided");
+    await runtime.prompt("带读第十章",{});
+    expect(guideStepResults(batches)[0]).toMatchObject({isError:true,text:expect.stringContaining("No chapter with chapterIndex 9")});
+    expect(events.find((event)=>event.type==="prompt_end")).not.toHaveProperty("guideStep");
+  });
+
+  it("hands no step to the UI when the turn is aborted",async()=>{
+    const {runtime,events}=setup(undefined,null,[fauxAssistantMessage(fauxToolCall("guide_step",{chapterIndex:1}),{stopReason:"toolUse"}),fauxAssistantMessage("",{stopReason:"aborted"})]);
+    await runtime.openBook("book",new ArrayBuffer(1));
+    await runtime.newSession(undefined,"guided");
+    await runtime.prompt("带读第二章",{});
+    expect(events.some((event)=>event.type==="prompt_end")).toBe(false);
+    expect(events.some((event)=>event.type==="prompt_aborted")).toBe(true);
+  });
+});
 
 describe("Guided sessions in the runtime",()=>{
   it("creates a Guided session and announces its kind",async()=>{
