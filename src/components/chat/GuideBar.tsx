@@ -1,7 +1,7 @@
 import { BookOpen, FastForward, ListEnd, Play, SkipForward } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { t as translate, useT } from "@/lib/i18n";
-import type { GuideStep } from "@/types/agent";
+import type { GuidePosition, GuideStep } from "@/types/agent";
 import type { MessageKey } from "@/locales/zh-CN";
 
 function stepTitle(step: GuideStep): string {
@@ -12,11 +12,16 @@ export function positionTitle(position: { chapterIndex: number; chapterTitle?: s
   return position.chapterTitle ?? translate("chat.guide.chapterFallback", { number: position.chapterIndex + 1 });
 }
 
-/** The paragraphs `from` to `to` of one chapter, numbered from 1 for the reader. */
+/** The paragraphs `from` to `to` (1-based, as the reader counts them) of one chapter. */
 export function paragraphsLabel(from: number, to: number): string {
-  return from === to
-    ? translate("chat.guide.paragraph", { number: from + 1 })
-    : translate("chat.guide.paragraphs", { from: from + 1, to: to + 1 });
+  return from >= to
+    ? translate("chat.guide.paragraph", { number: from })
+    : translate("chat.guide.paragraphs", { from, to });
+}
+
+/** The paragraph the reader sees at one end of a range; a step recorded before it was kept counts blocks. */
+function endParagraph(position: GuidePosition): number {
+  return position.paragraph ?? position.block + 1;
 }
 
 /** A range step's label: its chapter and paragraphs, or the chapters it runs between. */
@@ -24,7 +29,7 @@ function rangeLabel(step: GuideStep, within: MessageKey, across: MessageKey): st
   if (!step.range) return null;
   const { from, to } = step.range;
   return from.chapterIndex === to.chapterIndex
-    ? translate(within, { title: positionTitle(from), where: paragraphsLabel(from.block, to.block) })
+    ? translate(within, { title: positionTitle(from), where: paragraphsLabel(endParagraph(from), endParagraph(to)) })
     : translate(across, { from: positionTitle(from), to: positionTitle(to) });
 }
 
@@ -51,7 +56,7 @@ export function guidePositionLabel(step: GuideStep): string {
     const { to } = step.range;
     return step.skim
       ? translate("chat.guide.positionSkimmed", { title: positionTitle(to) })
-      : translate("chat.guide.positionBlock", { title: positionTitle(to), where: paragraphsLabel(to.block, to.block) });
+      : translate("chat.guide.positionBlock", { title: positionTitle(to), where: paragraphsLabel(endParagraph(to), endParagraph(to)) });
   }
   if (step.skim) return translate("chat.guide.positionSkimmed", { title: stepTitle(step) });
   return step.totalParts > 1

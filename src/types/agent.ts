@@ -31,6 +31,12 @@ export interface GuidePosition {
   block: number;
   /** The block's opening text when the step was sent, to find it again if the blocks shift. */
   snippet?: string;
+  /**
+   * The 1-based paragraph (see `isGuideParagraph`) the reader sees at this end
+   * of a range: as `from`, the first at or after `block`; as `to`, the last
+   * at or before it. Absent on steps recorded before it was kept.
+   */
+  paragraph?: number;
 }
 
 /** A reader's selection to guide up to. */

@@ -174,12 +174,12 @@ describe("Guided sessions in the runtime",()=>{
     const step={chapterIndex:0,part:1,totalParts:2};
     expect(await runtime.guideOutline(step)).toEqual({
       chapters:[
-        {chapterIndex:0,chapterTitle:"One",firstBlock:2,blocks:["c","d"].map((snippet)=>({snippet,chars:10,heading:0,part:0}))},
-        {chapterIndex:1,chapterTitle:"Two",firstBlock:0,blocks:["e","f"].map((snippet)=>({snippet,chars:10,heading:0,part:0}))},
+        {chapterIndex:0,chapterTitle:"One",firstBlock:2,paragraphsBefore:2,blocks:["c","d"].map((snippet)=>({snippet,chars:10,heading:0,part:0}))},
+        {chapterIndex:1,chapterTitle:"Two",firstBlock:0,paragraphsBefore:0,blocks:["e","f"].map((snippet)=>({snippet,chars:10,heading:0,part:0}))},
       ],
       more:null,
     });
-    expect(await runtime.guideStepTo(step,{chapterIndex:1,block:0},true)).toMatchObject({chapterIndex:0,part:1,skim:true,range:{from:{chapterIndex:0,block:2},to:{chapterIndex:1,block:0}}});
+    expect(await runtime.guideStepTo(step,{chapterIndex:1,block:0},true)).toMatchObject({chapterIndex:0,part:1,skim:true,range:{from:{chapterIndex:0,block:2,snippet:"c",paragraph:3},to:{chapterIndex:1,block:0,snippet:"e",paragraph:1}}});
     expect(await runtime.guideStepTo(step,{chapterIndex:0,block:1})).toBeNull();
   });
 

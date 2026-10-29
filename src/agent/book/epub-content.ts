@@ -108,7 +108,10 @@ function firstText(root: ReturnType<typeof parseXml>, names: string[], fallback:
 
 const INLINE_EMPTY_TAGS = new Set(["img", "svg", "audio", "video", "image"]);
 const IMAGE_TAGS = new Set(["img", "svg", "image"]);
-const BLOCK_TAGS = new Set(["p", "div", "section", "header", "footer", "aside"]);
+const BLOCK_TAGS = new Set([
+  "p", "div", "section", "header", "footer", "aside",
+  "article", "main", "nav", "address", "hgroup", "figure", "figcaption", "dl", "dt", "dd",
+]);
 const IMAGE_ALT_MAX_CHARS = 200;
 /** An image placeholder in the Markdown projection: `![alt](src)`. */
 const IMAGE_PLACEHOLDER = /!\[([^\]\n]*)\]\(([^)\s]+)\)/g;
@@ -605,7 +608,8 @@ function markdownEvents(root: XmlElement): MarkdownEvent[] {
     if (BLOCK_TAGS.has(tag)) {
       // Container block: mirror walkElement's transparent branch, but flush
       // and recurse at anchored children too, so each nested anchor lands in
-      // its own slice; the element itself is a block boundary (end flush).
+      // its own slice; the element itself is a block boundary (both ends).
+      flushInline();
       const children = element.childNodes;
       for (let index = 0; index < children.length; index += 1) {
         const child = children[index];
@@ -653,29 +657,27 @@ function dense(text: string): string {
 }
 
 /**
- * Dense content of a Markdown projection: strip structural markers (heading,
- * quote, list line prefixes; emphasis delimiters) first, then remove
- * whitespace. Comparable with `dense` of the flat projection; a mismatch
- * (e.g. literal `*` in the source text) makes the caller fall back to flat
- * text, which is always safe.
+ * Characters the Markdown projection may add of its own: heading, quote and
+ * list markers (ordered list numbers too), emphasis delimiters, table pipes
+ * and delimiter rows, and escapes.
  */
-function denseMarkdown(markdown: string): string {
-  const lines = withoutFootnoteRefs(withoutImages(withoutMarkup(markdown))).split("\n").map((line) => {
-    let text = line.replace(/^(\s*)([-+]|\d{1,9}\.)\s+/, "$1");
-    text = text.replace(/^(\s*)#{1,6}\s+/, "$1");
-    while (/^(\s*)>\s?/.test(text)) text = text.replace(/^(\s*)>\s?/, "$1");
-    // Table rows: drop the delimiter row and cell pipes, unescape literal `\|`.
-    if (/^\s*\|(?:\s*-{3,}\s*\|)+\s*$/.test(text)) return "";
-    if (/^\s*\|/.test(text)) text = text.replace(/\\\||\|/g, (pipe) => (pipe === "|" ? "" : "|"));
-    return text;
-  });
-  return dense(lines.join("\n"))
-    .split("**")
-    .join("")
-    .split("~~")
-    .join("")
-    .split("*")
-    .join("");
+const MARKDOWN_SYNTAX = new Set("#>*-+~|.\\0123456789");
+
+/**
+ * True when a Markdown projection holds the flat text and only its own syntax
+ * besides: every flat character in order, with nothing but `MARKDOWN_SYNTAX`
+ * between. Text that itself looks like syntax (a literal `*`, a paragraph
+ * opening `1. `) matches as text, so it keeps its slice's structure.
+ */
+function coversFlat(markdown: string, flat: string): boolean {
+  const marked = dense(withoutFootnoteRefs(withoutImages(withoutMarkup(markdown))));
+  const text = dense(flat);
+  let next = 0;
+  for (let index = 0; index < marked.length; index += 1) {
+    if (next < text.length && marked[index] === text[next]) next += 1;
+    else if (!MARKDOWN_SYNTAX.has(marked[index])) return false;
+  }
+  return next === text.length;
 }
 
 /**
@@ -714,10 +716,68 @@ function markdownSlices(events: readonly MarkdownEvent[], anchorIds: readonly st
  */
 export function parseSpineSegments(source: string, fileHref = ""): Segment[] {
   const root = parseSpineRoot(source);
-  if (root) annotateFootnotes([{ href: fileHref, root }]);
+  if (root) {
+    annotateFootnotes([{ href: fileHref, root }]);
+    dropUnshown(root);
+  }
   return spineSegments(source, root, fileHref).map((segment) =>
     segment.markdown === undefined ? segment : { ...segment, markdown: finalMarkdown(segment.markdown) },
   );
+}
+
+/** Elements whose text the reader never shows: document metadata, styles and scripts. */
+const UNSHOWN_TAGS = new Set(["head", "style", "script", "template"]);
+/** Set on an element whose id is no chapter start, so it cuts no segment. */
+const NOT_ANCHOR_ATTR = "data-litera-not-anchor";
+
+/** True for what the reader does not show in the text: unshown tags, hidden elements and page-break marks. */
+function isUnshown(element: XmlElement): boolean {
+  if (UNSHOWN_TAGS.has(elementTag(element)) || element.hasAttribute("hidden")) return true;
+  if (/(?:^|;)\s*display\s*:\s*none\b/i.test(element.getAttribute("style") ?? "")) return true;
+  return linkTypes(element).some((type) => type === "pagebreak" || type === "doc-pagebreak");
+}
+
+/** The ids of `element` and its descendants that are chapter starts. */
+function anchorIdsWithin(element: XmlElement): string[] {
+  return [element, ...Array.from(element.getElementsByTagName("*"))].flatMap((node) => {
+    const id = anchorIdOf(node);
+    return id === undefined ? [] : [id];
+  });
+}
+
+/**
+ * Remove from a spine document what the reader does not show (see
+ * `isUnshown`), so it neither reads as text nor cuts blocks. A removed
+ * element leaves its chapter starts behind as empty `<span>`s.
+ */
+function dropUnshown(element: XmlElement): void {
+  const children = Array.from(element.childNodes);
+  for (const child of children) {
+    if (child.nodeType !== 1) continue;
+    const childElement = child as XmlElement;
+    if (!isUnshown(childElement)) {
+      dropUnshown(childElement);
+      continue;
+    }
+    for (const id of anchorIdsWithin(childElement)) {
+      const mark = childElement.ownerDocument!.createElement("span");
+      mark.setAttribute("id", id);
+      element.insertBefore(mark, childElement);
+    }
+    element.removeChild(childElement);
+  }
+}
+
+/**
+ * Mark the ids in a spine document that no TOC entry targets (`starts`), so
+ * only chapter starts cut segments: page or position marks such as calibre's
+ * `<a id="filepos…">` would otherwise split their paragraph in two.
+ */
+function markChapterStarts(root: XmlElement, starts: ReadonlySet<string>): void {
+  for (const element of [root, ...Array.from(root.getElementsByTagName("*"))]) {
+    const id = anchorIdOf(element);
+    if (id !== undefined && !starts.has(id)) element.setAttribute(NOT_ANCHOR_ATTR, "1");
+  }
 }
 
 /** Parsed spine document root; null when the markup cannot be parsed. */
@@ -790,7 +850,7 @@ function spineSegments(source: string, root: XmlElement | null, fileHref: string
       return {
         anchorId: flat.anchorId,
         text: flat.text,
-        markdown: markdown !== undefined && denseMarkdown(markdown) === dense(flat.guard) ? resolveImageRefs(markdown, fileHref) : flat.text,
+        markdown: markdown !== undefined && coversFlat(markdown, flat.guard) ? resolveImageRefs(markdown, fileHref) : flat.text,
       };
     });
     return segments;
@@ -856,7 +916,7 @@ function parseNcx(files: Record<string, Uint8Array>, ncx: ManifestItem): NavNode
 
 function anchorIdOf(element: XmlElement): string | undefined {
   // A footnote reference is never a TOC target; anchoring it would split its paragraph.
-  if (noterefLabel(element) || element.getAttribute?.(NOTE_ATTR) || element.getAttribute?.(NOTE_MARK_ATTR)) return undefined;
+  if (noterefLabel(element) || element.getAttribute?.(NOTE_ATTR) || element.getAttribute?.(NOTE_MARK_ATTR) || element.getAttribute?.(NOT_ANCHOR_ATTR)) return undefined;
   const id = element.getAttribute("id");
   if (id) return id;
   if (elementTag(element) === "a") {
@@ -1425,6 +1485,15 @@ export function parseEpub(buffer: ArrayBuffer): ParsedBook {
     const root = roots[index];
     return root ? [{ href, root }] : [];
   }), toc);
+  roots.forEach((root, index) => {
+    if (!root) return;
+    const starts = new Set(toc.flatMap((node) => {
+      const fragment = hrefFragment(node.href);
+      return fragment && hrefMatches(node.href, spineHrefs[index]) ? [fragment, decodedPath(fragment)] : [];
+    }));
+    markChapterStarts(root, starts);
+    dropUnshown(root);
+  });
   const segments = spineHrefs.map((href, index) => spineSegments(sources[index], roots[index], href));
   const chapters = withFootnotes(buildOwnedChapters(toc, spineHrefs, segments), footnotes);
   return {
@@ -1535,11 +1604,33 @@ function definitionsLength(text: string, footnotes: ReadonlyMap<string, string> 
   return length;
 }
 
+/** Where a piece of an oversized block may end, best first: after a line, a sentence (with its closing quotes), a space. */
+const PIECE_ENDS = [/\n/g, /[。！？!?…][”’」』"')）]*|[.;；][”’"')]*(?=\s)/g, /\s/g];
+
+/**
+ * The end of the piece of `text` from `start`: at most `CHAPTER_PART_CHARS`
+ * on, at the last of the best kind of `PIECE_ENDS` past its middle, so a
+ * piece reads from the start of a line or sentence; else exactly at the limit.
+ */
+function pieceEnd(text: string, start: number): number {
+  if (start + CHAPTER_PART_CHARS >= text.length) return text.length;
+  const piece = text.slice(start, start + CHAPTER_PART_CHARS);
+  for (const pattern of PIECE_ENDS) {
+    let end = 0;
+    for (const match of piece.matchAll(pattern)) end = match.index + match[0].length;
+    if (end > CHAPTER_PART_CHARS / 2) return start + end;
+  }
+  return start + CHAPTER_PART_CHARS;
+}
+
 /**
  * The chapter as packable blocks: its `\n\n` paragraphs, with a block longer
- * than `CHAPTER_PART_CHARS` (e.g. a huge `<pre>`) hard-split into full-size
- * pieces and a residual piece. A full piece fills a window alone, so pieces
- * never join each other and every join of two blocks is an original `\n\n`.
+ * than `CHAPTER_PART_CHARS` (e.g. a huge `<pre>`) hard-split into pieces of
+ * at most that size, cut after a line or sentence where one is near the limit
+ * (see `pieceEnd`), and a residual piece. Every piece but the residual is
+ * over half the limit, and the residual is what did not fit with the piece
+ * before it, so pieces never join each other and every join of two blocks is
+ * an original `\n\n`.
  * A block's size counts the footnote definitions it brings along.
  */
 function windowBlocks(markdown: string, footnotes?: ReadonlyMap<string, string>): WindowBlock[] {
@@ -1561,8 +1652,10 @@ function windowBlocks(markdown: string, footnotes?: ReadonlyMap<string, string>)
       blocks.push(block(text, cut));
       continue;
     }
-    for (let start = 0; start < text.length; start += CHAPTER_PART_CHARS) {
-      blocks.push(block(text.slice(start, start + CHAPTER_PART_CHARS), start === 0 ? cut : 0));
+    for (let start = 0; start < text.length;) {
+      const end = pieceEnd(text, start);
+      blocks.push(block(text.slice(start, end), start === 0 ? cut : 0));
+      start = end;
     }
   }
   return blocks;

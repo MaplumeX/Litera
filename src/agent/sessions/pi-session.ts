@@ -66,6 +66,7 @@ function decodeGuidePosition(value: unknown): GuidePosition | null {
     ...(chapterTitle ? { chapterTitle } : {}),
     block: position.block,
     ...(snippet ? { snippet } : {}),
+    ...(nonNegativeInteger(position.paragraph) ? { paragraph: position.paragraph } : {}),
   };
 }
 

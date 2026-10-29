@@ -1,4 +1,4 @@
-import { chapterForHref, type BookTocEntry, type GuideBlock } from "@/agent/book/book-content";
+import { chapterForHref, guideParagraphsBefore, isGuideParagraph, type BookTocEntry, type GuideBlock } from "@/agent/book/book-content";
 import type { GuidePosition, GuideStep } from "@/types/agent";
 
 /**
@@ -38,7 +38,7 @@ Start directly, with no preamble, and do not ask whether to continue; the reader
 
 Messages without a guided step are the reader's side questions: answer them normally. They do not advance the reading, with one exception: when the reader asks to be guided through a place or a range ("带读第3章", "带读第三章的1-3段", "略读下一章", "读到这一节末尾"), call guide_step instead of retelling it yourself, then reply with one short line saying what comes next. The step is sent after your reply.
 - Find the chapter by its title and path in the TOC, not by counting: front matter and sub-sections are chapters of their own, so "第3章" is rarely chapterIndex 2. A chapter cut into sub-sections ends at its last sub-section.
-- Find paragraphs and section starts with list_guide_blocks; count only text blocks (not headings, images or blanks) as paragraphs.
+- Find paragraphs and section starts with list_guide_blocks: "the 3rd paragraph" is the block with paragraph 3 (headings, images and blanks have none), as the reader and the step labels count them.
 - Leave chapterIndex out to go on from where the guide is.
 - A step cannot start mid-chapter. For "第三章的5-7段", offer to read from the start of the chapter, or from where the guide is, to paragraph 7.
 - When the place is ambiguous, ask instead of guessing.
@@ -236,6 +236,14 @@ export function skipChapterStep(toc: readonly BookTocEntry[], step: GuideStep): 
 }
 
 /**
+ * The paragraph the reader sees at one end of a range (see
+ * `GuidePosition.paragraph`) among its chapter's `blocks`.
+ */
+export function guideRangeParagraph(blocks: readonly GuideBlock[], position: GuidePosition, end: "from" | "to"): number {
+  return end === "from" ? guideParagraphsBefore(blocks, position.block) + 1 : guideParagraphsBefore(blocks, position.block + 1);
+}
+
+/**
  * Where `position` is among a chapter's `blocks` now: its recorded block when
  * the snippet still matches there (or it has none), else the nearest block
  * with that snippet, else the recorded block.
@@ -277,9 +285,12 @@ export function guideStepStart(toc: readonly BookTocEntry[], step: GuideStep): {
 /** Blocks the "Read to…" picker loads at a time, at least. */
 export const GUIDE_OUTLINE_BLOCKS = 80;
 
-/** What the "Read to…" picker lists: chapters with their blocks from `firstBlock` on. */
+/**
+ * What the "Read to…" picker lists: chapters with their blocks from
+ * `firstBlock` on, and how many paragraphs come before it.
+ */
 export interface GuideOutline {
-  chapters: Array<{ chapterIndex: number; chapterTitle?: string; firstBlock: number; blocks: GuideBlock[] }>;
+  chapters: Array<{ chapterIndex: number; chapterTitle?: string; firstBlock: number; paragraphsBefore: number; blocks: GuideBlock[] }>;
   /** Pass as `after` to list more; null at the Book's end. */
   more: number | null;
 }
@@ -507,12 +518,16 @@ export interface GuideBlockPage {
   chapterIndex: number;
   chapterTitle?: string;
   totalBlocks: number;
-  blocks: Array<{ block: number; part: number; chars: number; snippet: string; heading?: number; kind?: "image" | "blank" }>;
+  blocks: Array<{ block: number; paragraph?: number; part: number; chars: number; snippet: string; heading?: number; kind?: "image" | "blank" }>;
   /** Pass as `fromBlock` for the next page; null at the chapter's end. */
   next: number | null;
 }
 
-/** Blocks `fromBlock` on of `entry` (at most `size`), numbered as read_chapter and guided steps number them. */
+/**
+ * Blocks `fromBlock` on of `entry` (at most `size`), numbered as read_chapter
+ * and guided steps number them; a paragraph also carries its 1-based number
+ * as the reader counts them.
+ */
 export function guideBlockPage(
   entry: BookTocEntry,
   blocks: readonly GuideBlock[],
@@ -522,12 +537,14 @@ export function guideBlockPage(
   const start = Math.max(0, Math.floor(fromBlock));
   const end = Math.min(blocks.length, start + size);
   const title = entry.label.trim();
+  let paragraph = guideParagraphsBefore(blocks, start);
   return {
     chapterIndex: entry.index,
     ...(title ? { chapterTitle: title } : {}),
     totalBlocks: blocks.length,
     blocks: blocks.slice(start, end).map((block, offset) => ({
       block: start + offset,
+      ...(isGuideParagraph(block) ? { paragraph: (paragraph += 1) } : {}),
       part: block.part,
       chars: block.chars,
       snippet: block.snippet,

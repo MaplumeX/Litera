@@ -350,9 +350,9 @@ describe("guideBlockPage", () => {
       chapterIndex: 0, chapterTitle: "Chapter 1", totalBlocks: 4, next: null,
       blocks: [
         { block: 0, part: 0, chars: 9, snippet: "Chapter 1", heading: 2 },
-        { block: 1, part: 0, chars: 300, snippet: "First paragraph" },
+        { block: 1, paragraph: 1, part: 0, chars: 300, snippet: "First paragraph" },
         { block: 2, part: 0, chars: 0, snippet: "", kind: "image" },
-        { block: 3, part: 1, chars: 200, snippet: "Second paragraph" },
+        { block: 3, paragraph: 2, part: 1, chars: 200, snippet: "Second paragraph" },
       ],
     });
   });
@@ -363,6 +363,8 @@ describe("guideBlockPage", () => {
     expect(first.next).toBe(3);
     const second = guideBlockPage(toc[0], blocks, first.next!, 3);
     expect(second.blocks.map((block) => block.block)).toEqual([3]);
+    // A later page counts on from the paragraphs before it.
+    expect(second.blocks[0].paragraph).toBe(2);
     expect(second.next).toBeNull();
   });
 

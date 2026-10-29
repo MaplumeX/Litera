@@ -183,6 +183,34 @@ describe("parseSpineSegments", () => {
     ]);
   });
 
+  it("leaves out what the reader never shows: head, styles, scripts, hidden elements and page breaks", () => {
+    const source =
+      '<html xmlns:epub="http://www.idpf.org/2007/ops"><head><title>书名 - 第一章</title><style>p{text-indent:2em}</style></head>' +
+      '<body><script>var x = 1;</script><h1>第一章</h1><p>正文一<span epub:type="pagebreak" title="12">12</span>。</p>' +
+      '<p hidden="">隐藏一</p><p style="color: red; display : none">隐藏二</p><div role="doc-pagebreak">13</div><p>正文二</p></body></html>';
+    expect(parseSpineSegments(source)).toEqual([
+      { text: "第一章正文一。正文二", markdown: "# 第一章\n\n正文一。\n\n正文二" },
+    ]);
+  });
+
+  it("keeps a TOC target on a hidden element as a boundary", () => {
+    const source = '<html><body><p>one</p><span id="ch2" hidden="">x</span><p>two</p></body></html>';
+    expect(parseSpineSegments(source)).toEqual([
+      { text: "one", markdown: "one" },
+      { anchorId: "ch2", text: "two", markdown: "two" },
+    ]);
+  });
+
+  it("keeps the structure of text that itself looks like Markdown", () => {
+    const source = "<html><body><p>星号*注释</p><p>1. 引言</p><p>- 破折号</p><p>&gt; 箭头</p><p># 井号</p><ul><li>一</li><li>二</li></ul></body></html>";
+    expect(parseSpineSegments(source)[0].markdown).toBe("星号*注释\n\n1. 引言\n\n- 破折号\n\n> 箭头\n\n# 井号\n\n- 一\n- 二");
+  });
+
+  it("gives figure captions and definition terms blocks of their own", () => {
+    const source = '<html><body><figure><img src="a.png" alt="图"/><figcaption>图 1 说明</figcaption></figure><dl><dt>术语</dt><dd>解释</dd></dl><p>后</p></body></html>';
+    expect(parseSpineSegments(source, "t/a.xhtml")[0].markdown).toBe("![图](t/a.png)\n\n图 1 说明\n\n术语\n\n解释\n\n后");
+  });
+
   it("falls back to a single htmlText segment on malformed markup", () => {
     const source = "<html><body><p>unclosed <div>text";
     const segments = parseSpineSegments(source);
@@ -284,7 +312,8 @@ describe("anchor-level ownership (AC1–AC3)", () => {
     const book = parseEpub(pack(files));
     const toc = bookToc(book);
     expect(toc.map((entry) => [entry.label, entry.hrefs])).toEqual([
-      ["第一章", ["OPS/text/vol1.xhtml", "OPS/text/vol1.xhtml#ch1", "OPS/text/vol1.xhtml#ch2", "OPS/text/vol1.xhtml#ch3"]],
+      // #ch2 and #ch3 are no TOC targets, so they cut no slice of their own.
+      ["第一章", ["OPS/text/vol1.xhtml", "OPS/text/vol1.xhtml#ch1"]],
       ["第四章", ["OPS/text/vol2.xhtml"]],
     ]);
     expect(toc[0].ancestors).toEqual(["第一卷 出走"]);
@@ -343,11 +372,10 @@ describe("anchor-level ownership (AC1–AC3)", () => {
     // markers stay on their own lines (segment-level dense guard plus the
     // `\n\n` joints only add strippable whitespace).
     expect(readChapter(book, 0).text).toBe("intro\n\norphan\n\nowned\n\ntrailing");
+    // Only the TOC's own target cuts a slice; #a and #c stay inside theirs.
     expect(bookToc(book)[0].hrefs).toEqual([
       "OPS/text/vol1.xhtml",
-      "OPS/text/vol1.xhtml#a",
       "OPS/text/vol1.xhtml#b",
-      "OPS/text/vol1.xhtml#c",
     ]);
   });
 });
@@ -513,6 +541,20 @@ describe("browser EPUB projection", () => {
     }
   });
 
+  it("cuts chapters only at ids the TOC targets, so other ids leave paragraphs whole", () => {
+    const files = hierarchyFiles(
+      '<ol><li><a href="text/vol1.xhtml#ch1">一</a></li><li><a href="text/vol1.xhtml#ch2">二</a></li></ol>',
+      {
+        "text/vol1.xhtml":
+          '<html><body><h2 id="ch1">一</h2><p>alpha <a id="filepos12"></a>beta <span id="page3">gamma</span> delta</p>' +
+          '<h2 id="ch2">二</h2><p>omega</p></body></html>',
+      },
+    );
+    const book = parseEpub(pack(files));
+    expect(book.chapters.map((chapter) => chapter.markdown)).toEqual(["## 一\n\nalpha beta gamma delta", "## 二\n\nomega"]);
+    expect(guideBlocks(book, 0).map((block) => block.snippet)).toEqual(["一", "alpha beta gamma delta"]);
+  });
+
   it("deduplicates multi-query hits and supports deterministic partial matching", () => {
     const book = parseEpub(epub({ nav: true }));
     expect(book.trigramIndex.get("ome")).toEqual([1]);
@@ -670,6 +712,14 @@ describe("chapterWindows", () => {
     const windows = chapterWindows(markdown);
     expect(windows.map((window) => window.length)).toEqual([12_000, 1]);
     // Hard-split pieces are exact consecutive slices of the oversized block.
+    expect(windows.join("")).toBe(markdown);
+  });
+
+  it("hard-splits an oversized paragraph after a sentence, not inside one", () => {
+    const markdown = "一句话说完了。".repeat(2_000);
+    const windows = chapterWindows(markdown);
+    expect(windows.length).toBe(2);
+    expect(windows.every((window) => window.length <= 12_000 && window.endsWith("。"))).toBe(true);
     expect(windows.join("")).toBe(markdown);
   });
 
@@ -1120,7 +1170,7 @@ describe("footnotes", () => {
     expect(text).toBe("正文甲[^1]与正文乙[^2]。\n\n[^1]: 第一条注释。\n[^2]: 第二条*注释*。");
     const notes = readChapter(book, 1).text;
     expect(notes).not.toContain("[^");
-    expect(notes).toContain("[1]第一条注释。");
+    expect(notes).toContain("<sup>[1]</sup>第一条注释。");
   });
 
   it("only appends definitions for noterefs inside the requested part", () => {

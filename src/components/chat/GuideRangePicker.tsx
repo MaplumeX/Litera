@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CHAPTER_PART_CHARS } from "@/agent/book/book-content";
+import { CHAPTER_PART_CHARS, guideParagraphsBefore, isGuideParagraph } from "@/agent/book/book-content";
 import type { GuideOutline } from "@/agent/runtime/guide";
 import { Button } from "@/components/ui/button";
 import {
@@ -43,6 +43,39 @@ function sectionEnd(chapter: OutlineChapter, index: number): number {
     if (heading > 0 && heading <= level) return chapter.firstBlock + next - 1;
   }
   return chapter.firstBlock + chapter.blocks.length - 1;
+}
+
+const compact = (text: string) => text.replace(/\s+/g, "");
+
+/**
+ * The headings (indexes into `chapter.blocks`) that only repeat the chapter's
+ * own row: the opening headings that together spell its title (e.g. "第一章"
+ * then "火车站"), and any heading that reads as the title. Whitespace aside.
+ */
+function titleHeadings(chapter: OutlineChapter): Set<number> {
+  const title = compact(chapter.chapterTitle ?? "");
+  const repeats = new Set<number>();
+  if (!title) return repeats;
+  chapter.blocks.forEach((block, index) => {
+    if (block.heading > 0 && compact(block.snippet) === title) repeats.add(index);
+  });
+  if (chapter.firstBlock > 0) return repeats;
+  let spelled = "";
+  const opening: number[] = [];
+  for (const [index, block] of chapter.blocks.entries()) {
+    if (block.kind === "blank") continue;
+    if (block.heading === 0) break;
+    spelled += compact(block.snippet);
+    opening.push(index);
+    if (spelled === title) opening.forEach((heading) => repeats.add(heading));
+    if (!title.startsWith(spelled)) break;
+  }
+  return repeats;
+}
+
+/** The paragraphs (1-based, as the reader counts them) of `chapter` up to block `block` of the chapter, at least 1. */
+function paragraphThrough(chapter: OutlineChapter, block: number): number {
+  return Math.max(1, chapter.paragraphsBefore + guideParagraphsBefore(chapter.blocks, block - chapter.firstBlock + 1));
 }
 
 /** Whether block `block` of chapter `chapterIndex` comes at or before `end`. */
@@ -110,62 +143,68 @@ export function GuideRangePicker({ open, onOpenChange, step, loadOutline, onPick
           <DialogTitle>{t("chat.guide.pick")}</DialogTitle>
           <DialogDescription>
             {start
-              ? t("chat.guide.pickHint", { title: positionTitle(start), where: paragraphsLabel(start.firstBlock, start.firstBlock) })
+              ? t("chat.guide.pickHint", { title: positionTitle(start), where: paragraphsLabel(start.paragraphsBefore + 1, start.paragraphsBefore + 1) })
               : t("chat.guide.pickLoading")}
           </DialogDescription>
         </DialogHeader>
 
         <div className="-mx-1 min-h-0 flex-1 overflow-y-auto px-1">
-          {chapters.map((chapter) => (
-            <section key={chapter.chapterIndex} className="mb-2">
-              <button
-                type="button"
-                className={cn(
-                  "sticky top-0 z-10 flex w-full items-baseline justify-between gap-2 rounded-md bg-background px-2 py-1.5 text-left text-sm font-semibold hover:bg-accent",
-                  end?.chapterIndex === chapter.chapterIndex && end.block === chapter.firstBlock + chapter.blocks.length - 1 && "text-primary",
-                )}
-                onClick={() => setEnd({ chapterIndex: chapter.chapterIndex, block: chapter.firstBlock + chapter.blocks.length - 1 })}
-              >
-                <span className="min-w-0 truncate">{positionTitle(chapter)}</span>
-                <span className="shrink-0 text-xs font-normal text-muted-foreground">{t("chat.guide.pickChapter")}</span>
-              </button>
-              <ol>
-                {chapter.blocks.map((block, index) => {
-                  // Blank blocks still count toward a range, but there is nothing to pick.
-                  if (block.kind === "blank") return null;
-                  // The heading that opens a chapter repeats the chapter's own row.
-                  if (block.heading > 0 && block.snippet === chapter.chapterTitle?.trim()) return null;
-                  const number = chapter.firstBlock + index;
-                  const inRange = upTo(end, chapter.chapterIndex, number);
-                  const isEnd = end?.chapterIndex === chapter.chapterIndex && end.block === number;
-                  return (
-                    <li key={number}>
-                      <button
-                        type="button"
-                        className={cn(
-                          "flex w-full items-baseline gap-2 rounded-md px-2 py-1 text-left text-sm hover:bg-accent",
-                          inRange && "bg-accent/50",
-                          isEnd && "bg-primary/10 ring-1 ring-primary/40",
-                          block.heading > 0 && "mt-1 font-medium",
-                        )}
-                        onClick={() => setEnd({
-                          chapterIndex: chapter.chapterIndex,
-                          block: block.heading > 0 ? sectionEnd(chapter, index) : number,
-                        })}
-                      >
-                        <span className={cn("min-w-0 flex-1 truncate", block.heading === 0 && "text-muted-foreground")}>
-                          {block.kind === "image" ? t("chat.guide.pickImage", { alt: block.snippet }) : block.snippet}
-                        </span>
-                        <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
-                          {block.heading > 0 ? t("chat.guide.pickSection") : number + 1}
-                        </span>
-                      </button>
-                    </li>
-                  );
-                })}
-              </ol>
-            </section>
-          ))}
+          {chapters.map((chapter) => {
+            const repeats = titleHeadings(chapter);
+            let paragraph = chapter.paragraphsBefore;
+            return (
+              <section key={chapter.chapterIndex} className="mb-2">
+                <button
+                  type="button"
+                  className={cn(
+                    "sticky top-0 z-10 flex w-full items-baseline justify-between gap-2 rounded-md bg-background px-2 py-1.5 text-left text-sm font-semibold hover:bg-accent",
+                    end?.chapterIndex === chapter.chapterIndex && end.block === chapter.firstBlock + chapter.blocks.length - 1 && "text-primary",
+                  )}
+                  onClick={() => setEnd({ chapterIndex: chapter.chapterIndex, block: chapter.firstBlock + chapter.blocks.length - 1 })}
+                >
+                  <span className="min-w-0 truncate">{positionTitle(chapter)}</span>
+                  <span className="shrink-0 text-xs font-normal text-muted-foreground">{t("chat.guide.pickChapter")}</span>
+                </button>
+                <ol>
+                  {chapter.blocks.map((block, index) => {
+                    // Paragraphs are numbered as the reader counts them; headings, images and blanks are not.
+                    if (isGuideParagraph(block)) paragraph += 1;
+                    // Blank blocks still count toward a range, but there is nothing to pick.
+                    if (block.kind === "blank") return null;
+                    // A heading that spells the chapter's title repeats the chapter's own row.
+                    if (repeats.has(index)) return null;
+                    const number = chapter.firstBlock + index;
+                    const inRange = upTo(end, chapter.chapterIndex, number);
+                    const isEnd = end?.chapterIndex === chapter.chapterIndex && end.block === number;
+                    return (
+                      <li key={number}>
+                        <button
+                          type="button"
+                          className={cn(
+                            "flex w-full items-baseline gap-2 rounded-md px-2 py-1 text-left text-sm hover:bg-accent",
+                            inRange && "bg-accent/50",
+                            isEnd && "bg-primary/10 ring-1 ring-primary/40",
+                            block.heading > 0 && "mt-1 font-medium",
+                          )}
+                          onClick={() => setEnd({
+                            chapterIndex: chapter.chapterIndex,
+                            block: block.heading > 0 ? sectionEnd(chapter, index) : number,
+                          })}
+                        >
+                          <span className={cn("min-w-0 flex-1 truncate", block.heading === 0 && "text-muted-foreground")}>
+                            {block.kind === "image" ? t("chat.guide.pickImage", { alt: block.snippet }) : block.snippet}
+                          </span>
+                          <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
+                            {block.heading > 0 ? t("chat.guide.pickSection") : isGuideParagraph(block) ? paragraph : null}
+                          </span>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ol>
+              </section>
+            );
+          })}
           {error && <p className="px-2 py-1 text-xs text-destructive">{error}</p>}
           {more !== null && (
             <Button
@@ -185,7 +224,7 @@ export function GuideRangePicker({ open, onOpenChange, step, loadOutline, onPick
             {end && endChapter
               ? t("chat.guide.pickSelected", {
                   title: positionTitle(endChapter),
-                  where: paragraphsLabel(end.block, end.block),
+                  where: paragraphsLabel(paragraphThrough(endChapter, end.block), paragraphThrough(endChapter, end.block)),
                   chars: t("chat.guide.pickChars", { count: format(chars) }),
                 })
               : t("chat.guide.pickNone")}

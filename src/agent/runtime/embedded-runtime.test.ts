@@ -436,7 +436,7 @@ describe("LiteraAgentRuntime",()=>{
     await runtime.prompt("第三章第一段",{});
     const results=batches.flat().flatMap((entry)=>{const message=entry.type==="message"?entry.message as {role?:string;toolName?:string;isError?:boolean;content?:Array<{type?:string;text?:string}>}:undefined;return message?.role==="toolResult"&&message.toolName==="list_guide_blocks"?[{isError:message.isError===true,text:message.content?.find((block)=>block.type==="text")?.text??""}]:[];});
     expect(results).toHaveLength(2);
-    expect(JSON.parse(results[0].text)).toEqual({chapterIndex:0,chapterTitle:"第三章",totalBlocks:2,next:null,blocks:[{block:0,part:0,chars:3,snippet:"第三章",heading:1},{block:1,part:0,chars:50,snippet:"第一段"}]});
+    expect(JSON.parse(results[0].text)).toEqual({chapterIndex:0,chapterTitle:"第三章",totalBlocks:2,next:null,blocks:[{block:0,part:0,chars:3,snippet:"第三章",heading:1},{block:1,paragraph:1,part:0,chars:50,snippet:"第一段"}]});
     expect(results[1].isError).toBe(true);
     expect(results[1].text).toContain("No chapter with chapterIndex 5");
   });

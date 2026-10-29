@@ -18,6 +18,14 @@ describe("guided step labels", () => {
     expect(guideStepLabel({ ...within, range: { from: { ...three, block: 4 }, to: { ...three, block: 4 } } })).toBe("带读：第三章（第 5 段）");
   });
 
+  it("count the paragraphs a range's ends hold, as the reader does", () => {
+    const counted: GuideStep = { ...within, range: { from: { ...three, block: 4, paragraph: 3 }, to: { ...three, block: 6, paragraph: 4 } } };
+    expect(guideStepLabel(counted)).toBe("带读：第三章（第 3–4 段）");
+    expect(guidePositionLabel(counted)).toBe("第三章 · 第 4 段");
+    // A range holding no paragraph names the one it stops before.
+    expect(guideStepLabel({ ...within, range: { from: { ...three, block: 4, paragraph: 3 }, to: { ...three, block: 4, paragraph: 2 } } })).toBe("带读：第三章（第 3 段）");
+  });
+
   it("name both chapters of a range across chapters", () => {
     expect(guideStepLabel(across)).toBe("带读：第三章 → 第五章");
     expect(guideStepLabel({ ...across, skim: true })).toBe("略读：第三章 → 第五章");

@@ -16,6 +16,18 @@ export interface BookTocEntry { index: number; label: string; ancestors: string[
  * or blank block, absent for text.
  */
 export interface GuideBlock { snippet: string; chars: number; heading: number; part: number; kind?: "image" | "blank" }
+
+/** Whether a block is a paragraph as the reader counts them: text, not a heading, image or blank. */
+export function isGuideParagraph(block: GuideBlock): boolean {
+  return block.heading === 0 && !block.kind;
+}
+
+/** How many of a chapter's `blocks` before block `end` are paragraphs (see `isGuideParagraph`). */
+export function guideParagraphsBefore(blocks: readonly GuideBlock[], end: number): number {
+  let count = 0;
+  for (let index = 0; index < Math.min(end, blocks.length); index += 1) if (isGuideParagraph(blocks[index])) count += 1;
+  return count;
+}
 /**
  * What helps find the block a selection ends in: the page's paragraph around
  * its end, and the step's first block (of several matches in its chapter,

@@ -584,9 +584,9 @@ describe("guided sessions", () => {
   });
 
   it("decodes the block range of a guided step, rejecting a malformed one", () => {
-    const range = { from: { chapterIndex: 1, chapterTitle: "One", block: 4, snippet: "It was" }, to: { chapterIndex: 3, block: 0 } };
+    const range = { from: { chapterIndex: 1, chapterTitle: "One", block: 4, snippet: "It was", paragraph: 3 }, to: { chapterIndex: 3, block: 0 } };
     expect(decodeGuide({ chapterIndex: 1, part: 1, totalParts: 2, range })).toEqual({ chapterIndex: 1, part: 1, totalParts: 2, range });
-    expect(decodeGuide({ chapterIndex: 1, part: 1, totalParts: 2, range: { from: { chapterIndex: 1, block: 4, snippet: 7 }, to: { chapterIndex: 1, block: 5 } } }))
+    expect(decodeGuide({ chapterIndex: 1, part: 1, totalParts: 2, range: { from: { chapterIndex: 1, block: 4, snippet: 7, paragraph: 0.5 }, to: { chapterIndex: 1, block: 5 } } }))
       .toEqual({ chapterIndex: 1, part: 1, totalParts: 2, range: { from: { chapterIndex: 1, block: 4 }, to: { chapterIndex: 1, block: 5 } } });
     expect(decodeGuide({ chapterIndex: 1, part: 1, totalParts: 2, range: { from: { chapterIndex: 1, block: -1 }, to: { chapterIndex: 1, block: 5 } } })).toBeNull();
     expect(decodeGuide({ chapterIndex: 1, part: 1, totalParts: 2, range: { from: { chapterIndex: 1, block: 4 } } })).toBeNull();
