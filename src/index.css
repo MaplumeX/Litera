@@ -214,10 +214,15 @@
   animation: chat-typing 1.2s ease-in-out infinite;
 }
 
-/* KaTeX 块级公式横向滚动兜底（长公式不撑破气泡布局）。 */
+/* KaTeX 块级公式横向滚动兜底（长公式不撑破气泡布局）。
+ * overflow-y: hidden 会按 KaTeX 的字体度量裁切，而中文等回退字体的字形
+ * 比度量更高——分式的分子顶部、分母底部会被切掉。上下留一点内边距给
+ * 超出度量的字形，同时等量收回外边距，整体间距不变。 */
 .katex-display {
   overflow-x: auto;
   overflow-y: hidden;
+  padding-block: 0.25em;
+  margin-block: 0.75em;
 }
 
 /* 对话消息流：消息气泡内的嵌套可滚区域（思考块、代码块、长表格、
