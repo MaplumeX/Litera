@@ -68,7 +68,7 @@ import {
 } from "@/lib/chat-panel-width";
 import { resolveReaderMode, type ReaderMode } from "@/lib/reader-mode";
 import { resolveReaderLayout } from "@/lib/reader-layout";
-import { flattenToc, quoteTargetHref } from "@/lib/toc-items";
+import { quoteTargetHref } from "@/lib/toc-items";
 import { useReaderTts } from "@/lib/use-reader-tts";
 import { isFindShortcut } from "@/lib/reader-paging";
 import { FinishBookPrompt } from "@/components/FinishBookPrompt";
@@ -139,9 +139,6 @@ function App() {
   // Contents and Annotations share one side panel, switched by tab.
   const [sidePanelOpen, setSidePanelOpen] = useState(false);
   const [sidePanelTab, setSidePanelTab] = useState<ReaderSidePanelTab>("toc");
-  // Agent mode: the chapter picked from the TOC as the discussion scope. It
-  // overrides the Book pane's position as the prompt's chapter context.
-  const [chapterScope, setChapterScope] = useState<{ href: string; label: string } | null>(null);
   // Agent mode in a Guided session: its steps, and the TOC progress they make.
   const [guideSteps, setGuideSteps] = useState<RecordedGuideStep[] | null>(null);
   const [tocWidth, setTocWidth] = useState(loadTocWidth);
@@ -149,7 +146,6 @@ function App() {
   const [searchFocusToken, setSearchFocusToken] = useState(0);
   const session = useReaderSession({
     onOpened: (context) => {
-      setChapterScope(null);
       setReaderMode(resolveReaderMode(context.lastReaderMode));
       const layout = resolveReaderLayout(context.lastLayout);
       setChatCollapsed(layout.chatCollapsed);
@@ -202,6 +198,7 @@ function App() {
   const tocWidthRef = useRef(tocWidth);
   tocWidthRef.current = tocWidth;
   const pendingCaptureRef = useRef<SelectionCapture | null>(null);
+  const pendingChapterRef = useRef<string | null>(null);
   const pendingQuoteRef = useRef<{ href: string; quote: string; block?: GuideBlockTarget } | null>(null);
   const closingRef = useRef(false);
   // Closing waits on the final save and Sync push (up to several seconds);
@@ -330,7 +327,6 @@ function App() {
     if (!(await session.closeBook())) return;
     tts.stop();
     setView("library");
-    setChapterScope(null);
     setSidePanelOpen(false);
     setSidePanelTab("toc");
     setReaderMode("reader");
@@ -396,16 +392,28 @@ function App() {
     setSettingsOpen(false);
   }, [flushReadingState]);
 
+  // Agent mode: a chapter picked from the TOC reveals a collapsed Book pane
+  // first, then jumps once it is visible.
   const handleTocGoTo = useCallback((href: string) => {
-    if (readerMode === "agent") {
-      const label = flattenToc(toc).find((item) => item.href === href)?.label ?? href;
-      setChapterScope({ href, label });
-      if (!bookCollapsed) goToChapterHref(href);
-    } else {
-      goToChapterHref(href);
-    }
     setSidePanelOpen(false);
-  }, [bookCollapsed, goToChapterHref, readerMode, toc]);
+    if (readerMode === "agent" && bookCollapsed) {
+      pendingChapterRef.current = href;
+      setBookCollapsed(false);
+      schedulePersistLayout({ chatCollapsed, bookCollapsed: false, sessionRailOpen });
+      return;
+    }
+    goToChapterHref(href);
+  }, [bookCollapsed, chatCollapsed, goToChapterHref, readerMode, schedulePersistLayout, sessionRailOpen]);
+
+  useEffect(() => {
+    if (bookCollapsed) return;
+    const href = pendingChapterRef.current;
+    if (!href) return;
+    pendingChapterRef.current = null;
+    // Let the pane lay out before foliate navigates inside it.
+    const frame = requestAnimationFrame(() => goToChapterHref(href));
+    return () => cancelAnimationFrame(frame);
+  }, [bookCollapsed, goToChapterHref]);
 
   const { progress: guideProgress, marks: guideMarks } = useGuideBookMarks(guideSteps, toc);
 
@@ -558,9 +566,7 @@ function App() {
   );
 
   // Reading mode: the side panel is a drawer over the Book. Agent mode: it
-  // opens over the Session, so picking a chapter never needs the Book pane.
-  const tocCurrentHref =
-    readerMode === "agent" ? chapterScope?.href ?? progress.chapterHref : progress.chapterHref;
+  // opens over the Session.
   // Annotations jump the Book, so showing them reveals a collapsed Book pane.
   const revealBookForAnnotations = () => {
     if (!bookCollapsed) return;
@@ -634,7 +640,7 @@ function App() {
           {sidePanelTab === "toc" ? (
             <TocSidebar
               toc={toc}
-              currentHref={tocCurrentHref}
+              currentHref={progress.chapterHref}
               expanded={tocExpanded}
               onToggle={session.handleTocToggle}
               onGoTo={handleTocGoTo}
@@ -1012,11 +1018,7 @@ function App() {
           >
             <ChatPanel
               ref={chatRef}
-              currentChapterHref={
-                readerMode === "agent" ? chapterScope?.href ?? progress.chapterHref : progress.chapterHref
-              }
-              chapterScope={readerMode === "agent" ? chapterScope : null}
-              onClearChapterScope={() => setChapterScope(null)}
+              currentChapterHref={progress.chapterHref}
               onOpenQuote={handleOpenQuote}
               bookId={fileData?.bookId ?? ""}
               variant={readerMode === "agent" ? "workspace" : "docked"}

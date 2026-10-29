@@ -26,7 +26,6 @@ let selectionResult: { step: GuideStep } | { error: "before" | "notFound" } = { 
 const guideStepToSelection = vi.fn(async (_step: GuideStep, _selection: GuideSelection) => selectionResult);
 const guideStepTo = vi.fn(async (_step: GuideStep, _to: { chapterIndex: number; block: number }, _skim?: boolean): Promise<GuideStep | null> => picked);
 const seventh = { chapterIndex: 6, chapterTitle: "第七章" };
-const guideStepAt = vi.fn(async (_href: string): Promise<GuideStep | null> => ({ from: { ...seventh, block: 0 }, to: { ...seventh, block: 2 }, part: { index: 0, total: 2 } }));
 const guideStepAnchor = vi.fn(async (step: RecordedGuideStep) => {
   const part = isLegacyGuideStep(step) ? step.part : step.part?.index ?? 0;
   const snippet = part ? "第二部分开头" : "第一部分开头";
@@ -46,7 +45,6 @@ vi.mock("@/lib/use-agent-bridge", () => ({
     guideOutline,
     guideStepTo,
     guideStepToSelection,
-    guideStepAt,
     guideStepAnchor,
     prompt,
     editPrompt,
@@ -92,7 +90,6 @@ beforeEach(() => {
   guideStepTo.mockClear();
   guideStepToSelection.mockClear();
   selectionResult = { step: picked };
-  guideStepAt.mockClear();
   guideStepAnchor.mockClear();
   afterChapter = { from: { chapterIndex: 3, chapterTitle: "第四章", block: 0 }, to: { chapterIndex: 3, chapterTitle: "第四章", block: 2 }, part: { index: 0, total: 1 } };
   nextStep = stepOne;
@@ -326,20 +323,6 @@ describe("ChatPanel on open", () => {
 });
 
 describe("ChatPanel and the TOC in a Guided session", () => {
-  it("reads on from a chapter freshly picked in the TOC", async () => {
-    const view = render(<ChatPanel bookId="book-1" variant="workspace" chapterScope={null} />);
-    await view.findByRole("button", { name: "开始带读：第三章" });
-    view.rerender(<ChatPanel bookId="book-1" variant="workspace" chapterScope={{ label: "第七章", href: "OEBPS/ch7.xhtml" }} />);
-    expect(await view.findByRole("button", { name: "开始带读：第七章" })).toBeTruthy();
-    expect(guideStepAt).toHaveBeenCalledWith("OEBPS/ch7.xhtml");
-  });
-
-  it("ignores a scope left over from before the session opened", async () => {
-    const view = render(<ChatPanel bookId="book-1" variant="workspace" chapterScope={{ label: "第七章", href: "OEBPS/ch7.xhtml" }} />);
-    await view.findByRole("button", { name: "开始带读：第三章" });
-    expect(guideStepAt).not.toHaveBeenCalled();
-  });
-
   it("reports the steps on the active branch, and null outside a Guided session", async () => {
     const onGuideStepsChange = vi.fn();
     bridgeState = guidedState({

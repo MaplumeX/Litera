@@ -493,37 +493,19 @@ describe("reader / agent mode", () => {
     expect(screen.getByTestId("reader-book-cell").contains(screen.getByLabelText("关闭目录"))).toBe(true);
   });
 
-  it("scopes agent prompts to the chapter picked from the TOC", async () => {
-    mockToc = [
-      { label: "第一章", href: "ch1.xhtml" },
-      { label: "第二章", href: "ch2.xhtml" },
-    ];
+  it("reveals a collapsed agent-mode book and jumps there when picking a chapter", async () => {
+    mockToc = [{ label: "第二章", href: "ch2.xhtml" }];
     localStorage.setItem(DEFAULT_READER_MODE_KEY, "agent");
     const screen = await openReader();
     fireEvent.click(screen.getByLabelText("目录、标注与搜索"));
     fireEvent.click(screen.getByText("第二章"));
 
     expect(screen.queryByLabelText("关闭目录")).toBeNull();
-    expect(screen.getByText("讨论范围：第二章")).toBeTruthy();
-    // The hidden book is not navigated.
-    expect(readerHandle.goToTocItem).not.toHaveBeenCalled();
-
-    const input = screen.getByPlaceholderText("输入问题…");
-    fireEvent.change(input, { target: { value: "讲讲这一章" } });
-    await act(async () => {
-      fireEvent.keyDown(input, { key: "Enter" });
-    });
-    expect(promptMock).toHaveBeenCalledWith(
-      "讲讲这一章",
-      expect.objectContaining({ chapterHref: "ch2.xhtml" }),
-      expect.anything(),
-    );
-
-    fireEvent.click(screen.getByLabelText("清除讨论范围"));
-    expect(screen.queryByText("讨论范围：第二章")).toBeNull();
+    await waitFor(() => expect(readerHandle.goToTocItem).toHaveBeenCalledWith("ch2.xhtml"));
+    expect(screen.getByLabelText("隐藏书籍")).toBeTruthy();
   });
 
-  it("also navigates a visible agent-mode book when picking a chapter", async () => {
+  it("navigates a visible agent-mode book when picking a chapter", async () => {
     mockToc = [{ label: "第一章", href: "ch1.xhtml" }];
     localStorage.setItem(DEFAULT_READER_MODE_KEY, "agent");
     const screen = await openReader();
@@ -531,17 +513,15 @@ describe("reader / agent mode", () => {
     fireEvent.click(screen.getByLabelText("目录、标注与搜索"));
     fireEvent.click(screen.getByText("第一章"));
     expect(readerHandle.goToTocItem).toHaveBeenCalledWith("ch1.xhtml");
-    expect(screen.getByText("讨论范围：第一章")).toBeTruthy();
   });
 
-  it("navigates without a scope chip when picking a chapter in reading mode", async () => {
+  it("navigates when picking a chapter in reading mode", async () => {
     mockToc = [{ label: "第一章", href: "ch1.xhtml" }];
     const screen = await openReader();
     fireEvent.click(screen.getByLabelText("显示对话"));
     fireEvent.click(screen.getByLabelText("目录、标注与搜索"));
     fireEvent.click(screen.getByText("第一章"));
     expect(readerHandle.goToTocItem).toHaveBeenCalledWith("ch1.xhtml");
-    expect(screen.queryByText("讨论范围：第一章")).toBeNull();
   });
 
   it("opens a citation in a collapsed agent-mode book at the quote", async () => {

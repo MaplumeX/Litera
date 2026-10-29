@@ -418,8 +418,6 @@ export const en: { [K in MessageKey]: string } = {
   "chat.suggest.summarize": "Summarize this chapter",
   "chat.suggest.about": "What is this book about?",
   "chat.suggest.outline": "Outline the key points",
-  "chat.chapterScope": "Discussing: {title}",
-  "chat.clearChapterScope": "Clear discussion scope",
   "chat.quoteSelection": "Quoted: “{text}”",
   "chat.clearQuote": "Clear quote",
   "chat.placeholder": "Ask a question…",
