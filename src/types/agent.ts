@@ -18,7 +18,7 @@ export interface AgentError {
 /** A Guided session reads the Book to the reader; fixed at creation. */
 export type SessionKind = "guided";
 
-/** A block (Markdown paragraph) of a chapter, as a guided step's range names it. */
+/** A block (Markdown paragraph) of a chapter, at one end of a guided step. */
 export interface GuidePosition {
   chapterIndex: number;
   chapterTitle?: string;
@@ -28,7 +28,7 @@ export interface GuidePosition {
   snippet?: string;
   /**
    * The 1-based paragraph (see `isGuideParagraph`) the reader sees at this end
-   * of a range: as `from`, the first at or after `block`; as `to`, the last
+   * of a step: as `from`, the first at or after `block`; as `to`, the last
    * at or before it. Absent on steps recorded before it was kept.
    */
   paragraph?: number;
@@ -43,24 +43,42 @@ export interface GuideSelection {
 }
 
 /**
- * One guided step, taken by the assistant with `guide_step` and persisted as
- * `guide` on that tool result's entry (on the user message entry in Sessions
- * recorded before); the latest one on the active branch is the Guide cursor.
- * Without `range` it covers part `part` of the chapter (a
- * skim: `part` to the chapter's end). With `range` it covers exactly the
- * blocks `from` to `to`, possibly across chapters, and `chapterIndex` /
- * `part` name the part `from` is in.
+ * One guided step: the blocks `from` to `to` (inclusive), possibly across
+ * chapters. Taken by the assistant with `guide_step` and persisted as `guide`
+ * on that tool result's entry; the furthest block the steps on the active
+ * branch reached is the Guide cursor.
  */
 export interface GuideStep {
-  chapterIndex: number;
-  /** 0-based read_chapter part. */
-  part: number;
-  totalParts: number;
-  chapterTitle?: string;
+  from: GuidePosition;
+  to: GuidePosition;
   /** A compressed pass instead of a full retelling. */
   skim?: true;
-  /** The blocks covered, `to` inclusive. */
-  range?: { from: GuidePosition; to: GuidePosition };
+  /**
+   * For the step's label only, never to find it: the step is part `index` of
+   * `from`'s chapter cut into `total` parts (a skim: that part to the
+   * chapter's end), as the chapter was cut when the step was taken.
+   */
+  part?: { index: number; total: number };
+}
+
+/**
+ * A guided step as Sessions recorded it before steps were block ranges (on
+ * the user message entry): part `part` of a chapter cut into `totalParts`
+ * (a skim: `part` to the chapter's end). Read, never written.
+ */
+export interface LegacyGuideStep {
+  chapterIndex: number;
+  chapterTitle?: string;
+  part: number;
+  totalParts: number;
+  skim?: true;
+}
+
+/** A guided step as a Session recorded it. */
+export type RecordedGuideStep = GuideStep | LegacyGuideStep;
+
+export function isLegacyGuideStep(step: RecordedGuideStep): step is LegacyGuideStep {
+  return !("from" in step);
 }
 
 /**
@@ -69,7 +87,7 @@ export interface GuideStep {
  * picked. It is not a step itself; the assistant takes it with `guide_step`.
  */
 export interface GuideRequest {
-  step?: GuideStep;
+  step?: RecordedGuideStep;
 }
 
 export interface AgentSessionSummary {
@@ -79,8 +97,8 @@ export interface AgentSessionSummary {
   updatedAt: string;
   systemPrompt?: string;
   kind?: SessionKind;
-  /** Guided sessions: the guide cursor, absent before the first step. */
-  guide?: GuideStep;
+  /** Guided sessions: the step that reached the Guide cursor, absent before the first step. */
+  guide?: RecordedGuideStep;
 }
 
 export interface BranchOption {
@@ -105,7 +123,7 @@ export interface AgentToolCall {
   done: boolean;
   isError?: boolean;
   /** The guided step a `guide_step` call took. */
-  guide?: GuideStep;
+  guide?: RecordedGuideStep;
 }
 
 export type AssistantBlock =
@@ -119,7 +137,7 @@ export interface UserMessage {
   selection?: string;
   chapterHref?: string;
   /** A guided step sent as the user message, in Sessions recorded before the assistant took steps itself. */
-  guide?: GuideStep;
+  guide?: RecordedGuideStep;
   /** Continue or a picked step; the content is then its label. */
   guideRequest?: GuideRequest;
 }
@@ -171,7 +189,7 @@ export function isTranscriptMarker(message: AgentMessage): message is Compaction
 }
 
 /** The guided steps taken in a transcript, oldest first: by `guide_step` calls, or sent as user messages in older Sessions. */
-export function takenGuideSteps(messages: readonly AgentMessage[]): GuideStep[] {
+export function takenGuideSteps(messages: readonly AgentMessage[]): RecordedGuideStep[] {
   return messages.flatMap((message) => {
     if (message.role === "user") return message.guide ? [message.guide] : [];
     if (message.role !== "assistant") return [];

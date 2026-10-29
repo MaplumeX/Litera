@@ -28,7 +28,7 @@ import { ReaderView, type SelectionCapture } from "@/components/ReaderView";
 import { ChatPanel, type ChatPanelHandle } from "@/components/chat/ChatPanel";
 import { embeddedAgentRuntime } from "@/agent/runtime/embedded-runtime";
 import { useGuideBookMarks } from "@/lib/use-guide-book-marks";
-import type { GuideSelection, GuideStep } from "@/types/agent";
+import type { GuideSelection, RecordedGuideStep } from "@/types/agent";
 import type { QuoteLocation } from "@/agent/book/book-content";
 import type { GuideBlockTarget } from "@/lib/guide-marks";
 import { LibraryView } from "@/components/LibraryView";
@@ -143,7 +143,7 @@ function App() {
   // overrides the Book pane's position as the prompt's chapter context.
   const [chapterScope, setChapterScope] = useState<{ href: string; label: string } | null>(null);
   // Agent mode in a Guided session: its steps, and the TOC progress they make.
-  const [guideSteps, setGuideSteps] = useState<GuideStep[] | null>(null);
+  const [guideSteps, setGuideSteps] = useState<RecordedGuideStep[] | null>(null);
   const [tocWidth, setTocWidth] = useState(loadTocWidth);
   // Bumped by Ctrl/⌘+F so the search field takes focus even when already open.
   const [searchFocusToken, setSearchFocusToken] = useState(0);

@@ -23,7 +23,7 @@ const later: GuideOutline = {
   more: null,
 };
 
-const step: GuideStep = { chapterIndex: 2, part: 1, totalParts: 3, chapterTitle: "第三章" };
+const step: GuideStep = { from: { chapterIndex: 2, chapterTitle: "第三章", block: 3 }, to: { chapterIndex: 2, chapterTitle: "第三章", block: 5 }, part: { index: 1, total: 3 } };
 const loadOutline = vi.fn(async (after?: number) => (after === undefined ? first : later));
 const onPick = vi.fn();
 

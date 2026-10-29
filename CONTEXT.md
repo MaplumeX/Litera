@@ -33,12 +33,12 @@ A Session in which the assistant takes the reader through the Book part by part,
 _Avoid_: Tutor mode, read-along, guided mode
 
 **Guided step**:
-One step of a Guided session: a part of a chapter by default, or a range of blocks (a chapter's paragraphs, headings and images) the reader picked, which may cross chapters. To the reader, and in "第3段", only paragraphs are counted, never headings, images or blanks. It starts right after the Guide cursor, or at the start of a picked chapter, never mid-chapter. The assistant takes it (the `guide_step` tool) and explains it in the same reply: on Continue, where it may end the step at a natural break near the default, on a step the reader picked in the GuideBar or the book, or when the reader asks ("带读第3章"). Continue and picks are messages asking for a step, not steps. The transcript marks each step the assistant took, with a way to its start in the Book.
+One step of a Guided session, recorded as the blocks it covers: a part of a chapter by default, or a range of blocks (a chapter's paragraphs, headings and images) the reader picked, which may cross chapters. To the reader, and in "第3段", only paragraphs are counted, never headings, images or blanks. It starts right after the Guide cursor, or at the start of a picked chapter (which may be one already read, to go over it again), never mid-chapter. The assistant takes it (the `guide_step` tool) and explains it in the same reply: on Continue, where it may end the step at a natural break near the default, on a step the reader picked in the GuideBar or the book, or when the reader asks ("带读第3章"). Continue and picks are messages asking for a step, not steps. The transcript marks each step the assistant took, with a way to its start in the Book.
 _Avoid_: Lesson, chunk
 
 **Guide cursor**:
-The block a Guided session has reached: the end of the latest guided step on the Session's active branch. Every message in the Session tells the assistant where it is. Derived, never stored; skipping or picking a chapter only changes the next step until it is sent.
-_Avoid_: Bookmark, reading position (that is the Book's)
+The furthest block a Guided session has reached: the furthest end of the guided steps on the Session's active branch. Going back over a chapter already read does not move it back; Continue goes on from it. Every message in the Session tells the assistant where it is. Derived, never stored; skipping or picking a chapter only changes the next step until it is sent. Separate from the Book's reading position: guiding never turns the reader's pages, and turning them never moves the guide.
+_Avoid_: Bookmark, reading position (that is the Book's), latest step
 
 **Chapter recap**:
 A short account of one chapter, written by the assistant when a Guided session finishes the chapter (every part retold or skimmed) and recorded on the Session's branch. Chapters that one Guided step finishes together share one recap. The model keeps every recap in its context for the rest of the Session, past Compaction; the transcript shows it as a collapsible marker. Belongs to the Session, not the Book.

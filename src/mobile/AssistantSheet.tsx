@@ -10,7 +10,7 @@ import {
 import { AlertCircle, ChevronDown, Loader2, Maximize2, Minimize2, Sparkles, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ChatPanel, type ChatPanelHandle } from "@/components/chat/ChatPanel";
-import type { GuideStep } from "@/types/agent";
+import type { RecordedGuideStep } from "@/types/agent";
 import type { QuoteLocation } from "@/agent/book/book-content";
 import type { GuideBlockTarget } from "@/lib/guide-marks";
 import { readerModeForSnap, snapAfterDrag, type SheetSnap } from "@/lib/assistant-sheet";
@@ -27,7 +27,7 @@ interface AssistantSheetProps {
   /** How far above the bottom edge the peek bar sits (a CSS length): clear of the toolbar while it shows. */
   peekOffset?: string;
   /** A Guided session's steps on the active branch, oldest first; null outside one. */
-  onGuideStepsChange?: (steps: GuideStep[] | null) => void;
+  onGuideStepsChange?: (steps: RecordedGuideStep[] | null) => void;
 }
 
 const NO_ACTIVITY: ChatActivity = { answering: false, preview: "", failed: false };

@@ -7,16 +7,16 @@ import { BookWorkerClient, chapterAside, chapterForHref, formatBookSnapshot, gui
 import { contextBudget, estimateBranchTokens, generateSummary, prepareCompaction, preparePrune } from "@/agent/compaction/compaction";
 import { createGuardedNativeFetch } from "@/agent/transport/native-fetch";
 import { validateMindmapParams } from "@/agent/runtime/mindmap";
-import { dueRecap, findGuideBlock, findableGuideBlock, guideBlockPage, guideRangeParagraph, guideReadingState, guideRequestContext, requestedGuideStep, type GuideStepRequest, guideChapterEntry, guidedPrompt, guideOutlinePlan, guidePageMarkPlan, guideStepContext, guideStepStart, guideStepTo, guideTocProgress, nextGuideStep, recappedChapters, resolveGuideStep, skimGuideStep, skipChapterStep, stepChapters, type GuideChapterProgress, type GuideOutline, type RecapChapters } from "@/agent/runtime/guide";
+import { dueRecap, findableGuideBlock, guideBlockPage, guideCursor, guideReadingState, guideRequestContext, guidedPrompt, guideOutlinePlan, guidePageMarkPlan, guideSpanTo, guideStepContext, guideTocProgress, locateGuideStep, nextGuideSpan, recappedChapters, recordGuideSpan, requestedGuideSpan, skimGuideSpan, skipChapterSpan, stepChapters, type GuideChapterProgress, type GuideOutline, type GuidePoint, type GuideSpan, type GuideStepRequest, type RecapChapters } from "@/agent/runtime/guide";
 import { generateChapterRecap, guideRecapContext } from "@/agent/runtime/recap";
 import { resolveRuntimeModel } from "@/agent/runtime/model-resolution";
 import { classifyPromptError } from "@/agent/runtime/prompt-error";
-import { activeBranch, branchLeafId, GUIDE_RECAP, guideCursor, guidedTurns, guideRecapChapters, isGuideRecapEntry, branchNavigation, contextBranch, convertPiContextToLlm, newEntry, piContextMessages, sessionConfig, sessionNavigation, visibleMessageEntries, visibleMessages, type DecodedPiSession, type PiSessionEntry, type SessionConfig } from "@/agent/sessions/pi-session";
+import { activeBranch, branchLeafId, GUIDE_RECAP, guidedTurns, guideRecapChapters, isGuideRecapEntry, branchNavigation, contextBranch, convertPiContextToLlm, newEntry, piContextMessages, sessionConfig, sessionNavigation, visibleMessageEntries, visibleMessages, type DecodedPiSession, type PiSessionEntry, type SessionConfig } from "@/agent/sessions/pi-session";
 import { restoreImageRefs, withImageRefs } from "@/agent/sessions/image-refs";
 import { tauriSessionPort, type SessionPort } from "@/agent/sessions/session-port";
 import { invokeErrorMessage } from "@/lib/app-error";
 import { loadGuidedStyle } from "@/lib/guided-style";
-import type { AgentEvent, AgentMessage as UiMessage, GuidePosition, GuideRequest, GuideSelection, GuideStep, SessionKind } from "@/types/agent";
+import type { AgentEvent, AgentMessage as UiMessage, GuideRequest, GuideSelection, GuideStep, RecordedGuideStep, SessionKind } from "@/types/agent";
 import type { AnnotationsFile } from "@/types/library";
 
 export interface RuntimeConfig { provider:string; model:string; api:string; baseUrl:string; apiKey:string; thinkingLevel:string; contextWindow?:number; imageInput?:boolean }
@@ -99,7 +99,7 @@ export class LiteraAgentRuntime {
   private readonly loadAnnotations:(bookId:string)=>Promise<AnnotationsFile>; private readonly loadGuidedStyle:()=>string|null;
   private images=new Map<string,Promise<ModelImage>>();
   /** The guided steps the model took in the running attempt (`guide_step`), by tool call, in order; persisted as `guide` on their tool results. */
-  private turnSteps:Array<{toolCallId:string;step:GuideStep}>=[];
+  private turnSteps:Array<{toolCallId:string;step:GuideStep;span:GuideSpan}>=[];
   /** `guide_step` calls run one at a time, each after the step before it. */
   private guideStepChain:Promise<unknown>=Promise.resolve();
   /** The open Book's blocks per chapter, for guided ranges. */
@@ -119,29 +119,29 @@ export class LiteraAgentRuntime {
   async listSessions(requestId?:string){if(!this.bookId)return;const bookId=this.bookId;const sessions=await this.sessions.list(bookId);if(this.bookId===bookId)this.emit({type:"sessions_list",bookId,requestId,sessions});return sessions;}
   async newSession(requestId?:string,kind?:SessionKind){if(!this.bookId)return;this.cancelMaintenance();const bookId=this.bookId;const session=await this.sessions.create(bookId,kind);if(this.bookId!==bookId)return;this.session=session;this.agent=null;this.emit({type:"session_created",bookId,sessionId:session.header.id,requestId,...(kind?{kind}:{})});}
   /** The open Guided session's next step; before its first step, start from `startHref`'s chapter. Null at the end of the Book or outside a Guided session. */
-  async nextGuideStep(startHref?:string):Promise<GuideStep|null>{if(!this.bookId)return null;const bookId=this.bookId;const session=this.session;if(session?.header.kind!=="guided")return null;const toc=await this.bookCall(bookId,()=>this.book.toc());return this.withGuideEnds(bookId,nextGuideStep(toc,await this.currentGuideCursor(bookId,toc,session),chapterForHref(toc,startHref)?.index));}
+  async nextGuideStep(startHref?:string):Promise<GuideStep|null>{if(!this.bookId)return null;const bookId=this.bookId;const session=this.session;if(session?.header.kind!=="guided")return null;const toc=await this.bookCall(bookId,()=>this.book.toc());return this.recordSpan(bookId,nextGuideSpan(toc,await this.guideCursorIn(bookId,toc,session),chapterForHref(toc,startHref)?.index));}
   /** The first guided step of the chapter after `step`'s. */
-  async guideStepAfterChapter(step:GuideStep):Promise<GuideStep|null>{if(!this.bookId)return null;const bookId=this.bookId;const toc=await this.bookCall(bookId,()=>this.book.toc());return this.withGuideEnds(bookId,skipChapterStep(toc,step));}
+  async guideStepAfterChapter(step:GuideStep):Promise<GuideStep|null>{return this.withLocatedStep(step,(toc,span)=>skipChapterSpan(toc,span));}
   /** The blocks the "Read to…" picker lists from where `step` starts, or after chapter `after`. */
-  async guideOutline(step:GuideStep,after?:number):Promise<GuideOutline>{if(!this.bookId)return{chapters:[],more:null};const bookId=this.bookId;const toc=await this.bookCall(bookId,()=>this.book.toc());const plan=guideOutlinePlan(toc,step,after);return{chapters:await Promise.all(plan.chapters.map(async(chapter)=>{const blocks=await this.chapterGuideBlocks(bookId,chapter.chapterIndex);return{...chapter,paragraphsBefore:guideParagraphsBefore(blocks,chapter.firstBlock),blocks:blocks.slice(chapter.firstBlock)};})),more:plan.more};}
+  async guideOutline(step:GuideStep,after?:number):Promise<GuideOutline>{if(!this.bookId)return{chapters:[],more:null};const bookId=this.bookId;const toc=await this.bookCall(bookId,()=>this.book.toc());const span=await this.locateStep(bookId,toc,step);if(!span)return{chapters:[],more:null};const plan=guideOutlinePlan(toc,span,after);return{chapters:await Promise.all(plan.chapters.map(async(chapter)=>{const blocks=await this.chapterGuideBlocks(bookId,chapter.chapterIndex);return{...chapter,paragraphsBefore:guideParagraphsBefore(blocks,chapter.firstBlock),blocks:blocks.slice(chapter.firstBlock)};})),more:plan.more};}
   /** The step from where `step` starts to the picked block `to`; null when `to` is before that start. */
-  async guideStepTo(step:GuideStep,to:{chapterIndex:number;block:number},skim?:boolean):Promise<GuideStep|null>{if(!this.bookId)return null;const bookId=this.bookId;const toc=await this.bookCall(bookId,()=>this.book.toc());return this.withGuideEnds(bookId,guideStepTo(toc,step,to,skim));}
+  async guideStepTo(step:GuideStep,to:{chapterIndex:number;block:number},skim?:boolean):Promise<GuideStep|null>{return this.withLocatedStep(step,(toc,span)=>guideSpanTo(toc,span,to,skim));}
   /**
    * The step from where `step` starts to the block a reader's `selection`
    * ends in (looked for in its chapter first, by the page's paragraph around
    * its end when given). `before`: the selection is before that start;
    * `notFound`: no block holds it.
    */
-  async guideStepToSelection(step:GuideStep,selection:GuideSelection):Promise<{step:GuideStep}|{error:"before"|"notFound"}>{if(!this.bookId)return{error:"notFound"};const bookId=this.bookId;const toc=await this.bookCall(bookId,()=>this.book.toc());const start=guideStepStart(toc,step);const hints={...(selection.paragraph?{paragraph:selection.paragraph}:{}),...(start?{after:start}:{})};const to=await this.bookCall(bookId,()=>this.book.locateGuideBlock(chapterForHref(toc,selection.chapterHref)?.index??-1,selection.text,hints));if(!to)return{error:"notFound"};const picked=await this.withGuideEnds(bookId,guideStepTo(toc,step,to));return picked?{step:picked}:{error:"before"};}
+  async guideStepToSelection(step:GuideStep,selection:GuideSelection):Promise<{step:GuideStep}|{error:"before"|"notFound"}>{if(!this.bookId)return{error:"notFound"};const bookId=this.bookId;const toc=await this.bookCall(bookId,()=>this.book.toc());const span=await this.locateStep(bookId,toc,step);const hints={...(selection.paragraph?{paragraph:selection.paragraph}:{}),...(span?{after:{chapterIndex:span.from.entry.index,block:span.from.block}}:{})};const to=await this.bookCall(bookId,()=>this.book.locateGuideBlock(chapterForHref(toc,selection.chapterHref)?.index??-1,selection.text,hints));if(!to)return{error:"notFound"};const picked=span&&await this.recordSpan(bookId,guideSpanTo(toc,span,to));return picked?{step:picked}:{error:"before"};}
   /** `step` as a skim from where it starts to the end of that chapter. */
-  async guideSkimStep(step:GuideStep):Promise<GuideStep|null>{if(!this.bookId)return null;const bookId=this.bookId;const toc=await this.bookCall(bookId,()=>this.book.toc());return this.withGuideEnds(bookId,skimGuideStep(toc,step));}
+  async guideSkimStep(step:GuideStep):Promise<GuideStep|null>{return this.withLocatedStep(step,(_toc,span)=>skimGuideSpan(span));}
   /** Guide progress per TOC href for `steps` (a Guided session's steps, oldest first). */
-  async guideTocProgress(steps:readonly GuideStep[],hrefs:readonly string[]):Promise<Record<string,GuideChapterProgress>>{if(!this.bookId||!steps.length)return{};const bookId=this.bookId;const toc=await this.bookCall(bookId,()=>this.book.toc());return guideTocProgress(toc,await this.currentGuideSteps(bookId,toc,steps),hrefs);}
+  async guideTocProgress(steps:readonly RecordedGuideStep[],hrefs:readonly string[]):Promise<Record<string,GuideChapterProgress>>{if(!this.bookId||!steps.length)return{};const bookId=this.bookId;const toc=await this.bookCall(bookId,()=>this.book.toc());return guideTocProgress(toc,await this.locateSteps(bookId,toc,steps),hrefs);}
   /** The Book pane's marks for `steps` (a Guided session's steps, oldest first): per file, the opening keys of the paragraphs read, skimmed, and at the Guide cursor. */
-  async guidePageMarks(steps:readonly GuideStep[]):Promise<GuidePageMarks>{
+  async guidePageMarks(steps:readonly RecordedGuideStep[]):Promise<GuidePageMarks>{
     if(!this.bookId||!steps.length)return{};const bookId=this.bookId;const toc=await this.bookCall(bookId,()=>this.book.toc());
     const marks:GuidePageMarks={};
-    for(const chapter of guidePageMarkPlan(toc,await this.currentGuideSteps(bookId,toc,steps))){
+    for(const chapter of guidePageMarkPlan(toc,await this.locateSteps(bookId,toc,steps))){
       const blocks=await this.chapterGuideBlocks(bookId,chapter.chapterIndex);
       const keys=(indices:readonly number[])=>indices.flatMap((index)=>{const block=blocks[index];const key=block&&!block.kind?guideMarkKey(block.snippet):"";return key?[key]:[];});
       // A step ending on a blank or an image shows its divider after the last block with text before it.
@@ -156,13 +156,13 @@ export class LiteraAgentRuntime {
     return marks;
   }
   /** The first guided step at `href`'s chapter (or the next one with text). */
-  async guideStepAt(href:string):Promise<GuideStep|null>{if(!this.bookId)return null;const bookId=this.bookId;const toc=await this.bookCall(bookId,()=>this.book.toc());const chapter=chapterForHref(toc,href);return chapter?nextGuideStep(toc,null,chapter.index):null;}
+  async guideStepAt(href:string):Promise<GuideStep|null>{if(!this.bookId)return null;const bookId=this.bookId;const toc=await this.bookCall(bookId,()=>this.book.toc());const chapter=chapterForHref(toc,href);return chapter?this.recordSpan(bookId,nextGuideSpan(toc,null,chapter.index)):null;}
   /**
    * Where the Book pane shows `step`'s start: its first findable block, as the
    * paragraph to count to on the chapter's pages, and its opening text to
    * search for should the count not land. Null when there is no such block.
    */
-  async guideStepAnchor(step:GuideStep):Promise<{chapterIndex:number;href?:string;snippet:string;target:GuideBlockTarget}|null>{if(!this.bookId)return null;const bookId=this.bookId;const toc=await this.bookCall(bookId,()=>this.book.toc());const start=guideStepStart(toc,step);const entry=start&&toc.find((candidate)=>candidate.index===start.chapterIndex);if(!start||!entry)return null;const blocks=await this.chapterGuideBlocks(bookId,start.chapterIndex);const from=step.range?.from.chapterIndex===start.chapterIndex?findGuideBlock(blocks,step.range.from):start.block;const block=findableGuideBlock(blocks,from);if(block===null)return null;const {snippet}=blocks[block];const key=guideMarkKey(snippet);const occurrence=blocks.slice(0,block).filter((before)=>!before.kind&&guideMarkKey(before.snippet)===key).length;return{chapterIndex:start.chapterIndex,...(entry.hrefs[0]?{href:entry.hrefs[0]}:{}),snippet,target:{hrefs:entry.hrefs,key,occurrence}};}
+  async guideStepAnchor(step:RecordedGuideStep):Promise<{chapterIndex:number;href?:string;snippet:string;target:GuideBlockTarget}|null>{if(!this.bookId)return null;const bookId=this.bookId;const toc=await this.bookCall(bookId,()=>this.book.toc());const span=await this.locateStep(bookId,toc,step);if(!span)return null;const {entry}=span.from;const blocks=await this.chapterGuideBlocks(bookId,entry.index);const block=findableGuideBlock(blocks,span.from.block);if(block===null)return null;const {snippet}=blocks[block];const key=guideMarkKey(snippet);const occurrence=blocks.slice(0,block).filter((before)=>!before.kind&&guideMarkKey(before.snippet)===key).length;return{chapterIndex:entry.index,...(entry.hrefs[0]?{href:entry.hrefs[0]}:{}),snippet,target:{hrefs:entry.hrefs,key,occurrence}};}
   async switchSession(sessionId:string,requestId?:string){if(!this.bookId)return;this.cancelMaintenance();const bookId=this.bookId;const session=await this.sessions.load(bookId,sessionId);if(this.bookId!==bookId)return;this.session=session;this.agent=null;this.emit({type:"session_switched",bookId,sessionId,requestId,messages:visibleMessages(session),...sessionNavigation(session)});}
   // Sync merged another device's entries into the files: show them, unless a
   // prompt or background maintenance is still writing to the open session.
@@ -243,9 +243,9 @@ export class LiteraAgentRuntime {
       const guideRequest=context.guideRequest;if(guideRequest&&session.header.kind!=="guided")throw new Error("Not a guided session");
       let guideState="";let requested="";
       if(session.header.kind==="guided"){
-        const cursor=await this.currentGuideCursor(promptBookId,toc,session);
-        guideState=guideReadingState(toc,cursor,await this.withGuideEnds(promptBookId,nextGuideStep(toc,cursor)));
-        if(guideRequest){const picked=guideRequest.step&&resolveGuideStep(toc,guideRequest.step);if(guideRequest.step&&!picked)throw new Error("Guided step is not in this book");requested=guideRequestContext(toc,cursor,picked??undefined)??"";if(!requested)throw new Error("Guided step is not in this book");}
+        const cursor=await this.guideCursorIn(promptBookId,toc,session);
+        guideState=guideReadingState(cursor,nextGuideSpan(toc,cursor));
+        if(guideRequest){const picked=guideRequest.step&&await this.locateStep(promptBookId,toc,guideRequest.step);if(guideRequest.step&&!picked)throw new Error("Guided step is not in this book");requested=guideRequestContext(toc,cursor,picked??undefined)??"";if(!requested)throw new Error("Guided step is not in this book");}
       }
       const readingContext=[guideState,requested,...(guideRequest?[]:[chapterAside(toc,context.chapterHref),context.selection?`Selected text: ${context.selection}`:""])].filter(Boolean).join("\n\n");
       const agent=await this.ensureAgent(config,session,promptBookId,carriedConfig??sessionConfig(session));
@@ -373,11 +373,11 @@ export class LiteraAgentRuntime {
     try{
       const toc=await this.bookCall(bookId,()=>this.book.toc());
       const turns=guidedTurns(session);
-      const steps=await this.currentGuideSteps(bookId,toc,turns.map((turn)=>turn.step));
+      const spans=await this.locateSteps(bookId,toc,turns.map((turn)=>turn.step));
       const recapped=recappedChapters(toc,guideRecapChapters(session));
-      const due=dueRecap(toc,steps,recapped);
+      const due=dueRecap(toc,spans,recapped);
       if(!due)return;
-      const retelling=turns.filter((_turn,index)=>stepChapters(toc,steps[index]).some((chapter)=>due.includes(chapter))).map((turn)=>turn.text.trim()).filter(Boolean);
+      const retelling=turns.filter((_turn,index)=>stepChapters(toc,spans[index]).some((chapter)=>due.includes(chapter))).map((turn)=>turn.text.trim()).filter(Boolean);
       if(!retelling.length||!live())return;
       const titleOf=(index:number)=>toc.find((entry)=>entry.index===index)?.label.trim()||undefined;
       const first=due[0];const last=due[due.length-1];
@@ -453,29 +453,19 @@ export class LiteraAgentRuntime {
     if(!blocks){blocks=this.bookCall(bookId,()=>this.book.guideBlocks(chapterIndex));this.guideBlockCache.set(chapterIndex,blocks);const pending=blocks;pending.catch(()=>{if(this.guideBlockCache.get(chapterIndex)===pending)this.guideBlockCache.delete(chapterIndex);});}
     return blocks;
   }
-  /**
-   * `step` with its range's ends marked: their snippets, so the blocks can be
-   * found again if they shift, and the paragraphs the reader sees there.
-   */
-  private async withGuideEnds<T extends GuideStep|null>(bookId:string,step:T):Promise<T>{
-    if(!step?.range)return step;
-    const mark=async(position:GuidePosition,end:"from"|"to"):Promise<GuidePosition>=>{const blocks=await this.chapterGuideBlocks(bookId,position.chapterIndex);const snippet=blocks[position.block]?.snippet;return{...position,...(snippet?{snippet}:{}),paragraph:guideRangeParagraph(blocks,position,end)};};
-    return {...step,range:{from:await mark(step.range.from,"from"),to:await mark(step.range.to,"to")}} as T;
-  }
-  /** Recorded steps with their ranges' blocks found again by snippet in the open Book. */
-  private async currentGuideSteps(bookId:string,toc:readonly BookTocEntry[],steps:readonly GuideStep[]):Promise<GuideStep[]>{
-    const locate=async(position:GuidePosition):Promise<GuidePosition>=>{
-      const entry=position.snippet?guideChapterEntry(toc,position):undefined;
-      if(!entry)return position;
-      const block=findGuideBlock(await this.chapterGuideBlocks(bookId,entry.index),position);
-      return block===position.block?position:{...position,block};
-    };
-    return Promise.all(steps.map(async(step)=>step.range?{...step,range:{from:await locate(step.range.from),to:await locate(step.range.to)}}:step));
-  }
-  /** The Guide cursor in the open Book: the last step taken in the running turn, else the latest one recorded on the Session's branch. */
-  private async currentGuideCursor(bookId:string,toc:readonly BookTocEntry[],session:DecodedPiSession):Promise<GuideStep|null>{
-    const taken=this.turnSteps[this.turnSteps.length-1]?.step;if(taken)return taken;
-    const cursor=guideCursor(session);return cursor&&(await this.currentGuideSteps(bookId,toc,[cursor]))[0];
+  /** Reads a chapter's blocks for locating and recording guided steps. */
+  private guideBlocksOf(bookId:string){return(chapterIndex:number)=>this.chapterGuideBlocks(bookId,chapterIndex);}
+  /** Where a recorded step is in the open Book; null when it no longer fits. Every recorded step goes through here before it is worked with. */
+  private locateStep(bookId:string,toc:readonly BookTocEntry[],step:RecordedGuideStep):Promise<GuideSpan|null>{return locateGuideStep(toc,this.guideBlocksOf(bookId),step);}
+  private locateSteps(bookId:string,toc:readonly BookTocEntry[],steps:readonly RecordedGuideStep[]):Promise<Array<GuideSpan|null>>{return Promise.all(steps.map((step)=>this.locateStep(bookId,toc,step)));}
+  /** A span as the step to record and hand out; every step leaves through here. */
+  private async recordSpan(bookId:string,span:GuideSpan|null):Promise<GuideStep|null>{return span&&recordGuideSpan(this.guideBlocksOf(bookId),span);}
+  /** `work` on `step` located in the open Book, its result recorded. */
+  private async withLocatedStep(step:RecordedGuideStep,work:(toc:readonly BookTocEntry[],span:GuideSpan)=>GuideSpan|null):Promise<GuideStep|null>{if(!this.bookId)return null;const bookId=this.bookId;const toc=await this.bookCall(bookId,()=>this.book.toc());const span=await this.locateStep(bookId,toc,step);return span&&this.recordSpan(bookId,work(toc,span));}
+  /** The Guide cursor in the open Book: the furthest block the Session's steps on its branch reached, with the steps taken in the running turn. */
+  private async guideCursorIn(bookId:string,toc:readonly BookTocEntry[],session:DecodedPiSession):Promise<GuidePoint|null>{
+    const recorded=await this.locateSteps(bookId,toc,guidedTurns(session).map((turn)=>turn.step));
+    return guideCursor([...recorded,...this.turnSteps.map((taken)=>taken.span)]);
   }
   /** A Book image for the model, decoded once per open Book and kept in a small LRU. */
   private loadImage(src:string):Promise<ModelImage>{
@@ -493,7 +483,7 @@ export class LiteraAgentRuntime {
     {name:"read_chapter",label:"Read Chapter",description:"Read one part of a chapter in Markdown (paragraphs, headings, emphasis, footnotes). Long chapters are split into parts (see totalParts, or parts in the TOC); part defaults to 0. To cover a whole chapter, call this once per part in the same turn. With fromBlock and toBlock, read exactly those blocks (the chapter's paragraphs, numbered from 0, inclusive) instead of a part; a read stops at the end of the part fromBlock is in, and the result's toBlock says where it stopped.",parameters:read,execute:async(_id,args)=>{const input=args as {chapterIndex:number;part?:number;fromBlock?:number;toBlock?:number};const range=input.fromBlock===undefined?undefined:{fromBlock:input.fromBlock,toBlock:input.toBlock??input.fromBlock};return result(JSON.stringify(await this.bookCall(bookId,()=>this.book.readChapter(input.chapterIndex,input.part,range))));}},
     {name:"list_guide_blocks",label:"List Blocks",description:"List a chapter's blocks, numbered as read_chapter's fromBlock/toBlock and guided steps number them. A block is a paragraph, a heading (heading gives its level), an image or blank (kind), or a piece of a very long paragraph. Each block has its part, length and the start of its text. Use it to find \"the 3rd paragraph\" or where a section starts: a paragraph carries its number as the reader counts paragraphs (headings, images and blanks have none). Long chapters come in pages; pass next as fromBlock for the next page (null at the chapter's end).",parameters:Type.Object({chapterIndex:Type.Number(),fromBlock:Type.Optional(Type.Number())}),execute:async(_id,args)=>{const input=args as {chapterIndex:number;fromBlock?:number};const entry=(await this.bookCall(bookId,()=>this.book.toc())).find((item)=>item.index===input.chapterIndex);if(!entry)throw new Error(`No chapter with chapterIndex ${input.chapterIndex}`);return result(JSON.stringify(guideBlockPage(entry,await this.chapterGuideBlocks(bookId,entry.index),input.fromBlock)));}},
     ...(vision?[{name:"view_image",label:"View Image",description:"Look at one image from the book. read_chapter shows images as Markdown placeholders ![alt text](src); pass the placeholder's src exactly as written. Use it when the answer depends on what the image shows; alt text is often empty or vague. Call it once per image, several in the same turn when needed.",parameters:Type.Object({src:Type.String()}),execute:async(_id:string,args:unknown)=>{const input=args as {src:string};const image=await this.bookCall(bookId,()=>this.loadImage(input.src));return{content:[{type:"text" as const,text:JSON.stringify({src:image.src,mimeType:image.mimeType,...(image.width?{width:image.width,height:image.height}:{})})},{type:"image" as const,data:image.data,mimeType:image.mimeType}],details:{src:image.src}};}} satisfies AgentTool]:[]),
-    ...(guided?[{name:"guide_step",label:"Guided Step",description:"Take the next guided step: this moves the guide on and tells you what to read. Then read it with read_chapter and explain it in this same reply. Call it whenever you take the reader on through the book: they press Continue, pick a step, or ask to be guided through a place or a range (\"带读第3章\", \"带读第三章的1-3段\", \"略读下一章\"). Not for questions about the book; those leave the guide where it is. Start: without chapterIndex, right after the guide (or the book's first chapter before the first step); with it, at that chapter's first block (a chapter without text moves on to the next one). A step never starts mid-chapter and never goes back: for \"第三章的5-7段\", offer to read from the chapter's start, or from where the guide is, to paragraph 7. End: toBlock in toChapterIndex (default: the start's chapter), or the last block of toChapterIndex when toBlock is left out; with neither, the default step (one part). skim: a compressed pass instead of a full explanation. Find a chapter by its title and path in get_toc, not by counting: front matter and sub-sections are chapters of their own, so \"第3章\" is rarely chapterIndex 2, and a chapter cut into sub-sections ends at its last sub-section. Find paragraphs and section starts with list_guide_blocks. When the place is ambiguous, ask instead of guessing. Each call takes one step, right after the one before.",parameters:Type.Object({chapterIndex:Type.Optional(Type.Number()),toChapterIndex:Type.Optional(Type.Number()),toBlock:Type.Optional(Type.Number()),skim:Type.Optional(Type.Boolean())}),execute:async(toolCallId:string,args:unknown)=>{const take=async()=>{const session=this.session;if(session?.header.kind!=="guided")throw new Error("Not a Guided session");const toc=await this.bookCall(bookId,()=>this.book.toc());const picked=requestedGuideStep(toc,await this.currentGuideCursor(bookId,toc,session),args as GuideStepRequest);if("error" in picked)throw new Error(picked.error);const step=await this.withGuideEnds(bookId,picked.step);this.turnSteps.push({toolCallId,step});return result(guideStepContext(toc,step));};const taken=this.guideStepChain.then(take,take);this.guideStepChain=taken.catch(()=>{});return taken;}} satisfies AgentTool]:[]),
+    ...(guided?[{name:"guide_step",label:"Guided Step",description:"Take the next guided step: this moves the guide on and tells you what to read. Then read it with read_chapter and explain it in this same reply. Call it whenever you take the reader on through the book: they press Continue, pick a step, or ask to be guided through a place or a range (\"带读第3章\", \"带读第三章的1-3段\", \"略读下一章\"). Not for questions about the book; those leave the guide where it is. Start: without chapterIndex, right after the furthest point the guide has reached (or the book's first chapter before the first step); with it, at that chapter's first block (a chapter without text moves on to the next one), which may also be a chapter already read, to go over it again; the guide's furthest point stays where it is. A step never starts mid-chapter: for \"第三章的5-7段\", offer to read from the chapter's start, or from where the guide is, to paragraph 7. End: toBlock in toChapterIndex (default: the start's chapter), or the last block of toChapterIndex when toBlock is left out; with neither, the default step (one part). skim: a compressed pass instead of a full explanation. Find a chapter by its title and path in get_toc, not by counting: front matter and sub-sections are chapters of their own, so \"第3章\" is rarely chapterIndex 2, and a chapter cut into sub-sections ends at its last sub-section. Find paragraphs and section starts with list_guide_blocks. When the place is ambiguous, ask instead of guessing. Each call takes one step, right after the one before.",parameters:Type.Object({chapterIndex:Type.Optional(Type.Number()),toChapterIndex:Type.Optional(Type.Number()),toBlock:Type.Optional(Type.Number()),skim:Type.Optional(Type.Boolean())}),execute:async(toolCallId:string,args:unknown)=>{const take=async()=>{const session=this.session;if(session?.header.kind!=="guided")throw new Error("Not a Guided session");const toc=await this.bookCall(bookId,()=>this.book.toc());const picked=requestedGuideSpan(toc,await this.guideCursorIn(bookId,toc,session),args as GuideStepRequest);if("error" in picked)throw new Error(picked.error);const step=await recordGuideSpan(this.guideBlocksOf(bookId),picked.span);this.turnSteps.push({toolCallId,step,span:picked.span});return result(guideStepContext(toc,picked.span));};const taken=this.guideStepChain.then(take,take);this.guideStepChain=taken.catch(()=>{});return taken;}} satisfies AgentTool]:[]),
     {name:"search_in_book",label:"Search Book",description:"Search multiple query variants",parameters:search,execute:async(_id,args)=>{const input=args as {queries:string[]};return result(JSON.stringify(await this.bookCall(bookId,()=>this.book.search(input.queries))));}},
     {name:"draw_mindmap",label:"Mind Map",description:"Draw a mind map from a markdown outline, rendered inline in the Session's message flow as a collapsible, interactive, SVG-exportable mind map. Use this when the user asks for a visual overview or summary (chapter structure, character relationships, argument maps) instead of writing long hierarchical prose. Parameters: title (short map title) and outline (one complete markdown outline using headings and/or nested lists). Limits: at most 4 levels deep, at most 100 nodes, each line at most 200 characters; an over-limit outline returns an error, so retry with a smaller, valid outline. Outline principles: keep each node to a short keyword or phrase (typically a few words, never sentences) — if a node needs more than a few words, split the idea across parent and child; choose the first-level branches as the map's skeleton (the few basic ordering ideas the whole topic hangs on); grow from general near the root to specific near the leaves, each child expanding on its parent. One call draws one complete, independent map.",parameters:Type.Object({title:Type.String(),outline:Type.String()}),execute:async(_id,args)=>{const input=args as {title:string;outline:string};return result(JSON.stringify(validateMindmapParams(input.title,input.outline)));}},
     {name:"list_annotations",label:"List Annotations",description:"List the current book's bookmarks and highlights. Use when the user asks about what they marked; not for ordinary chapter questions.",parameters:empty,execute:async()=>{try{const data=await this.bookCall(bookId,()=>this.loadAnnotations(bookId));return result(JSON.stringify({bookmarks:data.bookmarks.map(({id,cfi,fraction,createdAt,label})=>({id,cfi,fraction,createdAt,...(label!==undefined?{label}:{})})),highlights:data.highlights.map(({id,cfi,excerpt,createdAt,color,note})=>({id,cfi,excerpt,createdAt,color:color??"yellow",...(note?.trim()?{note}:{})}))}));}catch(error){throw error instanceof Error?error:new Error(invokeErrorMessage(error));}}},

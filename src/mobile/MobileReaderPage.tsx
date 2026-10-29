@@ -35,7 +35,7 @@ import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { APP_BAR_HEIGHT, AppBarIconButton, MobileAppBar } from "@/mobile/MobileAppBar";
 import { AssistantSheet } from "@/mobile/AssistantSheet";
-import type { GuideSelection, GuideStep } from "@/types/agent";
+import type { GuideSelection, RecordedGuideStep } from "@/types/agent";
 import { MobileDrawer } from "@/mobile/MobileDrawer";
 import { ReaderQuickSettings } from "@/mobile/ReaderQuickSettings";
 
@@ -228,7 +228,7 @@ export function MobileReaderPage({
 
   // In a Guided session, "Guide up to here" on a selection sends the step at
   // once; the sheet comes up to half to show the answer.
-  const [guideSteps, setGuideSteps] = useState<GuideStep[] | null>(null);
+  const [guideSteps, setGuideSteps] = useState<RecordedGuideStep[] | null>(null);
   const guided = guideSteps !== null;
   const { progress: guideProgress, marks: guideMarks } = useGuideBookMarks(guideSteps, toc);
   const handleGuideTo = useCallback(

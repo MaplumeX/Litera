@@ -10,7 +10,7 @@ import type {
   GuidePosition,
   GuideRecapMarker,
   GuideRequest,
-  GuideStep,
+  RecordedGuideStep,
   SessionKind,
 } from "@/types/agent";
 
@@ -79,26 +79,35 @@ function decodeGuideRequest(value: unknown): GuideRequest | null {
   return step ? { step } : {};
 }
 
-/** A persisted guided step, or null when absent or malformed. */
-export function decodeGuide(value: unknown): GuideStep | null {
+/**
+ * A persisted guided step, or null when absent or malformed. A step from
+ * before steps were block ranges is a part of a chapter; one from before they
+ * kept their ends at the top level names them in `range`.
+ */
+export function decodeGuide(value: unknown): RecordedGuideStep | null {
   const guide = object(value);
-  if (!guide || !nonNegativeInteger(guide.chapterIndex) || !nonNegativeInteger(guide.part)
+  if (!guide) return null;
+  const skim = guide.skim === true ? { skim: true as const } : {};
+  const ends = guide.from !== undefined || guide.to !== undefined ? guide : object(guide.range);
+  if (ends) {
+    const from = decodeGuidePosition(ends.from);
+    const to = decodeGuidePosition(ends.to);
+    if (!from || !to) return null;
+    const part = object(guide.part);
+    const labelPart = part && nonNegativeInteger(part.index) && nonNegativeInteger(part.total) && part.index < part.total
+      ? { part: { index: part.index, total: part.total } }
+      : {};
+    return { from, to, ...skim, ...labelPart };
+  }
+  if (!nonNegativeInteger(guide.chapterIndex) || !nonNegativeInteger(guide.part)
     || !nonNegativeInteger(guide.totalParts) || guide.part >= guide.totalParts) return null;
   const chapterTitle = string(guide.chapterTitle);
-  let range: GuideStep["range"];
-  if (guide.range !== undefined) {
-    const from = decodeGuidePosition(object(guide.range)?.from);
-    const to = decodeGuidePosition(object(guide.range)?.to);
-    if (!from || !to) return null;
-    range = { from, to };
-  }
   return {
     chapterIndex: guide.chapterIndex,
     part: guide.part,
     totalParts: guide.totalParts,
     ...(chapterTitle ? { chapterTitle } : {}),
-    ...(guide.skim === true ? { skim: true as const } : {}),
-    ...(range ? { range } : {}),
+    ...skim,
   };
 }
 
@@ -666,26 +675,14 @@ export function sessionSummary(value: unknown): AgentSessionSummary {
   return summary;
 }
 
-/** The guide cursor: the latest guided step on the active branch (on a `guide_step` result, or a user message in older Sessions). */
-export function guideCursor(session: DecodedPiSession): GuideStep | null {
-  const branch = activeBranch(session);
-  for (let index = branch.length - 1; index >= 0; index -= 1) {
-    const entry = branch[index];
-    if (entry.type !== "message") continue;
-    const guide = decodeGuide(entry.guide);
-    if (guide) return guide;
-  }
-  return null;
-}
-
 /**
  * The guided steps on the active branch, oldest first, each with the text of
  * the explanation that followed it (the assistant entries up to the next step
  * or user message). Side questions are left out.
  */
-export function guidedTurns(session: DecodedPiSession): Array<{ step: GuideStep; text: string }> {
-  const turns: Array<{ step: GuideStep; text: string }> = [];
-  let current: { step: GuideStep; text: string } | null = null;
+export function guidedTurns(session: DecodedPiSession): Array<{ step: RecordedGuideStep; text: string }> {
+  const turns: Array<{ step: RecordedGuideStep; text: string }> = [];
+  let current: { step: RecordedGuideStep; text: string } | null = null;
   for (const entry of activeBranch(session)) {
     const role = messageRole(entry);
     const step = role ? decodeGuide(entry.guide) : null;

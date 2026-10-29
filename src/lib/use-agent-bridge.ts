@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useReducer, useRef } from "react";
 import { embeddedAgentRuntime } from "@/agent/runtime/embedded-runtime";
 import { agentReducer, createAgentState } from "@/lib/agent-reducer";
-import type { AgentMessage, GuideRequest, GuideSelection, GuideStep, SessionKind } from "@/types/agent";
+import type { AgentMessage, GuideRequest, GuideSelection, GuideStep, RecordedGuideStep, SessionKind } from "@/types/agent";
 
 function id(prefix: string): string {
   return `${prefix}-${crypto.randomUUID()}`;
@@ -151,7 +151,7 @@ export function useAgentBridge(bookId: string) {
     [],
   );
   const guideStepAt = useCallback((href: string) => embeddedAgentRuntime.guideStepAt(href), []);
-  const guideStepAnchor = useCallback((step: GuideStep) => embeddedAgentRuntime.guideStepAnchor(step), []);
+  const guideStepAnchor = useCallback((step: RecordedGuideStep) => embeddedAgentRuntime.guideStepAnchor(step), []);
   const deleteSession = useCallback(async (sessionId: string) => {
     if (bookIdRef.current) await embeddedAgentRuntime.deleteSession(sessionId, id("delete-session"));
   }, []);

@@ -4,13 +4,13 @@ import type { GuideChapterProgress } from "@/agent/runtime/guide";
 import type { TocItem } from "@/components/ReaderView";
 import type { GuidePageMarks } from "@/lib/guide-marks";
 import { flattenToc } from "@/lib/toc-items";
-import type { GuideStep } from "@/types/agent";
+import type { RecordedGuideStep } from "@/types/agent";
 
 /**
  * What the Book shows of a Guided session: progress per TOC href and the
  * marks in the text. Empty outside a Guided session or before its first step.
  */
-export function useGuideBookMarks(steps: GuideStep[] | null, toc: TocItem[]) {
+export function useGuideBookMarks(steps: RecordedGuideStep[] | null, toc: TocItem[]) {
   const hrefs = useMemo(() => flattenToc(toc).map((item) => item.href).filter(Boolean), [toc]);
   const [progress, setProgress] = useState<Record<string, GuideChapterProgress> | undefined>(undefined);
   const [marks, setMarks] = useState<GuidePageMarks | null>(null);

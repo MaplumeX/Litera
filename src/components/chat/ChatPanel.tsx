@@ -41,13 +41,13 @@ import {
   loadSessionRailWidth,
   saveSessionRailWidth,
 } from "@/lib/session-rail-width";
-import { isTranscriptMarker, takenGuideSteps, type AgentToolCall, type AssistantChatMessage, type GuideRequest, type GuideSelection, type GuideStep } from "@/types/agent";
+import { isTranscriptMarker, takenGuideSteps, type AgentToolCall, type AssistantChatMessage, type GuideRequest, type GuideSelection, type GuideStep, type RecordedGuideStep } from "@/types/agent";
 import { chatActivity, type ChatActivity } from "@/lib/chat-activity";
 
 /** The `guide_step` calls of an assistant message that took a step, in order. */
-function guideCalls(message: AssistantChatMessage): Array<AgentToolCall & { guide: GuideStep }> {
+function guideCalls(message: AssistantChatMessage): Array<AgentToolCall & { guide: RecordedGuideStep }> {
   return (message.blocks ?? []).flatMap((block) =>
-    block.type === "toolCall" && block.toolCall.guide ? [block.toolCall as AgentToolCall & { guide: GuideStep }] : [],
+    block.type === "toolCall" && block.toolCall.guide ? [block.toolCall as AgentToolCall & { guide: RecordedGuideStep }] : [],
   );
 }
 
@@ -68,7 +68,7 @@ interface ChatPanelProps {
   bookId: string;
   variant?: "docked" | "workspace";
   /** A Guided session's steps on the active branch, oldest first; null outside one. */
-  onGuideStepsChange?: (steps: GuideStep[] | null) => void;
+  onGuideStepsChange?: (steps: RecordedGuideStep[] | null) => void;
   /** Agent mode: on open, resume the latest Guided session if there is one. */
   preferGuidedSession?: boolean;
   /** Workspace variant: whether the session rail shows. The host owns the
@@ -137,7 +137,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       };
     }, [bookId, locateQuote, onOpenQuote]);
     // A guided step's start: the Book pane counts its way to that paragraph.
-    const openGuideStep = useCallback(async (step: GuideStep) => {
+    const openGuideStep = useCallback(async (step: RecordedGuideStep) => {
       if (!onOpenQuote) return false;
       const anchor = await guideStepAnchor(step);
       if (!anchor?.href) return false;
@@ -405,7 +405,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
 
     const guideStepsKey = guideSteps ? JSON.stringify(guideSteps) : null;
     useEffect(() => {
-      onGuideStepsChange?.(guideStepsKey === null ? null : JSON.parse(guideStepsKey) as GuideStep[]);
+      onGuideStepsChange?.(guideStepsKey === null ? null : JSON.parse(guideStepsKey) as RecordedGuideStep[]);
     }, [guideStepsKey, onGuideStepsChange]);
     useEffect(() => () => onGuideStepsChange?.(null), [onGuideStepsChange]);
 
