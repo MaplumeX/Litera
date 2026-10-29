@@ -243,6 +243,12 @@ describe("Guided sessions in the runtime",()=>{
     });
   });
 
+  it("puts the Guide cursor's divider on the last block with text when the step ends on a blank or an image",async()=>{
+    const {runtime}=setup(undefined,null,undefined,{0:["a","b","c","d"],1:["e",""]});
+    await runtime.openBook("book",new ArrayBuffer(1));
+    expect((await runtime.guidePageMarks([{chapterIndex:1,part:0,totalParts:1}]))["two.xhtml"]).toMatchObject({cursor:"e"});
+  });
+
   it("refuses guide requests outside a Guided session, the Book, or the cursor's reach",async()=>{
     const {runtime,batches,systemPrompts}=setup();
     await runtime.openBook("book",new ArrayBuffer(1));

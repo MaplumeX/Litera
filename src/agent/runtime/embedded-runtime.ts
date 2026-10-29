@@ -144,7 +144,8 @@ export class LiteraAgentRuntime {
     for(const chapter of guidePageMarkPlan(toc,await this.currentGuideSteps(bookId,toc,steps))){
       const blocks=await this.chapterGuideBlocks(bookId,chapter.chapterIndex);
       const keys=(indices:readonly number[])=>indices.flatMap((index)=>{const block=blocks[index];const key=block&&!block.kind?guideMarkKey(block.snippet):"";return key?[key]:[];});
-      const cursor=chapter.cursor===undefined?"":keys([chapter.cursor])[0]??"";
+      // A step ending on a blank or an image shows its divider after the last block with text before it.
+      let cursor="";for(let index=chapter.cursor??-1;index>=0&&!cursor;index-=1)cursor=keys([index])[0]??"";
       for(const file of chapter.files){
         const current=marks[file]??{read:[],skimmed:[]};
         current.read.push(...keys(chapter.read));current.skimmed.push(...keys(chapter.skimmed));
