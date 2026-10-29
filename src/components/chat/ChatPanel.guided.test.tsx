@@ -222,7 +222,7 @@ describe("ChatPanel in a Guided session", () => {
 
   it("reads up to the paragraph the reader picks", async () => {
     const view = renderPanel();
-    fireEvent.click(await view.findByRole("button", { name: "选择这一步读到哪里" }));
+    fireEvent.click(await view.findByRole("button", { name: "读到…" }));
     fireEvent.click((await view.findByText("第二段")).closest("button")!);
     fireEvent.click(view.getByRole("button", { name: "带读" }));
     await waitFor(() => expect(prompt).toHaveBeenCalled());

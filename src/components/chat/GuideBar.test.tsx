@@ -52,6 +52,6 @@ describe("GuideBar", () => {
   it("labels Continue with a range's paragraphs", () => {
     const view = render(<GuideBar {...props} nextStep={within} />);
     expect(view.getByRole("button", { name: "继续：第三章 · 第 5–7 段" })).toBeTruthy();
-    expect(view.getByRole("button", { name: "选择这一步读到哪里" })).toBeTruthy();
+    expect(view.getByRole("button", { name: "读到…" })).toBeTruthy();
   });
 });

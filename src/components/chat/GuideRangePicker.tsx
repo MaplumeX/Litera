@@ -140,7 +140,7 @@ export function GuideRangePicker({ open, onOpenChange, step, loadOutline, onPick
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex max-h-[85vh] flex-col gap-3 p-4 sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>{t("chat.guide.pick")}</DialogTitle>
+          <DialogTitle>{t("chat.guide.pickTitle")}</DialogTitle>
           <DialogDescription>
             {start
               ? t("chat.guide.pickHint", { title: positionTitle(start), where: paragraphsLabel(start.paragraphsBefore + 1, start.paragraphsBefore + 1) })
