@@ -103,6 +103,17 @@ describe("guide_step in the runtime",()=>{
     expect(guideStepResults(batches)[0]).toMatchObject({isError:true,text:expect.stringContaining("No chapter with chapterIndex 9"),guide:undefined});
     expect(await runtime.nextGuideStep()).toMatchObject({from:{chapterIndex:0,block:0},part:{index:0,total:2}});
   });
+
+  it("takes no step when the reply that took it fails or is cut off",async()=>{
+    for(const ending of [fauxAssistantMessage("retold up to",{stopReason:"error",errorMessage:"401: invalid api key"}),fauxAssistantMessage("retold up to",{stopReason:"length"})]){
+      const {runtime,batches}=setup(undefined,null,[takeStep(),ending,"title"]);
+      await runtime.openBook("book",new ArrayBuffer(1));
+      await runtime.newSession(undefined,"guided");
+      await runtime.prompt("继续带读",{guideRequest:{}});
+      expect(guideStepResults(batches)).toEqual([expect.objectContaining({isError:false,guide:undefined})]);
+      expect(await runtime.nextGuideStep()).toMatchObject({from:{chapterIndex:0,block:0},part:{index:0,total:2}});
+    }
+  });
 });
 
 describe("Guided sessions in the runtime",()=>{
