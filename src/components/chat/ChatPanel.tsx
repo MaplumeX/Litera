@@ -59,9 +59,6 @@ export interface ChatPanelHandle {
 
 interface ChatPanelProps {
   currentChapterHref?: string;
-  /** Agent mode: the chapter picked from the TOC as the discussion scope. */
-  chapterScope?: { label: string; href?: string } | null;
-  onClearChapterScope?: () => void;
   /** Reveal a Citation's passage in the Book pane. */
   /** Reveal a quote in the Book pane; `block`, a guided step's start, to count to rather than search. */
   onOpenQuote?: (location: QuoteLocation, quote: string, block?: GuideBlockTarget) => void;
@@ -82,8 +79,6 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
   function ChatPanel(
     {
       currentChapterHref,
-      chapterScope,
-      onClearChapterScope,
       onOpenQuote,
       bookId,
       variant = "docked",
@@ -107,7 +102,6 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       guideOutline,
       guideStepTo,
       guideStepToSelection,
-      guideStepAt,
       guideStepAnchor,
       prompt,
       editPrompt,
@@ -386,22 +380,6 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     useEffect(() => {
       setPickedStep(undefined);
     }, [bookId, state.sessionId]);
-
-    // In a Guided session, picking a chapter from the TOC means "read on from
-    // here": the next step starts there. Only a fresh pick counts, not a scope
-    // left over from before switching into the session.
-    const scopeHref = chapterScope?.href;
-    const lastScopeRef = useRef(scopeHref);
-    useEffect(() => {
-      const changed = lastScopeRef.current !== scopeHref;
-      lastScopeRef.current = scopeHref;
-      if (!changed || !isGuided || !scopeHref) return;
-      let cancelled = false;
-      guideStepAt(scopeHref)
-        .then((step) => { if (!cancelled && step) setPickedStep(step); })
-        .catch((error) => { if (!cancelled) setInvokeError(String(error)); });
-      return () => { cancelled = true; };
-    }, [guideStepAt, isGuided, scopeHref]);
 
     const guideStepsKey = guideSteps ? JSON.stringify(guideSteps) : null;
     useEffect(() => {
@@ -966,8 +944,6 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
             bookReady={bookReady}
             pendingSelection={pendingSelection}
             onClearSelection={() => setPendingSelection(null)}
-            chapterScope={chapterScope}
-            onClearChapterScope={onClearChapterScope}
             textareaRef={inputRef}
             thinkingLevel={thinkingLevel}
             onThinkingLevelChange={(level) => void handleThinkingLevelChange(level)}

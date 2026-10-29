@@ -156,7 +156,6 @@ export class LiteraAgentRuntime {
     return marks;
   }
   /** The first guided step at `href`'s chapter (or the next one with text). */
-  async guideStepAt(href:string):Promise<GuideStep|null>{if(!this.bookId)return null;const bookId=this.bookId;const toc=await this.bookCall(bookId,()=>this.book.toc());const chapter=chapterForHref(toc,href);return chapter?this.recordSpan(bookId,nextGuideSpan(toc,null,chapter.index)):null;}
   /**
    * Where the Book pane shows `step`'s start: its first findable block, as the
    * paragraph to count to on the chapter's pages, and its opening text to

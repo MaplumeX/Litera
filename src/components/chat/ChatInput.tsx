@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { Brain, List, Quote, Send, Square, X } from "lucide-react";
+import { Brain, Quote, Send, Square, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
@@ -21,8 +21,6 @@ interface ChatInputProps {
   bookReady: boolean;
   pendingSelection: PendingSelection | null;
   onClearSelection: () => void;
-  chapterScope?: { label: string } | null;
-  onClearChapterScope?: () => void;
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
   thinkingLevel: string;
   onThinkingLevelChange: (level: string) => void;
@@ -39,8 +37,6 @@ export function ChatInput({
   bookReady,
   pendingSelection,
   onClearSelection,
-  chapterScope,
-  onClearChapterScope,
   textareaRef,
   thinkingLevel,
   onThinkingLevelChange,
@@ -71,23 +67,6 @@ export function ChatInput({
 
   return (
     <div className="px-2 pb-2 pt-1">
-      {chapterScope && (
-        <div className="mb-1.5 flex items-start gap-1.5 rounded-lg bg-muted/50 px-3 py-1.5 text-xs text-muted-foreground">
-          <List className="mt-0.5 h-3 w-3 shrink-0" />
-          <span className="min-w-0 flex-1 truncate">
-            {t("chat.chapterScope", { title: chapterScope.label })}
-          </span>
-          {onClearChapterScope && (
-            <button
-              onClick={onClearChapterScope}
-              className="text-muted-foreground transition-colors hover:text-foreground"
-              aria-label={t("chat.clearChapterScope")}
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
-          )}
-        </div>
-      )}
       {pendingSelection && (
         <div className="mb-1.5 flex items-start gap-1.5 rounded-lg bg-muted/50 px-3 py-1.5 text-xs text-muted-foreground">
           <Quote className="mt-0.5 h-3 w-3 shrink-0" />

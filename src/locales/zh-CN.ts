@@ -416,8 +416,6 @@ export const zhCN = {
   "chat.suggest.summarize": "总结本章内容",
   "chat.suggest.about": "这本书主要讲了什么",
   "chat.suggest.outline": "帮我梳理本节要点",
-  "chat.chapterScope": "讨论范围：{title}",
-  "chat.clearChapterScope": "清除讨论范围",
   "chat.quoteSelection": "引用选段：“{text}”",
   "chat.clearQuote": "清除引用",
   "chat.placeholder": "输入问题…",
