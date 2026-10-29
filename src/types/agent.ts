@@ -18,11 +18,6 @@ export interface AgentError {
 /** A Guided session reads the Book to the reader; fixed at creation. */
 export type SessionKind = "guided";
 
-/**
- * One guided step: the chapter part the assistant retells. Persisted on the
- * step's user-message entry; the latest one on the active branch is the
- * guide cursor.
- */
 /** A block (Markdown paragraph) of a chapter, as a guided step's range names it. */
 export interface GuidePosition {
   chapterIndex: number;
@@ -48,7 +43,10 @@ export interface GuideSelection {
 }
 
 /**
- * One guided step. Without `range` it covers part `part` of the chapter (a
+ * One guided step, taken by the assistant with `guide_step` and persisted as
+ * `guide` on that tool result's entry (on the user message entry in Sessions
+ * recorded before); the latest one on the active branch is the Guide cursor.
+ * Without `range` it covers part `part` of the chapter (a
  * skim: `part` to the chapter's end). With `range` it covers exactly the
  * blocks `from` to `to`, possibly across chapters, and `chapterIndex` /
  * `part` name the part `from` is in.
@@ -63,6 +61,15 @@ export interface GuideStep {
   skim?: true;
   /** The blocks covered, `to` inclusive. */
   range?: { from: GuidePosition; to: GuidePosition };
+}
+
+/**
+ * What a reader's message in a Guided session asks of the guide: Continue
+ * (no `step`; the assistant picks where the step ends) or a step the reader
+ * picked. It is not a step itself; the assistant takes it with `guide_step`.
+ */
+export interface GuideRequest {
+  step?: GuideStep;
 }
 
 export interface AgentSessionSummary {
@@ -97,6 +104,8 @@ export interface AgentToolCall {
   result?: unknown;
   done: boolean;
   isError?: boolean;
+  /** The guided step a `guide_step` call took. */
+  guide?: GuideStep;
 }
 
 export type AssistantBlock =
@@ -109,8 +118,10 @@ export interface UserMessage {
   content: string;
   selection?: string;
   chapterHref?: string;
-  /** Set on a guided step; the content is then the step's label. */
+  /** A guided step sent as the user message, in Sessions recorded before the assistant took steps itself. */
   guide?: GuideStep;
+  /** Continue or a picked step; the content is then its label. */
+  guideRequest?: GuideRequest;
 }
 
 export interface AssistantChatMessage {
@@ -159,6 +170,15 @@ export function isTranscriptMarker(message: AgentMessage): message is Compaction
   return message.role === "notice" || message.role === "recap";
 }
 
+/** The guided steps taken in a transcript, oldest first: by `guide_step` calls, or sent as user messages in older Sessions. */
+export function takenGuideSteps(messages: readonly AgentMessage[]): GuideStep[] {
+  return messages.flatMap((message) => {
+    if (message.role === "user") return message.guide ? [message.guide] : [];
+    if (message.role !== "assistant") return [];
+    return (message.blocks ?? []).flatMap((block) => (block.type === "toolCall" && block.toolCall.guide ? [block.toolCall.guide] : []));
+  });
+}
+
 type EventEnvelope = {
   version: number;
 };
@@ -189,8 +209,7 @@ export type AgentEvent = EventEnvelope & (
   // task as context maintenance.
   | ({ type: "guide_recap_added"; messages: AgentMessage[]; anchors: string[]; navigation: Record<string, AnchorBranchInfo> } & SessionCorrelation)
   | ({ type: "retry_scheduled"; attempt: number; maxAttempts: number; delayMs: number } & PromptCorrelation)
-  // `guideStep`: the guided step the model asked for (`guide_step`); the UI sends it next.
-  | ({ type: "prompt_end"; messages?: AgentMessage[]; anchors?: string[]; navigation?: Record<string, AnchorBranchInfo>; guideStep?: GuideStep } & PromptCorrelation)
+  | ({ type: "prompt_end"; messages?: AgentMessage[]; anchors?: string[]; navigation?: Record<string, AnchorBranchInfo>} & PromptCorrelation)
   | ({ type: "prompt_aborted"; messages?: AgentMessage[]; anchors?: string[]; navigation?: Record<string, AnchorBranchInfo> } & PromptCorrelation & RequestCorrelation)
   | ({ type: "session_created"; kind?: SessionKind } & BookCorrelation & { sessionId: string } & RequestCorrelation)
   | ({ type: "session_switched"; messages: AgentMessage[]; anchors?: string[]; navigation?: Record<string, AnchorBranchInfo> } & BookCorrelation & { sessionId: string } & RequestCorrelation)

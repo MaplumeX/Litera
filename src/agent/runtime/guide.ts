@@ -22,11 +22,14 @@ export const GUIDED_STYLE_MAX_CHARS = 16 * 1024;
 
 /**
  * Appended to the system prompt in Guided sessions. The mechanics are fixed;
- * only `style` (the reader's or the default) varies.
+ * only `style` (the reader's or the default) varies. Where steps start and end
+ * is the `guide_step` tool's business, not the prompt's.
  */
 export function guidedPrompt(style: string = DEFAULT_GUIDED_STYLE): string {
   return `<guided_reading>
-This is a Guided session. The reader does not read the book themselves; they rely on you to take them through it, one step at a time, in the book's order. Each guided step names exactly what to read: a part of a chapter, or a range of blocks (the chapter's paragraphs) that the reader chose. Read exactly that with read_chapter, then explain it to the reader in the style below.
+This is a Guided session. The reader does not read the book themselves; they rely on you to take them through it in the book's order, one guided step at a time, explaining each step in the style below.
+
+guide_step is how the guide moves on: call it whenever you take the reader on through the book, then read the step it gives you and explain it in the same reply. Anything else you answer as usual, and the guide stays where it is. Each message comes with the reading state: where the guide is and what the next step would be.
 
 <style>
 ${style.trim() || DEFAULT_GUIDED_STYLE}
@@ -34,16 +37,9 @@ ${style.trim() || DEFAULT_GUIDED_STYLE}
 
 A skim step is the exception to completeness: the reader chose to move fast, so give a compressed pass over what it names (the main line and key points) and say at the start that it is a skim.
 
-Start directly, with no preamble, and do not ask whether to continue; the reader has a Continue button. Write in the language of the step label.
+Start each step's explanation directly, with no preamble, and do not ask whether to continue; the reader has a Continue button. Write in the reader's language.
 
-Messages without a guided step are the reader's side questions: answer them normally. They do not advance the reading, with one exception: when the reader asks to be guided through a place or a range ("带读第3章", "带读第三章的1-3段", "略读下一章", "读到这一节末尾"), call guide_step instead of retelling it yourself, then reply with one short line saying what comes next. The step is sent after your reply.
-- Find the chapter by its title and path in the TOC, not by counting: front matter and sub-sections are chapters of their own, so "第3章" is rarely chapterIndex 2. A chapter cut into sub-sections ends at its last sub-section.
-- Find paragraphs and section starts with list_guide_blocks: "the 3rd paragraph" is the block with paragraph 3 (headings, images and blanks have none), as the reader and the step labels count them.
-- Leave chapterIndex out to go on from where the guide is.
-- A step cannot start mid-chapter. For "第三章的5-7段", offer to read from the start of the chapter, or from where the guide is, to paragraph 7.
-- When the place is ambiguous, ask instead of guessing.
-
-When the guide finishes a chapter, a chapter recap of it is added to the conversation. Recaps stay with you for the rest of the book, after the retellings themselves are gone: use them to connect back to earlier chapters.
+When the guide finishes a chapter, a chapter recap of it is added to the conversation. Recaps stay with you for the rest of the book, after the explanations themselves are gone: use them to connect back to earlier chapters.
 </guided_reading>`;
 }
 
@@ -356,24 +352,83 @@ function rangeReads(toc: readonly BookTocEntry[], step: GuideStep): string[] {
   });
 }
 
-/** Model-facing reading context of a guided step. */
-export function guideStepContext(toc: readonly BookTocEntry[], step: GuideStep): string {
+/** Where a step reads, for the model. */
+function stepWhere(toc: readonly BookTocEntry[], step: GuideStep): string {
   if (step.range) {
     const { from, to } = step.range;
-    const where = from.chapterIndex === to.chapterIndex
+    return from.chapterIndex === to.chapterIndex
       ? `${chapterName(from.chapterIndex, from.chapterTitle)}, blocks ${from.block} to ${to.block}`
       : `${chapterName(from.chapterIndex, from.chapterTitle)} block ${from.block} through ${chapterName(to.chapterIndex, to.chapterTitle)} block ${to.block}`;
-    const task = step.skim
-      ? `Guided step (skim): give a compressed pass over ${where}`
-      : `Guided step: retell ${where}`;
+  }
+  const name = chapterName(step.chapterIndex, step.chapterTitle);
+  const last = step.totalParts - 1;
+  if (step.skim) return step.part > 0 ? `${name}, parts ${step.part} to ${last} (of 0 to ${last})` : `${name}, the whole chapter`;
+  const span = stepSpan(toc, step);
+  return `${name}, part ${step.part} of 0 to ${last}${span ? ` (blocks ${span.from.block} to ${span.to.block})` : ""}`;
+}
+
+/** What the model reads for a guided step it took: `guide_step`'s result. */
+export function guideStepContext(toc: readonly BookTocEntry[], step: GuideStep): string {
+  const where = stepWhere(toc, step);
+  const task = step.skim ? `Guided step (skim): give a compressed pass over ${where}` : `Guided step: explain ${where}`;
+  if (step.range) {
     return `${task} (blocks are a chapter's paragraphs, numbered from 0). Call read_chapter with each of these in the same turn: ${rangeReads(toc, step).join("; ")}. Cover exactly this range.`;
   }
-  const title = step.chapterTitle ? ` ("${step.chapterTitle}")` : "";
   if (step.skim) {
     const parts = Array.from({ length: step.totalParts - step.part }, (_, offset) => step.part + offset);
-    return `Guided step (skim): give a compressed pass over chapterIndex ${step.chapterIndex}${title}, parts ${parts.join(", ")} (parts are numbered 0 to ${step.totalParts - 1}). Call read_chapter for each of these parts in the same turn.`;
+    return `${task}. Call read_chapter for each of these parts in the same turn: ${parts.map((part) => `chapterIndex ${step.chapterIndex}, part ${part}`).join("; ")}.`;
   }
-  return `Guided step: retell chapterIndex ${step.chapterIndex}${title}, part ${step.part} (parts are numbered 0 to ${step.totalParts - 1}). Call read_chapter with chapterIndex ${step.chapterIndex} and part ${step.part}.`;
+  return `${task}. Call read_chapter with chapterIndex ${step.chapterIndex} and part ${step.part}.`;
+}
+
+/**
+ * Where a Guided session stands, sent with every message in it: the block the
+ * guide has reached and the step Continue would take by default.
+ */
+export function guideReadingState(toc: readonly BookTocEntry[], cursor: GuideStep | null, next: GuideStep | null): string {
+  const end = cursor ? cursorEnd(toc, cursor) : null;
+  const reached = end && end.block >= 0
+    ? `The guide has reached ${chapterName(end.entry.index, end.entry.label.trim() || undefined)}, block ${end.block} of 0 to ${blockCount(end.entry) - 1}.`
+    : "The guide has not started yet.";
+  const ahead = next ? `The default next step: ${stepWhere(toc, next)}.` : "The guide has reached the end of the book.";
+  return `Guided reading state: ${reached} ${ahead}`;
+}
+
+/**
+ * The `guide_step` arguments that take `step` from `cursor`: its chapter when
+ * it does not start right after the cursor, its end when it is a range. Null
+ * when no call can take it (it starts mid-chapter, away from the cursor).
+ */
+export function guideStepRequestFor(toc: readonly BookTocEntry[], cursor: GuideStep | null, step: GuideStep): GuideStepRequest | null {
+  const span = stepSpan(toc, step);
+  if (!span) return null;
+  const next = nextGuideStep(toc, cursor);
+  const fromCursor = next ? stepSpan(toc, next)?.from : undefined;
+  const request: GuideStepRequest = {};
+  if (!fromCursor || compare(fromCursor, span.from) !== 0) {
+    if (span.from.block !== 0) return null;
+    request.chapterIndex = span.from.entry.index;
+  }
+  if (step.range) {
+    request.toChapterIndex = span.to.entry.index;
+    request.toBlock = span.to.block;
+  }
+  if (step.skim) request.skim = true;
+  return request;
+}
+
+/**
+ * What the reader asked for with a message: Continue (no step), leaving the
+ * step's end to the model, or a step they picked. Null when the picked step
+ * cannot be taken from the cursor.
+ */
+export function guideRequestContext(toc: readonly BookTocEntry[], cursor: GuideStep | null, picked?: GuideStep): string | null {
+  if (!picked) {
+    return "The reader pressed Continue: take the next guided step with guide_step, without chapterIndex. Leave the end out for the default step, or end it at a natural break near the default end (such as the end of a section), then explain it.";
+  }
+  const request = guideStepRequestFor(toc, cursor, picked);
+  if (!request) return null;
+  return `The reader picked the next guided step: ${stepWhere(toc, picked)}${picked.skim ? ", as a skim" : ""}. Take it with guide_step ${JSON.stringify(request)}, then explain it.`;
 }
 
 /** How far the guide has got through one chapter, for the TOC. */

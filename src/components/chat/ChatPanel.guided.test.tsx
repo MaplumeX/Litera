@@ -101,7 +101,23 @@ describe("ChatPanel in a Guided session", () => {
     fireEvent.click(start);
     await waitFor(() => expect(prompt).toHaveBeenCalled());
     const label = "带读：第三章（第 1/3 部分）";
-    expect(prompt).toHaveBeenCalledWith(label, { guide: stepOne }, { role: "user", content: label, guide: stepOne });
+    expect(prompt).toHaveBeenCalledWith(label, { guideRequest: { step: stepOne } }, { role: "user", content: label, guideRequest: { step: stepOne } });
+  });
+
+  it("continues with a plain request once the assistant has taken a step, leaving the step to it", async () => {
+    nextStep = { ...stepOne, part: 1 };
+    bridgeState = guidedState({
+      messages: [
+        { role: "user", content: "开始带读：第三章", guideRequest: { step: stepOne } },
+        { role: "assistant", content: "讲述", blocks: [{ type: "toolCall", toolCall: { toolCallId: "c1", tool: "guide_step", params: {}, done: true, guide: stepOne } }, { type: "text", text: "讲述" }] },
+      ],
+    });
+    const view = renderPanel();
+    fireEvent.click(await view.findByRole("button", { name: "继续：第三章 · 2/3" }));
+    await waitFor(() => expect(prompt).toHaveBeenCalled());
+    expect(prompt).toHaveBeenCalledWith("继续带读", { guideRequest: {} }, { role: "user", content: "继续带读", guideRequest: {} });
+    // The request is a transcript marker, not the reader's bubble.
+    expect(view.getByTestId("guide-step").textContent).toBe("开始带读：第三章");
   });
 
   it("continues once started, and cannot edit a guided step", async () => {
@@ -119,7 +135,7 @@ describe("ChatPanel in a Guided session", () => {
     expect(view.queryByRole("button", { name: "编辑" })).toBeNull();
   });
 
-  it("regenerates a guided step with its guide", async () => {
+  it("regenerates a step sent in an older Session as a request for it", async () => {
     bridgeState = guidedState({
       messages: [
         { role: "user", content: "带读：第三章（第 1/3 部分）", guide: stepOne },
@@ -129,28 +145,20 @@ describe("ChatPanel in a Guided session", () => {
     const view = renderPanel();
     fireEvent.click(view.getByRole("button", { name: "重新生成" }));
     await waitFor(() => expect(editPrompt).toHaveBeenCalled());
-    expect(editPrompt.mock.calls[0][2]).toMatchObject({ guide: stepOne });
+    expect(editPrompt.mock.calls[0][2]).toEqual({ guideRequest: { step: stepOne } });
   });
 
-  it("sends a step the assistant asked for once, as Continue would", async () => {
-    const requested = { sessionId: "guided-1", step: picked };
-    bridgeState = guidedState({ requestedGuideStep: requested });
+  it("regenerates a Continue with its request", async () => {
+    bridgeState = guidedState({
+      messages: [
+        { role: "user", content: "继续带读", guideRequest: {} },
+        { role: "assistant", content: "讲述" },
+      ],
+    });
     const view = renderPanel();
-    await waitFor(() => expect(prompt).toHaveBeenCalledTimes(1));
-    const label = "带读：第三章（第 1–2 段）";
-    expect(prompt).toHaveBeenCalledWith(label, { guide: picked }, { role: "user", content: label, guide: picked });
-    view.rerender(<ChatPanel variant="workspace" currentChapterHref="OEBPS/ch3.xhtml" bookId="book-1" />);
-    await act(async () => {});
-    expect(prompt).toHaveBeenCalledTimes(1);
-  });
-
-  it("does not send an asked step while answering or for another Session", async () => {
-    bridgeState = guidedState({ status: "prompting", promptId: "p", requestedGuideStep: { sessionId: "guided-1", step: picked } });
-    const view = renderPanel();
-    bridgeState = guidedState({ requestedGuideStep: { sessionId: "other", step: picked } });
-    view.rerender(<ChatPanel variant="workspace" currentChapterHref="OEBPS/ch3.xhtml" bookId="book-1" />);
-    await act(async () => {});
-    expect(prompt).not.toHaveBeenCalled();
+    fireEvent.click(view.getByRole("button", { name: "重新生成" }));
+    await waitFor(() => expect(editPrompt).toHaveBeenCalled());
+    expect(editPrompt.mock.calls[0][2]).toEqual({ guideRequest: {} });
   });
 
   it("skims the rest of the chapter in one step", async () => {
@@ -159,7 +167,7 @@ describe("ChatPanel in a Guided session", () => {
     await waitFor(() => expect(prompt).toHaveBeenCalled());
     expect(guideSkimStep).toHaveBeenCalledWith(stepOne);
     const skim = { ...stepOne, skim: true };
-    expect(prompt).toHaveBeenCalledWith("略读：第三章", { guide: skim }, { role: "user", content: "略读：第三章", guide: skim });
+    expect(prompt).toHaveBeenCalledWith("略读：第三章", { guideRequest: { step: skim } }, { role: "user", content: "略读：第三章", guideRequest: { step: skim } });
   });
 
   it("reads up to the paragraph the reader picks", async () => {
@@ -170,7 +178,7 @@ describe("ChatPanel in a Guided session", () => {
     await waitFor(() => expect(prompt).toHaveBeenCalled());
     expect(guideOutline).toHaveBeenCalledWith(stepOne, undefined);
     expect(guideStepTo).toHaveBeenCalledWith(stepOne, { chapterIndex: 2, block: 1 }, false);
-    expect(prompt).toHaveBeenCalledWith("带读：第三章（第 1–2 段）", { guide: picked }, { role: "user", content: "带读：第三章（第 1–2 段）", guide: picked });
+    expect(prompt).toHaveBeenCalledWith("带读：第三章（第 1–2 段）", { guideRequest: { step: picked } }, { role: "user", content: "带读：第三章（第 1–2 段）", guideRequest: { step: picked } });
   });
 
   it("reads up to a selection from the book", async () => {
@@ -180,7 +188,7 @@ describe("ChatPanel in a Guided session", () => {
     await act(async () => { ref.current!.guideTo({ text: "第二", paragraph: "第二段", chapterHref: "OEBPS/ch3.xhtml#s2" }); });
     await waitFor(() => expect(prompt).toHaveBeenCalled());
     expect(guideStepToSelection).toHaveBeenCalledWith(stepOne, { text: "第二", paragraph: "第二段", chapterHref: "OEBPS/ch3.xhtml#s2" });
-    expect(prompt.mock.calls[0][1]).toEqual({ guide: picked });
+    expect(prompt.mock.calls[0][1]).toEqual({ guideRequest: { step: picked } });
   });
 
   it("explains why a selection cannot end the step", async () => {
@@ -204,7 +212,7 @@ describe("ChatPanel in a Guided session", () => {
     expect(prompt).not.toHaveBeenCalled();
     fireEvent.click(start);
     await waitFor(() => expect(prompt).toHaveBeenCalled());
-    expect(prompt.mock.calls[0][1]).toEqual({ guide: afterChapter });
+    expect(prompt.mock.calls[0][1]).toEqual({ guideRequest: { step: afterChapter } });
   });
 
   it("says so at the end of the Book", async () => {
@@ -282,10 +290,13 @@ describe("ChatPanel and the TOC in a Guided session", () => {
         { role: "user", content: "带读", guide: stepOne },
         { role: "assistant", content: "讲述" },
         { role: "user", content: "插话" },
+        { role: "assistant", content: "回答" },
+        { role: "user", content: "继续带读", guideRequest: {} },
+        { role: "assistant", content: "讲述", blocks: [{ type: "toolCall", toolCall: { toolCallId: "c1", tool: "guide_step", params: {}, done: true, guide: { ...stepOne, part: 1 } } }] },
       ],
     });
     const view = render(<ChatPanel bookId="book-1" onGuideStepsChange={onGuideStepsChange} />);
-    expect(onGuideStepsChange).toHaveBeenLastCalledWith([stepOne]);
+    expect(onGuideStepsChange).toHaveBeenLastCalledWith([stepOne, { ...stepOne, part: 1 }]);
     bridgeState = guidedState({ sessions: [{ id: "guided-1", title: "t", createdAt: "1", updatedAt: "1" }] });
     view.rerender(<ChatPanel bookId="book-1" onGuideStepsChange={onGuideStepsChange} />);
     await waitFor(() => expect(onGuideStepsChange).toHaveBeenLastCalledWith(null));

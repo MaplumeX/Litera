@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useReducer, useRef } from "react";
 import { embeddedAgentRuntime } from "@/agent/runtime/embedded-runtime";
 import { agentReducer, createAgentState } from "@/lib/agent-reducer";
-import type { AgentMessage, GuideSelection, GuideStep, SessionKind } from "@/types/agent";
+import type { AgentMessage, GuideRequest, GuideSelection, GuideStep, SessionKind } from "@/types/agent";
 
 function id(prefix: string): string {
   return `${prefix}-${crypto.randomUUID()}`;
@@ -43,13 +43,8 @@ export function useAgentBridge(bookId: string) {
         pendingEditRef.current = null;
       }
       if (event.type === "prompt_end" || event.type === "prompt_aborted") {
-        // A step the assistant asked for goes out once the history is restored,
-        // so the restore cannot land on top of the step's own prompt.
-        const guideStep = event.type === "prompt_end" ? event.guideStep : undefined;
-        const sessionId = event.sessionId;
-        void embeddedAgentRuntime.switchSession(sessionId)
-          .then(() => { if (guideStep) dispatch({ type: "guide_step_requested", sessionId, step: guideStep }); })
-          .catch((error) => console.error("restore session history error:", error));
+        void embeddedAgentRuntime.switchSession(event.sessionId).catch((error) =>
+          console.error("restore session history error:", error));
         void listSessions().catch((error) => console.error("refresh sessions error:", error));
       } else if (event.type === "book_ready") {
         void listSessions().catch((error) => console.error("book ready sessions error:", error));
@@ -78,7 +73,7 @@ export function useAgentBridge(bookId: string) {
 
   const prompt = useCallback(async (
     text: string,
-    context: { selection?: string; chapterHref?: string; guide?: GuideStep },
+    context: { selection?: string; chapterHref?: string; guideRequest?: GuideRequest },
     message: AgentMessage,
   ) => {
     const currentBookId = bookIdRef.current;
@@ -100,7 +95,7 @@ export function useAgentBridge(bookId: string) {
   const editPrompt = useCallback(async (
     messageIndex: number,
     text: string,
-    context: { selection?: string; chapterHref?: string; guide?: GuideStep },
+    context: { selection?: string; chapterHref?: string; guideRequest?: GuideRequest },
     message: AgentMessage,
   ) => {
     const currentBookId = bookIdRef.current;

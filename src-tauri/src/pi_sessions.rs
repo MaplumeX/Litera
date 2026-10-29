@@ -820,8 +820,9 @@ fn latest_on_branch<'a>(
     None
 }
 
-/// The `guide` field of the latest guided step (a user message entry carrying
-/// one) on the branch ending at `leaf_id`.
+/// The `guide` field of the latest guided step (a message entry carrying one:
+/// a `guide_step` tool result, or a user message in older sessions) on the
+/// branch ending at `leaf_id`.
 fn latest_guide_on_branch<'a>(entries: &'a [Value], leaf_id: Option<&str>) -> Option<&'a Value> {
     let by_id: HashMap<&str, &Value> = entries
         .iter()

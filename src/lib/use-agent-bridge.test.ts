@@ -41,21 +41,6 @@ describe("useAgentBridge", () => {
     await waitFor(() => expect(runtime.listSessions).toHaveBeenCalled());
   });
 
-  it("hands an asked guided step over only after the history is restored", async () => {
-    let restore: (() => void) | undefined;
-    runtime.switchSession.mockImplementationOnce(() => new Promise<void>((resolve) => {
-      restore = () => { runtime.emit(event({ version: 3, type: "session_switched", bookId: "book-a", sessionId: "s", messages: [] })); resolve(); };
-    }));
-    const { result } = renderHook(() => useAgentBridge("book-a"));
-    act(() => runtime.emit(event({ type: "book_ready", bookId: "book-a" })));
-    const step = { chapterIndex: 2, part: 0, totalParts: 1 };
-    act(() => runtime.emit(event({ version: 2, type: "prompt_end", bookId: "book-a", sessionId: "s", promptId: "p", guideStep: step })));
-    expect(runtime.switchSession).toHaveBeenCalledWith("s");
-    expect(result.current.state.requestedGuideStep).toBeNull();
-    act(() => restore!());
-    await waitFor(() => expect(result.current.state.requestedGuideStep).toEqual({ sessionId: "s", step }));
-  });
-
   it("rejects prompts until the local book worker is ready", async () => {
     const { result } = renderHook(() => useAgentBridge("book-a"));
     await expect(result.current.prompt("hello", {}, { role: "user", content: "hello" }))

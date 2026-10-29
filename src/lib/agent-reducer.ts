@@ -7,7 +7,6 @@ import type {
   AnchorBranchInfo,
   AssistantBlock,
   AssistantChatMessage,
-  GuideStep,
 } from "@/types/agent";
 import { t } from "@/lib/i18n";
 
@@ -30,11 +29,6 @@ export interface AgentState {
   branchNavigation: Record<string, AnchorBranchInfo>;
   /** Anchor entry ids, index-aligned with `messages` (visibleMessageEntries). */
   branchAnchors: string[];
-  /**
-   * A guided step the assistant asked for (`guide_step`) in this Session,
-   * waiting to be sent like a Continue. Cleared by the next prompt.
-   */
-  requestedGuideStep: { sessionId: string; step: GuideStep } | null;
 }
 
 export type AgentAction =
@@ -44,7 +38,6 @@ export type AgentAction =
   | { type: "prompt_queued"; bookId: string; promptId: string }
   | { type: "prompt_queue_failed"; promptId: string; message: string }
   | { type: "user_message"; message: AgentMessage }
-  | { type: "guide_step_requested"; sessionId: string; step: GuideStep }
   | { type: "clear_error" };
 
 export function createAgentState(bookId: string | null = null): AgentState {
@@ -61,7 +54,6 @@ export function createAgentState(bookId: string | null = null): AgentState {
     sessionListRequestId: null,
     branchNavigation: {},
     branchAnchors: [],
-    requestedGuideStep: null,
   };
 }
 
@@ -274,7 +266,6 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
         ? {
             ...base,
             sessionId: event.sessionId,
-            requestedGuideStep: null,
             messages: base.promptId ? base.messages : [],
             branchNavigation: base.promptId ? base.branchNavigation : {},
             branchAnchors: base.promptId ? base.branchAnchors : [],
@@ -290,7 +281,7 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
         : base;
     case "session_switched":
       return matchesBook(base, event.bookId)
-        ? applyNavigation({ ...base, sessionId: event.sessionId, promptId: null, messages: event.messages, status: "bookReady", error: null, compaction: null, requestedGuideStep: base.requestedGuideStep?.sessionId === event.sessionId ? base.requestedGuideStep : null }, event)
+        ? applyNavigation({ ...base, sessionId: event.sessionId, promptId: null, messages: event.messages, status: "bookReady", error: null, compaction: null }, event)
         : base;
     case "branch_switched":
       if (!matchesBook(base, event.bookId)) return base;
@@ -394,11 +385,8 @@ export function agentReducer(state: AgentState, action: AgentAction): AgentState
         status: "prompting",
         promptId: action.promptId,
         error: null,
-        requestedGuideStep: null,
         compaction: state.compaction?.status === "failed" ? null : state.compaction,
       };
-    case "guide_step_requested":
-      return state.sessionId === action.sessionId ? { ...state, requestedGuideStep: { sessionId: action.sessionId, step: action.step } } : state;
     case "prompt_queue_failed":
       if (state.promptId !== action.promptId) return state;
       return {

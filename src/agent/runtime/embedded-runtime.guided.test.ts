@@ -26,7 +26,9 @@ function setup(kind?:SessionKind,guidedStyle:string|null=null,responses:Array<st
   return {runtime,batches,systemPrompts,requests,created,events,located,tools};
 }
 
-function guideStepResults(batches:PiSessionEntry[][]){return batches.flat().flatMap((entry)=>{const message=entry.type==="message"?entry.message as {role?:string;toolName?:string;isError?:boolean;content?:Array<{type?:string;text?:string}>}:undefined;return message?.role==="toolResult"&&message.toolName==="guide_step"?[{isError:message.isError===true,text:message.content?.find((block)=>block.type==="text")?.text??""}]:[];});}
+function guideStepResults(batches:PiSessionEntry[][]){return batches.flat().flatMap((entry)=>{const message=entry.type==="message"?entry.message as {role?:string;toolName?:string;isError?:boolean;content?:Array<{type?:string;text?:string}>}:undefined;return message?.role==="toolResult"&&message.toolName==="guide_step"?[{isError:message.isError===true,text:message.content?.find((block)=>block.type==="text")?.text??"",guide:entry.guide}]:[];});}
+const takeStep=(args:Record<string,unknown>={})=>fauxAssistantMessage(fauxToolCall("guide_step",args),{stopReason:"toolUse"});
+const readingContexts=(batches:PiSessionEntry[][])=>batches.flat().flatMap((entry)=>entry.type==="custom_message"&&entry.customType==="readingContext"?[String(entry.content)]:[]);
 
 describe("guide_step in the runtime",()=>{
   it("offers guide_step only in Guided sessions",async()=>{
@@ -42,58 +44,63 @@ describe("guide_step in the runtime",()=>{
     expect(guided.tools[0]).toContain("guide_step");
   });
 
-  it("hands the asked step to the UI on prompt_end, and the turn stays a side question",async()=>{
-    const {runtime,batches,events}=setup(undefined,null,[fauxAssistantMessage([fauxToolCall("guide_step",{chapterIndex:0,toBlock:2}),fauxToolCall("guide_step",{chapterIndex:1,toBlock:0})],{stopReason:"toolUse"}),"好，接下来带读第二章第 1 段。","title"]);
+  it("takes the asked step in the turn: tells the model what to read and records the step on the tool result",async()=>{
+    const {runtime,batches,events}=setup(undefined,null,[takeStep({chapterIndex:0,toBlock:2}),"retold","title"]);
     await runtime.openBook("book",new ArrayBuffer(1));
     await runtime.newSession(undefined,"guided");
-    await runtime.prompt("带读第二章第一段",{});
-    // A later call replaces an earlier one.
-    expect(events.find((event)=>event.type==="prompt_end")).toMatchObject({guideStep:{chapterIndex:1,range:{from:{chapterIndex:1,block:0},to:{chapterIndex:1,block:0}}}});
-    expect(guideStepResults(batches).map((result)=>result.isError)).toEqual([false,false]);
+    await runtime.prompt("带读第一章到第 3 段",{});
+    const [taken]=guideStepResults(batches);
+    expect(taken).toMatchObject({isError:false,guide:{chapterIndex:0,range:{from:{chapterIndex:0,block:0,snippet:"a"},to:{chapterIndex:0,block:2,snippet:"c"}}}});
+    expect(taken.text).toContain("chapterIndex 0, fromBlock 0, toBlock 1; chapterIndex 0, fromBlock 2, toBlock 2");
     const user=batches.flat().find((entry)=>entry.type==="message"&&(entry.message as {role?:string}).role==="user");
     expect(user).not.toHaveProperty("guide");
-    expect(await runtime.nextGuideStep()).toMatchObject({chapterIndex:0,part:0});
+    expect(events.find((event)=>event.type==="prompt_end")).not.toHaveProperty("guideStep");
+    expect(events.find((event)=>event.type==="prompt_end")).toMatchObject({messages:expect.arrayContaining([expect.objectContaining({role:"assistant",blocks:expect.arrayContaining([{type:"toolCall",toolCall:expect.objectContaining({tool:"guide_step",guide:expect.objectContaining({chapterIndex:0})})}])})])});
+    expect(await runtime.nextGuideStep()).toMatchObject({chapterIndex:0,range:{from:{block:3},to:{block:3}}});
   });
 
-  it("lets the model find a chapter and its paragraphs, then ask for the step",async()=>{
-    const {runtime,batches,events}=setup(undefined,null,[
+  it("takes consecutive steps when the model calls it more than once",async()=>{
+    const {runtime,batches}=setup(undefined,null,[fauxAssistantMessage([fauxToolCall("guide_step",{toBlock:1}),fauxToolCall("guide_step",{})],{stopReason:"toolUse"}),"retold","title"]);
+    await runtime.openBook("book",new ArrayBuffer(1));
+    await runtime.newSession(undefined,"guided");
+    await runtime.prompt("读完第一章",{});
+    expect(guideStepResults(batches).map((result)=>result.guide)).toEqual([
+      expect.objectContaining({chapterIndex:0,part:0}),
+      expect.objectContaining({chapterIndex:0,part:1}),
+    ]);
+    expect(await runtime.nextGuideStep()).toMatchObject({chapterIndex:1,part:0});
+  });
+
+  it("lets the model find a chapter and its paragraphs, then take the step",async()=>{
+    const {runtime,batches}=setup(undefined,null,[
       fauxAssistantMessage(fauxToolCall("get_toc",{}),{stopReason:"toolUse"}),
       fauxAssistantMessage(fauxToolCall("list_guide_blocks",{chapterIndex:1}),{stopReason:"toolUse"}),
-      fauxAssistantMessage(fauxToolCall("guide_step",{chapterIndex:1,toBlock:1}),{stopReason:"toolUse"}),
-      "好，接下来带读 Two 的第 1-2 段。","title",
+      takeStep({chapterIndex:1,toBlock:1}),
+      "Two 的前两段讲的是……","title",
     ]);
     await runtime.openBook("book",new ArrayBuffer(1));
     await runtime.newSession(undefined,"guided");
     await runtime.prompt("带读 Two 的前两段",{});
     expect(JSON.parse(batches.flat().flatMap((entry)=>{const message=entry.type==="message"?entry.message as {role?:string;toolName?:string;content?:Array<{type?:string;text?:string}>}:undefined;return message?.role==="toolResult"&&message.toolName==="list_guide_blocks"?[message.content?.[0]?.text??""]:[];})[0])).toMatchObject({chapterIndex:1,totalBlocks:2,blocks:[{block:0,snippet:"e"},{block:1,snippet:"f"}]});
-    expect(events.find((event)=>event.type==="prompt_end")).toMatchObject({guideStep:{chapterIndex:1,part:0}});
+    expect(guideStepResults(batches)[0].guide).toMatchObject({chapterIndex:1,part:0});
   });
 
   it("starts at the Guide cursor without a chapter",async()=>{
-    const {runtime,events}=setup(undefined,null,["retelling","title",fauxAssistantMessage(fauxToolCall("guide_step",{toBlock:3}),{stopReason:"toolUse"}),"好。"]);
+    const {runtime,batches}=setup(undefined,null,[takeStep(),"retelling","title",takeStep({toBlock:3}),"好。"]);
     await runtime.openBook("book",new ArrayBuffer(1));
     await runtime.newSession(undefined,"guided");
-    await runtime.prompt("step",{guide:{chapterIndex:0,part:0,totalParts:2}});
+    await runtime.prompt("继续带读",{guideRequest:{}});
     await runtime.prompt("读完这一章",{});
-    expect(events.filter((event)=>event.type==="prompt_end").at(-1)).toMatchObject({guideStep:{chapterIndex:0,part:1}});
+    expect(guideStepResults(batches).map((result)=>result.guide)).toEqual([expect.objectContaining({chapterIndex:0,part:0}),expect.objectContaining({chapterIndex:0,part:1})]);
   });
 
-  it("returns an error the model can act on, and hands no step to the UI",async()=>{
-    const {runtime,batches,events}=setup(undefined,null,[fauxAssistantMessage(fauxToolCall("guide_step",{chapterIndex:9}),{stopReason:"toolUse"}),"没有这一章。","title"]);
+  it("returns an error the model can act on, and takes no step",async()=>{
+    const {runtime,batches}=setup(undefined,null,[takeStep({chapterIndex:9}),"没有这一章。","title"]);
     await runtime.openBook("book",new ArrayBuffer(1));
     await runtime.newSession(undefined,"guided");
     await runtime.prompt("带读第十章",{});
-    expect(guideStepResults(batches)[0]).toMatchObject({isError:true,text:expect.stringContaining("No chapter with chapterIndex 9")});
-    expect(events.find((event)=>event.type==="prompt_end")).not.toHaveProperty("guideStep");
-  });
-
-  it("hands no step to the UI when the turn is aborted",async()=>{
-    const {runtime,events}=setup(undefined,null,[fauxAssistantMessage(fauxToolCall("guide_step",{chapterIndex:1}),{stopReason:"toolUse"}),fauxAssistantMessage("",{stopReason:"aborted"})]);
-    await runtime.openBook("book",new ArrayBuffer(1));
-    await runtime.newSession(undefined,"guided");
-    await runtime.prompt("带读第二章",{});
-    expect(events.some((event)=>event.type==="prompt_end")).toBe(false);
-    expect(events.some((event)=>event.type==="prompt_aborted")).toBe(true);
+    expect(guideStepResults(batches)[0]).toMatchObject({isError:true,text:expect.stringContaining("No chapter with chapterIndex 9"),guide:undefined});
+    expect(await runtime.nextGuideStep()).toMatchObject({chapterIndex:0,part:0});
   });
 });
 
@@ -106,52 +113,70 @@ describe("Guided sessions in the runtime",()=>{
     expect(events.find((event)=>event.type==="session_created")).toMatchObject({kind:"guided"});
   });
 
-  it("walks the guide cursor through parts and chapters, starting from the given chapter",async()=>{
-    const {runtime}=setup();
+  it("walks the guide cursor through the steps the model takes, starting from the given chapter",async()=>{
+    const {runtime}=setup(undefined,null,[takeStep(),"retold","title","side answer"]);
     await runtime.openBook("book",new ArrayBuffer(1));
     expect(await runtime.nextGuideStep()).toBeNull();// no Guided session open
     await runtime.newSession(undefined,"guided");
     expect(await runtime.nextGuideStep("two.xhtml")).toMatchObject({chapterIndex:1,part:0});
-    const first=await runtime.nextGuideStep();
-    expect(first).toEqual({chapterIndex:0,part:0,totalParts:2,chapterTitle:"One"});
-    await runtime.prompt("Guided reading: One (part 1/2)",{guide:first!});
+    expect(await runtime.nextGuideStep()).toEqual({chapterIndex:0,part:0,totalParts:2,chapterTitle:"One"});
+    await runtime.prompt("继续带读",{guideRequest:{}});
     expect(await runtime.nextGuideStep("two.xhtml")).toMatchObject({chapterIndex:0,part:1});
     await runtime.prompt("side question",{});
     expect(await runtime.nextGuideStep()).toMatchObject({chapterIndex:0,part:1});
   });
 
-  it("sends a guided step with the guided style, the step's own context and the guide on the entry",async()=>{
-    const {runtime,batches,systemPrompts}=setup();
+  it("sends every message with the reading state, and a picked step with its exact call",async()=>{
+    const {runtime,batches,systemPrompts}=setup(undefined,null,["side answer","title",takeStep({chapterIndex:1}),"retold"]);
     await runtime.openBook("book",new ArrayBuffer(1));
     await runtime.newSession(undefined,"guided");
-    await runtime.prompt("Guided reading: One (part 2/2)",{guide:{chapterIndex:0,part:1,totalParts:7}});
+    await runtime.prompt("who is the author?",{chapterHref:"two.xhtml",selection:"e"});
     expect(systemPrompts[0]).toBe(`${SYSTEM_PROMPT}\n\n${GUIDED_PROMPT}`);
-    const entries=batches[0];
-    const context=entries.find((entry)=>entry.type==="custom_message"&&entry.customType==="readingContext");
-    expect(context?.content).toContain("Call read_chapter with chapterIndex 0 and part 1");
-    // The step is normalized against the open Book.
-    expect(entries.at(-1)).toMatchObject({type:"message",guide:{chapterIndex:0,part:1,totalParts:2,chapterTitle:"One"}});
+    const [side]=readingContexts(batches);
+    expect(side).toContain("Guided reading state: The guide has not started yet.");
+    expect(side).toContain("Selected text: e");
+    await runtime.prompt("带读：Two",{guideRequest:{step:{chapterIndex:1,part:0,totalParts:1}},chapterHref:"two.xhtml"});
+    const picked=readingContexts(batches)[1];
+    expect(picked).toContain('Take it with guide_step {"chapterIndex":1}');
+    expect(picked).not.toContain("Reading");
+    // The request is not a step; the model's call is.
+    const user=batches.flat().filter((entry)=>entry.type==="message"&&(entry.message as {role?:string}).role==="user").at(-1);
+    expect(user).toMatchObject({guideRequest:{step:{chapterIndex:1}}});
+    expect(user).not.toHaveProperty("guide");
+    expect(guideStepResults(batches)[0].guide).toMatchObject({chapterIndex:1,part:0});
   });
 
-  it("sends a range step with its exact reads and records the snippets of its ends",async()=>{
-    const {runtime,batches}=setup();
+  it("leaves Continue's end to the model",async()=>{
+    const {runtime,batches}=setup(undefined,null,[takeStep(),"retold","title",takeStep({toChapterIndex:1}),"retold"]);
     await runtime.openBook("book",new ArrayBuffer(1));
     await runtime.newSession(undefined,"guided");
-    await runtime.prompt("step",{guide:{chapterIndex:0,part:0,totalParts:2,range:{from:{chapterIndex:0,block:1},to:{chapterIndex:1,block:0}}}});
-    const entries=batches[0];
-    const context=entries.find((entry)=>entry.type==="custom_message"&&entry.customType==="readingContext");
-    expect(context?.content).toContain("chapterIndex 0, fromBlock 1, toBlock 1; chapterIndex 0, fromBlock 2, toBlock 3; chapterIndex 1, fromBlock 0, toBlock 0");
-    expect(entries.at(-1)).toMatchObject({type:"message",guide:{range:{from:{chapterIndex:0,block:1,snippet:"b"},to:{chapterIndex:1,block:0,snippet:"e"}}}});
+    await runtime.prompt("继续带读",{guideRequest:{}});
+    await runtime.prompt("继续带读",{guideRequest:{}});
+    const continued=readingContexts(batches)[1];
+    expect(continued).toContain("The guide has reached chapterIndex 0 (\"One\"), block 1 of 0 to 3.");
+    expect(continued).toContain("The default next step: chapterIndex 0 (\"One\"), part 1 of 0 to 1 (blocks 2 to 3).");
+    expect(continued).toContain("The reader pressed Continue");
+    expect(guideStepResults(batches)[1].guide).toMatchObject({chapterIndex:0,part:1,range:{to:{chapterIndex:1,block:1}}});
+  });
+
+  it("takes a range step across chapters and records the snippets of its ends",async()=>{
+    const {runtime,batches}=setup(undefined,null,[takeStep({toChapterIndex:1,toBlock:0}),"retold","title"]);
+    await runtime.openBook("book",new ArrayBuffer(1));
+    await runtime.newSession(undefined,"guided");
+    await runtime.prompt("step",{});
+    const [taken]=guideStepResults(batches);
+    expect(taken.text).toContain("chapterIndex 0, fromBlock 0, toBlock 1; chapterIndex 0, fromBlock 2, toBlock 3; chapterIndex 1, fromBlock 0, toBlock 0");
+    expect(taken.guide).toMatchObject({range:{from:{chapterIndex:0,block:0,snippet:"a"},to:{chapterIndex:1,block:0,snippet:"e"}}});
     expect(await runtime.nextGuideStep()).toMatchObject({chapterIndex:1,range:{from:{block:1},to:{block:1}}});
   });
 
   it("finds a recorded range's blocks again by their snippets when the blocks shifted",async()=>{
     const shifting={0:["a","b","c","d"],1:["e","f"]};
-    const {runtime}=setup(undefined,null,undefined,shifting);
+    const {runtime}=setup(undefined,null,[takeStep({toBlock:0}),"retold","title"],shifting);
     await runtime.openBook("book",new ArrayBuffer(1));
     await runtime.newSession(undefined,"guided");
     const sessionId=(await runtime.listSessions())?.[0]?.id??"session-1";
-    await runtime.prompt("step",{guide:{chapterIndex:0,part:0,totalParts:2,range:{from:{chapterIndex:0,block:0},to:{chapterIndex:0,block:0}}}});
+    await runtime.prompt("step",{});
     // A block now comes before "a": the step's end is block 1, not 0.
     shifting[0]=["new","a","b","c"];
     await runtime.openBook("book",new ArrayBuffer(1));
@@ -207,13 +232,15 @@ describe("Guided sessions in the runtime",()=>{
     });
   });
 
-  it("refuses guided steps outside a Guided session or the Book",async()=>{
+  it("refuses guide requests outside a Guided session, the Book, or the cursor's reach",async()=>{
     const {runtime,batches,systemPrompts}=setup();
     await runtime.openBook("book",new ArrayBuffer(1));
     await runtime.newSession();
-    await expect(runtime.prompt("step",{guide:{chapterIndex:0,part:0,totalParts:2}})).rejects.toThrow();
+    await expect(runtime.prompt("step",{guideRequest:{}})).rejects.toThrow();
     await runtime.newSession(undefined,"guided");
-    await expect(runtime.prompt("step",{guide:{chapterIndex:5,part:0,totalParts:1}})).rejects.toThrow();
+    await expect(runtime.prompt("step",{guideRequest:{step:{chapterIndex:5,part:0,totalParts:1}}})).rejects.toThrow();
+    // Mid-chapter, away from the cursor: no guide_step call can take it.
+    await expect(runtime.prompt("step",{guideRequest:{step:{chapterIndex:0,part:1,totalParts:2}}})).rejects.toThrow();
     expect(batches).toEqual([]);
     expect(systemPrompts).toEqual([]);
   });
@@ -222,21 +249,21 @@ describe("Guided sessions in the runtime",()=>{
     const {runtime,systemPrompts}=setup(undefined,"Use a table for every part.");
     await runtime.openBook("book",new ArrayBuffer(1));
     await runtime.newSession(undefined,"guided");
-    await runtime.prompt("step",{guide:{chapterIndex:0,part:0,totalParts:2}});
+    await runtime.prompt("question",{});
     expect(systemPrompts[0]).toBe(`${SYSTEM_PROMPT}\n\n${guidedPrompt("Use a table for every part.")}`);
     expect(systemPrompts[0]).toContain("Continue button");
     expect(systemPrompts[0]).not.toContain("Cover the part completely");
   });
 
   it("writes a recap once the guide finishes a chapter and keeps it in the next step's context",async()=>{
-    const {runtime,batches,requests,events}=setup(undefined,null,["part one retold","title","part two retold","The chapter in short.","chapter two retold"]);
+    const {runtime,batches,requests,events}=setup(undefined,null,[takeStep(),"part one retold","title",takeStep(),"part two retold","The chapter in short.",takeStep(),"chapter two retold"]);
     await runtime.openBook("book",new ArrayBuffer(1));
     await runtime.newSession(undefined,"guided");
-    await runtime.prompt("Guided reading: One (part 1/2)",{guide:{chapterIndex:0,part:0,totalParts:2}});
+    await runtime.prompt("继续带读",{guideRequest:{}});
     await new Promise((resolve)=>setTimeout(resolve,20));// flush the fire-and-forget title task
     await runtime.settled();
     expect(batches.flat().some((entry)=>entry.customType==="guideRecap")).toBe(false);
-    await runtime.prompt("Guided reading: One (part 2/2)",{guide:{chapterIndex:0,part:1,totalParts:2}});
+    await runtime.prompt("继续带读",{guideRequest:{}});
     await runtime.settled();
     const recapRequest=requests.at(-1)!;
     expect(recapRequest).toContain("part one retold");
@@ -244,18 +271,18 @@ describe("Guided sessions in the runtime",()=>{
     const recap=batches.at(-1)![0];
     expect(recap).toMatchObject({type:"custom_message",customType:"guideRecap",details:{chapterIndex:0,chapterTitle:"One",text:"The chapter in short."}});
     expect(events.find((event)=>event.type==="guide_recap_added")).toMatchObject({messages:expect.arrayContaining([{role:"recap",chapterIndex:0,chapterTitle:"One",text:"The chapter in short."}])});
-    await runtime.prompt("Guided reading: Two",{guide:{chapterIndex:1,part:0,totalParts:1}});
+    await runtime.prompt("继续带读",{guideRequest:{}});
     expect(requests.at(-1)).toContain("Chapter recap (chapterIndex 0");
   });
 
   it("writes one recap for the chapters one step finished",async()=>{
-    const {runtime,batches,requests,events}=setup(undefined,null,["one retold","title","rest retold","Both chapters in short."]);
+    const {runtime,batches,requests,events}=setup(undefined,null,[takeStep(),"one retold","title",takeStep({toChapterIndex:1}),"rest retold","Both chapters in short."]);
     await runtime.openBook("book",new ArrayBuffer(1));
     await runtime.newSession(undefined,"guided");
-    await runtime.prompt("step one",{guide:{chapterIndex:0,part:0,totalParts:2}});
+    await runtime.prompt("step one",{guideRequest:{}});
     await new Promise((resolve)=>setTimeout(resolve,20));
     await runtime.settled();
-    await runtime.prompt("step two",{guide:{chapterIndex:0,part:1,totalParts:2,range:{from:{chapterIndex:0,block:2},to:{chapterIndex:1,block:1}}}});
+    await runtime.prompt("step two",{});
     await runtime.settled();
     const recapRequest=requests.at(-1)!;
     expect(recapRequest).toContain("one retold");

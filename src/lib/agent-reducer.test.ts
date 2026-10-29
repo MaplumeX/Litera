@@ -15,21 +15,6 @@ describe("agentReducer", () => {
     expect(state.sessions.map((session) => session.id)).toEqual(["b"]);
   });
 
-  it("keeps an asked guided step for its Session until the next prompt", () => {
-    const step = { chapterIndex: 2, part: 0, totalParts: 1 };
-    let state: AgentState = { ...createAgentState("book-a"), status: "bookReady", sessionId: "s" };
-    state = agentReducer(state, { type: "guide_step_requested", sessionId: "other", step });
-    expect(state.requestedGuideStep).toBeNull();
-    state = agentReducer(state, { type: "guide_step_requested", sessionId: "s", step });
-    expect(state.requestedGuideStep).toEqual({ sessionId: "s", step });
-    state = reduce(state, { version: 1, type: "session_switched", bookId: "book-a", sessionId: "s", messages: [] });
-    expect(state.requestedGuideStep).toEqual({ sessionId: "s", step });
-    state = agentReducer(state, { type: "prompt_queued", bookId: "book-a", promptId: "p" });
-    expect(state.requestedGuideStep).toBeNull();
-    state = agentReducer({ ...state, requestedGuideStep: { sessionId: "s", step } }, { type: "event", event: { version: 2, type: "session_switched", bookId: "book-a", sessionId: "t", messages: [] } });
-    expect(state.requestedGuideStep).toBeNull();
-  });
-
   it("rejects stale prompt deltas after a book switch", () => {
     let state = createAgentState("book-a");
     state = reduce(state, { version: 1, type: "prompt_started", bookId: "book-a", sessionId: "s", promptId: "p" });

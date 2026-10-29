@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { BookTocEntry } from "@/agent/book/book-content";
 import type { GuidePosition, GuideStep } from "@/types/agent";
-import { dueRecap, findGuideBlock, guideBlockPage, guidedPrompt, guidePageMarkPlan, recappedChapters, guideOutlinePlan, guideStepContext, guideStepTo, guideTocProgress, nextGuideStep, requestedGuideStep, resolveGuideStep, skimGuideStep, skipChapterStep, stepChapters } from "./guide";
+import { dueRecap, findGuideBlock, guideBlockPage, guidedPrompt, guideReadingState, guideRequestContext, guideStepRequestFor, guidePageMarkPlan, recappedChapters, guideOutlinePlan, guideStepContext, guideStepTo, guideTocProgress, nextGuideStep, requestedGuideStep, resolveGuideStep, skimGuideStep, skipChapterStep, stepChapters } from "./guide";
 
 // Every part holds three blocks.
 const chapter = (index: number, parts: number, chars = 1000, label = `Chapter ${index + 1}`): BookTocEntry => ({
@@ -91,7 +91,8 @@ describe("skims and skips", () => {
     expect(step).toMatchObject({ skim: true, part: 1 });
     const text = guideStepContext(toc, step!);
     expect(text).toContain("skim");
-    expect(text).toContain("parts 1, 2");
+    expect(text).toContain("parts 1 to 2");
+    expect(text).toContain("chapterIndex 2, part 1; chapterIndex 2, part 2");
   });
 });
 
@@ -415,16 +416,67 @@ describe("requestedGuideStep", () => {
 });
 
 describe("guidedPrompt", () => {
-  it("tells the model to start asked-for steps with guide_step, not to retell them itself", () => {
+  it("makes guide_step the one way the guide moves on, and leaves its rules to the tool", () => {
     const prompt = guidedPrompt();
-    expect(prompt).toContain("call guide_step instead of retelling it yourself");
-    expect(prompt).toContain("list_guide_blocks");
-    expect(prompt).toContain("not by counting");
-    expect(prompt).toContain("cannot start mid-chapter");
-    expect(prompt).toContain("ask instead of guessing");
+    expect(prompt).toContain("guide_step is how the guide moves on");
+    expect(prompt).toContain("reading state");
+    expect(prompt).not.toContain("side question");
+    expect(prompt).not.toContain("mid-chapter");
+    expect(prompt).not.toContain("list_guide_blocks");
   });
 
   it("keeps the mechanics when the reader's style replaces the default", () => {
-    expect(guidedPrompt("Use a table.")).toContain("call guide_step");
+    const prompt = guidedPrompt("Use a table.");
+    expect(prompt).toContain("guide_step is how the guide moves on");
+    expect(prompt).toContain("Use a table.");
+    expect(prompt).not.toContain("Cover the part completely");
+  });
+});
+
+describe("guideReadingState", () => {
+  it("says where the guide is and what Continue would read", () => {
+    const cursor: GuideStep = { chapterIndex: 2, part: 0, totalParts: 3 };
+    const text = guideReadingState(toc, cursor, nextGuideStep(toc, cursor));
+    expect(text).toContain("reached chapterIndex 2 (\"Chapter 3\"), block 2 of 0 to 8");
+    expect(text).toContain("default next step: chapterIndex 2 (\"Chapter 3\"), part 1 of 0 to 2 (blocks 3 to 5)");
+  });
+
+  it("says when the guide has not started or has reached the end", () => {
+    expect(guideReadingState(toc, null, nextGuideStep(toc, null))).toContain("has not started yet");
+    expect(guideReadingState(toc, { chapterIndex: 3, part: 0, totalParts: 1 }, null)).toContain("end of the book");
+  });
+});
+
+describe("guideStepRequestFor", () => {
+  const cursor: GuideStep = { chapterIndex: 2, part: 0, totalParts: 3 };
+  // Whatever the reader picked, the guide_step call it maps to takes that same step.
+  const roundTrip = (step: GuideStep, from: GuideStep | null = cursor) => {
+    const request = guideStepRequestFor(toc, from, step);
+    expect(request).not.toBeNull();
+    const taken = requestedGuideStep(toc, from, request!);
+    expect(taken).toEqual({ step: resolveGuideStep(toc, step) });
+    return request;
+  };
+
+  it("leaves the start out when the step goes on from the cursor", () => {
+    expect(roundTrip(nextGuideStep(toc, cursor)!)).toEqual({});
+    expect(roundTrip(skimGuideStep(toc, nextGuideStep(toc, cursor)!)!)).toEqual({ skim: true });
+    expect(roundTrip(guideStepTo(toc, nextGuideStep(toc, cursor)!, { chapterIndex: 3, block: 1 })!)).toEqual({ toChapterIndex: 3, toBlock: 1 });
+  });
+
+  it("names the chapter of a step picked elsewhere, as the TOC or skipping picks it", () => {
+    expect(roundTrip(nextGuideStep(toc, null, 3)!)).toEqual({ chapterIndex: 3 });
+    expect(roundTrip(skipChapterStep(toc, nextGuideStep(toc, cursor)!)!)).toEqual({ chapterIndex: 3 });
+    expect(roundTrip(nextGuideStep(toc, null, 2)!, null)).toEqual({ chapterIndex: 2 });
+  });
+
+  it("refuses a step no call can take: mid-chapter, away from the cursor", () => {
+    expect(guideStepRequestFor(toc, cursor, ranged(at(2, 5), at(2, 6)))).toBeNull();
+    expect(guideRequestContext(toc, cursor, ranged(at(2, 5), at(2, 6)))).toBeNull();
+  });
+
+  it("tells the model the exact call for a picked step, and leaves Continue's end to it", () => {
+    expect(guideRequestContext(toc, cursor, nextGuideStep(toc, null, 3)!)).toContain('guide_step {"chapterIndex":3}');
+    expect(guideRequestContext(toc, cursor)).toContain("natural break");
   });
 });

@@ -1,14 +1,12 @@
 import type { ReactNode } from "react";
 import { BookOpen, FastForward } from "lucide-react";
-import type { GuideStep } from "@/types/agent";
 
 /**
- * Transcript marker for a guided step: where a step of a Guided session
- * starts, and what it reads. The reader did not type it (Continue, the
- * picker or the assistant sent it), so it is not shown as their message.
+ * Transcript marker for Continue or a picked guided step: where the reader
+ * moved the guide on. They did not type it, so it is not shown as their message.
  */
-export function GuideStepMarker({ label, step, branchSwitcher }: { label: string; step: GuideStep; branchSwitcher?: ReactNode }) {
-  const Icon = step.skim ? FastForward : BookOpen;
+export function GuideStepMarker({ label, skim, branchSwitcher }: { label: string; skim?: boolean; branchSwitcher?: ReactNode }) {
+  const Icon = skim ? FastForward : BookOpen;
   return (
     <div data-testid="guide-step" className="flex items-center gap-2 py-1 text-xs text-muted-foreground">
       <span className="h-px flex-1 bg-border" aria-hidden />

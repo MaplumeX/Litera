@@ -33,6 +33,7 @@ import {
 } from "@/lib/answer-process";
 import { CitationContext } from "./Citation";
 import { ToolCallRaw, paramsSummary } from "./ToolCallCard";
+import { guideStepLabel } from "./GuideBar";
 
 type T = ReturnType<typeof useT>["t"];
 
@@ -344,7 +345,7 @@ function OtherToolStep({ call }: { call: AgentToolCall }) {
       calls={[call]}
       icon={lookup.icon}
       title={t(lookup.title)}
-      meta={call.tool === "view_image" ? imageName(call) : count === undefined ? undefined : t("chat.process.annotationCount", { count })}
+      meta={call.tool === "view_image" ? imageName(call) : call.guide ? guideStepLabel(call.guide) : count === undefined ? undefined : t("chat.process.annotationCount", { count })}
     />
   );
 }

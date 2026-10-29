@@ -9,6 +9,7 @@ import type {
   BranchOption,
   GuidePosition,
   GuideRecapMarker,
+  GuideRequest,
   GuideStep,
   SessionKind,
 } from "@/types/agent";
@@ -68,6 +69,14 @@ function decodeGuidePosition(value: unknown): GuidePosition | null {
     ...(snippet ? { snippet } : {}),
     ...(nonNegativeInteger(position.paragraph) ? { paragraph: position.paragraph } : {}),
   };
+}
+
+/** A persisted guide request (an object, with an optional step), or null when absent or malformed. */
+function decodeGuideRequest(value: unknown): GuideRequest | null {
+  const request = object(value);
+  if (!request) return null;
+  const step = decodeGuide(request.step);
+  return step ? { step } : {};
 }
 
 /** A persisted guided step, or null when absent or malformed. */
@@ -422,6 +431,7 @@ export function visibleMessages(session: DecodedPiSession): UiAgentMessage[] {
     if (!message) continue;
     if (message.role === "toolResult" && typeof message.toolCallId === "string") {
       const owner = toolOwners.get(message.toolCallId);
+      const guide = decodeGuide(entry.guide);
       if (owner) {
         const ownerMessage = output[owner.messageIndex];
         const block = ownerMessage?.role === "assistant" ? ownerMessage.blocks?.[owner.blockIndex] : undefined;
@@ -430,6 +440,7 @@ export function visibleMessages(session: DecodedPiSession): UiAgentMessage[] {
             ...block.toolCall,
             result: contentText(message.content),
             ...(message.isError === true ? { isError: true } : {}),
+            ...(guide ? { guide } : {}),
           };
         }
       }
@@ -443,7 +454,8 @@ export function visibleMessages(session: DecodedPiSession): UiAgentMessage[] {
       const selection = string(entry.selection) ?? undefined;
       const chapterHref = string(entry.chapterHref) ?? undefined;
       const guide = decodeGuide(entry.guide);
-      output.push({ role: "user", content: contentText(message.content), ...(selection ? { selection } : {}), ...(chapterHref ? { chapterHref } : {}), ...(guide ? { guide } : {}) });
+      const guideRequest = decodeGuideRequest(entry.guideRequest);
+      output.push({ role: "user", content: contentText(message.content), ...(selection ? { selection } : {}), ...(chapterHref ? { chapterHref } : {}), ...(guide ? { guide } : {}), ...(guideRequest ? { guideRequest } : {}) });
       continue;
     }
     const stopReason = message.stopReason === "aborted" || message.stopReason === "error" ? message.stopReason : undefined;
@@ -654,7 +666,7 @@ export function sessionSummary(value: unknown): AgentSessionSummary {
   return summary;
 }
 
-/** The guide cursor: the latest guided step on the active branch. */
+/** The guide cursor: the latest guided step on the active branch (on a `guide_step` result, or a user message in older Sessions). */
 export function guideCursor(session: DecodedPiSession): GuideStep | null {
   const branch = activeBranch(session);
   for (let index = branch.length - 1; index >= 0; index -= 1) {
@@ -668,18 +680,20 @@ export function guideCursor(session: DecodedPiSession): GuideStep | null {
 
 /**
  * The guided steps on the active branch, oldest first, each with the text of
- * the answer that followed it (the assistant entries up to the next user
- * message). Side questions are left out.
+ * the explanation that followed it (the assistant entries up to the next step
+ * or user message). Side questions are left out.
  */
 export function guidedTurns(session: DecodedPiSession): Array<{ step: GuideStep; text: string }> {
   const turns: Array<{ step: GuideStep; text: string }> = [];
   let current: { step: GuideStep; text: string } | null = null;
   for (const entry of activeBranch(session)) {
     const role = messageRole(entry);
-    if (role === "user") {
-      const step = decodeGuide(entry.guide);
-      current = step ? { step, text: "" } : null;
-      if (current) turns.push(current);
+    const step = role ? decodeGuide(entry.guide) : null;
+    if (step) {
+      current = { step, text: "" };
+      turns.push(current);
+    } else if (role === "user") {
+      current = null;
     } else if (role === "assistant" && current) {
       current.text += contentText(object(entry.message)?.content);
     }
