@@ -55,6 +55,7 @@ describe("guide_step in the runtime",()=>{
     const user=batches.flat().find((entry)=>entry.type==="message"&&(entry.message as {role?:string}).role==="user");
     expect(user).not.toHaveProperty("guide");
     expect(events.find((event)=>event.type==="prompt_end")).not.toHaveProperty("guideStep");
+    expect(events.find((event)=>event.type==="tool_end")).toMatchObject({guide:{chapterIndex:0,range:{from:{block:0},to:{block:2}}}});
     expect(events.find((event)=>event.type==="prompt_end")).toMatchObject({messages:expect.arrayContaining([expect.objectContaining({role:"assistant",blocks:expect.arrayContaining([{type:"toolCall",toolCall:expect.objectContaining({tool:"guide_step",guide:expect.objectContaining({chapterIndex:0})})}])})])});
     expect(await runtime.nextGuideStep()).toMatchObject({chapterIndex:0,range:{from:{block:3},to:{block:3}}});
   });
@@ -105,6 +106,16 @@ describe("guide_step in the runtime",()=>{
 });
 
 describe("Guided sessions in the runtime",()=>{
+  it("finds a step's start for the Book pane: its first block with text to find, counted among those opening alike",async()=>{
+    const {runtime}=setup(undefined,null,[],{0:["a","Same opening","c","Same opening"],1:["Chapter two"]});
+    await runtime.openBook("book",new ArrayBuffer(1));
+    expect(await runtime.guideStepAnchor({chapterIndex:0,part:0,totalParts:2})).toEqual({chapterIndex:0,href:"one.xhtml",snippet:"Same opening",target:{hrefs:["one.xhtml"],key:"Sameopening",occurrence:0}});
+    expect(await runtime.guideStepAnchor({chapterIndex:0,part:1,totalParts:2})).toMatchObject({target:{key:"Sameopening",occurrence:1}});
+    const from={chapterIndex:0,block:3,snippet:"Same opening"};
+    expect(await runtime.guideStepAnchor({chapterIndex:0,part:1,totalParts:2,range:{from,to:from}})).toMatchObject({target:{occurrence:1}});
+    expect(await runtime.guideStepAnchor({chapterIndex:5,part:0,totalParts:1})).toBeNull();
+  });
+
   it("creates a Guided session and announces its kind",async()=>{
     const {runtime,created,events}=setup();
     await runtime.openBook("book",new ArrayBuffer(1));

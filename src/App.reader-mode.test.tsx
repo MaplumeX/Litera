@@ -577,7 +577,7 @@ describe("reader / agent mode", () => {
 
     expect(screen.getByTestId("reader-book-cell").hidden).toBe(false);
     await waitFor(() => {
-      expect(readerHandle.goToQuote).toHaveBeenCalledWith("Text/c.xhtml#s3", "“自由不是没有约束”");
+      expect(readerHandle.goToQuote).toHaveBeenCalledWith("Text/c.xhtml#s3", "“自由不是没有约束”", undefined);
     });
   });
 

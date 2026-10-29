@@ -31,6 +31,7 @@ A Guided session is driven by the runtime, not the model:
 | 01 | `guide_step` takes the step in the turn | resolved | — |
 | 02 | Continue and picks as messages with a reading state | resolved | 01 |
 | 03 | Guided prompt: rules move into the tools | resolved | 01 |
+| 04 | The transcript marks the steps taken, with a way to their start in the Book | resolved | 01, 02 |
 
 ## Out of Scope
 

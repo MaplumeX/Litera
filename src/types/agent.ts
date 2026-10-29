@@ -198,7 +198,8 @@ export type AgentEvent = EventEnvelope & (
   | ({ type: "thinking_delta"; delta: string; contentIndex: number } & PromptCorrelation)
   | ({ type: "thinking_end"; contentIndex: number } & PromptCorrelation)
   | ({ type: "tool_start"; toolCallId: string; tool: string; params: unknown } & PromptCorrelation)
-  | ({ type: "tool_end"; toolCallId: string; result: unknown; isError: boolean } & PromptCorrelation)
+  /** `guide`: the step a `guide_step` call took. */
+  | ({ type: "tool_end"; toolCallId: string; result: unknown; isError: boolean; guide?: GuideStep } & PromptCorrelation)
   // Context maintenance runs inside a prompt or in the background after one,
   // so compaction events correlate to the Session, not to a prompt.
   // `reason: "overflow"`: a request exceeded the context window and is retried after compaction.

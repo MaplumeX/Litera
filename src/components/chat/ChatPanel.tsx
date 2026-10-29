@@ -16,6 +16,7 @@ import { useAgentBridge } from "@/lib/use-agent-bridge";
 import { useAgentConfig } from "@/lib/use-agent-config";
 import { invokeErrorMessage } from "@/lib/app-error";
 import type { QuoteLocation } from "@/agent/book/book-content";
+import type { GuideBlockTarget } from "@/lib/guide-marks";
 import { CHATGPT_PROVIDER_ID, isCustomProviderId } from "@/types/agent-config";
 import { AgentConfigDialog } from "@/components/AgentConfigDialog";
 import { MessageBubble } from "./MessageBubble";
@@ -40,8 +41,15 @@ import {
   loadSessionRailWidth,
   saveSessionRailWidth,
 } from "@/lib/session-rail-width";
-import { isTranscriptMarker, takenGuideSteps, type GuideRequest, type GuideSelection, type GuideStep } from "@/types/agent";
+import { isTranscriptMarker, takenGuideSteps, type AgentToolCall, type AssistantChatMessage, type GuideRequest, type GuideSelection, type GuideStep } from "@/types/agent";
 import { chatActivity, type ChatActivity } from "@/lib/chat-activity";
+
+/** The `guide_step` calls of an assistant message that took a step, in order. */
+function guideCalls(message: AssistantChatMessage): Array<AgentToolCall & { guide: GuideStep }> {
+  return (message.blocks ?? []).flatMap((block) =>
+    block.type === "toolCall" && block.toolCall.guide ? [block.toolCall as AgentToolCall & { guide: GuideStep }] : [],
+  );
+}
 
 export interface ChatPanelHandle {
   fillInput: (text: string, chapterHref?: string) => void;
@@ -55,7 +63,8 @@ interface ChatPanelProps {
   chapterScope?: { label: string; href?: string } | null;
   onClearChapterScope?: () => void;
   /** Reveal a Citation's passage in the Book pane. */
-  onOpenQuote?: (location: QuoteLocation, quote: string) => void;
+  /** Reveal a quote in the Book pane; `block`, a guided step's start, to count to rather than search. */
+  onOpenQuote?: (location: QuoteLocation, quote: string, block?: GuideBlockTarget) => void;
   bookId: string;
   variant?: "docked" | "workspace";
   /** A Guided session's steps on the active branch, oldest first; null outside one. */
@@ -99,6 +108,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       guideStepTo,
       guideStepToSelection,
       guideStepAt,
+      guideStepAnchor,
       prompt,
       editPrompt,
       renameSession,
@@ -126,6 +136,15 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         openInBook: onOpenQuote,
       };
     }, [bookId, locateQuote, onOpenQuote]);
+    // A guided step's start: the Book pane counts its way to that paragraph.
+    const openGuideStep = useCallback(async (step: GuideStep) => {
+      if (!onOpenQuote) return false;
+      const anchor = await guideStepAnchor(step);
+      if (!anchor?.href) return false;
+      onOpenQuote({ status: "verified", chapterIndex: anchor.chapterIndex, href: anchor.href }, anchor.snippet, anchor.target);
+      return true;
+    }, [guideStepAnchor, onOpenQuote]);
+    const canOpenGuideStep = !!onOpenQuote;
     const [input, setInput] = useState("");
     const [pendingSelection, setPendingSelection] = useState<{
       text: string;
@@ -828,9 +847,17 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                       onNext={() => void handleSwitchBranch(info.options[info.activeIndex + 1].anchorId, 1)}
                     />
                   );
-                  // Continue or a picked step was sent for the reader, not typed: a marker, not their bubble.
-                  if (message.guide || message.guideRequest) {
-                    return <GuideStepMarker label={message.content} skim={!!(message.guide ?? message.guideRequest?.step)?.skim} branchSwitcher={branchSwitcher} />;
+                  // A step sent as the reader's message in older Sessions: the step itself, not their bubble.
+                  if (message.guide) {
+                    const step = message.guide;
+                    return (
+                      <GuideStepMarker
+                        label={message.content}
+                        skim={!!step.skim}
+                        branchSwitcher={branchSwitcher}
+                        onOpen={canOpenGuideStep ? () => openGuideStep(step) : undefined}
+                      />
+                    );
                   }
                   return (
                     <MessageBubble
@@ -846,6 +873,14 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                     />
                   );
                 })()}
+                {message.role === "assistant" && guideCalls(message).map((call) => (
+                  <GuideStepMarker
+                    key={call.toolCallId}
+                    label={guideStepLabel(call.guide)}
+                    skim={!!call.guide.skim}
+                    onOpen={canOpenGuideStep ? () => openGuideStep(call.guide) : undefined}
+                  />
+                ))}
                 {message.role === "assistant" && (
                   <AssistantMessage
                     message={message}

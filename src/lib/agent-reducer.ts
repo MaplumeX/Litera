@@ -227,6 +227,7 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
                     result: event.result,
                     done: true,
                     isError: event.isError,
+                    ...(event.guide ? { guide: event.guide } : {}),
                   },
                 }
               : block,

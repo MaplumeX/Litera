@@ -151,6 +151,7 @@ export function useAgentBridge(bookId: string) {
     [],
   );
   const guideStepAt = useCallback((href: string) => embeddedAgentRuntime.guideStepAt(href), []);
+  const guideStepAnchor = useCallback((step: GuideStep) => embeddedAgentRuntime.guideStepAnchor(step), []);
   const deleteSession = useCallback(async (sessionId: string) => {
     if (bookIdRef.current) await embeddedAgentRuntime.deleteSession(sessionId, id("delete-session"));
   }, []);
@@ -168,5 +169,5 @@ export function useAgentBridge(bookId: string) {
     [],
   );
 
-  return { state, prompt, editPrompt, abort, listSessions, newSession, nextGuideStep, guideStepAfterChapter, guideSkimStep, guideOutline, guideStepTo, guideStepToSelection, guideStepAt, switchSession, deleteSession, renameSession, updateSessionConfig, switchBranchAtAnchor, locateQuote };
+  return { state, prompt, editPrompt, abort, listSessions, newSession, nextGuideStep, guideStepAfterChapter, guideSkimStep, guideOutline, guideStepTo, guideStepToSelection, guideStepAt, guideStepAnchor, switchSession, deleteSession, renameSession, updateSessionConfig, switchBranchAtAnchor, locateQuote };
 }

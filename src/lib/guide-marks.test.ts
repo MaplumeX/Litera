@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { applyGuideMarks, guideMarkKey } from "./guide-marks";
+import { applyGuideMarks, findGuideParagraph, guideMarkKey } from "./guide-marks";
 
 function page(html: string): Document {
   const doc = document.implementation.createHTMLDocument("page");
@@ -65,5 +65,28 @@ describe("applyGuideMarks", () => {
     applyGuideMarks(doc, null, "");
     expect(doc.querySelector("[data-litera-guide]")).toBeNull();
     expect(doc.querySelector("[data-litera-guide-cursor]")).toBeNull();
+  });
+});
+
+describe("findGuideParagraph", () => {
+  const key = guideMarkKey("He said no.");
+
+  it("finds the paragraph by how many open alike before it", () => {
+    const doc = page("<p>He said no.</p><p>Between.</p><blockquote><p>He said no.</p></blockquote><p>He said no.</p>");
+    expect(findGuideParagraph(doc, key, 0)).toBe(doc.querySelector("p"));
+    // A blockquote and the paragraph in it are one paragraph.
+    expect(findGuideParagraph(doc, key, 1)).toBe(doc.querySelector("blockquote"));
+    expect(findGuideParagraph(doc, key, 2)).toBe(doc.querySelectorAll("body > p")[2]);
+  });
+
+  it("counts from where the chapter starts in a shared file, the paragraph holding the anchor included", () => {
+    const doc = page('<p>He said no.</p><h2 id="two">Two</h2><p>He said no.</p><p><a id="three"></a>He said no.</p>');
+    expect(findGuideParagraph(doc, key, 0, doc.getElementById("two"))).toBe(doc.querySelectorAll("p")[1]);
+    expect(findGuideParagraph(doc, key, 0, doc.getElementById("three"))).toBe(doc.querySelectorAll("p")[2]);
+  });
+
+  it("says how many it passed when the page has fewer", () => {
+    const doc = page("<p>He said no.</p><p>Other.</p>");
+    expect(findGuideParagraph(doc, key, 3)).toBe(1);
   });
 });

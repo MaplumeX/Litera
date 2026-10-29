@@ -48,7 +48,7 @@ import {
 } from "@/lib/annotations";
 import { SelectionToolbar } from "@/components/SelectionToolbar";
 import { selectionParagraph } from "@/lib/selection-paragraph";
-import { applyGuideMarks, type GuidePageMarks } from "@/lib/guide-marks";
+import { applyGuideMarks, findGuideParagraph, type GuideBlockTarget, type GuidePageMarks } from "@/lib/guide-marks";
 import { hrefMatches } from "@/agent/book/book-content";
 import { t as translate } from "@/lib/i18n";
 import type { GuideSelection } from "@/types/agent";
@@ -133,8 +133,11 @@ export interface ReaderViewHandle {
   getChapterTicks: () => number[];
   previewLabelAt: (fraction: number) => string | undefined;
   goToCfi: (cfi: string) => Promise<boolean>;
-  /** Go to a quoted sentence in the chapter at `href` and outline it; falls back to the chapter start. */
-  goToQuote: (href: string, quote: string) => Promise<boolean>;
+  /**
+   * Go to a quoted sentence in the chapter at `href` and outline it; with
+   * `block`, to that paragraph first. Falls back to the chapter start.
+   */
+  goToQuote: (href: string, quote: string, block?: GuideBlockTarget) => Promise<boolean>;
   setStyles: (css: string) => void;
   setColumnCount: (count: number) => void;
   setFlow: (flow: ReaderFlow) => void;
@@ -1346,36 +1349,69 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         return false;
       }
     }, []);
-    const goToQuote = useCallback(async (href: string, quote: string) => {
+    const goToQuote = useCallback(async (href: string, quote: string, block?: GuideBlockTarget) => {
       const view = viewRef.current as unknown as (FoliateAnnotator & {
-        book?: { resolveHref?: (href: string) => { index: number } | null };
+        book?: {
+          resolveHref?: (href: string) => { index: number } | null;
+          sections?: { createDocument?: () => Promise<Document> }[];
+        };
         search?: (opts: { query: string; index: number }) => AsyncGenerator<unknown>;
       }) | null;
       if (!view) return false;
       clearQuoteFlash();
+      // Go to `cfi` and outline it briefly, unlike foliate's lasting search outline.
+      const goToAndFlash = async (cfi: string) => {
+        const resolved = (await view.goTo?.(cfi)) as
+          | { index: number; anchor?: (doc: Document) => Range }
+          | undefined;
+        const contents = view.renderer
+          ?.getContents?.()
+          .find((item) => item.index === resolved?.index);
+        const range = contents?.doc ? resolved?.anchor?.(contents.doc) : undefined;
+        if (contents?.overlayer && range) {
+          contents.overlayer.add(QUOTE_OVERLAY_KEY, range, Overlayer.highlight, {
+            color: QUOTE_HIGHLIGHT_COLOR,
+          });
+          quoteFlashTimerRef.current = setTimeout(clearQuoteFlash, QUOTE_FLASH_MS);
+        }
+      };
       try {
+        // A guided block: count to it through the chapter's files, as the text alone may open other paragraphs too.
+        if (block) {
+          let remaining = block.occurrence;
+          const files = new Map<string, string | undefined>();
+          for (const target of block.hrefs) {
+            const [file, fragment] = target.split("#");
+            if (!files.has(file)) files.set(file, fragment || undefined);
+          }
+          for (const [file, fragment] of files) {
+            const index = view.book?.resolveHref?.(file)?.index;
+            const doc = index == null ? undefined : await view.book?.sections?.[index]?.createDocument?.();
+            if (index == null || !doc) continue;
+            const found = findGuideParagraph(doc, block.key, remaining, fragment ? doc.getElementById(fragment) : null);
+            if (typeof found === "number") {
+              remaining -= found;
+              continue;
+            }
+            const range = doc.createRange();
+            range.selectNodeContents(found);
+            const cfi = view.getCFI?.(index, range);
+            if (cfi) {
+              await goToAndFlash(cfi);
+              return true;
+            }
+            break;
+          }
+        }
         const index = view.book?.resolveHref?.(href)?.index;
         if (index != null && view.search) {
           for (const query of quoteSearchQueries(quote)) {
             for await (const result of view.search({ query, index })) {
               const cfi = (result as { cfi?: unknown } | null)?.cfi;
               if (typeof cfi === "string") {
-                // Only the first hit matters; drop foliate's persistent search
-                // outline and flash the quote briefly instead.
+                // Only the first hit matters; drop foliate's persistent search outline.
                 view.clearSearch?.();
-                const resolved = (await view.goTo?.(cfi)) as
-                  | { index: number; anchor?: (doc: Document) => Range }
-                  | undefined;
-                const contents = view.renderer
-                  ?.getContents?.()
-                  .find((item) => item.index === resolved?.index);
-                const range = contents?.doc ? resolved?.anchor?.(contents.doc) : undefined;
-                if (contents?.overlayer && range) {
-                  contents.overlayer.add(QUOTE_OVERLAY_KEY, range, Overlayer.highlight, {
-                    color: QUOTE_HIGHLIGHT_COLOR,
-                  });
-                  quoteFlashTimerRef.current = setTimeout(clearQuoteFlash, QUOTE_FLASH_MS);
-                }
+                await goToAndFlash(cfi);
                 return true;
               }
             }

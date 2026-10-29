@@ -30,6 +30,7 @@ import { embeddedAgentRuntime } from "@/agent/runtime/embedded-runtime";
 import { useGuideBookMarks } from "@/lib/use-guide-book-marks";
 import type { GuideSelection, GuideStep } from "@/types/agent";
 import type { QuoteLocation } from "@/agent/book/book-content";
+import type { GuideBlockTarget } from "@/lib/guide-marks";
 import { LibraryView } from "@/components/LibraryView";
 import {
   BookImportConfirmDialog,
@@ -201,7 +202,7 @@ function App() {
   const tocWidthRef = useRef(tocWidth);
   tocWidthRef.current = tocWidth;
   const pendingCaptureRef = useRef<SelectionCapture | null>(null);
-  const pendingQuoteRef = useRef<{ href: string; quote: string } | null>(null);
+  const pendingQuoteRef = useRef<{ href: string; quote: string; block?: GuideBlockTarget } | null>(null);
   const closingRef = useRef(false);
   // Closing waits on the final save and Sync push (up to several seconds);
   // say so, or the close button looks broken.
@@ -411,17 +412,17 @@ function App() {
   // A Citation's "Open in Book": reveal a collapsed Agent-mode Book pane
   // first, then jump once it is visible.
   const handleOpenQuote = useCallback(
-    (location: QuoteLocation, quote: string) => {
+    (location: QuoteLocation, quote: string, block?: GuideBlockTarget) => {
       const target = location.href;
       if (!target) return;
       const href = quoteTargetHref(toc, target);
       if (readerMode === "agent" && bookCollapsed) {
-        pendingQuoteRef.current = { href, quote };
+        pendingQuoteRef.current = { href, quote, block };
         setBookCollapsed(false);
         schedulePersistLayout({ chatCollapsed, bookCollapsed: false, sessionRailOpen });
         return;
       }
-      void readerRef.current?.goToQuote(href, quote);
+      void readerRef.current?.goToQuote(href, quote, block);
     },
     [bookCollapsed, chatCollapsed, readerMode, readerRef, schedulePersistLayout, sessionRailOpen, toc],
   );
@@ -433,7 +434,7 @@ function App() {
     pendingQuoteRef.current = null;
     // Let the pane lay out before foliate navigates inside it.
     const frame = requestAnimationFrame(() => {
-      void readerRef.current?.goToQuote(pending.href, pending.quote);
+      void readerRef.current?.goToQuote(pending.href, pending.quote, pending.block);
     });
     return () => cancelAnimationFrame(frame);
   }, [bookCollapsed, readerRef]);

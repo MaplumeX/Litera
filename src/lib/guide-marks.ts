@@ -117,3 +117,35 @@ export function applyGuideMarks(doc: Document, marks: GuideFileMarks | null, cur
     }
   }
 }
+
+/**
+ * A block of a chapter to find on its pages: the `occurrence`th (0-based)
+ * paragraph with `key` from the chapter's start, through its files in order
+ * (`hrefs`, a fragment marking where the chapter starts in a file it shares).
+ * Counting, not the key alone, tells apart paragraphs that open alike.
+ */
+export interface GuideBlockTarget {
+  hrefs: string[];
+  key: string;
+  occurrence: number;
+}
+
+/**
+ * The `occurrence`th (0-based) paragraph of `doc` with `key`, from `start` on
+ * (the paragraph holding it included), or how many it passed when the page
+ * has fewer. An element inside a counted one is that same paragraph.
+ */
+export function findGuideParagraph(doc: Document, key: string, occurrence: number, start?: Element | null): Element | number {
+  let seen = 0;
+  let counted: Element | null = null;
+  for (const element of doc.body?.querySelectorAll(PARAGRAPHS) ?? []) {
+    if (start && !element.contains(start) && !(start.compareDocumentPosition(element) & Node.DOCUMENT_POSITION_FOLLOWING)) continue;
+    if (counted?.contains(element)) continue;
+    if (element.tagName.toUpperCase() === "DIV" && element.querySelector(PARAGRAPHS)) continue;
+    if (elementKey(element) !== key) continue;
+    if (seen === occurrence) return element;
+    seen += 1;
+    counted = element;
+  }
+  return seen;
+}

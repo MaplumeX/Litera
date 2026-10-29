@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { BookTocEntry } from "@/agent/book/book-content";
 import type { GuidePosition, GuideStep } from "@/types/agent";
-import { dueRecap, findGuideBlock, guideBlockPage, guidedPrompt, guideReadingState, guideRequestContext, guideStepRequestFor, guidePageMarkPlan, recappedChapters, guideOutlinePlan, guideStepContext, guideStepTo, guideTocProgress, nextGuideStep, requestedGuideStep, resolveGuideStep, skimGuideStep, skipChapterStep, stepChapters } from "./guide";
+import { dueRecap, findGuideBlock, findableGuideBlock, guideBlockPage, guidedPrompt, guideReadingState, guideRequestContext, guideStepRequestFor, guidePageMarkPlan, recappedChapters, guideOutlinePlan, guideStepContext, guideStepTo, guideTocProgress, nextGuideStep, requestedGuideStep, resolveGuideStep, skimGuideStep, skipChapterStep, stepChapters } from "./guide";
 
 // Every part holds three blocks.
 const chapter = (index: number, parts: number, chars = 1000, label = `Chapter ${index + 1}`): BookTocEntry => ({
@@ -252,6 +252,24 @@ describe("findGuideBlock", () => {
 
   it("keeps the recorded block when no block has the snippet", () => {
     expect(findGuideBlock(blocks, { chapterIndex: 0, block: 2, snippet: "gone" })).toBe(2);
+  });
+});
+
+describe("findableGuideBlock", () => {
+  const block = (snippet: string, kind?: "image" | "blank") => ({ snippet, chars: snippet.length, heading: 0, part: 0, ...(kind ? { kind } : {}) });
+  const blocks = [block("Chapter One"), block("一"), block("", "image"), block("", "blank"), block("The opening line.")];
+
+  it("keeps a block with enough text", () => {
+    expect(findableGuideBlock(blocks, 0)).toBe(0);
+  });
+
+  it("skips short headings, images and blanks", () => {
+    expect(findableGuideBlock(blocks, 1)).toBe(4);
+  });
+
+  it("is null when nothing from the start can be found", () => {
+    expect(findableGuideBlock(blocks.slice(0, 4), 1)).toBeNull();
+    expect(findableGuideBlock(blocks, 9)).toBeNull();
   });
 });
 

@@ -24,6 +24,7 @@ import { BookSearchPanel } from "@/components/BookSearchPanel";
 import { FinishBookPrompt } from "@/components/FinishBookPrompt";
 import { KosyncPrompt } from "@/components/KosyncPrompt";
 import type { QuoteLocation } from "@/agent/book/book-content";
+import type { GuideBlockTarget } from "@/lib/guide-marks";
 import type { SheetSnap } from "@/lib/assistant-sheet";
 import type { ReaderSession } from "@/lib/use-reader-session";
 import { quoteTargetHref } from "@/lib/toc-items";
@@ -189,7 +190,7 @@ export function MobileReaderPage({
   const { readerRef, fileData, currentBook, progress, toc, annotations, bookSearch } = session;
   const chatRef = useRef<ChatPanelHandle>(null);
   const pendingCaptureRef = useRef<SelectionCapture | null>(null);
-  const pendingQuoteRef = useRef<{ href: string; quote: string } | null>(null);
+  const pendingQuoteRef = useRef<{ href: string; quote: string; block?: GuideBlockTarget } | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searching = panel === "search";
   const quickSettingsOpen = panel === "settings" && chromeVisible;
@@ -252,15 +253,15 @@ export function MobileReaderPage({
   // A Citation's "Open in Book": a full-screen sheet steps down to half so
   // the passage shows above it.
   const handleOpenQuote = useCallback(
-    (location: QuoteLocation, quote: string) => {
+    (location: QuoteLocation, quote: string, block?: GuideBlockTarget) => {
       if (!location.href) return;
       const href = quoteTargetHref(toc, location.href);
       if (snap === "full") {
-        pendingQuoteRef.current = { href, quote };
+        pendingQuoteRef.current = { href, quote, block };
         onSnapChange("half");
         return;
       }
-      void readerRef.current?.goToQuote(href, quote);
+      void readerRef.current?.goToQuote(href, quote, block);
     },
     [onSnapChange, readerRef, snap, toc],
   );
@@ -271,7 +272,7 @@ export function MobileReaderPage({
     if (!pending) return;
     pendingQuoteRef.current = null;
     const frame = requestAnimationFrame(() => {
-      void readerRef.current?.goToQuote(pending.href, pending.quote);
+      void readerRef.current?.goToQuote(pending.href, pending.quote, pending.block);
     });
     return () => cancelAnimationFrame(frame);
   }, [readerRef, snap]);

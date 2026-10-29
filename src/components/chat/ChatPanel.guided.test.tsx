@@ -23,6 +23,10 @@ let selectionResult: { step: GuideStep } | { error: "before" | "notFound" } = { 
 const guideStepToSelection = vi.fn(async (_step: GuideStep, _selection: GuideSelection) => selectionResult);
 const guideStepTo = vi.fn(async (_step: GuideStep, _to: { chapterIndex: number; block: number }, _skim?: boolean): Promise<GuideStep | null> => picked);
 const guideStepAt = vi.fn(async (_href: string): Promise<GuideStep | null> => ({ chapterIndex: 6, part: 0, totalParts: 2, chapterTitle: "第七章" }));
+const guideStepAnchor = vi.fn(async (step: GuideStep) => {
+  const snippet = step.part ? "第二部分开头" : "第一部分开头";
+  return { chapterIndex: step.chapterIndex, href: "OEBPS/ch3.xhtml", snippet, target: { hrefs: ["OEBPS/ch3.xhtml"], key: snippet, occurrence: step.part } } as { chapterIndex: number; href?: string; snippet: string; target: { hrefs: string[]; key: string; occurrence: number } } | null;
+});
 let bridgeState: AgentState;
 
 vi.mock("@/lib/use-agent-bridge", () => ({
@@ -38,6 +42,7 @@ vi.mock("@/lib/use-agent-bridge", () => ({
     guideStepTo,
     guideStepToSelection,
     guideStepAt,
+    guideStepAnchor,
     prompt,
     editPrompt,
     renameSession: vi.fn(),
@@ -81,6 +86,7 @@ beforeEach(() => {
   guideStepToSelection.mockClear();
   selectionResult = { step: picked };
   guideStepAt.mockClear();
+  guideStepAnchor.mockClear();
   afterChapter = { chapterIndex: 3, part: 0, totalParts: 1, chapterTitle: "第四章" };
   nextStep = stepOne;
   bridgeState = guidedState();
@@ -116,8 +122,52 @@ describe("ChatPanel in a Guided session", () => {
     fireEvent.click(await view.findByRole("button", { name: "继续：第三章 · 2/3" }));
     await waitFor(() => expect(prompt).toHaveBeenCalled());
     expect(prompt).toHaveBeenCalledWith("继续带读", { guideRequest: {} }, { role: "user", content: "继续带读", guideRequest: {} });
-    // The request is a transcript marker, not the reader's bubble.
-    expect(view.getByTestId("guide-step").textContent).toBe("开始带读：第三章");
+    // The step the assistant took is the marker; the request is a quiet bubble that cannot be edited.
+    expect(view.getByTestId("guide-step").textContent).toBe("带读：第三章（第 1/3 部分）");
+    expect(view.getByText("开始带读：第三章")).toBeTruthy();
+    expect(view.queryByRole("button", { name: "编辑" })).toBeNull();
+  });
+
+  it("marks every step the assistant took, also on request in its own words, and opens its start in the Book", async () => {
+    const two: GuideStep = { ...stepOne, part: 1 };
+    bridgeState = guidedState({
+      messages: [
+        { role: "user", content: "带读第三章前两部分" },
+        {
+          role: "assistant",
+          content: "讲述",
+          blocks: [
+            { type: "toolCall", toolCall: { toolCallId: "c1", tool: "guide_step", params: {}, done: true, guide: stepOne } },
+            { type: "toolCall", toolCall: { toolCallId: "c2", tool: "guide_step", params: {}, done: true, guide: two } },
+            { type: "text", text: "讲述" },
+          ],
+        },
+      ],
+    });
+    const onOpenQuote = vi.fn();
+    const view = render(<ChatPanel variant="workspace" bookId="book-1" onOpenQuote={onOpenQuote} />);
+    const markers = view.getAllByTestId("guide-step");
+    expect(markers.map((marker) => marker.textContent)).toEqual(["带读：第三章（第 1/3 部分）在书中打开", "带读：第三章（第 2/3 部分）在书中打开"]);
+    fireEvent.click(view.getAllByRole("button", { name: "在书中打开" })[1]);
+    await waitFor(() => expect(onOpenQuote).toHaveBeenCalled());
+    expect(guideStepAnchor).toHaveBeenCalledWith(two);
+    // The Book pane counts to the paragraph; the text is only its fallback.
+    expect(onOpenQuote).toHaveBeenCalledWith({ status: "verified", chapterIndex: 2, href: "OEBPS/ch3.xhtml" }, "第二部分开头", { hrefs: ["OEBPS/ch3.xhtml"], key: "第二部分开头", occurrence: 1 });
+  });
+
+  it("says so when a step's start cannot be found in the Book", async () => {
+    bridgeState = guidedState({
+      messages: [
+        { role: "user", content: "继续带读", guideRequest: {} },
+        { role: "assistant", content: "讲述", blocks: [{ type: "toolCall", toolCall: { toolCallId: "c1", tool: "guide_step", params: {}, done: true, guide: stepOne } }] },
+      ],
+    });
+    guideStepAnchor.mockResolvedValueOnce(null);
+    const onOpenQuote = vi.fn();
+    const view = render(<ChatPanel variant="workspace" bookId="book-1" onOpenQuote={onOpenQuote} />);
+    fireEvent.click(view.getByRole("button", { name: "在书中打开" }));
+    expect(await view.findByRole("button", { name: "未能在书中定位" })).toBeTruthy();
+    expect(onOpenQuote).not.toHaveBeenCalled();
   });
 
   it("continues once started, and cannot edit a guided step", async () => {

@@ -56,6 +56,17 @@ describe("agentReducer", () => {
     ]);
   });
 
+  it("puts the step a guide_step call took on the call as it ends", () => {
+    let state = createAgentState("book-a");
+    state = reduce(state, { version: 1, type: "prompt_started", bookId: "book-a", sessionId: "s", promptId: "p" });
+    state = reduce(state, { version: 2, type: "tool_start", bookId: "book-a", sessionId: "s", promptId: "p", toolCallId: "one", tool: "guide_step", params: {} });
+    const guide = { chapterIndex: 2, part: 0, totalParts: 3 };
+    state = reduce(state, { version: 3, type: "tool_end", bookId: "book-a", sessionId: "s", promptId: "p", toolCallId: "one", result: "read", isError: false, guide });
+    expect(state.messages[0].blocks).toEqual([
+      { type: "toolCall", toolCall: expect.objectContaining({ toolCallId: "one", done: true, guide }) },
+    ]);
+  });
+
   it("maintains blocks in event order for interleaved deltas", () => {
     let state = createAgentState("book-a");
     state = reduce(state, { version: 1, type: "prompt_started", bookId: "book-a", sessionId: "s", promptId: "p" });

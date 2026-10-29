@@ -2,6 +2,7 @@ import type { KeyboardEvent, ReactNode } from "react";
 import { BookOpen, Check, Pencil, Quote, X } from "lucide-react";
 import type { UserMessage } from "@/types/agent";
 import { useT } from "@/lib/i18n";
+import { cn } from "@/lib/utils";
 
 interface MessageBubbleProps {
   message: UserMessage;
@@ -55,8 +56,14 @@ export function MessageBubble({
           autoFocus
         />
       ) : (
-        <div className="flex max-w-[85%] items-start gap-1.5 rounded-xl bg-primary px-3 py-2 text-sm text-primary-foreground">
-          {message.guide && <BookOpen className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
+        <div
+          className={cn(
+            "flex max-w-[85%] items-start gap-1.5 rounded-xl px-3 py-2",
+            // Continue or a pick: sent for the reader by a button, quieter than what they typed.
+            message.guideRequest ? "bg-secondary text-xs text-secondary-foreground" : "bg-primary text-sm text-primary-foreground",
+          )}
+        >
+          {message.guideRequest && <BookOpen className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
           <span>{message.content}</span>
         </div>
       )}
@@ -82,7 +89,7 @@ export function MessageBubble({
               <Check className="h-3.5 w-3.5" />
             </button>
           </>
-        ) : (
+        ) : message.guideRequest ? null : (
           <button
             type="button"
             onClick={onStartEdit}

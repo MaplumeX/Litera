@@ -254,6 +254,22 @@ export function findGuideBlock(blocks: readonly { snippet: string }[], position:
   return found >= 0 ? found : block;
 }
 
+/** The shortest snippet the Book pane can find a block by. */
+const FINDABLE_SNIPPET_CHARS = 4;
+
+/**
+ * The first block at or after `start` with enough text to find on the page
+ * (not an image, a blank or a one-character heading), or null when the
+ * chapter has none from there.
+ */
+export function findableGuideBlock(blocks: readonly GuideBlock[], start: number): number | null {
+  for (let index = Math.max(0, start); index < blocks.length; index += 1) {
+    const block = blocks[index];
+    if (!block.kind && [...block.snippet].length >= FINDABLE_SNIPPET_CHARS) return index;
+  }
+  return null;
+}
+
 /**
  * The step from where `step` starts to block `to` (inclusive), or null when
  * `to` comes before that start or is not in the Book. The reader picks `to`;
