@@ -24,15 +24,18 @@ import { BookSearchPanel } from "@/components/BookSearchPanel";
 import { FinishBookPrompt } from "@/components/FinishBookPrompt";
 import { KosyncPrompt } from "@/components/KosyncPrompt";
 import type { QuoteLocation } from "@/agent/book/book-content";
+import type { GuideBlockTarget } from "@/lib/guide-marks";
 import type { SheetSnap } from "@/lib/assistant-sheet";
 import type { ReaderSession } from "@/lib/use-reader-session";
 import { quoteTargetHref } from "@/lib/toc-items";
+import { useGuideBookMarks } from "@/lib/use-guide-book-marks";
 import { shortBookTitle } from "@/lib/book-title";
 import { READER_FOOTER_POSITIONS, useReaderFooter } from "@/lib/reader-footer";
 import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { APP_BAR_HEIGHT, AppBarIconButton, MobileAppBar } from "@/mobile/MobileAppBar";
 import { AssistantSheet } from "@/mobile/AssistantSheet";
+import type { GuideSelection, RecordedGuideStep } from "@/types/agent";
 import { MobileDrawer } from "@/mobile/MobileDrawer";
 import { ReaderQuickSettings } from "@/mobile/ReaderQuickSettings";
 
@@ -187,7 +190,7 @@ export function MobileReaderPage({
   const { readerRef, fileData, currentBook, progress, toc, annotations, bookSearch } = session;
   const chatRef = useRef<ChatPanelHandle>(null);
   const pendingCaptureRef = useRef<SelectionCapture | null>(null);
-  const pendingQuoteRef = useRef<{ href: string; quote: string } | null>(null);
+  const pendingQuoteRef = useRef<{ href: string; quote: string; block?: GuideBlockTarget } | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const searching = panel === "search";
   const quickSettingsOpen = panel === "settings" && chromeVisible;
@@ -223,6 +226,22 @@ export function MobileReaderPage({
     [onSnapChange, readerRef, snap],
   );
 
+  // In a Guided session, "Guide up to here" on a selection sends the step at
+  // once; the sheet comes up to half to show the answer.
+  const [guideSteps, setGuideSteps] = useState<RecordedGuideStep[] | null>(null);
+  const guided = guideSteps !== null;
+  const { progress: guideProgress, marks: guideMarks } = useGuideBookMarks(guideSteps, toc);
+  const handleGuideTo = useCallback(
+    (selection: GuideSelection) => {
+      if (snap === "collapsed") {
+        readerRef.current?.anchorToSelection();
+        onSnapChange("half");
+      }
+      chatRef.current?.guideTo(selection);
+    },
+    [onSnapChange, readerRef, snap],
+  );
+
   useLayoutEffect(() => {
     if (snap === "collapsed") return;
     const pending = pendingCaptureRef.current;
@@ -234,15 +253,15 @@ export function MobileReaderPage({
   // A Citation's "Open in Book": a full-screen sheet steps down to half so
   // the passage shows above it.
   const handleOpenQuote = useCallback(
-    (location: QuoteLocation, quote: string) => {
+    (location: QuoteLocation, quote: string, block?: GuideBlockTarget) => {
       if (!location.href) return;
       const href = quoteTargetHref(toc, location.href);
       if (snap === "full") {
-        pendingQuoteRef.current = { href, quote };
+        pendingQuoteRef.current = { href, quote, block };
         onSnapChange("half");
         return;
       }
-      void readerRef.current?.goToQuote(href, quote);
+      void readerRef.current?.goToQuote(href, quote, block);
     },
     [onSnapChange, readerRef, snap, toc],
   );
@@ -253,7 +272,7 @@ export function MobileReaderPage({
     if (!pending) return;
     pendingQuoteRef.current = null;
     const frame = requestAnimationFrame(() => {
-      void readerRef.current?.goToQuote(pending.href, pending.quote);
+      void readerRef.current?.goToQuote(pending.href, pending.quote, pending.block);
     });
     return () => cancelAnimationFrame(frame);
   }, [readerRef, snap]);
@@ -301,6 +320,8 @@ export function MobileReaderPage({
             fileData={fileData}
             onRelocate={session.handleRelocate}
             onSelectionCapture={handleSelectionCapture}
+            onGuideTo={guided ? handleGuideTo : undefined}
+            guideMarks={guideMarks}
             onHighlight={session.handleAddHighlight}
             onUpdateHighlight={session.handleUpdateHighlight}
             onDeleteHighlight={session.handleDeleteHighlight}
@@ -447,6 +468,7 @@ export function MobileReaderPage({
           currentChapterHref={progress.chapterHref}
           onOpenQuote={handleOpenQuote}
           peekOffset={chromeVisible ? `${bottomBarHeight}px` : undefined}
+          onGuideStepsChange={setGuideSteps}
         />
       )}
 
@@ -550,6 +572,7 @@ export function MobileReaderPage({
               session.goToChapterHref(href);
               onPanelChange(null);
             }}
+            guideProgress={guideProgress}
           />
         ) : (
           <AnnotationsSidebar

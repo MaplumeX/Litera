@@ -425,6 +425,22 @@ describe("LiteraAgentRuntime",()=>{
     expect(text).not.toContain("hrefs");
   });
 
+  it("lists a chapter's blocks for list_guide_blocks, and refuses an unknown chapter",async()=>{
+    const current=session();const batches:PiSessionEntry[][]=[];
+    const sessions:SessionPort={create:async()=>current,list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,entries)=>{batches.push(entries);return entries.at(-1)?.id??null;}};
+    const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"zh",totalChapters:1}),toc:async()=>[{index:0,label:"第三章",ancestors:[],depth:0,hrefs:["c3.xhtml"],chars:100,parts:1,blocks:2,partStarts:[0]}],readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:1,fromBlock:0,toBlock:1,totalBlocks:2,text:"chapter"}),guideBlocks:async()=>[{snippet:"第三章",chars:3,heading:1,part:0},{snippet:"第一段",chars:50,heading:0,part:0}],locateGuideBlock:async()=>null,search:async()=>[],close:()=>{}};
+    const faux=createFauxCore({tokensPerSecond:10_000});faux.setResponses([fauxAssistantMessage([fauxToolCall("list_guide_blocks",{chapterIndex:0}),fauxToolCall("list_guide_blocks",{chapterIndex:5})],{stopReason:"toolUse"}),fauxAssistantMessage("ok")]);
+    const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret",thinkingLevel:"off"};
+    const runtime=new LiteraAgentRuntime({sessions,book,loadConfig:async()=>config,loadStream:async()=>faux.streamSimple});
+    await runtime.openBook("book",new ArrayBuffer(1));
+    await runtime.prompt("第三章第一段",{});
+    const results=batches.flat().flatMap((entry)=>{const message=entry.type==="message"?entry.message as {role?:string;toolName?:string;isError?:boolean;content?:Array<{type?:string;text?:string}>}:undefined;return message?.role==="toolResult"&&message.toolName==="list_guide_blocks"?[{isError:message.isError===true,text:message.content?.find((block)=>block.type==="text")?.text??""}]:[];});
+    expect(results).toHaveLength(2);
+    expect(JSON.parse(results[0].text)).toEqual({chapterIndex:0,chapterTitle:"第三章",totalBlocks:2,next:null,blocks:[{block:0,part:0,chars:3,snippet:"第三章",heading:1},{block:1,paragraph:1,part:0,chars:50,snippet:"第一段"}]});
+    expect(results[1].isError).toBe(true);
+    expect(results[1].text).toContain("No chapter with chapterIndex 5");
+  });
+
   it("generates and persists a session title after the first turn",async()=>{
     const current=session();const batches:PiSessionEntry[][]=[];const events:{type:string;title?:string}[]=[];
     const sessions:SessionPort={create:async()=>current,list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,entries)=>{batches.push(entries);return entries.at(-1)?.id??null;}};

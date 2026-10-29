@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useReducer, useRef } from "react";
 import { embeddedAgentRuntime } from "@/agent/runtime/embedded-runtime";
 import { agentReducer, createAgentState } from "@/lib/agent-reducer";
-import type { AgentMessage, GuideStep, SessionKind } from "@/types/agent";
+import type { AgentMessage, GuideRequest, GuideSelection, GuideStep, RecordedGuideStep, SessionKind } from "@/types/agent";
 
 function id(prefix: string): string {
   return `${prefix}-${crypto.randomUUID()}`;
@@ -73,7 +73,7 @@ export function useAgentBridge(bookId: string) {
 
   const prompt = useCallback(async (
     text: string,
-    context: { selection?: string; chapterHref?: string; guide?: GuideStep },
+    context: { selection?: string; chapterHref?: string; guideRequest?: GuideRequest },
     message: AgentMessage,
   ) => {
     const currentBookId = bookIdRef.current;
@@ -95,7 +95,7 @@ export function useAgentBridge(bookId: string) {
   const editPrompt = useCallback(async (
     messageIndex: number,
     text: string,
-    context: { selection?: string; chapterHref?: string; guide?: GuideStep },
+    context: { selection?: string; chapterHref?: string; guideRequest?: GuideRequest },
     message: AgentMessage,
   ) => {
     const currentBookId = bookIdRef.current;
@@ -134,7 +134,24 @@ export function useAgentBridge(bookId: string) {
     (step: GuideStep) => embeddedAgentRuntime.guideStepAfterChapter(step),
     [],
   );
+  const guideSkimStep = useCallback(
+    (step: GuideStep) => embeddedAgentRuntime.guideSkimStep(step),
+    [],
+  );
+  const guideOutline = useCallback(
+    (step: GuideStep, after?: number) => embeddedAgentRuntime.guideOutline(step, after),
+    [],
+  );
+  const guideStepTo = useCallback(
+    (step: GuideStep, to: { chapterIndex: number; block: number }, skim?: boolean) => embeddedAgentRuntime.guideStepTo(step, to, skim),
+    [],
+  );
+  const guideStepToSelection = useCallback(
+    (step: GuideStep, selection: GuideSelection) => embeddedAgentRuntime.guideStepToSelection(step, selection),
+    [],
+  );
   const guideStepAt = useCallback((href: string) => embeddedAgentRuntime.guideStepAt(href), []);
+  const guideStepAnchor = useCallback((step: RecordedGuideStep) => embeddedAgentRuntime.guideStepAnchor(step), []);
   const deleteSession = useCallback(async (sessionId: string) => {
     if (bookIdRef.current) await embeddedAgentRuntime.deleteSession(sessionId, id("delete-session"));
   }, []);
@@ -152,5 +169,5 @@ export function useAgentBridge(bookId: string) {
     [],
   );
 
-  return { state, prompt, editPrompt, abort, listSessions, newSession, nextGuideStep, guideStepAfterChapter, guideStepAt, switchSession, deleteSession, renameSession, updateSessionConfig, switchBranchAtAnchor, locateQuote };
+  return { state, prompt, editPrompt, abort, listSessions, newSession, nextGuideStep, guideStepAfterChapter, guideSkimStep, guideOutline, guideStepTo, guideStepToSelection, guideStepAt, guideStepAnchor, switchSession, deleteSession, renameSession, updateSessionConfig, switchBranchAtAnchor, locateQuote };
 }

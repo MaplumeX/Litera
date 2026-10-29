@@ -16,6 +16,7 @@ import { useAgentBridge } from "@/lib/use-agent-bridge";
 import { useAgentConfig } from "@/lib/use-agent-config";
 import { invokeErrorMessage } from "@/lib/app-error";
 import type { QuoteLocation } from "@/agent/book/book-content";
+import type { GuideBlockTarget } from "@/lib/guide-marks";
 import { CHATGPT_PROVIDER_ID, isCustomProviderId } from "@/types/agent-config";
 import { AgentConfigDialog } from "@/components/AgentConfigDialog";
 import { MessageBubble } from "./MessageBubble";
@@ -25,12 +26,14 @@ import { ChatInput } from "./ChatInput";
 import { CitationContext, type CitationActions } from "./Citation";
 import { ModelSwitcher } from "./ModelSwitcher";
 import { EmptyState } from "./EmptyState";
+import { GuideRangePicker } from "./GuideRangePicker";
 import { GuideBar, guideStepLabel } from "./GuideBar";
 import { SessionConfigDialog, type SessionConfigTarget } from "./SessionConfigDialog";
 import { SessionList } from "./SessionList";
 import { TypingIndicator } from "./TypingIndicator";
 import { CompactionNotice, CompactionStatus } from "./CompactionNotice";
 import { GuideRecap } from "./GuideRecap";
+import { GuideStepMarker } from "./GuideStepMarker";
 import { ChatOutlineRail, userMessagePreview } from "./ChatOutlineRail";
 import { useT } from "@/lib/i18n";
 import {
@@ -38,11 +41,20 @@ import {
   loadSessionRailWidth,
   saveSessionRailWidth,
 } from "@/lib/session-rail-width";
-import { isTranscriptMarker, type GuideStep } from "@/types/agent";
+import { isTranscriptMarker, takenGuideSteps, type AgentToolCall, type AssistantChatMessage, type GuideRequest, type GuideSelection, type GuideStep, type RecordedGuideStep } from "@/types/agent";
 import { chatActivity, type ChatActivity } from "@/lib/chat-activity";
+
+/** The `guide_step` calls of an assistant message that took a step, in order. */
+function guideCalls(message: AssistantChatMessage): Array<AgentToolCall & { guide: RecordedGuideStep }> {
+  return (message.blocks ?? []).flatMap((block) =>
+    block.type === "toolCall" && block.toolCall.guide ? [block.toolCall as AgentToolCall & { guide: RecordedGuideStep }] : [],
+  );
+}
 
 export interface ChatPanelHandle {
   fillInput: (text: string, chapterHref?: string) => void;
+  /** In a Guided session: send the next step up to the block a selection ends in. */
+  guideTo: (selection: GuideSelection) => void;
 }
 
 interface ChatPanelProps {
@@ -51,11 +63,12 @@ interface ChatPanelProps {
   chapterScope?: { label: string; href?: string } | null;
   onClearChapterScope?: () => void;
   /** Reveal a Citation's passage in the Book pane. */
-  onOpenQuote?: (location: QuoteLocation, quote: string) => void;
+  /** Reveal a quote in the Book pane; `block`, a guided step's start, to count to rather than search. */
+  onOpenQuote?: (location: QuoteLocation, quote: string, block?: GuideBlockTarget) => void;
   bookId: string;
   variant?: "docked" | "workspace";
   /** A Guided session's steps on the active branch, oldest first; null outside one. */
-  onGuideStepsChange?: (steps: GuideStep[] | null) => void;
+  onGuideStepsChange?: (steps: RecordedGuideStep[] | null) => void;
   /** Agent mode: on open, resume the latest Guided session if there is one. */
   preferGuidedSession?: boolean;
   /** Workspace variant: whether the session rail shows. The host owns the
@@ -90,7 +103,12 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       newSession,
       nextGuideStep,
       guideStepAfterChapter,
+      guideSkimStep,
+      guideOutline,
+      guideStepTo,
+      guideStepToSelection,
       guideStepAt,
+      guideStepAnchor,
       prompt,
       editPrompt,
       renameSession,
@@ -118,6 +136,15 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         openInBook: onOpenQuote,
       };
     }, [bookId, locateQuote, onOpenQuote]);
+    // A guided step's start: the Book pane counts its way to that paragraph.
+    const openGuideStep = useCallback(async (step: RecordedGuideStep) => {
+      if (!onOpenQuote) return false;
+      const anchor = await guideStepAnchor(step);
+      if (!anchor?.href) return false;
+      onOpenQuote({ status: "verified", chapterIndex: anchor.chapterIndex, href: anchor.href }, anchor.snippet, anchor.target);
+      return true;
+    }, [guideStepAnchor, onOpenQuote]);
+    const canOpenGuideStep = !!onOpenQuote;
     const [input, setInput] = useState("");
     const [pendingSelection, setPendingSelection] = useState<{
       text: string;
@@ -173,7 +200,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     );
     const hasUserMessage = userMessageTocItems.length > 0;
     const isGuided = state.sessions.find((session) => session.id === state.sessionId)?.kind === "guided";
-    const guideStarted = state.messages.some((message) => message.role === "user" && !!message.guide);
+    const guideSteps = isGuided ? takenGuideSteps(state.messages) : null;
+    const guideStarted = !!guideSteps?.length;
     // Undefined until the runtime has worked it out; null at the end of the Book.
     const [computedStep, setComputedStep] = useState<GuideStep | null | undefined>(undefined);
     // A step the reader picked (skipping a chapter) instead of the computed
@@ -181,6 +209,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     // the guide is.
     const [pickedStep, setPickedStep] = useState<GuideStep | null | undefined>(undefined);
     const nextStep = pickedStep !== undefined ? pickedStep : computedStep;
+    const [rangePickerOpen, setRangePickerOpen] = useState(false);
     const showOutlineRail = isWorkspace && userMessageTocItems.length >= 2;
 
     const clearMessageTocJumpTimer = useCallback(() => {
@@ -374,15 +403,14 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       return () => { cancelled = true; };
     }, [guideStepAt, isGuided, scopeHref]);
 
-    const guideStepsKey = isGuided
-      ? JSON.stringify(state.messages.flatMap((message) => message.role === "user" && message.guide ? [message.guide] : []))
-      : null;
+    const guideStepsKey = guideSteps ? JSON.stringify(guideSteps) : null;
     useEffect(() => {
-      onGuideStepsChange?.(guideStepsKey === null ? null : JSON.parse(guideStepsKey) as GuideStep[]);
+      onGuideStepsChange?.(guideStepsKey === null ? null : JSON.parse(guideStepsKey) as RecordedGuideStep[]);
     }, [guideStepsKey, onGuideStepsChange]);
     useEffect(() => () => onGuideStepsChange?.(null), [onGuideStepsChange]);
 
-    const sendGuideStep = useCallback(async (step: GuideStep) => {
+    // Continue or a picked step goes out as a message; the assistant takes the step.
+    const sendGuideRequest = useCallback(async (label: string, guideRequest: GuideRequest) => {
       if (isStreaming || !bookId) return;
       setPickedStep(undefined);
       setEditingIndex(null);
@@ -390,14 +418,24 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       setInvokeError(null);
       setSubmitting(true);
       scrollToBottom();
-      const label = guideStepLabel(step);
       try {
-        await prompt(label, { guide: step }, { role: "user", content: label, guide: step });
+        await prompt(label, { guideRequest }, { role: "user", content: label, guideRequest });
       } catch (error) {
         setInvokeError(String(error));
         setSubmitting(false);
       }
     }, [bookId, isStreaming, prompt, scrollToBottom]);
+    const sendGuideStep = useCallback(
+      (step: GuideStep) => sendGuideRequest(guideStepLabel(step), { step }),
+      [sendGuideRequest],
+    );
+    // Before the first step and after a pick, Continue names where to start;
+    // otherwise the assistant goes on from the guide and picks where to stop.
+    const handleGuideContinue = useCallback(() => {
+      if (!nextStep) return;
+      if (pickedStep || !guideStarted) void sendGuideStep(nextStep);
+      else void sendGuideRequest(t("chat.guide.continueMessage"), {});
+    }, [guideStarted, nextStep, pickedStep, sendGuideRequest, sendGuideStep, t]);
 
     const handleGuideSkip = useCallback(async () => {
       if (!nextStep || isStreaming) return;
@@ -408,6 +446,34 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         setInvokeError(String(error));
       }
     }, [guideStepAfterChapter, isStreaming, nextStep]);
+
+    const handleGuideSkim = useCallback(async () => {
+      if (!nextStep || isStreaming) return;
+      setInvokeError(null);
+      try {
+        const skim = await guideSkimStep(nextStep);
+        if (skim) await sendGuideStep(skim);
+      } catch (error) {
+        setInvokeError(String(error));
+      }
+    }, [guideSkimStep, isStreaming, nextStep, sendGuideStep]);
+
+    const loadGuideOutline = useCallback(
+      (after?: number) => (nextStep ? guideOutline(nextStep, after) : Promise.resolve({ chapters: [], more: null })),
+      [guideOutline, nextStep],
+    );
+
+    const handleGuideRangePick = useCallback(async (to: { chapterIndex: number; block: number }, skim: boolean) => {
+      if (!nextStep || isStreaming) return;
+      setRangePickerOpen(false);
+      setInvokeError(null);
+      try {
+        const step = await guideStepTo(nextStep, to, skim);
+        if (step) await sendGuideStep(step);
+      } catch (error) {
+        setInvokeError(String(error));
+      }
+    }, [guideStepTo, isStreaming, nextStep, sendGuideStep]);
 
     const handleAbort = useCallback(async () => {
       setInvokeError(null);
@@ -426,7 +492,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     const handleStartEdit = useCallback((index: number) => {
       if (isStreaming) return;
       const message = state.messages[index];
-      if (!message || message.role !== "user" || message.guide) return;
+      if (!message || message.role !== "user" || message.guide || message.guideRequest) return;
       setEditingIndex(index);
       setEditDraft(message.content);
     }, [isStreaming, state.messages]);
@@ -475,6 +541,8 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       if (lastIndex < 0 || isStreaming || !bookId) return;
       const original = state.messages[lastIndex];
       if (!original || original.role !== "user") return;
+      // A step sent as the message in older Sessions is asked for again.
+      const guideRequest = original.guideRequest ?? (original.guide ? { step: original.guide } : undefined);
       setEditingIndex(null);
       setEditDraft("");
       setInvokeError(null);
@@ -484,13 +552,13 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         await editPrompt(
           lastIndex,
           original.content,
-          { selection: original.selection, chapterHref: original.chapterHref, guide: original.guide },
+          { selection: original.selection, chapterHref: original.chapterHref, guideRequest },
           {
             role: "user",
             content: original.content,
             selection: original.selection,
             chapterHref: original.chapterHref,
-            ...(original.guide ? { guide: original.guide } : {}),
+            ...(guideRequest ? { guideRequest } : {}),
           },
         );
       } catch (error) {
@@ -567,7 +635,23 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       inputRef.current?.focus();
     }, []);
 
-    useImperativeHandle(ref, () => ({ fillInput }), [fillInput]);
+    const guideTo = useCallback(async (selection: GuideSelection) => {
+      if (!isGuided || !nextStep) return;
+      if (isStreaming) {
+        setInvokeError(t("chat.guide.selectionBusy"));
+        return;
+      }
+      setInvokeError(null);
+      try {
+        const result = await guideStepToSelection(nextStep, selection);
+        if ("step" in result) await sendGuideStep(result.step);
+        else setInvokeError(t(result.error === "before" ? "chat.guide.selectionBefore" : "chat.guide.selectionNotFound"));
+      } catch (error) {
+        setInvokeError(String(error));
+      }
+    }, [guideStepToSelection, isGuided, isStreaming, nextStep, sendGuideStep, t]);
+
+    useImperativeHandle(ref, () => ({ fillInput, guideTo: (selection) => void guideTo(selection) }), [fillInput, guideTo]);
 
     // Leave the conversation at least half the panel while dragging the rail.
     const startRailResize = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
@@ -751,33 +835,52 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                 ) || undefined}
                 data-user-message-index={message.role === "user" ? index : undefined}
               >
-                {message.role === "user" && (
-                  <MessageBubble
-                    message={message}
-                    editing={editingIndex === index}
-                    draft={editingIndex === index ? editDraft : message.content}
-                    onDraftChange={setEditDraft}
-                    onStartEdit={() => handleStartEdit(index)}
-                    onSave={() => void handleSaveEdit()}
-                    onCancel={handleCancelEdit}
-                    editDisabled={isStreaming}
-                    editable={!message.guide}
-                    branchSwitcher={(() => {
-                      const anchorId = state.branchAnchors[index];
-                      const info = anchorId !== undefined ? state.branchNavigation[anchorId] : undefined;
-                      if (!info || info.options.length <= 1 || info.activeIndex < 0) return undefined;
-                      return (
-                        <BranchSwitcher
-                          current={info.activeIndex + 1}
-                          total={info.options.length}
-                          disabled={isStreaming}
-                          onPrev={() => void handleSwitchBranch(info.options[info.activeIndex - 1].anchorId, -1)}
-                          onNext={() => void handleSwitchBranch(info.options[info.activeIndex + 1].anchorId, 1)}
-                        />
-                      );
-                    })()}
+                {message.role === "user" && (() => {
+                  const anchorId = state.branchAnchors[index];
+                  const info = anchorId !== undefined ? state.branchNavigation[anchorId] : undefined;
+                  const branchSwitcher = !info || info.options.length <= 1 || info.activeIndex < 0 ? undefined : (
+                    <BranchSwitcher
+                      current={info.activeIndex + 1}
+                      total={info.options.length}
+                      disabled={isStreaming}
+                      onPrev={() => void handleSwitchBranch(info.options[info.activeIndex - 1].anchorId, -1)}
+                      onNext={() => void handleSwitchBranch(info.options[info.activeIndex + 1].anchorId, 1)}
+                    />
+                  );
+                  // A step sent as the reader's message in older Sessions: the step itself, not their bubble.
+                  if (message.guide) {
+                    const step = message.guide;
+                    return (
+                      <GuideStepMarker
+                        label={message.content}
+                        skim={!!step.skim}
+                        branchSwitcher={branchSwitcher}
+                        onOpen={canOpenGuideStep ? () => openGuideStep(step) : undefined}
+                      />
+                    );
+                  }
+                  return (
+                    <MessageBubble
+                      message={message}
+                      editing={editingIndex === index}
+                      draft={editingIndex === index ? editDraft : message.content}
+                      onDraftChange={setEditDraft}
+                      onStartEdit={() => handleStartEdit(index)}
+                      onSave={() => void handleSaveEdit()}
+                      onCancel={handleCancelEdit}
+                      editDisabled={isStreaming}
+                      branchSwitcher={branchSwitcher}
+                    />
+                  );
+                })()}
+                {message.role === "assistant" && guideCalls(message).map((call) => (
+                  <GuideStepMarker
+                    key={call.toolCallId}
+                    label={guideStepLabel(call.guide)}
+                    skim={!!call.guide.skim}
+                    onOpen={canOpenGuideStep ? () => openGuideStep(call.guide) : undefined}
                   />
-                )}
+                ))}
                 {message.role === "assistant" && (
                   <AssistantMessage
                     message={message}
@@ -839,9 +942,19 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
               nextStep={nextStep}
               started={guideStarted}
               disabled={isStreaming}
-              onContinue={() => { if (nextStep) void sendGuideStep(nextStep); }}
-              onSkim={() => { if (nextStep) void sendGuideStep({ ...nextStep, skim: true }); }}
+              onContinue={handleGuideContinue}
+              onSkim={() => void handleGuideSkim()}
               onSkip={() => void handleGuideSkip()}
+              onPick={() => setRangePickerOpen(true)}
+            />
+          )}
+          {isGuided && bookReady && nextStep && (
+            <GuideRangePicker
+              open={rangePickerOpen}
+              onOpenChange={setRangePickerOpen}
+              step={nextStep}
+              loadOutline={loadGuideOutline}
+              onPick={(to, skim) => void handleGuideRangePick(to, skim)}
             />
           )}
           <ChatInput

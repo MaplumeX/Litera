@@ -8,6 +8,7 @@ import {
   Highlighter,
   ImageIcon,
   Info,
+  ListEnd,
   ListTree,
   Loader2,
   MessageSquareText,
@@ -32,6 +33,7 @@ import {
 } from "@/lib/answer-process";
 import { CitationContext } from "./Citation";
 import { ToolCallRaw, paramsSummary } from "./ToolCallCard";
+import { guideStepLabel } from "./GuideBar";
 
 type T = ReturnType<typeof useT>["t"];
 
@@ -314,6 +316,8 @@ function SearchStep({ call }: { call: AgentToolCall }) {
 
 const LOOKUP_STEPS: Record<string, { icon: LucideIcon; title: MessageKey }> = {
   get_toc: { icon: ListTree, title: "chat.process.toc" },
+  list_guide_blocks: { icon: ListTree, title: "chat.process.blocks" },
+  guide_step: { icon: ListEnd, title: "chat.process.guideStep" },
   get_book_metadata: { icon: Info, title: "chat.process.metadata" },
   list_annotations: { icon: Highlighter, title: "chat.process.annotations" },
   view_image: { icon: ImageIcon, title: "chat.process.image" },
@@ -341,7 +345,7 @@ function OtherToolStep({ call }: { call: AgentToolCall }) {
       calls={[call]}
       icon={lookup.icon}
       title={t(lookup.title)}
-      meta={call.tool === "view_image" ? imageName(call) : count === undefined ? undefined : t("chat.process.annotationCount", { count })}
+      meta={call.tool === "view_image" ? imageName(call) : call.guide ? guideStepLabel(call.guide) : count === undefined ? undefined : t("chat.process.annotationCount", { count })}
     />
   );
 }

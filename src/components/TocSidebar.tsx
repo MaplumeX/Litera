@@ -20,12 +20,14 @@ interface TocSidebarProps {
 /** A Guided session's progress on one TOC row. */
 function GuideMark({ progress }: { progress: GuideChapterProgress }) {
   const { t } = useT();
-  const done = progress.covered >= progress.totalParts;
+  const done = progress.coveredBlocks >= progress.totalBlocks;
+  // Rounded down, so a chapter shows 100% only once it is done.
+  const percent = Math.floor((progress.coveredBlocks * 100) / Math.max(1, progress.totalBlocks));
   const label = progress.skimmed
     ? t("toc.guide.skimmed")
     : done
       ? t("toc.guide.done")
-      : t("toc.guide.partial", { covered: progress.covered, total: progress.totalParts });
+      : t("toc.guide.partial", { percent });
   return (
     <span
       className="ml-1 flex shrink-0 items-center gap-1 text-[11px] tabular-nums text-muted-foreground"
@@ -38,7 +40,7 @@ function GuideMark({ progress }: { progress: GuideChapterProgress }) {
           ? t("toc.guide.skimmedShort")
           : done
             ? <Check className="h-3.5 w-3.5" />
-            : `${progress.covered}/${progress.totalParts}`}
+            : `${percent}%`}
       </span>
     </span>
   );

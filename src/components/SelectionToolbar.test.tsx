@@ -41,4 +41,14 @@ describe("SelectionToolbar", () => {
     expect(onCopy).toHaveBeenCalledOnce();
     expect(onAskAgent).toHaveBeenCalledOnce();
   });
+
+  it("offers guiding up to the selection only when asked to", () => {
+    const onGuideTo = vi.fn();
+    const props = { x: 10, y: 20, lastColor: "yellow" as const, onHighlight: vi.fn(), onCopy: vi.fn(), onAskAgent: vi.fn() };
+    const view = render(<SelectionToolbar {...props} />);
+    expect(view.queryByLabelText("带读到这里")).toBeNull();
+    view.rerender(<SelectionToolbar {...props} onGuideTo={onGuideTo} />);
+    fireEvent.click(view.getByLabelText("带读到这里"));
+    expect(onGuideTo).toHaveBeenCalledOnce();
+  });
 });

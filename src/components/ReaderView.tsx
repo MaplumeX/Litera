@@ -47,6 +47,11 @@ import {
   setLastUsedHighlightColor,
 } from "@/lib/annotations";
 import { SelectionToolbar } from "@/components/SelectionToolbar";
+import { selectionParagraph } from "@/lib/selection-paragraph";
+import { applyGuideMarks, findGuideParagraph, type GuideBlockTarget, type GuidePageMarks } from "@/lib/guide-marks";
+import { hrefMatches } from "@/agent/book/book-content";
+import { t as translate } from "@/lib/i18n";
+import type { GuideSelection } from "@/types/agent";
 import { HighlightEditor } from "@/components/HighlightEditor";
 import { FootnotePopup } from "@/components/FootnotePopup";
 import { ImageViewer } from "@/components/ImageViewer";
@@ -128,8 +133,11 @@ export interface ReaderViewHandle {
   getChapterTicks: () => number[];
   previewLabelAt: (fraction: number) => string | undefined;
   goToCfi: (cfi: string) => Promise<boolean>;
-  /** Go to a quoted sentence in the chapter at `href` and outline it; falls back to the chapter start. */
-  goToQuote: (href: string, quote: string) => Promise<boolean>;
+  /**
+   * Go to a quoted sentence in the chapter at `href` and outline it; with
+   * `block`, to that paragraph first. Falls back to the chapter start.
+   */
+  goToQuote: (href: string, quote: string, block?: GuideBlockTarget) => Promise<boolean>;
   setStyles: (css: string) => void;
   setColumnCount: (count: number) => void;
   setFlow: (flow: ReaderFlow) => void;
@@ -182,6 +190,8 @@ interface ReaderViewProps {
   ) => void;
   /** Called when the user clicks the ask-agent button on a selection. */
   onSelectionCapture?: (capture: SelectionCapture) => void;
+  /** In a Guided session: called to read up to a selection. Absent hides the action. */
+  onGuideTo?: (selection: GuideSelection) => void;
   /** Called when the user clicks highlight on a selection. */
   onHighlight?: (selection: SelectionCfi) => void;
   /** Called when the in-page editor changes color or note. */
@@ -210,6 +220,8 @@ interface ReaderViewProps {
   onUserRelocate?: () => void;
   /** Reader CSS (font/theme) to inject into footnote popup inner views. */
   stylesCss?: string;
+  /** A Guided session's marks: paragraphs read, skimmed, and at the Guide cursor. */
+  guideMarks?: GuidePageMarks | null;
   /** A blank tap in the middle third of the page (the mobile shell toggles its chrome). */
   onMiddleTap?: () => void;
 }
@@ -294,6 +306,15 @@ function readIframeSelectionRange(view: FoliateAnnotator): Range | null {
   return null;
 }
 
+/** Mark a page document with the Guided session's marks for its file, or clear them. */
+function markGuidedDoc(view: unknown, doc: Document, index: number | undefined, marks: GuidePageMarks | null | undefined) {
+  const sectionId = index === undefined
+    ? undefined
+    : (view as { book?: { sections?: { id?: string }[] } } | null)?.book?.sections?.[index]?.id;
+  const file = marks && sectionId ? Object.keys(marks).find((href) => hrefMatches(href, sectionId)) : undefined;
+  applyGuideMarks(doc, marks && file ? marks[file] : null, translate("reader.guideCursor"));
+}
+
 function selectionOverlayPos(doc: Document, range: Range): { x: number; y: number } | null {
   const rect = range.getBoundingClientRect();
   if (rect.width === 0 && rect.height === 0) return null;
@@ -342,6 +363,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       fileData,
       onRelocate,
       onSelectionCapture,
+      onGuideTo,
       onHighlight,
       onUpdateHighlight,
       onDeleteHighlight,
@@ -356,6 +378,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       keysDisabled = false,
       onUserRelocate,
       stylesCss,
+      guideMarks,
       onMiddleTap,
     },
     ref,
@@ -415,6 +438,8 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
     }, [emitHistory]);
     const [image, setImage] = useState<ReaderImage | null>(null);
     // Latest reader CSS for footnote inner views (read inside the mount effect).
+    const guideMarksRef = useRef(guideMarks);
+    guideMarksRef.current = guideMarks;
     const stylesCssRef = useRef(stylesCss);
     stylesCssRef.current = stylesCss;
     const onMiddleTapRef = useRef(onMiddleTap);
@@ -497,6 +522,8 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       x: number;
       y: number;
       text: string;
+      /** The page paragraph the selection ends in, for "Guide up to here". */
+      paragraph: string;
     } | null>(null);
     const [editor, setEditor] = useState<{
       id: string;
@@ -783,13 +810,15 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         }
         lastSelectionDocRef.current = doc;
         closeHighlightEditorRef.current();
-        setSelectionPos({ x: pos.x, y: pos.y, text });
+        setSelectionPos({ x: pos.x, y: pos.y, text, paragraph: selectionParagraph(range) });
       };
       const handleLoad = (e: Event) => {
         unbindDoc?.();
         unbindDoc = undefined;
-        const doc = (e as CustomEvent<{ doc?: Document }>).detail?.doc;
+        const detail = (e as CustomEvent<{ doc?: Document; index?: number }>).detail;
+        const doc = detail?.doc;
         if (!doc) return;
+        markGuidedDoc(el, doc, detail.index, guideMarksRef.current);
         void hideUntilFontsReady(doc);
         const unbindPointer = bindPointerPaging(
           doc,
@@ -1206,6 +1235,12 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       clearIframeSelection();
     }, [selectionPos, onSelectionCapture, clearIframeSelection]);
 
+    const handleGuideTo = useCallback(() => {
+      if (!selectionPos) return;
+      onGuideTo?.({ text: selectionPos.text, paragraph: selectionPos.paragraph, chapterHref: currentChapterHrefRef.current });
+      clearIframeSelection();
+    }, [selectionPos, onGuideTo, clearIframeSelection]);
+
     const handleCopySelection = useCallback(() => {
       if (!selectionPos) return;
       void navigator.clipboard.writeText(selectionPos.text);
@@ -1314,36 +1349,69 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         return false;
       }
     }, []);
-    const goToQuote = useCallback(async (href: string, quote: string) => {
+    const goToQuote = useCallback(async (href: string, quote: string, block?: GuideBlockTarget) => {
       const view = viewRef.current as unknown as (FoliateAnnotator & {
-        book?: { resolveHref?: (href: string) => { index: number } | null };
+        book?: {
+          resolveHref?: (href: string) => { index: number } | null;
+          sections?: { createDocument?: () => Promise<Document> }[];
+        };
         search?: (opts: { query: string; index: number }) => AsyncGenerator<unknown>;
       }) | null;
       if (!view) return false;
       clearQuoteFlash();
+      // Go to `cfi` and outline it briefly, unlike foliate's lasting search outline.
+      const goToAndFlash = async (cfi: string) => {
+        const resolved = (await view.goTo?.(cfi)) as
+          | { index: number; anchor?: (doc: Document) => Range }
+          | undefined;
+        const contents = view.renderer
+          ?.getContents?.()
+          .find((item) => item.index === resolved?.index);
+        const range = contents?.doc ? resolved?.anchor?.(contents.doc) : undefined;
+        if (contents?.overlayer && range) {
+          contents.overlayer.add(QUOTE_OVERLAY_KEY, range, Overlayer.highlight, {
+            color: QUOTE_HIGHLIGHT_COLOR,
+          });
+          quoteFlashTimerRef.current = setTimeout(clearQuoteFlash, QUOTE_FLASH_MS);
+        }
+      };
       try {
+        // A guided block: count to it through the chapter's files, as the text alone may open other paragraphs too.
+        if (block) {
+          let remaining = block.occurrence;
+          const files = new Map<string, string | undefined>();
+          for (const target of block.hrefs) {
+            const [file, fragment] = target.split("#");
+            if (!files.has(file)) files.set(file, fragment || undefined);
+          }
+          for (const [file, fragment] of files) {
+            const index = view.book?.resolveHref?.(file)?.index;
+            const doc = index == null ? undefined : await view.book?.sections?.[index]?.createDocument?.();
+            if (index == null || !doc) continue;
+            const found = findGuideParagraph(doc, block.key, remaining, fragment ? doc.getElementById(fragment) : null);
+            if (typeof found === "number") {
+              remaining -= found;
+              continue;
+            }
+            const range = doc.createRange();
+            range.selectNodeContents(found);
+            const cfi = view.getCFI?.(index, range);
+            if (cfi) {
+              await goToAndFlash(cfi);
+              return true;
+            }
+            break;
+          }
+        }
         const index = view.book?.resolveHref?.(href)?.index;
         if (index != null && view.search) {
           for (const query of quoteSearchQueries(quote)) {
             for await (const result of view.search({ query, index })) {
               const cfi = (result as { cfi?: unknown } | null)?.cfi;
               if (typeof cfi === "string") {
-                // Only the first hit matters; drop foliate's persistent search
-                // outline and flash the quote briefly instead.
+                // Only the first hit matters; drop foliate's persistent search outline.
                 view.clearSearch?.();
-                const resolved = (await view.goTo?.(cfi)) as
-                  | { index: number; anchor?: (doc: Document) => Range }
-                  | undefined;
-                const contents = view.renderer
-                  ?.getContents?.()
-                  .find((item) => item.index === resolved?.index);
-                const range = contents?.doc ? resolved?.anchor?.(contents.doc) : undefined;
-                if (contents?.overlayer && range) {
-                  contents.overlayer.add(QUOTE_OVERLAY_KEY, range, Overlayer.highlight, {
-                    color: QUOTE_HIGHLIGHT_COLOR,
-                  });
-                  quoteFlashTimerRef.current = setTimeout(clearQuoteFlash, QUOTE_FLASH_MS);
-                }
+                await goToAndFlash(cfi);
                 return true;
               }
             }
@@ -1355,6 +1423,14 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       }
       return false;
     }, [clearQuoteFlash]);
+    // Pages already on screen take new marks at once; later pages on load.
+    useEffect(() => {
+      const view = viewRef.current as unknown as { renderer?: { getContents?: () => { index?: number; doc?: Document }[] } } | null;
+      for (const { index, doc } of view?.renderer?.getContents?.() ?? []) {
+        if (doc) markGuidedDoc(view, doc, index, guideMarks);
+      }
+    }, [guideMarks]);
+
     const setStyles = useCallback((css: string) => {
       const view = viewRef.current as unknown as { renderer?: { setStyles?: (c: string) => void } };
       view?.renderer?.setStyles?.(css);
@@ -1606,6 +1682,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
             onHighlight={handleHighlightSelection}
             onCopy={handleCopySelection}
             onAskAgent={handleAskAgent}
+            onGuideTo={onGuideTo ? handleGuideTo : undefined}
           />
         )}
 

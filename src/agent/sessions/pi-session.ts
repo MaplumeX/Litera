@@ -7,7 +7,10 @@ import type {
   AgentToolCall,
   AssistantBlock,
   BranchOption,
-  GuideStep,
+  GuidePosition,
+  GuideRecapMarker,
+  GuideRequest,
+  RecordedGuideStep,
   SessionKind,
 } from "@/types/agent";
 
@@ -54,10 +57,49 @@ function nonNegativeInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 0;
 }
 
-/** A persisted guided step, or null when absent or malformed. */
-export function decodeGuide(value: unknown): GuideStep | null {
+function decodeGuidePosition(value: unknown): GuidePosition | null {
+  const position = object(value);
+  if (!position || !nonNegativeInteger(position.chapterIndex) || !nonNegativeInteger(position.block)) return null;
+  const chapterTitle = string(position.chapterTitle);
+  const snippet = string(position.snippet);
+  return {
+    chapterIndex: position.chapterIndex,
+    ...(chapterTitle ? { chapterTitle } : {}),
+    block: position.block,
+    ...(snippet ? { snippet } : {}),
+    ...(nonNegativeInteger(position.paragraph) ? { paragraph: position.paragraph } : {}),
+  };
+}
+
+/** A persisted guide request (an object, with an optional step), or null when absent or malformed. */
+function decodeGuideRequest(value: unknown): GuideRequest | null {
+  const request = object(value);
+  if (!request) return null;
+  const step = decodeGuide(request.step);
+  return step ? { step } : {};
+}
+
+/**
+ * A persisted guided step, or null when absent or malformed. A step from
+ * before steps were block ranges is a part of a chapter; one from before they
+ * kept their ends at the top level names them in `range`.
+ */
+export function decodeGuide(value: unknown): RecordedGuideStep | null {
   const guide = object(value);
-  if (!guide || !nonNegativeInteger(guide.chapterIndex) || !nonNegativeInteger(guide.part)
+  if (!guide) return null;
+  const skim = guide.skim === true ? { skim: true as const } : {};
+  const ends = guide.from !== undefined || guide.to !== undefined ? guide : object(guide.range);
+  if (ends) {
+    const from = decodeGuidePosition(ends.from);
+    const to = decodeGuidePosition(ends.to);
+    if (!from || !to) return null;
+    const part = object(guide.part);
+    const labelPart = part && nonNegativeInteger(part.index) && nonNegativeInteger(part.total) && part.index < part.total
+      ? { part: { index: part.index, total: part.total } }
+      : {};
+    return { from, to, ...skim, ...labelPart };
+  }
+  if (!nonNegativeInteger(guide.chapterIndex) || !nonNegativeInteger(guide.part)
     || !nonNegativeInteger(guide.totalParts) || guide.part >= guide.totalParts) return null;
   const chapterTitle = string(guide.chapterTitle);
   return {
@@ -65,7 +107,7 @@ export function decodeGuide(value: unknown): GuideStep | null {
     part: guide.part,
     totalParts: guide.totalParts,
     ...(chapterTitle ? { chapterTitle } : {}),
-    ...(guide.skim === true ? { skim: true as const } : {}),
+    ...skim,
   };
 }
 
@@ -169,7 +211,7 @@ export function activeBranch(session: DecodedPiSession): PiSessionEntry[] {
  * Tools whose results are Book content the model can fetch again, so Pruning
  * may clear them from the model context.
  */
-export const PRUNABLE_TOOLS: ReadonlySet<string> = new Set(["read_chapter", "search_in_book", "get_toc", "view_image"]);
+export const PRUNABLE_TOOLS: ReadonlySet<string> = new Set(["read_chapter", "search_in_book", "get_toc", "list_guide_blocks", "view_image"]);
 
 /** A toolResult entry of a prunable tool that the projection has not cleared yet. */
 export function isPrunableEntry(entry: PiSessionEntry): boolean {
@@ -185,14 +227,28 @@ export function isGuideRecapEntry(entry: PiSessionEntry): boolean {
 
 export const GUIDE_RECAP = "guideRecap";
 
-/** A recap entry's chapter and reader-facing text, or null when malformed. */
-function decodeRecap(entry: PiSessionEntry): { chapterIndex: number; chapterTitle?: string; text: string } | null {
+/**
+ * A recap entry's chapters and reader-facing text, or null when malformed.
+ * A recap of several chapters names the last as `throughChapterIndex`; one
+ * not after the first is dropped.
+ */
+function decodeRecap(entry: PiSessionEntry): Omit<GuideRecapMarker, "role"> | null {
   if (!isGuideRecapEntry(entry)) return null;
   const details = object(entry.details);
   const text = string(details?.text);
   if (!details || !nonNegativeInteger(details.chapterIndex) || !text) return null;
   const chapterTitle = string(details.chapterTitle);
-  return { chapterIndex: details.chapterIndex, ...(chapterTitle ? { chapterTitle } : {}), text };
+  const through = nonNegativeInteger(details.throughChapterIndex) && details.throughChapterIndex > details.chapterIndex
+    ? details.throughChapterIndex
+    : undefined;
+  const throughChapterTitle = through !== undefined ? string(details.throughChapterTitle) : null;
+  return {
+    chapterIndex: details.chapterIndex,
+    ...(chapterTitle ? { chapterTitle } : {}),
+    ...(through !== undefined ? { throughChapterIndex: through } : {}),
+    ...(throughChapterTitle ? { throughChapterTitle } : {}),
+    text,
+  };
 }
 
 function prunedPlaceholder(toolName: string, args: Record<string, unknown> | undefined): string {
@@ -384,6 +440,7 @@ export function visibleMessages(session: DecodedPiSession): UiAgentMessage[] {
     if (!message) continue;
     if (message.role === "toolResult" && typeof message.toolCallId === "string") {
       const owner = toolOwners.get(message.toolCallId);
+      const guide = decodeGuide(entry.guide);
       if (owner) {
         const ownerMessage = output[owner.messageIndex];
         const block = ownerMessage?.role === "assistant" ? ownerMessage.blocks?.[owner.blockIndex] : undefined;
@@ -392,6 +449,7 @@ export function visibleMessages(session: DecodedPiSession): UiAgentMessage[] {
             ...block.toolCall,
             result: contentText(message.content),
             ...(message.isError === true ? { isError: true } : {}),
+            ...(guide ? { guide } : {}),
           };
         }
       }
@@ -405,7 +463,8 @@ export function visibleMessages(session: DecodedPiSession): UiAgentMessage[] {
       const selection = string(entry.selection) ?? undefined;
       const chapterHref = string(entry.chapterHref) ?? undefined;
       const guide = decodeGuide(entry.guide);
-      output.push({ role: "user", content: contentText(message.content), ...(selection ? { selection } : {}), ...(chapterHref ? { chapterHref } : {}), ...(guide ? { guide } : {}) });
+      const guideRequest = decodeGuideRequest(entry.guideRequest);
+      output.push({ role: "user", content: contentText(message.content), ...(selection ? { selection } : {}), ...(chapterHref ? { chapterHref } : {}), ...(guide ? { guide } : {}), ...(guideRequest ? { guideRequest } : {}) });
       continue;
     }
     const stopReason = message.stopReason === "aborted" || message.stopReason === "error" ? message.stopReason : undefined;
@@ -616,32 +675,22 @@ export function sessionSummary(value: unknown): AgentSessionSummary {
   return summary;
 }
 
-/** The guide cursor: the latest guided step on the active branch. */
-export function guideCursor(session: DecodedPiSession): GuideStep | null {
-  const branch = activeBranch(session);
-  for (let index = branch.length - 1; index >= 0; index -= 1) {
-    const entry = branch[index];
-    if (entry.type !== "message") continue;
-    const guide = decodeGuide(entry.guide);
-    if (guide) return guide;
-  }
-  return null;
-}
-
 /**
  * The guided steps on the active branch, oldest first, each with the text of
- * the answer that followed it (the assistant entries up to the next user
- * message). Side questions are left out.
+ * the explanation that followed it (the assistant entries up to the next step
+ * or user message). Side questions are left out.
  */
-export function guidedTurns(session: DecodedPiSession): Array<{ step: GuideStep; text: string }> {
-  const turns: Array<{ step: GuideStep; text: string }> = [];
-  let current: { step: GuideStep; text: string } | null = null;
+export function guidedTurns(session: DecodedPiSession): Array<{ step: RecordedGuideStep; text: string }> {
+  const turns: Array<{ step: RecordedGuideStep; text: string }> = [];
+  let current: { step: RecordedGuideStep; text: string } | null = null;
   for (const entry of activeBranch(session)) {
     const role = messageRole(entry);
-    if (role === "user") {
-      const step = decodeGuide(entry.guide);
-      current = step ? { step, text: "" } : null;
-      if (current) turns.push(current);
+    const step = role ? decodeGuide(entry.guide) : null;
+    if (step) {
+      current = { step, text: "" };
+      turns.push(current);
+    } else if (role === "user") {
+      current = null;
     } else if (role === "assistant" && current) {
       current.text += contentText(object(entry.message)?.content);
     }
@@ -649,11 +698,13 @@ export function guidedTurns(session: DecodedPiSession): Array<{ step: GuideStep;
   return turns;
 }
 
-/** The chapters with a recap on the active branch. */
-export function guideRecapChapters(session: DecodedPiSession): Array<{ chapterIndex: number; chapterTitle?: string }> {
+/** The chapters of each recap on the active branch. */
+export function guideRecapChapters(session: DecodedPiSession): Array<Omit<GuideRecapMarker, "role" | "text">> {
   return activeBranch(session).flatMap((entry) => {
     const recap = decodeRecap(entry);
-    return recap ? [{ chapterIndex: recap.chapterIndex, ...(recap.chapterTitle ? { chapterTitle: recap.chapterTitle } : {}) }] : [];
+    if (!recap) return [];
+    const { text: _text, ...chapters } = recap;
+    return [chapters];
   });
 }
 

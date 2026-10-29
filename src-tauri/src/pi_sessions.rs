@@ -284,7 +284,7 @@ impl PiSessionStore {
                 .map(str::to_string);
             let guide = kind
                 .as_ref()
-                .and_then(|_| latest_guide_on_branch(&entries, leaf_id.as_deref()))
+                .and_then(|_| furthest_guide_on_branch(&entries, leaf_id.as_deref()))
                 .cloned();
             summaries.push(PiSessionSummary {
                 id: id.to_string(),
@@ -820,14 +820,59 @@ fn latest_on_branch<'a>(
     None
 }
 
-/// The `guide` field of the latest guided step (a user message entry carrying
-/// one) on the branch ending at `leaf_id`.
-fn latest_guide_on_branch<'a>(entries: &'a [Value], leaf_id: Option<&str>) -> Option<&'a Value> {
+/// The `guide` field of the latest guided step (a message entry carrying one:
+/// a `guide_step` tool result, or a user message in older sessions) on the
+/// branch ending at `leaf_id`.
+/// Where a recorded guided step ends: its chapter, then its block, or for a
+/// step from before steps were block ranges, its share of the chapter as a
+/// fraction (a skim reaches the chapter's end).
+enum GuideEnd {
+    Block(u64, u64),
+    Share(u64, u64, u64),
+}
+
+fn guide_end(guide: &Value) -> Option<GuideEnd> {
+    let number = |value: &Value, key: &str| value.get(key).and_then(Value::as_u64);
+    if let Some(to) = guide.get("to").or_else(|| guide.get("range").and_then(|range| range.get("to"))) {
+        return Some(GuideEnd::Block(number(to, "chapterIndex")?, number(to, "block")?));
+    }
+    let chapter = number(guide, "chapterIndex")?;
+    let total = number(guide, "totalParts")?.max(1);
+    let reached = if guide.get("skim").and_then(Value::as_bool) == Some(true) {
+        total
+    } else {
+        number(guide, "part")? + 1
+    };
+    Some(GuideEnd::Share(chapter, reached, total))
+}
+
+/// Whether `left` ends past `right`. Ends of different kinds in one chapter
+/// cannot be compared; the newer one counts then.
+fn guide_ends_after(left: &GuideEnd, right: &GuideEnd) -> bool {
+    let chapter = |end: &GuideEnd| match end {
+        GuideEnd::Block(chapter, _) | GuideEnd::Share(chapter, _, _) => *chapter,
+    };
+    if chapter(left) != chapter(right) {
+        return chapter(left) > chapter(right);
+    }
+    match (left, right) {
+        (GuideEnd::Block(_, left), GuideEnd::Block(_, right)) => left > right,
+        (GuideEnd::Share(_, left, left_total), GuideEnd::Share(_, right, right_total)) => {
+            left * right_total > right * left_total
+        }
+        _ => false,
+    }
+}
+
+/// The guided step on the active branch that reached the Guide cursor: the
+/// one ending furthest into the Book (the newest of those ending alike).
+fn furthest_guide_on_branch<'a>(entries: &'a [Value], leaf_id: Option<&str>) -> Option<&'a Value> {
     let by_id: HashMap<&str, &Value> = entries
         .iter()
         .filter_map(|entry| entry_id(entry).map(|id| (id, entry)))
         .collect();
     let mut visited = HashSet::new();
+    let mut furthest: Option<(&Value, GuideEnd)> = None;
     let mut current = leaf_id.and_then(|id| by_id.get(id).copied());
     while let Some(entry) = current {
         if !visited.insert(entry_id(entry)?) {
@@ -835,7 +880,12 @@ fn latest_guide_on_branch<'a>(entries: &'a [Value], leaf_id: Option<&str>) -> Op
         }
         if entry.get("type").and_then(Value::as_str) == Some("message") {
             if let Some(guide) = entry.get("guide").filter(|guide| guide.is_object()) {
-                return Some(guide);
+                if let Some(end) = guide_end(guide) {
+                    // Walking back from the leaf: an older step must end strictly further.
+                    if furthest.as_ref().map_or(true, |(_, best)| guide_ends_after(&end, best)) {
+                        furthest = Some((guide, end));
+                    }
+                }
             }
         }
         current = entry
@@ -843,7 +893,7 @@ fn latest_guide_on_branch<'a>(entries: &'a [Value], leaf_id: Option<&str>) -> Op
             .and_then(Value::as_str)
             .and_then(|parent| by_id.get(parent).copied());
     }
-    None
+    furthest.map(|(guide, _)| guide)
 }
 
 /// The newest of `candidates` (by append order) whose ancestry reaches
@@ -1767,6 +1817,19 @@ mod sync_merge_tests {
             .unwrap();
         let summary = &store.list("book").unwrap()[0];
         assert_eq!(summary.guide.as_ref().unwrap()["part"], 1);
+
+        // Going back over an earlier chapter leaves the cursor at the furthest step.
+        let mut back = message("back0001", Some("side0001"), "chapter one again");
+        back["guide"] = json!({"from": {"chapterIndex": 0, "block": 0}, "to": {"chapterIndex": 0, "block": 5}});
+        let mut on = message("step0003", Some("back0001"), "on in chapter three");
+        on["guide"] = json!({"from": {"chapterIndex": 2, "block": 0}, "to": {"chapterIndex": 2, "block": 3}});
+        store.append("book", &id, Some("side0001"), vec![back]).unwrap();
+        let summary = &store.list("book").unwrap()[0];
+        assert_eq!(summary.guide.as_ref().unwrap()["part"], 1);
+        // A block range and an older part step in one chapter: the newer counts.
+        store.append("book", &id, Some("back0001"), vec![on]).unwrap();
+        let summary = &store.list("book").unwrap()[0];
+        assert_eq!(summary.guide.as_ref().unwrap()["to"]["block"], 3);
 
         // Back on the first step's branch, the cursor follows it.
         store.set_leaf("book", &id, "step0001").unwrap();

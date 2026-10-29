@@ -18,19 +18,76 @@ export interface AgentError {
 /** A Guided session reads the Book to the reader; fixed at creation. */
 export type SessionKind = "guided";
 
+/** A block (Markdown paragraph) of a chapter, at one end of a guided step. */
+export interface GuidePosition {
+  chapterIndex: number;
+  chapterTitle?: string;
+  /** 0-based block of the chapter (see `BookTocEntry.blocks`). */
+  block: number;
+  /** The block's opening text when the step was sent, to find it again if the blocks shift. */
+  snippet?: string;
+  /**
+   * The 1-based paragraph (see `isGuideParagraph`) the reader sees at this end
+   * of a step: as `from`, the first at or after `block`; as `to`, the last
+   * at or before it. Absent on steps recorded before it was kept.
+   */
+  paragraph?: number;
+}
+
+/** A reader's selection to guide up to. */
+export interface GuideSelection {
+  text: string;
+  /** The text of the page's paragraph the selection ends in. */
+  paragraph?: string;
+  chapterHref?: string;
+}
+
 /**
- * One guided step: the chapter part the assistant retells. Persisted on the
- * step's user-message entry; the latest one on the active branch is the
- * guide cursor.
+ * One guided step: the blocks `from` to `to` (inclusive), possibly across
+ * chapters. Taken by the assistant with `guide_step` and persisted as `guide`
+ * on that tool result's entry; the furthest block the steps on the active
+ * branch reached is the Guide cursor.
  */
 export interface GuideStep {
+  from: GuidePosition;
+  to: GuidePosition;
+  /** A compressed pass instead of a full retelling. */
+  skim?: true;
+  /**
+   * For the step's label only, never to find it: the step is part `index` of
+   * `from`'s chapter cut into `total` parts (a skim: that part to the
+   * chapter's end), as the chapter was cut when the step was taken.
+   */
+  part?: { index: number; total: number };
+}
+
+/**
+ * A guided step as Sessions recorded it before steps were block ranges (on
+ * the user message entry): part `part` of a chapter cut into `totalParts`
+ * (a skim: `part` to the chapter's end). Read, never written.
+ */
+export interface LegacyGuideStep {
   chapterIndex: number;
-  /** 0-based read_chapter part. */
+  chapterTitle?: string;
   part: number;
   totalParts: number;
-  chapterTitle?: string;
-  /** A skim: parts `part` to the chapter's end in one compressed pass. */
   skim?: true;
+}
+
+/** A guided step as a Session recorded it. */
+export type RecordedGuideStep = GuideStep | LegacyGuideStep;
+
+export function isLegacyGuideStep(step: RecordedGuideStep): step is LegacyGuideStep {
+  return !("from" in step);
+}
+
+/**
+ * What a reader's message in a Guided session asks of the guide: Continue
+ * (no `step`; the assistant picks where the step ends) or a step the reader
+ * picked. It is not a step itself; the assistant takes it with `guide_step`.
+ */
+export interface GuideRequest {
+  step?: RecordedGuideStep;
 }
 
 export interface AgentSessionSummary {
@@ -40,8 +97,8 @@ export interface AgentSessionSummary {
   updatedAt: string;
   systemPrompt?: string;
   kind?: SessionKind;
-  /** Guided sessions: the guide cursor, absent before the first step. */
-  guide?: GuideStep;
+  /** Guided sessions: the step that reached the Guide cursor, absent before the first step. */
+  guide?: RecordedGuideStep;
 }
 
 export interface BranchOption {
@@ -65,6 +122,8 @@ export interface AgentToolCall {
   result?: unknown;
   done: boolean;
   isError?: boolean;
+  /** The guided step a `guide_step` call took. */
+  guide?: RecordedGuideStep;
 }
 
 export type AssistantBlock =
@@ -77,8 +136,10 @@ export interface UserMessage {
   content: string;
   selection?: string;
   chapterHref?: string;
-  /** Set on a guided step; the content is then the step's label. */
-  guide?: GuideStep;
+  /** A guided step sent as the user message, in Sessions recorded before the assistant took steps itself. */
+  guide?: RecordedGuideStep;
+  /** Continue or a picked step; the content is then its label. */
+  guideRequest?: GuideRequest;
 }
 
 export interface AssistantChatMessage {
@@ -110,6 +171,9 @@ export interface GuideRecapMarker {
   role: "recap";
   chapterIndex: number;
   chapterTitle?: string;
+  /** The last chapter of a recap that covers several, finished by one step. */
+  throughChapterIndex?: number;
+  throughChapterTitle?: string;
   text: string;
 }
 
@@ -122,6 +186,15 @@ export type AgentMessage = UserMessage | AssistantChatMessage | CompactionNotice
 /** Transcript markers are not chat turns. */
 export function isTranscriptMarker(message: AgentMessage): message is CompactionNotice | GuideRecapMarker {
   return message.role === "notice" || message.role === "recap";
+}
+
+/** The guided steps taken in a transcript, oldest first: by `guide_step` calls, or sent as user messages in older Sessions. */
+export function takenGuideSteps(messages: readonly AgentMessage[]): RecordedGuideStep[] {
+  return messages.flatMap((message) => {
+    if (message.role === "user") return message.guide ? [message.guide] : [];
+    if (message.role !== "assistant") return [];
+    return (message.blocks ?? []).flatMap((block) => (block.type === "toolCall" && block.toolCall.guide ? [block.toolCall.guide] : []));
+  });
 }
 
 type EventEnvelope = {
@@ -143,7 +216,8 @@ export type AgentEvent = EventEnvelope & (
   | ({ type: "thinking_delta"; delta: string; contentIndex: number } & PromptCorrelation)
   | ({ type: "thinking_end"; contentIndex: number } & PromptCorrelation)
   | ({ type: "tool_start"; toolCallId: string; tool: string; params: unknown } & PromptCorrelation)
-  | ({ type: "tool_end"; toolCallId: string; result: unknown; isError: boolean } & PromptCorrelation)
+  /** `guide`: the step a `guide_step` call took. */
+  | ({ type: "tool_end"; toolCallId: string; result: unknown; isError: boolean; guide?: GuideStep } & PromptCorrelation)
   // Context maintenance runs inside a prompt or in the background after one,
   // so compaction events correlate to the Session, not to a prompt.
   // `reason: "overflow"`: a request exceeded the context window and is retried after compaction.
@@ -154,7 +228,7 @@ export type AgentEvent = EventEnvelope & (
   // task as context maintenance.
   | ({ type: "guide_recap_added"; messages: AgentMessage[]; anchors: string[]; navigation: Record<string, AnchorBranchInfo> } & SessionCorrelation)
   | ({ type: "retry_scheduled"; attempt: number; maxAttempts: number; delayMs: number } & PromptCorrelation)
-  | ({ type: "prompt_end"; messages?: AgentMessage[]; anchors?: string[]; navigation?: Record<string, AnchorBranchInfo> } & PromptCorrelation)
+  | ({ type: "prompt_end"; messages?: AgentMessage[]; anchors?: string[]; navigation?: Record<string, AnchorBranchInfo>} & PromptCorrelation)
   | ({ type: "prompt_aborted"; messages?: AgentMessage[]; anchors?: string[]; navigation?: Record<string, AnchorBranchInfo> } & PromptCorrelation & RequestCorrelation)
   | ({ type: "session_created"; kind?: SessionKind } & BookCorrelation & { sessionId: string } & RequestCorrelation)
   | ({ type: "session_switched"; messages: AgentMessage[]; anchors?: string[]; navigation?: Record<string, AnchorBranchInfo> } & BookCorrelation & { sessionId: string } & RequestCorrelation)

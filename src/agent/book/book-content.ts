@@ -3,8 +3,39 @@ import type { ModelImage } from "./model-image";
 export type { ModelImage };
 export const CHAPTER_PART_CHARS = 12_000;
 export interface BookMetadata { title: string; author: string; language: string; totalChapters: number }
-/** `parts`: how many read_chapter windows the chapter splits into. */
-export interface BookTocEntry { index: number; label: string; ancestors: string[]; depth: number; hrefs: string[]; chars: number; parts: number }
+/**
+ * `parts`: how many read_chapter windows the chapter splits into. `blocks`:
+ * how many blocks (Markdown paragraphs) it has; `partStarts`: the first block
+ * of each part.
+ */
+export interface BookTocEntry { index: number; label: string; ancestors: string[]; depth: number; hrefs: string[]; chars: number; parts: number; blocks: number; partStarts: number[] }
+/**
+ * One block of a chapter. `snippet`: its opening plain text, whitespace
+ * collapsed (an image block: its alt text); `heading`: the heading level, 0
+ * for none; `part`: the read_chapter part holding it; `kind`: an image-only
+ * or blank block, absent for text.
+ */
+export interface GuideBlock { snippet: string; chars: number; heading: number; part: number; kind?: "image" | "blank" }
+
+/** Whether a block is a paragraph as the reader counts them: text, not a heading, image or blank. */
+export function isGuideParagraph(block: GuideBlock): boolean {
+  return block.heading === 0 && !block.kind;
+}
+
+/** How many of a chapter's `blocks` before block `end` are paragraphs (see `isGuideParagraph`). */
+export function guideParagraphsBefore(blocks: readonly GuideBlock[], end: number): number {
+  let count = 0;
+  for (let index = 0; index < Math.min(end, blocks.length); index += 1) if (isGuideParagraph(blocks[index])) count += 1;
+  return count;
+}
+/**
+ * What helps find the block a selection ends in: the page's paragraph around
+ * its end, and the step's first block (of several matches in its chapter,
+ * the first at or after it wins).
+ */
+export interface GuideSelectionHints { paragraph?: string; after?: { chapterIndex: number; block: number } }
+/** What read_chapter returns: a part, or the blocks `fromBlock` to `toBlock` of it. */
+export interface ChapterRead { chapterIndex: number; chapterNumber: number; chapterTitle?: string; part: number; totalParts: number; fromBlock: number; toBlock: number; totalBlocks: number; text: string }
 export interface SearchHit { chapterIndex: number; chapterTitle?: string; part: number; match: "exact" | "partial"; snippet: string }
 /**
  * Where a quoted passage sits in the Book. `verified`: found in the cited
@@ -27,7 +58,11 @@ export interface BookContentPort {
   open(bookId: string, bytes: ArrayBuffer): Promise<void>;
   metadata(): Promise<BookMetadata>;
   toc(): Promise<BookTocEntry[]>;
-  readChapter(chapterIndex: number, part?: number): Promise<{ chapterIndex: number; chapterNumber: number; chapterTitle?: string; part: number; totalParts: number; text: string }>;
+  /** A part, or with `range` the blocks `fromBlock` to `toBlock` (inclusive, cut at the end of the part they start in). */
+  readChapter(chapterIndex: number, part?: number, range?: { fromBlock: number; toBlock: number }): Promise<ChapterRead>;
+  guideBlocks(chapterIndex: number): Promise<GuideBlock[]>;
+  /** The block a reader's selection ends in, looking in `chapterIndex` first; null when not found. */
+  locateGuideBlock(chapterIndex: number, selection: string, hints?: GuideSelectionHints): Promise<{ chapterIndex: number; block: number } | null>;
   search(queries: string[]): Promise<SearchHit[]>;
   locateQuote(chapterIndex: number, quote: string): Promise<QuoteLocation>;
   /** A packaged image by its read_chapter placeholder `src`, fitted for vision models. */
@@ -98,7 +133,7 @@ export function formatBookSnapshot(metadata: BookMetadata, toc: readonly BookToc
   return parts.join("\n");
 }
 
-type Request = { id: string; method: "open" | "metadata" | "toc" | "readChapter" | "search" | "locateQuote" | "readImage"; args: unknown[] };
+type Request = { id: string; method: "open" | "metadata" | "toc" | "readChapter" | "guideBlocks" | "locateGuideBlock" | "search" | "locateQuote" | "readImage"; args: unknown[] };
 type Response = { id: string; result?: unknown; error?: string };
 
 export class BookWorkerClient implements BookContentPort {
@@ -149,7 +184,9 @@ export class BookWorkerClient implements BookContentPort {
   }
   metadata(): Promise<BookMetadata> { return this.call("metadata", []); }
   toc(): Promise<BookTocEntry[]> { return this.call("toc", []); }
-  readChapter(chapterIndex: number, part = 0) { return this.call<Awaited<ReturnType<BookContentPort["readChapter"]>>>("readChapter", [chapterIndex, part]); }
+  readChapter(chapterIndex: number, part = 0, range?: { fromBlock: number; toBlock: number }): Promise<ChapterRead> { return this.call("readChapter", range ? [chapterIndex, part, range] : [chapterIndex, part]); }
+  guideBlocks(chapterIndex: number): Promise<GuideBlock[]> { return this.call("guideBlocks", [chapterIndex]); }
+  locateGuideBlock(chapterIndex: number, selection: string, hints?: GuideSelectionHints): Promise<{ chapterIndex: number; block: number } | null> { return this.call("locateGuideBlock", [chapterIndex, selection, hints ?? {}]); }
   search(queries: string[]): Promise<SearchHit[]> { return this.call("search", [queries]); }
   locateQuote(chapterIndex: number, quote: string): Promise<QuoteLocation> { return this.call("locateQuote", [chapterIndex, quote]); }
   readImage(src: string): Promise<ModelImage> { return this.call("readImage", [src]); }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activeBranch, branchLeafId, branchNavigation, contextBranch, convertPiContextToLlm, decodeGuide, decodePiSession, guideCursor, guidedTurns, guideRecapChapters, piContextMessages, sessionConfig, sessionSummary, visibleMessageEntries, visibleMessages } from "./pi-session";
+import { activeBranch, branchLeafId, branchNavigation, contextBranch, convertPiContextToLlm, decodeGuide, decodePiSession, guidedTurns, guideRecapChapters, piContextMessages, sessionConfig, sessionSummary, visibleMessageEntries, visibleMessages } from "./pi-session";
 import type { PiSessionEntry } from "./pi-session";
 
 const timestamp = "2026-08-14T00:00:00Z";
@@ -583,20 +583,68 @@ describe("guided sessions", () => {
     expect(decodeGuide({ chapterIndex: 1, part: 0, totalParts: 2, skim: "yes" })).not.toHaveProperty("skim");
   });
 
+  it("decodes a guided step's block range and label part, rejecting a malformed one", () => {
+    const from = { chapterIndex: 1, chapterTitle: "One", block: 4, snippet: "It was", paragraph: 3 };
+    const to = { chapterIndex: 3, block: 0 };
+    expect(decodeGuide({ from, to, skim: true, part: { index: 1, total: 2 } })).toEqual({ from, to, skim: true, part: { index: 1, total: 2 } });
+    expect(decodeGuide({ from, to, part: { index: 2, total: 2 } })).toEqual({ from, to });
+    expect(decodeGuide({ from: { chapterIndex: 1, block: 4, snippet: 7, paragraph: 0.5 }, to: { chapterIndex: 1, block: 5 } }))
+      .toEqual({ from: { chapterIndex: 1, block: 4 }, to: { chapterIndex: 1, block: 5 } });
+    expect(decodeGuide({ from: { chapterIndex: 1, block: -1 }, to: { chapterIndex: 1, block: 5 } })).toBeNull();
+    expect(decodeGuide({ from: { chapterIndex: 1, block: 4 } })).toBeNull();
+  });
+
+  it("reads a range recorded with its ends under `range` as a block range", () => {
+    const range = { from: { chapterIndex: 1, block: 4 }, to: { chapterIndex: 3, block: 0 } };
+    expect(decodeGuide({ chapterIndex: 1, part: 1, totalParts: 2, range, skim: true })).toEqual({ ...range, skim: true });
+    expect(decodeGuide({ chapterIndex: 1, part: 1, totalParts: 2, range: { from: range.from } })).toBeNull();
+  });
+
   it("puts the guide on visible user messages", () => {
     const session = makeSession([step("u1", null, 0), entry("a1", "u1", "assistant", "retelling")], "a1");
     expect(visibleMessages(session)[0]).toMatchObject({ role: "user", guide: { chapterIndex: 4, part: 0 } });
   });
 
-  it("derives the cursor from the latest step on the active branch, skipping side questions", () => {
+  it("lists the steps on the active branch, skipping side questions", () => {
     const entries = [
       step("u1", null, 0), entry("a1", "u1", "assistant", "part one"),
       step("u2", "a1", 1), entry("a2", "u2", "assistant", "part two"),
       entry("q1", "a2", "user", "side question"), entry("a3", "q1", "assistant", "answer"),
     ];
-    expect(guideCursor(makeSession(entries, "a3"))).toMatchObject({ part: 1 });
-    expect(guideCursor(makeSession(entries, "a1"))).toMatchObject({ part: 0 });
-    expect(guideCursor(makeSession([entry("q", null, "user", "hi")], "q"))).toBeNull();
+    expect(guidedTurns(makeSession(entries, "a3")).map((turn) => turn.step)).toEqual([expect.objectContaining({ part: 0 }), expect.objectContaining({ part: 1 })]);
+    expect(guidedTurns(makeSession(entries, "a1")).map((turn) => turn.step)).toEqual([expect.objectContaining({ part: 0 })]);
+    expect(guidedTurns(makeSession([entry("q", null, "user", "hi")], "q"))).toEqual([]);
+  });
+
+  // A step the assistant took: its guide_step call and the tool result carrying the step.
+  const taken = (id: string, parentId: string | null, part: number) => [
+    { type: "message", id: `${id}c`, parentId, timestamp, message: { role: "assistant", content: [{ type: "text", text: "Next up. " }, { type: "toolCall", id: `call-${id}`, name: "guide_step", arguments: {} }], timestamp: 1 } },
+    { type: "message", id, parentId: `${id}c`, timestamp, guide: { chapterIndex: 4, part, totalParts: 2 }, message: { role: "toolResult", toolCallId: `call-${id}`, toolName: "guide_step", content: [{ type: "text", text: "Guided step" }], isError: false, timestamp: 1 } },
+  ];
+
+  it("reads steps the assistant took from their tool results, next to steps sent as user messages", () => {
+    const entries = [
+      step("u1", null, 0), entry("a1", "u1", "assistant", "part one"),
+      entry("q1", "a1", "user", "继续带读"), ...taken("t1", "q1", 1), entry("a2", "t1", "assistant", "part two"),
+      entry("q2", "a2", "user", "side question"), entry("a3", "q2", "assistant", "answer"),
+    ];
+    const session = makeSession(entries, "a3");
+    expect(guidedTurns(session)).toEqual([
+      { step: expect.objectContaining({ part: 0 }), text: "part one" },
+      { step: expect.objectContaining({ part: 1 }), text: "part two" },
+    ]);
+    const call = visibleMessages(session).flatMap((message) => message.role === "assistant" ? message.blocks ?? [] : []).find((block) => block.type === "toolCall");
+    expect(call).toMatchObject({ toolCall: { tool: "guide_step", guide: { chapterIndex: 4, part: 1 } } });
+  });
+
+  it("puts a guide request on its user message, without a malformed step", () => {
+    const request = (id: string, guideRequest: unknown) => ({ ...entry(id, null, "user", "继续带读"), guideRequest });
+    expect(visibleMessages(makeSession([request("u1", {})], "u1"))[0]).toEqual({ role: "user", content: "继续带读", guideRequest: {} });
+    expect(visibleMessages(makeSession([request("u1", { step: { chapterIndex: 4, part: 0, totalParts: 2 } })], "u1"))[0]).toMatchObject({ guideRequest: { step: { chapterIndex: 4 } } });
+    expect(visibleMessages(makeSession([request("u1", { step: { chapterIndex: -1 } })], "u1"))[0]).toMatchObject({ guideRequest: {} });
+    expect(visibleMessages(makeSession([request("u1", "continue")], "u1"))[0]).not.toHaveProperty("guideRequest");
+    // A request is not a step.
+    expect(guidedTurns(makeSession([request("u1", { step: { chapterIndex: 4, part: 0, totalParts: 2 } })], "u1"))).toEqual([]);
   });
 
   const recap = (id: string, parentId: string, chapterIndex: number, text: string) => ({
@@ -623,6 +671,15 @@ describe("guided sessions", () => {
     expect(visibleMessageEntries(session).map((item) => item.id)).toEqual(["u1", "a1", "r1"]);
     expect(guideRecapChapters(session)).toEqual([{ chapterIndex: 4, chapterTitle: "Chapter 5" }]);
     expect(guideRecapChapters(makeSession([step("u1", null, 2), entry("a1", "u1", "assistant", "retelling")], "a1"))).toEqual([]);
+  });
+
+  it("decodes a recap of several chapters, dropping a malformed range end", () => {
+    const grouped = { ...recap("r1", "a1", 4, "The gist."), details: { chapterIndex: 4, chapterTitle: "Chapter 5", throughChapterIndex: 6, throughChapterTitle: "Chapter 7", text: "The gist." } };
+    const session = makeSession([step("u1", null, 2), entry("a1", "u1", "assistant", "retelling"), grouped], "r1");
+    expect(visibleMessages(session)[2]).toEqual({ role: "recap", chapterIndex: 4, chapterTitle: "Chapter 5", throughChapterIndex: 6, throughChapterTitle: "Chapter 7", text: "The gist." });
+    expect(guideRecapChapters(session)).toEqual([{ chapterIndex: 4, chapterTitle: "Chapter 5", throughChapterIndex: 6, throughChapterTitle: "Chapter 7" }]);
+    const malformed = { ...grouped, details: { chapterIndex: 4, throughChapterIndex: 3, text: "The gist." } };
+    expect(guideRecapChapters(makeSession([step("u1", null, 2), entry("a1", "u1", "assistant", "retelling"), malformed], "r1"))).toEqual([{ chapterIndex: 4 }]);
   });
 
   it("keeps recaps that a compaction cut off in the model context, right after the summary", () => {

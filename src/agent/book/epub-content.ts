@@ -5,6 +5,8 @@ import {
   hrefMatches,
   type BookMetadata,
   type BookTocEntry,
+  type GuideBlock,
+  type GuideSelectionHints,
   type QuoteLocation,
   type SearchHit,
 } from "./book-content";
@@ -106,7 +108,10 @@ function firstText(root: ReturnType<typeof parseXml>, names: string[], fallback:
 
 const INLINE_EMPTY_TAGS = new Set(["img", "svg", "audio", "video", "image"]);
 const IMAGE_TAGS = new Set(["img", "svg", "image"]);
-const BLOCK_TAGS = new Set(["p", "div", "section", "header", "footer", "aside"]);
+const BLOCK_TAGS = new Set([
+  "p", "div", "section", "header", "footer", "aside",
+  "article", "main", "nav", "address", "hgroup", "figure", "figcaption", "dl", "dt", "dd",
+]);
 const IMAGE_ALT_MAX_CHARS = 200;
 /** An image placeholder in the Markdown projection: `![alt](src)`. */
 const IMAGE_PLACEHOLDER = /!\[([^\]\n]*)\]\(([^)\s]+)\)/g;
@@ -603,7 +608,8 @@ function markdownEvents(root: XmlElement): MarkdownEvent[] {
     if (BLOCK_TAGS.has(tag)) {
       // Container block: mirror walkElement's transparent branch, but flush
       // and recurse at anchored children too, so each nested anchor lands in
-      // its own slice; the element itself is a block boundary (end flush).
+      // its own slice; the element itself is a block boundary (both ends).
+      flushInline();
       const children = element.childNodes;
       for (let index = 0; index < children.length; index += 1) {
         const child = children[index];
@@ -651,29 +657,27 @@ function dense(text: string): string {
 }
 
 /**
- * Dense content of a Markdown projection: strip structural markers (heading,
- * quote, list line prefixes; emphasis delimiters) first, then remove
- * whitespace. Comparable with `dense` of the flat projection; a mismatch
- * (e.g. literal `*` in the source text) makes the caller fall back to flat
- * text, which is always safe.
+ * Characters the Markdown projection may add of its own: heading, quote and
+ * list markers (ordered list numbers too), emphasis delimiters, table pipes
+ * and delimiter rows, and escapes.
  */
-function denseMarkdown(markdown: string): string {
-  const lines = withoutFootnoteRefs(withoutImages(withoutMarkup(markdown))).split("\n").map((line) => {
-    let text = line.replace(/^(\s*)([-+]|\d{1,9}\.)\s+/, "$1");
-    text = text.replace(/^(\s*)#{1,6}\s+/, "$1");
-    while (/^(\s*)>\s?/.test(text)) text = text.replace(/^(\s*)>\s?/, "$1");
-    // Table rows: drop the delimiter row and cell pipes, unescape literal `\|`.
-    if (/^\s*\|(?:\s*-{3,}\s*\|)+\s*$/.test(text)) return "";
-    if (/^\s*\|/.test(text)) text = text.replace(/\\\||\|/g, (pipe) => (pipe === "|" ? "" : "|"));
-    return text;
-  });
-  return dense(lines.join("\n"))
-    .split("**")
-    .join("")
-    .split("~~")
-    .join("")
-    .split("*")
-    .join("");
+const MARKDOWN_SYNTAX = new Set("#>*-+~|.\\0123456789");
+
+/**
+ * True when a Markdown projection holds the flat text and only its own syntax
+ * besides: every flat character in order, with nothing but `MARKDOWN_SYNTAX`
+ * between. Text that itself looks like syntax (a literal `*`, a paragraph
+ * opening `1. `) matches as text, so it keeps its slice's structure.
+ */
+function coversFlat(markdown: string, flat: string): boolean {
+  const marked = dense(withoutFootnoteRefs(withoutImages(withoutMarkup(markdown))));
+  const text = dense(flat);
+  let next = 0;
+  for (let index = 0; index < marked.length; index += 1) {
+    if (next < text.length && marked[index] === text[next]) next += 1;
+    else if (!MARKDOWN_SYNTAX.has(marked[index])) return false;
+  }
+  return next === text.length;
 }
 
 /**
@@ -712,10 +716,68 @@ function markdownSlices(events: readonly MarkdownEvent[], anchorIds: readonly st
  */
 export function parseSpineSegments(source: string, fileHref = ""): Segment[] {
   const root = parseSpineRoot(source);
-  if (root) annotateFootnotes([{ href: fileHref, root }]);
+  if (root) {
+    annotateFootnotes([{ href: fileHref, root }]);
+    dropUnshown(root);
+  }
   return spineSegments(source, root, fileHref).map((segment) =>
     segment.markdown === undefined ? segment : { ...segment, markdown: finalMarkdown(segment.markdown) },
   );
+}
+
+/** Elements whose text the reader never shows: document metadata, styles and scripts. */
+const UNSHOWN_TAGS = new Set(["head", "style", "script", "template"]);
+/** Set on an element whose id is no chapter start, so it cuts no segment. */
+const NOT_ANCHOR_ATTR = "data-litera-not-anchor";
+
+/** True for what the reader does not show in the text: unshown tags, hidden elements and page-break marks. */
+function isUnshown(element: XmlElement): boolean {
+  if (UNSHOWN_TAGS.has(elementTag(element)) || element.hasAttribute("hidden")) return true;
+  if (/(?:^|;)\s*display\s*:\s*none\b/i.test(element.getAttribute("style") ?? "")) return true;
+  return linkTypes(element).some((type) => type === "pagebreak" || type === "doc-pagebreak");
+}
+
+/** The ids of `element` and its descendants that are chapter starts. */
+function anchorIdsWithin(element: XmlElement): string[] {
+  return [element, ...Array.from(element.getElementsByTagName("*"))].flatMap((node) => {
+    const id = anchorIdOf(node);
+    return id === undefined ? [] : [id];
+  });
+}
+
+/**
+ * Remove from a spine document what the reader does not show (see
+ * `isUnshown`), so it neither reads as text nor cuts blocks. A removed
+ * element leaves its chapter starts behind as empty `<span>`s.
+ */
+function dropUnshown(element: XmlElement): void {
+  const children = Array.from(element.childNodes);
+  for (const child of children) {
+    if (child.nodeType !== 1) continue;
+    const childElement = child as XmlElement;
+    if (!isUnshown(childElement)) {
+      dropUnshown(childElement);
+      continue;
+    }
+    for (const id of anchorIdsWithin(childElement)) {
+      const mark = childElement.ownerDocument!.createElement("span");
+      mark.setAttribute("id", id);
+      element.insertBefore(mark, childElement);
+    }
+    element.removeChild(childElement);
+  }
+}
+
+/**
+ * Mark the ids in a spine document that no TOC entry targets (`starts`), so
+ * only chapter starts cut segments: page or position marks such as calibre's
+ * `<a id="filepos…">` would otherwise split their paragraph in two.
+ */
+function markChapterStarts(root: XmlElement, starts: ReadonlySet<string>): void {
+  for (const element of [root, ...Array.from(root.getElementsByTagName("*"))]) {
+    const id = anchorIdOf(element);
+    if (id !== undefined && !starts.has(id)) element.setAttribute(NOT_ANCHOR_ATTR, "1");
+  }
 }
 
 /** Parsed spine document root; null when the markup cannot be parsed. */
@@ -788,7 +850,7 @@ function spineSegments(source: string, root: XmlElement | null, fileHref: string
       return {
         anchorId: flat.anchorId,
         text: flat.text,
-        markdown: markdown !== undefined && denseMarkdown(markdown) === dense(flat.guard) ? resolveImageRefs(markdown, fileHref) : flat.text,
+        markdown: markdown !== undefined && coversFlat(markdown, flat.guard) ? resolveImageRefs(markdown, fileHref) : flat.text,
       };
     });
     return segments;
@@ -854,7 +916,7 @@ function parseNcx(files: Record<string, Uint8Array>, ncx: ManifestItem): NavNode
 
 function anchorIdOf(element: XmlElement): string | undefined {
   // A footnote reference is never a TOC target; anchoring it would split its paragraph.
-  if (noterefLabel(element) || element.getAttribute?.(NOTE_ATTR) || element.getAttribute?.(NOTE_MARK_ATTR)) return undefined;
+  if (noterefLabel(element) || element.getAttribute?.(NOTE_ATTR) || element.getAttribute?.(NOTE_MARK_ATTR) || element.getAttribute?.(NOT_ANCHOR_ATTR)) return undefined;
   const id = element.getAttribute("id");
   if (id) return id;
   if (elementTag(element) === "a") {
@@ -1423,6 +1485,15 @@ export function parseEpub(buffer: ArrayBuffer): ParsedBook {
     const root = roots[index];
     return root ? [{ href, root }] : [];
   }), toc);
+  roots.forEach((root, index) => {
+    if (!root) return;
+    const starts = new Set(toc.flatMap((node) => {
+      const fragment = hrefFragment(node.href);
+      return fragment && hrefMatches(node.href, spineHrefs[index]) ? [fragment, decodedPath(fragment)] : [];
+    }));
+    markChapterStarts(root, starts);
+    dropUnshown(root);
+  });
   const segments = spineHrefs.map((href, index) => spineSegments(sources[index], roots[index], href));
   const chapters = withFootnotes(buildOwnedChapters(toc, spineHrefs, segments), footnotes);
   return {
@@ -1479,15 +1550,20 @@ function buildTrigramIndex(chapters: readonly Chapter[]): Map<string, number[]> 
 }
 
 export function bookToc(book: ParsedBook): BookTocEntry[] {
-  return book.chapters.map((chapter, index) => ({
-    index,
-    label: chapter.label,
-    ancestors: chapter.ancestors,
-    depth: chapter.depth,
-    hrefs: chapter.hrefs,
-    chars: chapter.markdown.length,
-    parts: chapterParts(chapter).length,
-  }));
+  return book.chapters.map((chapter, index) => {
+    const { blocks, partStarts } = layoutOf(chapter);
+    return {
+      index,
+      label: chapter.label,
+      ancestors: chapter.ancestors,
+      depth: chapter.depth,
+      hrefs: chapter.hrefs,
+      chars: chapter.markdown.length,
+      parts: partStarts.length,
+      blocks: blocks.length,
+      partStarts,
+    };
+  });
 }
 
 // Cost of cutting a chapter before a block (see `chapterWindows`).
@@ -1528,11 +1604,33 @@ function definitionsLength(text: string, footnotes: ReadonlyMap<string, string> 
   return length;
 }
 
+/** Where a piece of an oversized block may end, best first: after a line, a sentence (with its closing quotes), a space. */
+const PIECE_ENDS = [/\n/g, /[。！？!?…][”’」』"')）]*|[.;；][”’"')]*(?=\s)/g, /\s/g];
+
+/**
+ * The end of the piece of `text` from `start`: at most `CHAPTER_PART_CHARS`
+ * on, at the last of the best kind of `PIECE_ENDS` past its middle, so a
+ * piece reads from the start of a line or sentence; else exactly at the limit.
+ */
+function pieceEnd(text: string, start: number): number {
+  if (start + CHAPTER_PART_CHARS >= text.length) return text.length;
+  const piece = text.slice(start, start + CHAPTER_PART_CHARS);
+  for (const pattern of PIECE_ENDS) {
+    let end = 0;
+    for (const match of piece.matchAll(pattern)) end = match.index + match[0].length;
+    if (end > CHAPTER_PART_CHARS / 2) return start + end;
+  }
+  return start + CHAPTER_PART_CHARS;
+}
+
 /**
  * The chapter as packable blocks: its `\n\n` paragraphs, with a block longer
- * than `CHAPTER_PART_CHARS` (e.g. a huge `<pre>`) hard-split into full-size
- * pieces and a residual piece. A full piece fills a window alone, so pieces
- * never join each other and every join of two blocks is an original `\n\n`.
+ * than `CHAPTER_PART_CHARS` (e.g. a huge `<pre>`) hard-split into pieces of
+ * at most that size, cut after a line or sentence where one is near the limit
+ * (see `pieceEnd`), and a residual piece. Every piece but the residual is
+ * over half the limit, and the residual is what did not fit with the piece
+ * before it, so pieces never join each other and every join of two blocks is
+ * an original `\n\n`.
  * A block's size counts the footnote definitions it brings along.
  */
 function windowBlocks(markdown: string, footnotes?: ReadonlyMap<string, string>): WindowBlock[] {
@@ -1542,7 +1640,8 @@ function windowBlocks(markdown: string, footnotes?: ReadonlyMap<string, string>)
   let afterHeading = false;
   for (const text of markdown.split("\n\n")) {
     if (!text) continue;
-    const heading = HEADING.exec(text);
+    // A block after a stray third line break starts with "\n".
+    const heading = HEADING.exec(text.trimStart());
     const cut = afterHeading
       ? CUT_AFTER_HEADING
       : heading
@@ -1553,8 +1652,10 @@ function windowBlocks(markdown: string, footnotes?: ReadonlyMap<string, string>)
       blocks.push(block(text, cut));
       continue;
     }
-    for (let start = 0; start < text.length; start += CHAPTER_PART_CHARS) {
-      blocks.push(block(text.slice(start, start + CHAPTER_PART_CHARS), start === 0 ? cut : 0));
+    for (let start = 0; start < text.length;) {
+      const end = pieceEnd(text, start);
+      blocks.push(block(text.slice(start, end), start === 0 ? cut : 0));
+      start = end;
     }
   }
   return blocks;
@@ -1633,44 +1734,94 @@ function cheapestSplit(blocks: readonly WindowBlock[], count: number): { cost: n
  * toward its size.
  */
 export function chapterWindows(markdown: string, footnotes?: ReadonlyMap<string, string>): string[] {
-  const blocks = windowBlocks(markdown, footnotes);
+  const { blocks, partStarts } = chapterLayout(markdown, footnotes);
   if (!blocks.length) return [""];
+  return partStarts.map((start, index) => blocks.slice(start, partStarts[index + 1] ?? blocks.length).join("\n\n"));
+}
+
+/**
+ * A chapter as `chapterWindows` cuts it: its blocks (the `\n\n` paragraphs,
+ * oversize ones hard-split) and the first block of each part. A Guided
+ * session's ranges count these blocks.
+ */
+export interface ChapterLayout {
+  blocks: string[];
+  partStarts: number[];
+}
+
+function chapterLayout(markdown: string, footnotes?: ReadonlyMap<string, string>): ChapterLayout {
+  const blocks = windowBlocks(markdown, footnotes);
+  const texts = blocks.map((block) => block.text);
   const minimal = minimalWindowCount(blocks);
-  if (minimal === 1) return [blocks.map((block) => block.text).join("\n\n")];
+  if (minimal <= 1) return { blocks: texts, partStarts: [0] };
   const fewest = cheapestSplit(blocks, minimal)!;
   const more = minimal < blocks.length ? cheapestSplit(blocks, minimal + 1) : null;
   const { starts } = more && more.cost + EXTRA_PART < fewest.cost ? more : fewest;
-  return starts.map((start, index) =>
-    blocks.slice(start, starts[index + 1] ?? blocks.length).map((block) => block.text).join("\n\n"));
+  return { blocks: texts, partStarts: starts };
 }
 
 // The TOC reports part counts on every prompt; pack each chapter once.
-const partsCache = new WeakMap<Chapter, string[]>();
+const layoutCache = new WeakMap<Chapter, ChapterLayout>();
 
-/** The read_chapter windows of one chapter, cached per parsed chapter. */
-function chapterParts(chapter: Chapter): string[] {
-  const cached = partsCache.get(chapter);
+/** The blocks and parts of one chapter, cached per parsed chapter. */
+function layoutOf(chapter: Chapter): ChapterLayout {
+  const cached = layoutCache.get(chapter);
   if (cached) return cached;
-  let windows: string[];
+  let layout: ChapterLayout;
   try {
-    windows = chapterWindows(chapter.markdown, chapter.footnotes);
+    layout = chapterLayout(chapter.markdown, chapter.footnotes);
   } catch {
     // Defensive: if packing ever fails, degrade to flat-text hard slicing.
-    windows = Array.from(
+    const blocks = Array.from(
       { length: Math.max(1, Math.ceil(chapter.text.length / CHAPTER_PART_CHARS)) },
       (_, part) => chapter.text.slice(part * CHAPTER_PART_CHARS, (part + 1) * CHAPTER_PART_CHARS),
     );
+    layout = { blocks, partStarts: blocks.map((_, index) => index) };
   }
-  partsCache.set(chapter, windows);
-  return windows;
+  layoutCache.set(chapter, layout);
+  return layout;
 }
 
-export function readChapter(book: ParsedBook, chapterIndex: number, rawPart = 0) {
+/** The read_chapter windows of one chapter. */
+function chapterParts(chapter: Chapter): string[] {
+  const { blocks, partStarts } = layoutOf(chapter);
+  if (!blocks.length) return [""];
+  return partStarts.map((start, index) => blocks.slice(start, partStarts[index + 1] ?? blocks.length).join("\n\n"));
+}
+
+/** The part holding `block`. */
+function partOfBlock(partStarts: readonly number[], block: number): number {
+  let part = 0;
+  while (part + 1 < partStarts.length && partStarts[part + 1] <= block) part += 1;
+  return part;
+}
+
+/**
+ * One part of a chapter, or with `range` its blocks `fromBlock` to `toBlock`
+ * (inclusive). A range never runs past the end of the part it starts in, so
+ * a read stays within `CHAPTER_PART_CHARS`; the result names the blocks it
+ * holds.
+ */
+export function readChapter(book: ParsedBook, chapterIndex: number, rawPart = 0, range?: { fromBlock: number; toBlock: number }) {
   const chapter = book.chapters[chapterIndex];
   if (!chapter) throw new Error("Chapter index is out of range");
-  const windows = chapterParts(chapter);
-  const totalParts = windows.length;
-  const part = Math.min(Math.max(0, Math.trunc(rawPart) || 0), totalParts - 1);
+  const { blocks, partStarts } = layoutOf(chapter);
+  const totalParts = partStarts.length;
+  const lastBlock = Math.max(0, blocks.length - 1);
+  const block = (value: number) => Math.min(Math.max(0, Math.trunc(value) || 0), lastBlock);
+  const partEnd = (part: number) => Math.max(partStarts[part], (partStarts[part + 1] ?? blocks.length) - 1);
+  let part: number;
+  let fromBlock: number;
+  let toBlock: number;
+  if (range) {
+    fromBlock = block(range.fromBlock);
+    part = partOfBlock(partStarts, fromBlock);
+    toBlock = Math.min(Math.max(fromBlock, block(range.toBlock)), partEnd(part));
+  } else {
+    part = Math.min(Math.max(0, Math.trunc(rawPart) || 0), totalParts - 1);
+    fromBlock = partStarts[part];
+    toBlock = partEnd(part);
+  }
   const chapterTitle = chapterTitleOf(chapter);
   return {
     chapterIndex,
@@ -1678,8 +1829,39 @@ export function readChapter(book: ParsedBook, chapterIndex: number, rawPart = 0)
     ...(chapterTitle ? { chapterTitle } : {}),
     part,
     totalParts,
-    text: withFootnoteDefinitions(finalMarkdown(windows[part]), chapter.footnotes),
+    fromBlock,
+    toBlock,
+    totalBlocks: blocks.length,
+    text: withFootnoteDefinitions(finalMarkdown(blocks.slice(fromBlock, toBlock + 1).join("\n\n")), chapter.footnotes),
   };
+}
+
+/** Length of a block's opening text kept to find it again (see `GuideBlock`). */
+export const GUIDE_SNIPPET_CHARS = 60;
+
+function blockPlainText(text: string): string {
+  return plainBlock(finalMarkdown(text)).replace(/\s+/g, " ").trim();
+}
+
+/** The blocks of a chapter, as a Guided session picks and finds them. */
+export function guideBlocks(book: ParsedBook, chapterIndex: number): GuideBlock[] {
+  const chapter = book.chapters[chapterIndex];
+  if (!chapter) throw new Error("Chapter index is out of range");
+  const { blocks, partStarts } = layoutOf(chapter);
+  return blocks.map((text, index) => {
+    const markdown = finalMarkdown(text);
+    const heading = HEADING.exec(markdown.trimStart());
+    const plain = blockPlainText(text);
+    const alts = [...markdown.matchAll(IMAGE_PLACEHOLDER)].map((match) => match[1].trim()).filter(Boolean);
+    const image = !plain && markdown.match(IMAGE_PLACEHOLDER) !== null;
+    return {
+      snippet: (image ? alts.join(" ") : plain).slice(0, GUIDE_SNIPPET_CHARS),
+      chars: markdown.length,
+      heading: heading ? heading[1].length : 0,
+      part: partOfBlock(partStarts, index),
+      ...(image ? { kind: "image" as const } : !plain ? { kind: "blank" as const } : {}),
+    };
+  });
 }
 
 function chapterTitleOf(chapter: Chapter): string | undefined {
@@ -1925,4 +2107,34 @@ export function locateQuote(book: ParsedBook, chapterIndex: number, quote: strin
     };
   }
   return { status: "unverified", chapterIndex: cited };
+}
+
+/**
+ * The block a reader's selection ends in. Matched like a quote: first by the
+ * page's whole paragraph around the selection's end (`hints.paragraph`),
+ * which is rarely ambiguous, then by the selection's last line. Looks in
+ * chapter `chapterIndex` first, then in the rest of the Book. Null when no
+ * block holds it.
+ */
+export function locateGuideBlock(
+  book: ParsedBook,
+  chapterIndex: number,
+  selection: string,
+  hints: GuideSelectionHints = {},
+): { chapterIndex: number; block: number } | null {
+  const lastLine = selection.split("\n").map((line) => line.trim()).filter(Boolean).pop() ?? "";
+  const targets = [hints.paragraph ?? "", lastLine].map((text) => normalizeForQuote(text).text).filter(Boolean);
+  const order = book.chapters.map((_, index) => index).filter((index) => index !== chapterIndex);
+  if (book.chapters[chapterIndex]) order.unshift(chapterIndex);
+  for (const target of targets) {
+    for (const index of order) {
+      const matches = layoutOf(book.chapters[index]).blocks
+        .map((text, block) => (matchInBlock(plainBlock(text), [target]) ? block : -1))
+        .filter((block) => block >= 0);
+      if (!matches.length) continue;
+      const from = hints.after?.chapterIndex === index ? hints.after.block : 0;
+      return { chapterIndex: index, block: matches.find((block) => block >= from) ?? matches[0] };
+    }
+  }
+  return null;
 }

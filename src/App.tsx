@@ -2,7 +2,6 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
-  useMemo,
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
@@ -28,9 +27,10 @@ import {
 import { ReaderView, type SelectionCapture } from "@/components/ReaderView";
 import { ChatPanel, type ChatPanelHandle } from "@/components/chat/ChatPanel";
 import { embeddedAgentRuntime } from "@/agent/runtime/embedded-runtime";
-import type { GuideChapterProgress } from "@/agent/runtime/guide";
-import type { GuideStep } from "@/types/agent";
+import { useGuideBookMarks } from "@/lib/use-guide-book-marks";
+import type { GuideSelection, RecordedGuideStep } from "@/types/agent";
 import type { QuoteLocation } from "@/agent/book/book-content";
+import type { GuideBlockTarget } from "@/lib/guide-marks";
 import { LibraryView } from "@/components/LibraryView";
 import {
   BookImportConfirmDialog,
@@ -143,8 +143,7 @@ function App() {
   // overrides the Book pane's position as the prompt's chapter context.
   const [chapterScope, setChapterScope] = useState<{ href: string; label: string } | null>(null);
   // Agent mode in a Guided session: its steps, and the TOC progress they make.
-  const [guideSteps, setGuideSteps] = useState<GuideStep[] | null>(null);
-  const [guideProgress, setGuideProgress] = useState<Record<string, GuideChapterProgress> | undefined>(undefined);
+  const [guideSteps, setGuideSteps] = useState<RecordedGuideStep[] | null>(null);
   const [tocWidth, setTocWidth] = useState(loadTocWidth);
   // Bumped by Ctrl/⌘+F so the search field takes focus even when already open.
   const [searchFocusToken, setSearchFocusToken] = useState(0);
@@ -203,7 +202,7 @@ function App() {
   const tocWidthRef = useRef(tocWidth);
   tocWidthRef.current = tocWidth;
   const pendingCaptureRef = useRef<SelectionCapture | null>(null);
-  const pendingQuoteRef = useRef<{ href: string; quote: string } | null>(null);
+  const pendingQuoteRef = useRef<{ href: string; quote: string; block?: GuideBlockTarget } | null>(null);
   const closingRef = useRef(false);
   // Closing waits on the final save and Sync push (up to several seconds);
   // say so, or the close button looks broken.
@@ -363,6 +362,15 @@ function App() {
     }
   }, [bookCollapsed, chatCollapsed, readerMode, schedulePersistLayout, sessionRailOpen]);
 
+  // In a Guided session: read up to a selection, showing the chat for the answer.
+  const handleGuideTo = useCallback((selection: GuideSelection) => {
+    if (readerMode === "reader" && chatCollapsed) {
+      setChatCollapsed(false);
+      schedulePersistLayout({ chatCollapsed: false, bookCollapsed, sessionRailOpen });
+    }
+    chatRef.current?.guideTo(selection);
+  }, [bookCollapsed, chatCollapsed, readerMode, schedulePersistLayout, sessionRailOpen]);
+
   const handleReaderModeChange = useCallback(
     (mode: ReaderMode) => {
       setReaderMode(mode);
@@ -399,36 +407,22 @@ function App() {
     setSidePanelOpen(false);
   }, [bookCollapsed, goToChapterHref, readerMode, toc]);
 
-  const guideTocHrefs = useMemo(
-    () => flattenToc(toc).map((item) => item.href).filter(Boolean),
-    [toc],
-  );
-  useEffect(() => {
-    if (readerMode !== "agent" || !guideSteps?.length) {
-      setGuideProgress(undefined);
-      return;
-    }
-    let cancelled = false;
-    embeddedAgentRuntime.guideTocProgress(guideSteps, guideTocHrefs)
-      .then((next) => { if (!cancelled) setGuideProgress(next); })
-      .catch((error) => console.error("guide progress error:", error));
-    return () => { cancelled = true; };
-  }, [guideSteps, guideTocHrefs, readerMode]);
+  const { progress: guideProgress, marks: guideMarks } = useGuideBookMarks(guideSteps, toc);
 
   // A Citation's "Open in Book": reveal a collapsed Agent-mode Book pane
   // first, then jump once it is visible.
   const handleOpenQuote = useCallback(
-    (location: QuoteLocation, quote: string) => {
+    (location: QuoteLocation, quote: string, block?: GuideBlockTarget) => {
       const target = location.href;
       if (!target) return;
       const href = quoteTargetHref(toc, target);
       if (readerMode === "agent" && bookCollapsed) {
-        pendingQuoteRef.current = { href, quote };
+        pendingQuoteRef.current = { href, quote, block };
         setBookCollapsed(false);
         schedulePersistLayout({ chatCollapsed, bookCollapsed: false, sessionRailOpen });
         return;
       }
-      void readerRef.current?.goToQuote(href, quote);
+      void readerRef.current?.goToQuote(href, quote, block);
     },
     [bookCollapsed, chatCollapsed, readerMode, readerRef, schedulePersistLayout, sessionRailOpen, toc],
   );
@@ -440,7 +434,7 @@ function App() {
     pendingQuoteRef.current = null;
     // Let the pane lay out before foliate navigates inside it.
     const frame = requestAnimationFrame(() => {
-      void readerRef.current?.goToQuote(pending.href, pending.quote);
+      void readerRef.current?.goToQuote(pending.href, pending.quote, pending.block);
     });
     return () => cancelAnimationFrame(frame);
   }, [bookCollapsed, readerRef]);
@@ -925,6 +919,8 @@ function App() {
                 fileData={fileData}
                 onRelocate={session.handleRelocate}
                 onSelectionCapture={handleSelectionCapture}
+                onGuideTo={guideSteps ? handleGuideTo : undefined}
+                guideMarks={guideMarks}
                 onHighlight={session.handleAddHighlight}
                 onUpdateHighlight={session.handleUpdateHighlight}
                 onDeleteHighlight={session.handleDeleteHighlight}

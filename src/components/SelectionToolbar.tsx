@@ -1,4 +1,4 @@
-import { Copy, MessageSquare } from "lucide-react";
+import { Copy, ListEnd, MessageSquare } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
 import { HIGHLIGHT_COLORS, HIGHLIGHT_COLOR_HEX } from "@/lib/annotations";
@@ -12,6 +12,8 @@ interface SelectionToolbarProps {
   onHighlight: (color: HighlightColor) => void;
   onCopy: () => void;
   onAskAgent: () => void;
+  /** In a Guided session: read up to the selection. Absent hides the button. */
+  onGuideTo?: () => void;
 }
 
 /** One click highlights in a color; picking a color later is the editor's job. */
@@ -22,6 +24,7 @@ export function SelectionToolbar({
   onHighlight,
   onCopy,
   onAskAgent,
+  onGuideTo,
 }: SelectionToolbarProps) {
   const { t } = useT();
   return (
@@ -60,6 +63,17 @@ export function SelectionToolbar({
       >
         <Copy className="size-3.5" aria-hidden />
       </button>
+      {onGuideTo && (
+        <button
+          type="button"
+          className="flex size-7 items-center justify-center rounded-full transition-colors duration-200 hover:bg-accent motion-reduce:transition-none"
+          aria-label={t("reader.guideTo")}
+          title={t("reader.guideTo")}
+          onClick={onGuideTo}
+        >
+          <ListEnd className="size-3.5" aria-hidden />
+        </button>
+      )}
       <button
         type="button"
         className="flex h-7 items-center gap-1.5 rounded-full pr-3 pl-2.5 transition-colors duration-200 hover:bg-accent motion-reduce:transition-none"
