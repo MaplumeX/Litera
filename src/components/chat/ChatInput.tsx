@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { Brain, Quote, Send, Square, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { useT } from "@/lib/i18n";
 
@@ -102,10 +103,12 @@ export function ChatInput({
           <div className="flex min-w-0 items-center gap-2">
             {leadingControls}
             <Select value={thinkingLevel} onValueChange={onThinkingLevelChange} disabled={isStreaming}>
-              <SelectTrigger className="h-6 w-auto gap-1 border-none bg-transparent px-1.5 text-[10px] text-muted-foreground shadow-none focus:ring-0 dark:bg-transparent dark:hover:bg-transparent" aria-label={t("chat.thinkingLevel")} title={t("chat.thinkingLevel")}>
-                <Brain className={cn("size-3", thinkingLevel === "off" && "opacity-50")} />
-                <SelectValue />
-              </SelectTrigger>
+              <Tip label={t("chat.thinkingLevel")}>
+                <SelectTrigger className="h-6 w-auto gap-1 border-none bg-transparent px-1.5 text-[10px] text-muted-foreground shadow-none focus:ring-0 dark:bg-transparent dark:hover:bg-transparent" aria-label={t("chat.thinkingLevel")}>
+                  <Brain className={cn("size-3", thinkingLevel === "off" && "opacity-50")} />
+                  <SelectValue />
+                </SelectTrigger>
+              </Tip>
               <SelectContent position="popper" side="top" align="start">
                 {THINKING_LEVELS.map((level) => (
                   <SelectItem key={level} value={level}>{level}</SelectItem>

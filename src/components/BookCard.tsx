@@ -3,6 +3,7 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import { ArrowDown, ArrowUp, Check, CloudOff, Star } from "lucide-react";
 import type { BookRecord, ReadingStatus } from "@/types/library";
 import { BookStatusMenu } from "@/components/BookStatusMenu";
+import { Tip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { useT, type MessageKey } from "@/lib/i18n";
 import {
@@ -148,71 +149,74 @@ export function BookCard({
 
   const card = (
     <div className="group relative flex flex-col gap-2">
-      <button
-        type="button"
-        className={cn(
-          "relative aspect-[2/3] w-full overflow-hidden rounded-cover bg-muted shadow-cover transition-[box-shadow,transform,opacity] duration-200 hover:shadow-cover-hover active:scale-[0.98] motion-reduce:transition-none motion-reduce:active:scale-100",
-          selectMode && selected && "ring-2 ring-primary ring-offset-2 ring-offset-background",
-        )}
-        onClick={(e) => {
-          if (selectMode) {
-            if (e.shiftKey && onSelectRange) onSelectRange(book.id);
-            else onToggleSelect?.(book.id);
-            return;
-          }
-          // Ctrl/⌘-click starts a selection, as in a file manager.
-          if ((e.ctrlKey || e.metaKey) && onEnterSelect) {
-            onEnterSelect(book.id);
-            return;
-          }
-          void onOpen(book.id);
-        }}
-        disabled={(opening || openDisabled) && !selectMode}
-        title={book.title}
-        aria-pressed={selectMode ? selected : undefined}
-      >
-        <BookCoverImage book={book} coverRev={coverRev} />
-        {uncached && !selectMode && (
-          <span
-            role="img"
-            className="absolute left-1.5 top-1.5 flex items-center rounded-sm bg-background/85 p-1 text-muted-foreground"
-            title={t("library.notCached")}
-            aria-label={t("library.notCached")}
-          >
-            <CloudOff className="size-3" aria-hidden />
-          </span>
-        )}
-        {pct != null && !opening && (
-          <>
-            <span className="absolute inset-x-0 bottom-0 h-0.5 bg-foreground/15">
-              <span
-                className="block h-full bg-primary"
-                style={{ width: `${pct}%` }}
-              />
+      {/* The cloud badge sits inside the cover, so its meaning joins the
+          cover's tip rather than stacking a second one. */}
+      <Tip label={uncached && !selectMode ? `${book.title}\n${t("library.notCached")}` : book.title}>
+        <button
+          type="button"
+          className={cn(
+            "relative aspect-[2/3] w-full overflow-hidden rounded-cover bg-muted shadow-cover transition-[box-shadow,transform,opacity] duration-200 hover:shadow-cover-hover active:scale-[0.98] motion-reduce:transition-none motion-reduce:active:scale-100",
+            selectMode && selected && "ring-2 ring-primary ring-offset-2 ring-offset-background",
+          )}
+          onClick={(e) => {
+            if (selectMode) {
+              if (e.shiftKey && onSelectRange) onSelectRange(book.id);
+              else onToggleSelect?.(book.id);
+              return;
+            }
+            // Ctrl/⌘-click starts a selection, as in a file manager.
+            if ((e.ctrlKey || e.metaKey) && onEnterSelect) {
+              onEnterSelect(book.id);
+              return;
+            }
+            void onOpen(book.id);
+          }}
+          disabled={(opening || openDisabled) && !selectMode}
+          aria-label={book.title}
+          aria-pressed={selectMode ? selected : undefined}
+        >
+          <BookCoverImage book={book} coverRev={coverRev} />
+          {uncached && !selectMode && (
+            <span
+              role="img"
+              className="absolute left-1.5 top-1.5 flex items-center rounded-sm bg-background/85 p-1 text-muted-foreground"
+              aria-label={t("library.notCached")}
+            >
+              <CloudOff className="size-3" aria-hidden />
             </span>
-            <span className="absolute bottom-1.5 right-1.5 rounded-sm bg-background/80 px-1 py-px text-[10px] font-medium tabular-nums text-foreground/80 opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-within:opacity-100 motion-reduce:transition-none">
-              {pct}%
+          )}
+          {pct != null && !opening && (
+            <>
+              <span className="absolute inset-x-0 bottom-0 h-0.5 bg-foreground/15">
+                <span
+                  className="block h-full bg-primary"
+                  style={{ width: `${pct}%` }}
+                />
+              </span>
+              <span className="absolute bottom-1.5 right-1.5 rounded-sm bg-background/80 px-1 py-px text-[10px] font-medium tabular-nums text-foreground/80 opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-within:opacity-100 motion-reduce:transition-none">
+                {pct}%
+              </span>
+            </>
+          )}
+          {opening && !selectMode && (
+            <span className="absolute inset-x-0 bottom-0 bg-background/90 px-2 py-1 text-xs font-medium">
+              {t("library.opening")}
             </span>
-          </>
-        )}
-        {opening && !selectMode && (
-          <span className="absolute inset-x-0 bottom-0 bg-background/90 px-2 py-1 text-xs font-medium">
-            {t("library.opening")}
-          </span>
-        )}
-        {selectMode && (
-          <span
-            className={cn(
-              "absolute left-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-sm border border-background/80",
-              selected
-                ? "bg-primary text-primary-foreground"
-                : "bg-background/80 text-transparent",
-            )}
-          >
-            <Check className="size-3" />
-          </span>
-        )}
-      </button>
+          )}
+          {selectMode && (
+            <span
+              className={cn(
+                "absolute left-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-sm border border-background/80",
+                selected
+                  ? "bg-primary text-primary-foreground"
+                  : "bg-background/80 text-transparent",
+              )}
+            >
+              <Check className="size-3" />
+            </span>
+          )}
+        </button>
+      </Tip>
 
       {!selectMode && (
         <div className="absolute right-1 top-1 z-10 opacity-0 transition-opacity duration-200 group-hover:opacity-100 has-[:focus-visible]:opacity-100 has-[[data-state=open]]:opacity-100 motion-reduce:transition-none">
@@ -511,12 +515,13 @@ export function BookListRow({
         </span>
         {/* Always rendered so rows keep their columns aligned when a book has
             no series. */}
-        <span
-          className={cn(LIST_COLUMNS.series, "truncate text-right text-xs text-muted-foreground")}
-          title={book.series || undefined}
-        >
-          {book.series}
-        </span>
+        <Tip label={book.series || undefined} overflowOnly>
+          <span
+            className={cn(LIST_COLUMNS.series, "truncate text-right text-xs text-muted-foreground")}
+          >
+            {book.series}
+          </span>
+        </Tip>
         <span className={cn(LIST_COLUMNS.progress, "flex items-center gap-2 text-xs tabular-nums text-muted-foreground")}>
           {pct == null ? (
             t("library.noProgress")
@@ -533,18 +538,19 @@ export function BookListRow({
           )}
         </span>
         {cacheColumn && (
-          <span
-            data-cache-cell
-            className={cn(LIST_COLUMNS.cache, "flex items-center justify-end gap-1 text-xs text-muted-foreground")}
-            title={uncached ? t("library.notCached") : undefined}
-          >
-            {uncached && (
-              <>
-                <CloudOff className="size-3" aria-hidden />
-                {t("library.notCached")}
-              </>
-            )}
-          </span>
+          <Tip label={uncached ? t("library.notCached") : undefined} overflowOnly>
+            <span
+              data-cache-cell
+              className={cn(LIST_COLUMNS.cache, "flex items-center justify-end gap-1 text-xs text-muted-foreground")}
+            >
+              {uncached && (
+                <>
+                  <CloudOff className="size-3" aria-hidden />
+                  {t("library.notCached")}
+                </>
+              )}
+            </span>
+          </Tip>
         )}
         <span className={cn(LIST_COLUMNS.opened, "truncate text-right text-xs text-muted-foreground")}>
           {book.lastOpenedAt
@@ -619,35 +625,37 @@ export function BookResumeTile({
   return (
     <BookActionContext {...actions}>
       <div className="group relative w-24 shrink-0">
-        <button
-          type="button"
-          title={book.title}
-          className="flex w-full flex-col gap-1.5 text-left disabled:opacity-60"
-          onClick={() => {
-            void onOpen(book.id);
-          }}
-          disabled={opening || openDisabled}
-        >
-          <span className="block aspect-[2/3] w-full overflow-hidden rounded-cover bg-muted shadow-cover transition-[box-shadow,transform] duration-200 group-hover:shadow-cover-hover group-active:scale-[0.98] motion-reduce:transition-none motion-reduce:group-active:scale-100">
-            <BookCoverImage book={book} coverRev={coverRev} />
-          </span>
-          <span className="block truncate text-xs font-medium">{book.title}</span>
-          <span className="flex items-center gap-1.5">
-            <span className="h-0.5 flex-1 overflow-hidden rounded-full bg-foreground/10">
-              <span
-                className="block h-full bg-primary"
-                style={{ width: `${pct ?? 0}%` }}
-              />
+        <Tip label={book.title}>
+          <button
+            type="button"
+            aria-label={book.title}
+            className="flex w-full flex-col gap-1.5 text-left disabled:opacity-60"
+            onClick={() => {
+              void onOpen(book.id);
+            }}
+            disabled={opening || openDisabled}
+          >
+            <span className="block aspect-[2/3] w-full overflow-hidden rounded-cover bg-muted shadow-cover transition-[box-shadow,transform] duration-200 group-hover:shadow-cover-hover group-active:scale-[0.98] motion-reduce:transition-none motion-reduce:group-active:scale-100">
+              <BookCoverImage book={book} coverRev={coverRev} />
             </span>
-            <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
-              {opening
-                ? t("library.opening")
-                : pct == null
-                  ? t("library.noProgress")
-                  : `${pct}%`}
+            <span className="block truncate text-xs font-medium">{book.title}</span>
+            <span className="flex items-center gap-1.5">
+              <span className="h-0.5 flex-1 overflow-hidden rounded-full bg-foreground/10">
+                <span
+                  className="block h-full bg-primary"
+                  style={{ width: `${pct ?? 0}%` }}
+                />
+              </span>
+              <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
+                {opening
+                  ? t("library.opening")
+                  : pct == null
+                    ? t("library.noProgress")
+                    : `${pct}%`}
+              </span>
             </span>
-          </span>
-        </button>
+          </button>
+        </Tip>
         <div className="absolute right-1 top-1 z-10 opacity-0 transition-opacity duration-200 group-hover:opacity-100 has-[:focus-visible]:opacity-100 has-[[data-state=open]]:opacity-100 motion-reduce:transition-none">
           <BookActionDropdown
             className="h-6 w-6 border border-border/80 bg-background"

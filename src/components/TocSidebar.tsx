@@ -3,6 +3,7 @@ import { Check, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown } from
 import type { TocItem } from "@/components/ReaderView";
 import type { GuideChapterProgress } from "@/agent/runtime/guide";
 import { Button } from "@/components/ui/button";
+import { Tip } from "@/components/ui/tooltip";
 import { useT } from "@/lib/i18n";
 import { tocPathKey } from "@/lib/toc-items";
 import { cn } from "@/lib/utils";
@@ -29,20 +30,21 @@ function GuideMark({ progress }: { progress: GuideChapterProgress }) {
       ? t("toc.guide.done")
       : t("toc.guide.partial", { percent });
   return (
-    <span
-      className="ml-1 flex shrink-0 items-center gap-1 text-[11px] tabular-nums text-muted-foreground"
-      title={progress.current ? `${label} · ${t("toc.guide.current")}` : label}
-      aria-label={progress.current ? `${label}, ${t("toc.guide.current")}` : label}
-    >
-      {progress.current && <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-primary" />}
-      <span aria-hidden>
-        {progress.skimmed
-          ? t("toc.guide.skimmedShort")
-          : done
-            ? <Check className="h-3.5 w-3.5" />
-            : `${percent}%`}
+    <Tip label={progress.current ? `${label} · ${t("toc.guide.current")}` : label}>
+      <span
+        className="ml-1 flex shrink-0 items-center gap-1 text-[11px] tabular-nums text-muted-foreground"
+        aria-label={progress.current ? `${label}, ${t("toc.guide.current")}` : label}
+      >
+        {progress.current && <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-primary" />}
+        <span aria-hidden>
+          {progress.skimmed
+            ? t("toc.guide.skimmedShort")
+            : done
+              ? <Check className="h-3.5 w-3.5" />
+              : `${percent}%`}
+        </span>
       </span>
-    </span>
+    </Tip>
   );
 }
 
@@ -112,18 +114,19 @@ function TocNode({
           <span className="w-6 shrink-0" />
         )}
         {item.href ? (
-          <button
-            type="button"
-            className="min-w-0 flex-1 truncate text-left"
-            title={item.label}
-            onClick={() => onGoTo(item.href)}
-          >
-            {item.label}
-          </button>
+          <Tip label={item.label} side="right" overflowOnly>
+            <button
+              type="button"
+              className="min-w-0 flex-1 truncate text-left"
+              onClick={() => onGoTo(item.href)}
+            >
+              {item.label}
+            </button>
+          </Tip>
         ) : (
-          <span className="min-w-0 flex-1 truncate" title={item.label}>
-            {item.label}
-          </span>
+          <Tip label={item.label} side="right" overflowOnly>
+            <span className="min-w-0 flex-1 truncate">{item.label}</span>
+          </Tip>
         )}
         {progress && <GuideMark progress={progress} />}
       </div>

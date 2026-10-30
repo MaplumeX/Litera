@@ -8,6 +8,7 @@ import {
 } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Button } from "@/components/ui/button";
+import { Tip } from "@/components/ui/tooltip";
 import {
   WindowControls,
   titlebarClassName,
@@ -791,14 +792,15 @@ function App() {
             <PanelLeft />
           </Button>
         )}
-        <h1
-          className="min-w-0 shrink truncate select-none text-sm font-medium"
-          title={bookTitle}
-          data-titlebar-drag
-          {...titlebarDrag}
-        >
-          {shortBookTitle(bookTitle)}
-        </h1>
+        <Tip label={bookTitle} side="bottom">
+          <h1
+            className="min-w-0 shrink truncate select-none text-sm font-medium"
+            data-titlebar-drag
+            {...titlebarDrag}
+          >
+            {shortBookTitle(bookTitle)}
+          </h1>
+        </Tip>
         <div
           className="min-h-0 min-w-0 flex-1 select-none self-stretch"
           data-titlebar-drag

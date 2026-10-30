@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Battery, BatteryCharging } from "lucide-react";
+import { Tip } from "@/components/ui/tooltip";
 import { useT } from "@/lib/i18n";
 import { chapterBoundsAt, percentOf } from "@/lib/reader-progress";
 import { READER_FOOTER_POSITIONS, useReaderFooter, type ReaderFooterSettings } from "@/lib/reader-footer";
@@ -61,16 +62,18 @@ export function ReaderFooterContent({
   function content(item: ReaderFooterSettings["left"]) {
     switch (item) {
       case "none": return null;
-      case "chapter": return <span title={chapterLabel}>{chapterLabel}</span>;
+      case "chapter": return <Tip label={chapterLabel} overflowOnly><span>{chapterLabel}</span></Tip>;
       case "book-progress": return (
         <span aria-label={t("reader.footer.bookProgressValue", { pct: percentOf(fraction) })}>
           {percentOf(fraction)}%
         </span>
       );
       case "chapter-progress": return chapterPct == null ? null : (
-        <span data-testid="reader-chapter-progress" title={t("reader.chapterProgress", { pct: chapterPct })}>
-          {chapterPct}%
-        </span>
+        <Tip label={t("reader.chapterProgress", { pct: chapterPct })}>
+          <span data-testid="reader-chapter-progress" aria-label={t("reader.chapterProgress", { pct: chapterPct })}>
+            {chapterPct}%
+          </span>
+        </Tip>
       );
       case "time": return preview ? "12:34" : <FooterClock />;
       case "battery": {
@@ -81,10 +84,12 @@ export function ReaderFooterContent({
           })
           : t("reader.footer.batteryUnavailable");
         return (
-          <span className="inline-flex max-w-full items-center gap-1" title={label} aria-label={label}>
-            <Icon className="size-3.5 shrink-0" aria-hidden />
-            <span>{battery ? `${Math.round(battery.level * 100)}%` : "—"}</span>
-          </span>
+          <Tip label={label}>
+            <span className="inline-flex max-w-full items-center gap-1" aria-label={label}>
+              <Icon className="size-3.5 shrink-0" aria-hidden />
+              <span>{battery ? `${Math.round(battery.level * 100)}%` : "—"}</span>
+            </span>
+          </Tip>
         );
       }
     }

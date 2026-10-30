@@ -1,5 +1,6 @@
 import { Copy, ListEnd, MessageSquare } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Tip } from "@/components/ui/tooltip";
 import { useT } from "@/lib/i18n";
 import { HIGHLIGHT_COLORS, HIGHLIGHT_COLOR_HEX } from "@/lib/annotations";
 import type { HighlightColor } from "@/types/library";
@@ -64,15 +65,16 @@ export function SelectionToolbar({
         <Copy className="size-3.5" aria-hidden />
       </button>
       {onGuideTo && (
-        <button
-          type="button"
-          className="flex size-7 items-center justify-center rounded-full transition-colors duration-200 hover:bg-accent motion-reduce:transition-none"
-          aria-label={t("reader.guideTo")}
-          title={t("reader.guideTo")}
-          onClick={onGuideTo}
-        >
-          <ListEnd className="size-3.5" aria-hidden />
-        </button>
+        <Tip label={t("reader.guideTo")}>
+          <button
+            type="button"
+            className="flex size-7 items-center justify-center rounded-full transition-colors duration-200 hover:bg-accent motion-reduce:transition-none"
+            aria-label={t("reader.guideTo")}
+            onClick={onGuideTo}
+          >
+            <ListEnd className="size-3.5" aria-hidden />
+          </button>
+        </Tip>
       )}
       <button
         type="button"

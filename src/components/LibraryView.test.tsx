@@ -285,14 +285,14 @@ describe("LibraryView", () => {
       delete_book: () => undefined,
     });
 
-    const { findByText, getByRole, getByTitle } = render(
+    const { findByText, getByRole, getByLabelText } = render(
       <LibraryView onOpenBook={onOpenBook} onOpenSettings={() => {}} />,
     );
     await findByText("Stored Title");
-    ctrlClick(getByTitle("Stored Title"));
+    ctrlClick(getByLabelText("Stored Title"));
     expect(await findByText("已选 1")).toBeTruthy();
 
-    getByTitle("Second Book").click();
+    getByLabelText("Second Book").click();
     expect(onOpenBook).not.toHaveBeenCalled();
     expect(await findByText("已选 2")).toBeTruthy();
 
@@ -370,11 +370,11 @@ describe("LibraryView", () => {
       delete_book: () => undefined,
     });
 
-    const { findByText, getByRole, getByTitle } = render(
+    const { findByText, getByRole, getByLabelText } = render(
       <LibraryView onOpenBook={() => {}} onOpenSettings={() => {}} />,
     );
     await findByText("Stored Title");
-    fireEvent.contextMenu(getByTitle("Stored Title"));
+    fireEvent.contextMenu(getByLabelText("Stored Title"));
     (await waitFor(() => getByRole("menuitem", { name: "删除…" }))).click();
 
     expect(await findByText("删除「Stored Title」？")).toBeTruthy();
@@ -468,7 +468,7 @@ describe("LibraryView", () => {
     const heading = await findByText("继续阅读");
     const recents = heading.closest("section") as HTMLElement;
     expect(within(recents).getByText("42%")).toBeTruthy();
-    within(recents).getByTitle("Stored Title").click();
+    within(recents).getByLabelText("Stored Title").click();
     expect(onOpenBook).toHaveBeenCalledWith("book-1");
 
     fireEvent.change(getByPlaceholderText("搜索书名、作者、系列…"), {
@@ -504,7 +504,7 @@ describe("LibraryView", () => {
       <LibraryView onOpenBook={() => {}} onOpenSettings={() => {}} />,
     );
     await findByText("继续阅读");
-    ctrlClick(within(mainShelf()).getByTitle("Stored Title"));
+    ctrlClick(within(mainShelf()).getByLabelText("Stored Title"));
     await findByText("已选 1");
     expect(queryByText("继续阅读")).toBeNull();
   });
@@ -523,7 +523,7 @@ describe("LibraryView", () => {
     );
     const heading = await findByText("继续阅读");
     const recents = heading.closest("section") as HTMLElement;
-    fireEvent.contextMenu(within(recents).getByTitle("Stored Title"));
+    fireEvent.contextMenu(within(recents).getByLabelText("Stored Title"));
     (await waitFor(() => getByRole("menuitem", { name: "打开" }))).click();
     expect(onOpenBook).toHaveBeenCalledWith("book-1");
   });
@@ -550,7 +550,7 @@ describe("LibraryView", () => {
     );
     const heading = await findByText("继续阅读");
     const recents = heading.closest("section") as HTMLElement;
-    expect(within(recents).getAllByTitle(/^(Alpha|Zeta)$/).map((el) => el.title)).toEqual([
+    expect(within(recents).getAllByLabelText(/^(Alpha|Zeta)$/).map((el) => el.getAttribute("aria-label"))).toEqual([
       "Zeta",
       "Alpha",
     ]);
@@ -558,12 +558,12 @@ describe("LibraryView", () => {
     await pickSortItem("书名");
     await waitFor(() => {
       expect(localStorage.getItem(LIBRARY_SORT_KEY)).toBe("title");
-      expect(within(mainShelf()).getAllByTitle(/^(Alpha|Zeta)$/).map((el) => el.title)).toEqual([
+      expect(within(mainShelf()).getAllByLabelText(/^(Alpha|Zeta)$/).map((el) => el.getAttribute("aria-label"))).toEqual([
         "Alpha",
         "Zeta",
       ]);
     });
-    expect(within(recents).getAllByTitle(/^(Alpha|Zeta)$/).map((el) => el.title)).toEqual([
+    expect(within(recents).getAllByLabelText(/^(Alpha|Zeta)$/).map((el) => el.getAttribute("aria-label"))).toEqual([
       "Zeta",
       "Alpha",
     ]);
@@ -591,7 +591,7 @@ describe("LibraryView", () => {
     // Zeta shows in both Continue reading and the shelf.
     await findAllByText("Zeta");
     // "Recently opened" starts newest-first.
-    expect(within(mainShelf()).getAllByTitle(/^(Alpha|Zeta)$/).map((el) => el.title)).toEqual([
+    expect(within(mainShelf()).getAllByLabelText(/^(Alpha|Zeta)$/).map((el) => el.getAttribute("aria-label"))).toEqual([
       "Zeta",
       "Alpha",
     ]);
@@ -599,7 +599,7 @@ describe("LibraryView", () => {
     await pickSortItem("升序");
     await waitFor(() => {
       expect(localStorage.getItem(LIBRARY_SORT_ORDER_KEY)).toBe("asc");
-      expect(within(mainShelf()).getAllByTitle(/^(Alpha|Zeta)$/).map((el) => el.title)).toEqual([
+      expect(within(mainShelf()).getAllByLabelText(/^(Alpha|Zeta)$/).map((el) => el.getAttribute("aria-label"))).toEqual([
         "Alpha",
         "Zeta",
       ]);
@@ -608,7 +608,7 @@ describe("LibraryView", () => {
     await pickSortItem("降序");
     await waitFor(() => {
       expect(localStorage.getItem(LIBRARY_SORT_ORDER_KEY)).toBe("desc");
-      expect(within(mainShelf()).getAllByTitle(/^(Alpha|Zeta)$/).map((el) => el.title)).toEqual([
+      expect(within(mainShelf()).getAllByLabelText(/^(Alpha|Zeta)$/).map((el) => el.getAttribute("aria-label"))).toEqual([
         "Zeta",
         "Alpha",
       ]);
@@ -637,7 +637,7 @@ describe("LibraryView", () => {
     // Flip "recent" to ascending (oldest opened first), then switch to Title.
     await pickSortItem("升序");
     await waitFor(() => {
-      expect(within(mainShelf()).getAllByTitle(/^(Alpha|Zeta)$/).map((el) => el.title)).toEqual([
+      expect(within(mainShelf()).getAllByLabelText(/^(Alpha|Zeta)$/).map((el) => el.getAttribute("aria-label"))).toEqual([
         "Zeta",
         "Alpha",
       ]);
@@ -646,7 +646,7 @@ describe("LibraryView", () => {
     await waitFor(() => {
       // Title's natural direction is ascending, not the carried-over "asc".
       expect(localStorage.getItem(LIBRARY_SORT_ORDER_KEY)).toBe("asc");
-      expect(within(mainShelf()).getAllByTitle(/^(Alpha|Zeta)$/).map((el) => el.title)).toEqual([
+      expect(within(mainShelf()).getAllByLabelText(/^(Alpha|Zeta)$/).map((el) => el.getAttribute("aria-label"))).toEqual([
         "Alpha",
         "Zeta",
       ]);
@@ -1008,12 +1008,12 @@ describe("LibraryView", () => {
   });
 
   it("hides card menus in select mode", async () => {
-    const { findByText, getByRole, queryByRole, getByTitle } = render(
+    const { findByText, getByRole, queryByRole, getByLabelText } = render(
       <LibraryView onOpenBook={() => {}} onOpenSettings={() => {}} />,
     );
     await findByText("Stored Title");
     expect(getByRole("button", { name: "更多操作" })).toBeTruthy();
-    ctrlClick(getByTitle("Stored Title"));
+    ctrlClick(getByLabelText("Stored Title"));
     expect(await findByText("已选 1")).toBeTruthy();
     expect(queryByRole("button", { name: "更多操作" })).toBeNull();
   });
@@ -1310,7 +1310,7 @@ describe("LibraryView — curation", () => {
       "section",
     ) as HTMLElement;
     expect(
-      within(recentsSection).getAllByTitle(/^Opened/).map((el) => el.title),
+      within(recentsSection).getAllByLabelText(/^Opened/).map((el) => el.getAttribute("aria-label")),
     ).toEqual(["Opened Reading"]);
 
     getByRole("button", { name: /^未读/ }).click();
@@ -1406,11 +1406,11 @@ describe("LibraryView — shelf toolbar and selection", () => {
   });
 
   it("keeps the titlebar unchanged in select mode", async () => {
-    const { findByText, getByRole, getByTitle } = render(
+    const { findByText, getByRole, getByLabelText } = render(
       <LibraryView onOpenBook={() => {}} onOpenSettings={() => {}} />,
     );
     await findByText("Stored Title");
-    ctrlClick(getByTitle("Stored Title"));
+    ctrlClick(getByLabelText("Stored Title"));
     await findByText("已选 1");
     expect(getByRole("button", { name: "导入书籍" })).toBeTruthy();
     expect(getByRole("button", { name: "设置" })).toBeTruthy();
@@ -1418,14 +1418,14 @@ describe("LibraryView — shelf toolbar and selection", () => {
 
   it("enters select mode from a book's menu with that book selected", async () => {
     setupInvoke({ list_books: () => [book, second] });
-    const { findByText, getByRole, getByTitle } = render(
+    const { findByText, getByRole, getByLabelText } = render(
       <LibraryView onOpenBook={() => {}} onOpenSettings={() => {}} />,
     );
     await findByText("Second Book");
-    fireEvent.contextMenu(getByTitle("Second Book"));
+    fireEvent.contextMenu(getByLabelText("Second Book"));
     (await waitFor(() => getByRole("menuitem", { name: "选择" }))).click();
     expect(await findByText("已选 1")).toBeTruthy();
-    expect(getByTitle("Second Book").getAttribute("aria-pressed")).toBe("true");
+    expect(getByLabelText("Second Book").getAttribute("aria-pressed")).toBe("true");
   });
 
   it("stars every selected book unless all are starred, and keeps the selection", async () => {
@@ -1439,11 +1439,11 @@ describe("LibraryView — shelf toolbar and selection", () => {
         return { ...source, starred };
       },
     });
-    const { findByRole, findByText, getByRole, getByTitle } = render(
+    const { findByRole, findByText, getByRole, getByLabelText } = render(
       <LibraryView onOpenBook={() => {}} onOpenSettings={() => {}} />,
     );
     await findByText("Second Book");
-    ctrlClick(getByTitle("Stored Title"));
+    ctrlClick(getByLabelText("Stored Title"));
     (await findByRole("button", { name: "全选" })).click();
     expect(await findByText("已选 2")).toBeTruthy();
 
@@ -1456,7 +1456,7 @@ describe("LibraryView — shelf toolbar and selection", () => {
     });
     // Everything is starred now, so the same button unstars.
     expect(await findByText("取消星标")).toBeTruthy();
-    expect(getByTitle("Stored Title").getAttribute("aria-pressed")).toBe("true");
+    expect(getByLabelText("Stored Title").getAttribute("aria-pressed")).toBe("true");
     expect(getByRole("button", { name: "全选" })).toBeTruthy();
   });
 
@@ -1468,11 +1468,11 @@ describe("LibraryView — shelf toolbar and selection", () => {
         return { ...(bookId === book.id ? book : second), readingStatus: "finished" };
       },
     });
-    const { findByRole, findByText, getByRole, getByTitle } = render(
+    const { findByRole, findByText, getByRole, getByLabelText } = render(
       <LibraryView onOpenBook={() => {}} onOpenSettings={() => {}} />,
     );
     await findByText("Second Book");
-    ctrlClick(getByTitle("Stored Title"));
+    ctrlClick(getByLabelText("Stored Title"));
     (await findByRole("button", { name: "全选" })).click();
     await findByText("已选 2");
 
@@ -1500,11 +1500,11 @@ describe("LibraryView — shelf toolbar and selection", () => {
         throw new Error("nope");
       },
     });
-    const { findByRole, findByText, getByRole, getByTitle } = render(
+    const { findByRole, findByText, getByRole, getByLabelText } = render(
       <LibraryView onOpenBook={() => {}} onOpenSettings={() => {}} />,
     );
     await findByText("Second Book");
-    ctrlClick(getByTitle("Stored Title"));
+    ctrlClick(getByLabelText("Stored Title"));
     (await findByRole("button", { name: "全选" })).click();
     await findByText("已选 2");
     getByRole("button", { name: "加星标" }).click();
@@ -1515,11 +1515,11 @@ describe("LibraryView — shelf toolbar and selection", () => {
 
   it("selects all with Ctrl+A and leaves select mode with Escape", async () => {
     setupInvoke({ list_books: () => [book, second] });
-    const { findByText, getByRole, queryByText, getByTitle } = render(
+    const { findByText, getByRole, queryByText, getByLabelText } = render(
       <LibraryView onOpenBook={() => {}} onOpenSettings={() => {}} />,
     );
     await findByText("Second Book");
-    ctrlClick(getByTitle("Stored Title"));
+    ctrlClick(getByLabelText("Stored Title"));
     await findByText("已选 1");
 
     fireEvent.keyDown(window, { key: "a", ctrlKey: true });
