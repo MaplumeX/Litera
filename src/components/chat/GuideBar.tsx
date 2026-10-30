@@ -1,5 +1,6 @@
 import { BookOpen, FastForward, ListEnd, Play, SkipForward } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Tip } from "@/components/ui/tooltip";
 import { t as translate, useT } from "@/lib/i18n";
 import { isLegacyGuideStep, type GuidePosition, type GuideStep, type RecordedGuideStep } from "@/types/agent";
 import type { MessageKey } from "@/locales/zh-CN";
@@ -107,50 +108,54 @@ export function GuideBar({ nextStep, started, disabled, onContinue, onSkim, onSk
         : t("chat.guide.continueWhole", { title });
   return (
     <div className="flex items-center justify-center gap-1 px-2 pt-1">
-      <Button
-        size="sm"
-        variant="secondary"
-        className="min-w-0 rounded-full"
-        onClick={onContinue}
-        disabled={disabled}
-        title={label}
-      >
-        <Play />
-        <span className="truncate">{label}</span>
-      </Button>
-      <Button
-        size="icon-sm"
-        variant="ghost"
-        className="shrink-0 rounded-full text-muted-foreground"
-        onClick={onPick}
-        disabled={disabled}
-        aria-label={t("chat.guide.pick")}
-        title={t("chat.guide.pick")}
-      >
-        <ListEnd />
-      </Button>
-      <Button
-        size="icon-sm"
-        variant="ghost"
-        className="shrink-0 rounded-full text-muted-foreground"
-        onClick={onSkim}
-        disabled={disabled}
-        aria-label={t("chat.guide.skim")}
-        title={t("chat.guide.skim")}
-      >
-        <FastForward />
-      </Button>
-      <Button
-        size="icon-sm"
-        variant="ghost"
-        className="shrink-0 rounded-full text-muted-foreground"
-        onClick={onSkip}
-        disabled={disabled}
-        aria-label={t("chat.guide.skip")}
-        title={t("chat.guide.skip")}
-      >
-        <SkipForward />
-      </Button>
+      <Tip label={label} overflowOnly>
+        <Button
+          size="sm"
+          variant="secondary"
+          className="min-w-0 rounded-full"
+          onClick={onContinue}
+          disabled={disabled}
+        >
+          <Play />
+          <span className="truncate">{label}</span>
+        </Button>
+      </Tip>
+      <Tip label={t("chat.guide.pick")}>
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          className="shrink-0 rounded-full text-muted-foreground"
+          onClick={onPick}
+          disabled={disabled}
+          aria-label={t("chat.guide.pick")}
+        >
+          <ListEnd />
+        </Button>
+      </Tip>
+      <Tip label={t("chat.guide.skim")}>
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          className="shrink-0 rounded-full text-muted-foreground"
+          onClick={onSkim}
+          disabled={disabled}
+          aria-label={t("chat.guide.skim")}
+        >
+          <FastForward />
+        </Button>
+      </Tip>
+      <Tip label={t("chat.guide.skip")}>
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          className="shrink-0 rounded-full text-muted-foreground"
+          onClick={onSkip}
+          disabled={disabled}
+          aria-label={t("chat.guide.skip")}
+        >
+          <SkipForward />
+        </Button>
+      </Tip>
     </div>
   );
 }

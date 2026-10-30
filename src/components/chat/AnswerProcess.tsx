@@ -18,6 +18,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Tip } from "@/components/ui/tooltip";
 import { useT, type MessageKey } from "@/lib/i18n";
 import type { AgentToolCall } from "@/types/agent";
 import { isPartialCoverage, toolResultText, type SourceSummary } from "@/lib/source-summary";
@@ -106,22 +107,24 @@ function SourceSegments({ summary }: { summary: SourceSummary }) {
     segments.push({ key: "failed", text: t("chat.sources.failed", { count: summary.failed }), error: true });
   }
   return (
-    <span title={summary.chapters.length > 1 ? titled.join("\n") : undefined}>
-      <span className="font-medium text-foreground">{t("chat.sources.label")}</span>
-      {segments.map((segment, index) => (
-        <span key={segment.key}>
-          <span className="mx-1.5 text-muted-foreground/50">{index === 0 ? "" : "·"}</span>
-          <span
-            className={cn(
-              segment.partial && "text-amber-700 dark:text-amber-500",
-              segment.error && "text-destructive",
-            )}
-          >
-            {segment.text}
+    <Tip label={summary.chapters.length > 1 ? titled.join("\n") : undefined} align="start">
+      <span>
+        <span className="font-medium text-foreground">{t("chat.sources.label")}</span>
+        {segments.map((segment, index) => (
+          <span key={segment.key}>
+            <span className="mx-1.5 text-muted-foreground/50">{index === 0 ? "" : "·"}</span>
+            <span
+              className={cn(
+                segment.partial && "text-amber-700 dark:text-amber-500",
+                segment.error && "text-destructive",
+              )}
+            >
+              {segment.text}
+            </span>
           </span>
-        </span>
-      ))}
-    </span>
+        ))}
+      </span>
+    </Tip>
   );
 }
 
@@ -228,19 +231,20 @@ function ToolStep({
         ) : (
           <div className="flex min-w-0 flex-1 items-start gap-1.5">{line}</div>
         )}
-        <button
-          type="button"
-          onClick={() => setRawOpen((value) => !value)}
-          aria-pressed={rawOpen}
-          aria-label={t("chat.process.raw")}
-          title={t("chat.process.raw")}
-          className={cn(
-            "mt-0.5 shrink-0 text-muted-foreground/40 transition-opacity hover:text-muted-foreground focus-visible:opacity-100",
-            !rawOpen && "opacity-0 group-hover:opacity-100",
-          )}
-        >
-          <Braces className="h-3.5 w-3.5" />
-        </button>
+        <Tip label={t("chat.process.raw")}>
+          <button
+            type="button"
+            onClick={() => setRawOpen((value) => !value)}
+            aria-pressed={rawOpen}
+            aria-label={t("chat.process.raw")}
+            className={cn(
+              "mt-0.5 shrink-0 text-muted-foreground/40 transition-opacity hover:text-muted-foreground focus-visible:opacity-100",
+              !rawOpen && "opacity-0 group-hover:opacity-100",
+            )}
+          >
+            <Braces className="h-3.5 w-3.5" />
+          </button>
+        </Tip>
       </div>
       {open && body && <div className="space-y-1.5 pb-1 pl-5 pt-1 text-xs">{body}</div>}
       {rawOpen && (

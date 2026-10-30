@@ -44,11 +44,11 @@ afterEach(() => {
 
 describe("ReaderFooter", () => {
   it("shows chapter, chapter progress and book progress in separate positions", () => {
-    const { container, getByTitle, getByLabelText } = render(
+    const { container, getByLabelText } = render(
       <ReaderFooter chapterLabel="第二章" fraction={0.3} ticks={[0, 0.2, 0.6, 1]} />,
     );
     expect(container.querySelector('[data-footer-position="left"]')?.textContent).toBe("第二章");
-    expect(getByTitle("本章 25%").textContent).toBe("25%");
+    expect(getByLabelText("本章 25%").textContent).toBe("25%");
     expect(getByLabelText("全书 30%").textContent).toBe("30%");
     expect(getBatteryStatus).not.toHaveBeenCalled();
   });

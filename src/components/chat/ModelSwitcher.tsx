@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Check, ChevronDown, Settings } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Tip } from "@/components/ui/tooltip";
 import { listBuiltinModelIds } from "@/agent/runtime/model-resolution";
 import { CHATGPT_PROVIDER_ID, isCustomProviderId } from "@/types/agent-config";
 import { cn } from "@/lib/utils";
@@ -75,17 +76,18 @@ export function ModelSwitcher({
   const trigger =
     configured && provider && !disabled ? (
       <Popover open={open} onOpenChange={setOpen} modal={false}>
-        <PopoverTrigger asChild>
-          <button
-            type="button"
-            aria-label={t("chat.modelLabel")}
-            title={model ?? undefined}
-            className="flex h-6 w-auto max-w-44 items-center gap-0.5 rounded-sm border-none bg-transparent px-1.5 text-[10px] text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
-          >
-            <span className="min-w-0 truncate">{label}</span>
-            <ChevronDown className="h-3 w-3 shrink-0 opacity-70" />
-          </button>
-        </PopoverTrigger>
+        <Tip label={model}>
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              aria-label={t("chat.modelLabel")}
+              className="flex h-6 w-auto max-w-44 items-center gap-0.5 rounded-sm border-none bg-transparent px-1.5 text-[10px] text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+            >
+              <span className="min-w-0 truncate">{label}</span>
+              <ChevronDown className="h-3 w-3 shrink-0 opacity-70" />
+            </button>
+          </PopoverTrigger>
+        </Tip>
         <PopoverContent
           side="top"
           align="start"
@@ -128,17 +130,18 @@ export function ModelSwitcher({
         </PopoverContent>
       </Popover>
     ) : (
-      <button
-        type="button"
-        aria-label={t("chat.modelLabel")}
-        onClick={onOpenConfig}
-        disabled={disabled}
-        title={label}
-        className="flex h-6 w-auto max-w-44 items-center gap-0.5 rounded-sm border-none bg-transparent px-1.5 text-[10px] text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
-      >
-        <span className="min-w-0 truncate">{label}</span>
-        <ChevronDown className="h-3 w-3 shrink-0 opacity-70" />
-      </button>
+      <Tip label={label}>
+        <button
+          type="button"
+          aria-label={t("chat.modelLabel")}
+          onClick={onOpenConfig}
+          disabled={disabled}
+          className="flex h-6 w-auto max-w-44 items-center gap-0.5 rounded-sm border-none bg-transparent px-1.5 text-[10px] text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+        >
+          <span className="min-w-0 truncate">{label}</span>
+          <ChevronDown className="h-3 w-3 shrink-0 opacity-70" />
+        </button>
+      </Tip>
     );
 
   return trigger;

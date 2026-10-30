@@ -1,5 +1,6 @@
 import { BookmarkPlus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Tip } from "@/components/ui/tooltip";
 import { highlightColorHex } from "@/lib/annotations";
 import { useT } from "@/lib/i18n";
 import type { BookmarkRecord, HighlightRecord } from "@/types/library";
@@ -59,14 +60,15 @@ export function AnnotationsSidebar({
           ) : (
             bookmarks.map((bookmark) => (
               <div key={bookmark.id} className="flex items-start gap-0.5 px-1">
-                <button
-                  type="button"
-                  className="min-w-0 flex-1 truncate rounded-md px-2 py-1 text-left text-sm text-muted-foreground transition-colors duration-150 hover:bg-accent/70 motion-reduce:transition-none hover:text-accent-foreground"
-                  title={bookmarkLabel(bookmark)}
-                  onClick={() => onJumpBookmark(bookmark)}
-                >
-                  {bookmarkLabel(bookmark)}
-                </button>
+                <Tip label={bookmarkLabel(bookmark)} side="right" overflowOnly>
+                  <button
+                    type="button"
+                    className="min-w-0 flex-1 truncate rounded-md px-2 py-1 text-left text-sm text-muted-foreground transition-colors duration-150 hover:bg-accent/70 motion-reduce:transition-none hover:text-accent-foreground"
+                    onClick={() => onJumpBookmark(bookmark)}
+                  >
+                    {bookmarkLabel(bookmark)}
+                  </button>
+                </Tip>
                 <Button
                   type="button"
                   size="icon-xs"
@@ -91,28 +93,29 @@ export function AnnotationsSidebar({
           ) : (
             highlights.map((highlight) => (
               <div key={highlight.id} className="flex items-start gap-0.5 px-1">
-                <button
-                  type="button"
-                  className="min-w-0 flex-1 rounded-md px-2 py-1 text-left text-sm text-muted-foreground transition-colors duration-150 hover:bg-accent/70 motion-reduce:transition-none hover:text-accent-foreground"
-                  title={highlight.excerpt}
-                  onClick={() => onJumpHighlight(highlight)}
-                >
-                  <span className="flex items-start gap-2">
-                    <span
-                      className="mt-1 size-2.5 shrink-0 rounded-full"
-                      style={{ backgroundColor: highlightColorHex(highlight.color) }}
-                      aria-hidden
-                    />
-                    <span className="min-w-0 flex-1">
-                      <span className="line-clamp-2">{highlight.excerpt}</span>
-                      {highlight.note?.trim() ? (
-                        <span className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
-                          {highlight.note}
-                        </span>
-                      ) : null}
+                <Tip label={highlight.excerpt} side="right" overflowOnly>
+                  <button
+                    type="button"
+                    className="min-w-0 flex-1 rounded-md px-2 py-1 text-left text-sm text-muted-foreground transition-colors duration-150 hover:bg-accent/70 motion-reduce:transition-none hover:text-accent-foreground"
+                    onClick={() => onJumpHighlight(highlight)}
+                  >
+                    <span className="flex items-start gap-2">
+                      <span
+                        className="mt-1 size-2.5 shrink-0 rounded-full"
+                        style={{ backgroundColor: highlightColorHex(highlight.color) }}
+                        aria-hidden
+                      />
+                      <span className="min-w-0 flex-1">
+                        <span className="line-clamp-2">{highlight.excerpt}</span>
+                        {highlight.note?.trim() ? (
+                          <span className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
+                            {highlight.note}
+                          </span>
+                        ) : null}
+                      </span>
                     </span>
-                  </span>
-                </button>
+                  </button>
+                </Tip>
                 <Button
                   type="button"
                   size="icon-xs"

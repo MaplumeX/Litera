@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { BookOpen, MoreHorizontal, Pencil, Plus, Settings, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Tip } from "@/components/ui/tooltip";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -131,28 +132,30 @@ export function SessionList({
         <div className="flex items-center justify-between border-b py-1.5 pr-1.5 pl-3">
           <span className="text-xs font-medium text-muted-foreground">{t("chat.sessions")}</span>
           <div className="flex items-center">
-            <Button
-              size="icon-xs"
-              variant="ghost"
-              className="text-muted-foreground hover:text-foreground"
-              onClick={onNewGuided}
-              disabled={isStreaming}
-              aria-label={t("chat.newGuided")}
-              title={t("chat.newGuided")}
-            >
-              <BookOpen />
-            </Button>
-            <Button
-              size="icon-xs"
-              variant="ghost"
-              className="text-muted-foreground hover:text-foreground"
-              onClick={onNewSession}
-              disabled={isStreaming}
-              aria-label={t("chat.newSession")}
-              title={t("chat.newSession")}
-            >
-              <Plus />
-            </Button>
+            <Tip label={t("chat.newGuided")}>
+              <Button
+                size="icon-xs"
+                variant="ghost"
+                className="text-muted-foreground hover:text-foreground"
+                onClick={onNewGuided}
+                disabled={isStreaming}
+                aria-label={t("chat.newGuided")}
+              >
+                <BookOpen />
+              </Button>
+            </Tip>
+            <Tip label={t("chat.newSession")}>
+              <Button
+                size="icon-xs"
+                variant="ghost"
+                className="text-muted-foreground hover:text-foreground"
+                onClick={onNewSession}
+                disabled={isStreaming}
+                aria-label={t("chat.newSession")}
+              >
+                <Plus />
+              </Button>
+            </Tip>
           </div>
         </div>
       )}
@@ -219,38 +222,43 @@ export function SessionList({
                     />
                   ) : (
                     <>
-                      <button
-                        className="flex min-w-0 flex-1 items-center gap-2 rounded-md py-1.5 pr-2 pl-2.5 text-left outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50"
-                        onClick={() => onSwitchSession(session.id)}
-                        title={session.title}
-                        disabled={isStreaming}
-                        aria-current={active ? "true" : undefined}
+                      {/* The time cell hides on hover for the actions button, so
+                          the full timestamp rides along under the title. */}
+                      <Tip
+                        label={`${session.title}\n${new Date(session.updatedAt).toLocaleString(locale)}`}
+                        side="right"
                       >
-                        {session.kind === "guided" && (
-                          <BookOpen
-                            className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
-                            aria-label={t("chat.guide.badge")}
-                          />
-                        )}
-                        <span className="flex min-w-0 flex-1 flex-col">
-                          <span className={cn("truncate", active && "font-medium")}>
-                            {session.title}
-                          </span>
-                          {session.guide && (
-                            <span className="truncate text-[11px] text-muted-foreground">
-                              {guidePositionLabel(session.guide)}
-                            </span>
-                          )}
-                        </span>
-                        {/* The time gives way to the actions button on hover,
-                            keyboard focus, or while the menu is open. */}
-                        <span
-                          className="min-w-6 shrink-0 text-right text-[11px] tabular-nums text-muted-foreground group-hover:invisible group-has-[:focus-visible]:invisible group-has-[[data-state=open]]:invisible"
-                          title={new Date(session.updatedAt).toLocaleString(locale)}
+                        <button
+                          className="flex min-w-0 flex-1 items-center gap-2 rounded-md py-1.5 pr-2 pl-2.5 text-left outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50"
+                          onClick={() => onSwitchSession(session.id)}
+                          disabled={isStreaming}
+                          aria-current={active ? "true" : undefined}
                         >
-                          {formatSessionTime(session.updatedAt, locale)}
-                        </span>
-                      </button>
+                          {session.kind === "guided" && (
+                            <BookOpen
+                              className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
+                              aria-label={t("chat.guide.badge")}
+                            />
+                          )}
+                          <span className="flex min-w-0 flex-1 flex-col">
+                            <span className={cn("truncate", active && "font-medium")}>
+                              {session.title}
+                            </span>
+                            {session.guide && (
+                              <span className="truncate text-[11px] text-muted-foreground">
+                                {guidePositionLabel(session.guide)}
+                              </span>
+                            )}
+                          </span>
+                          {/* The time gives way to the actions button on hover,
+                              keyboard focus, or while the menu is open. */}
+                          <span
+                            className="min-w-6 shrink-0 text-right text-[11px] tabular-nums text-muted-foreground group-hover:invisible group-has-[:focus-visible]:invisible group-has-[[data-state=open]]:invisible"
+                          >
+                            {formatSessionTime(session.updatedAt, locale)}
+                          </span>
+                        </button>
+                      </Tip>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <button

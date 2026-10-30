@@ -68,22 +68,22 @@ describe("BookCard", () => {
 
   it("does not open when openDisabled", () => {
     const onOpen = vi.fn();
-    const { getByTitle } = renderCard({ onOpen, openDisabled: true });
+    const { getByLabelText } = renderCard({ onOpen, openDisabled: true });
 
-    getByTitle("Test Book").click();
+    getByLabelText("Test Book").click();
     expect(onOpen).not.toHaveBeenCalled();
   });
 
   it("toggles selection in select mode instead of opening", () => {
     const onOpen = vi.fn();
     const onToggleSelect = vi.fn();
-    const { getByTitle } = renderCard({
+    const { getByLabelText } = renderCard({
       onOpen,
       selectMode: true,
       onToggleSelect,
     });
 
-    getByTitle("Test Book").click();
+    getByLabelText("Test Book").click();
     expect(onToggleSelect).toHaveBeenCalledWith("abc");
     expect(onOpen).not.toHaveBeenCalled();
   });
@@ -112,26 +112,26 @@ describe("BookCard", () => {
   it("offers star and select in the menu when the host supports them", async () => {
     const onToggleStar = vi.fn();
     const onEnterSelect = vi.fn();
-    const { getByTitle, getByRole } = renderCard({
+    const { getByLabelText, getByRole } = renderCard({
       book: { ...book, starred: true },
       onToggleStar,
       onEnterSelect,
     });
 
-    fireEvent.contextMenu(getByTitle("Test Book"));
+    fireEvent.contextMenu(getByLabelText("Test Book"));
     (await waitFor(() => getByRole("menuitem", { name: "取消星标" }))).click();
     expect(onToggleStar).toHaveBeenCalledWith({ ...book, starred: true });
 
-    fireEvent.contextMenu(getByTitle("Test Book"));
+    fireEvent.contextMenu(getByLabelText("Test Book"));
     (await waitFor(() => getByRole("menuitem", { name: "选择" }))).click();
     expect(onEnterSelect).toHaveBeenCalledWith("abc");
   });
 
   it("sets a reading status from the menu's submenu", async () => {
     const onChangeStatus = vi.fn();
-    const { getByTitle, getByRole } = renderCard({ onChangeStatus });
+    const { getByLabelText, getByRole } = renderCard({ onChangeStatus });
 
-    fireEvent.contextMenu(getByTitle("Test Book"));
+    fireEvent.contextMenu(getByLabelText("Test Book"));
     const trigger = await waitFor(() => getByRole("menuitem", { name: "阅读状态" }));
     fireEvent.keyDown(trigger, { key: "ArrowRight" });
     (await waitFor(() => getByRole("menuitem", { name: "在读" }))).click();
@@ -139,8 +139,8 @@ describe("BookCard", () => {
   });
 
   it("leaves curation out of the menu when the host does not support it", async () => {
-    const { getByTitle, getByRole, queryByRole } = renderCard();
-    fireEvent.contextMenu(getByTitle("Test Book"));
+    const { getByLabelText, getByRole, queryByRole } = renderCard();
+    fireEvent.contextMenu(getByLabelText("Test Book"));
     await waitFor(() => getByRole("menuitem", { name: "打开" }));
     expect(queryByRole("menuitem", { name: "阅读状态" })).toBeNull();
     expect(queryByRole("menuitem", { name: "加星标" })).toBeNull();
@@ -161,9 +161,9 @@ describe("BookCard", () => {
 
   it("opens the same actions from a right-click", async () => {
     const onOpen = vi.fn();
-    const { getByTitle, getByRole } = renderCard({ onOpen });
+    const { getByLabelText, getByRole } = renderCard({ onOpen });
 
-    fireEvent.contextMenu(getByTitle("Test Book"));
+    fireEvent.contextMenu(getByLabelText("Test Book"));
     const open = await waitFor(() => getByRole("menuitem", { name: "打开" }));
     open.click();
     expect(onOpen).toHaveBeenCalledWith("abc");

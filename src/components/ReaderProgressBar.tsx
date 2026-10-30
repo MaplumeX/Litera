@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, Redo2, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Tip } from "@/components/ui/tooltip";
 import { useT } from "@/lib/i18n";
 import {
   chapterBoundsAt,
@@ -91,28 +92,30 @@ export function ReaderProgressBar({
           thing the reader is looking for; App hides them once the reader
           reads on. */}
       {canGoBack && (
-        <Button
-          type="button"
-          size="icon-sm"
-          variant="ghost"
-          aria-label={t("reader.historyBack")}
-          title={t("reader.historyBack")}
-          onClick={() => onBack?.()}
-        >
-          <Undo2 />
-        </Button>
+        <Tip label={t("reader.historyBack")}>
+          <Button
+            type="button"
+            size="icon-sm"
+            variant="ghost"
+            aria-label={t("reader.historyBack")}
+            onClick={() => onBack?.()}
+          >
+            <Undo2 />
+          </Button>
+        </Tip>
       )}
       {canGoForward && (
-        <Button
-          type="button"
-          size="icon-sm"
-          variant="ghost"
-          aria-label={t("reader.historyForward")}
-          title={t("reader.historyForward")}
-          onClick={() => onForward?.()}
-        >
-          <Redo2 />
-        </Button>
+        <Tip label={t("reader.historyForward")}>
+          <Button
+            type="button"
+            size="icon-sm"
+            variant="ghost"
+            aria-label={t("reader.historyForward")}
+            onClick={() => onForward?.()}
+          >
+            <Redo2 />
+          </Button>
+        </Tip>
       )}
       {/* Chapter arrows repeat page turning, so they stay out of sight until
           the bar is hovered or reached by keyboard. */}
@@ -133,13 +136,15 @@ export function ReaderProgressBar({
       {/* Always shown at a fixed width: toggling it on hover resized the track
           and made the bar jump under the pointer. */}
       {chapterPct != null && (
-        <span
-          data-testid="reader-chapter-progress"
-          className="w-8 shrink-0 text-xs text-muted-foreground/70 tabular-nums"
-          title={t("reader.chapterProgress", { pct: chapterPct })}
-        >
-          {chapterPct}%
-        </span>
+        <Tip label={t("reader.chapterProgress", { pct: chapterPct })}>
+          <span
+            data-testid="reader-chapter-progress"
+            aria-label={t("reader.chapterProgress", { pct: chapterPct })}
+            className="w-8 shrink-0 text-xs text-muted-foreground/70 tabular-nums"
+          >
+            {chapterPct}%
+          </span>
+        </Tip>
       )}
       <div
         ref={trackRef}
