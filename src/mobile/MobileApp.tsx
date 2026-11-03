@@ -26,6 +26,8 @@ import { useSyncScheduler } from "@/lib/use-sync-scheduler";
 import { useSystemInsets } from "@/lib/use-system-insets";
 import { MobileLibraryPage } from "@/mobile/MobileLibraryPage";
 import { MobileReaderPage, type ReaderPanel } from "@/mobile/MobileReaderPage";
+import { ReadingLogSyncNotice } from "@/components/stats/ReadingLogSyncNotice";
+import { MobileStatsPage } from "@/mobile/MobileStatsPage";
 import { MobileTrashPage } from "@/mobile/MobileTrashPage";
 import {
   cancelBackPreview,
@@ -37,18 +39,18 @@ import {
 } from "@/mobile/back-preview";
 import { bookCover, supportsViewTransitions, transitionPage, type PageMotion } from "@/mobile/page-transition";
 
-type Page = "library" | "reader" | "trash";
+type Page = "library" | "reader" | "trash" | "stats";
 
 /**
  * How a page arrives where the WebView has no View Transitions (there the
  * motion lives in page-transition.ts): a Book opens out of the shelf and the
- * shelf comes back from behind it; Trash slides in from the side like a
+ * shelf comes back from behind it; Trash and Reading stats slide in from the side like a
  * sub-page and back out. Nothing on the first page.
  */
 function pageEnterClass(from: Page | null, to: Page): string | undefined {
   if (from === null || from === to) return undefined;
   if (to === "reader") return "m-page-open";
-  if (to === "trash") return "m-page-push";
+  if (to === "trash" || to === "stats") return "m-page-push";
   return from === "reader" ? "m-page-return" : "m-page-pop";
 }
 
@@ -127,7 +129,7 @@ function DeviceSettings({
 }
 
 /**
- * The phone's shell: a page stack (Library → Reader, plus Trash), overlays
+ * The phone's shell: a page stack (Library → Reader, plus Trash and Reading stats), overlays
  * above it, and the platform bridge for Back, volume keys, the app
  * lifecycle, incoming books and the window. The open Book, the shelf and
  * Sync are the same modules the desktop shell uses.
@@ -313,7 +315,7 @@ export default function MobileApp() {
       void closeReader();
       return;
     }
-    if (page === "trash") {
+    if (page === "trash" || page === "stats") {
       goToPage("library", "pop");
       return;
     }
@@ -338,7 +340,7 @@ export default function MobileApp() {
     }
     const element = pageElementRef.current;
     if (!element) return null;
-    if (page === "trash") return { element, kind: "page" };
+    if (page === "trash" || page === "stats") return { element, kind: "page" };
     if (page !== "reader" || snap !== "collapsed" || chromeVisible || panel === "search") return null;
     if (session.readerRef.current?.hasSelection()) return null;
     return { element, kind: "page" };
@@ -454,6 +456,13 @@ export default function MobileApp() {
           />
         ) : page === "trash" ? (
           <MobileTrashPage shelf={shelf} onBack={() => goToPage("library", "pop")} />
+        ) : page === "stats" ? (
+          <MobileStatsPage
+            shelf={shelf}
+            onOpenBook={session.openBook}
+            openingBookId={session.openingBookId}
+            onBack={() => goToPage("library", "pop")}
+          />
         ) : (
           <MobileLibraryPage
             shelf={shelf}
@@ -464,6 +473,7 @@ export default function MobileApp() {
               setSettingsOpen(true);
             }}
             onOpenTrash={() => goToPage("trash", "push")}
+            onOpenStats={() => goToPage("stats", "push")}
             searchOpen={searchOpen}
             onSearchOpenChange={handleSearchOpenChange}
           />
@@ -472,6 +482,7 @@ export default function MobileApp() {
       {/* Snackbars outlive a page, at the bottom where Android puts them. Always
           mounted: the update snackbar shows itself when there is one. */}
       <div className="pointer-events-none fixed inset-x-0 bottom-[calc(var(--safe-bottom)+5.5rem)] z-40 flex flex-col gap-2 px-4">
+        <ReadingLogSyncNotice variant="snackbar" />
         {session.persistenceError && (
           <Notice
             variant="snackbar"

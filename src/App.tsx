@@ -75,6 +75,7 @@ import { isFindShortcut } from "@/lib/reader-paging";
 import { FinishBookPrompt } from "@/components/FinishBookPrompt";
 import { KosyncPrompt } from "@/components/KosyncPrompt";
 import { Notice, NoticeStack } from "@/components/Notice";
+import { ReadingLogSyncNotice } from "@/components/stats/ReadingLogSyncNotice";
 import { UpdateBanner } from "@/components/UpdateBanner";
 import { useAutoUpdateCheck } from "@/lib/app-update";
 
@@ -142,6 +143,9 @@ function App() {
     bookHidden,
     fileKey: fileData?.bookId ?? null,
   });
+  useEffect(() => {
+    session.readingTracker.setTtsPlaying(tts.status === "playing");
+  }, [session.readingTracker, tts.status]);
   const chatRef = useRef<ChatPanelHandle>(null);
   const shellRef = useRef<HTMLDivElement>(null);
   const sidePanelRef = useRef<HTMLDivElement>(null);
@@ -661,6 +665,7 @@ function App() {
 
   const appNotices = (
     <>
+      <ReadingLogSyncNotice />
       {session.persistenceError && (
         <Notice
           tone="error"
@@ -889,6 +894,7 @@ function App() {
                 ref={readerRef}
                 fileData={fileData}
                 onRelocate={session.handleRelocate}
+                onReaderActivity={session.readingTracker.activity}
                 onSelectionCapture={handleSelectionCapture}
                 onGuideTo={guideSteps ? handleGuideTo : undefined}
                 guideMarks={guideMarks}

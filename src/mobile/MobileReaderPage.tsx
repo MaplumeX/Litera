@@ -319,6 +319,7 @@ export function MobileReaderPage({
             ref={readerRef}
             fileData={fileData}
             onRelocate={session.handleRelocate}
+            onReaderActivity={session.readingTracker.activity}
             onSelectionCapture={handleSelectionCapture}
             onGuideTo={guided ? handleGuideTo : undefined}
             guideMarks={guideMarks}

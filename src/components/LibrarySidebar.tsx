@@ -3,6 +3,7 @@ import {
   Book,
   BookCheck,
   BookOpen,
+  ChartColumn,
   Library,
   Pause,
   Plus,
@@ -40,6 +41,9 @@ interface LibrarySidebarProps {
   importing: boolean;
   trashCount: number;
   onOpenTrash: () => void;
+  /** The Reading stats page is showing, in place of the shelf. */
+  statsActive?: boolean;
+  onOpenStats?: () => void;
   busy: boolean;
   /** Move focus to the active filter on mount, for the narrow-window drawer. */
   autoFocus?: boolean;
@@ -64,6 +68,8 @@ export function LibrarySidebar({
   importing,
   trashCount,
   onOpenTrash,
+  statsActive = false,
+  onOpenStats,
   busy,
   autoFocus = false,
   header,
@@ -90,7 +96,7 @@ export function LibrarySidebar({
         className={cn("min-h-0 flex-1 overflow-y-auto p-2", header && "pt-1")}
       >
         {STATUS_OPTIONS.map((option) => {
-          const active = option.value === statusFilter;
+          const active = !statsActive && option.value === statusFilter;
           const Icon = FILTER_ICONS[option.value];
           const count = counts[option.value];
           return (
@@ -125,6 +131,22 @@ export function LibrarySidebar({
         })}
       </nav>
       <div className="p-2">
+        {onOpenStats && (
+          <button
+            type="button"
+            aria-current={statsActive ? "page" : undefined}
+            onClick={onOpenStats}
+            className={cn(
+              ITEM_CLASS,
+              statsActive
+                ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
+                : IDLE_ITEM_CLASS,
+            )}
+          >
+            <ChartColumn className="size-4 shrink-0 opacity-70" aria-hidden />
+            <span className="min-w-0 flex-1 truncate text-left">{t("stats.title")}</span>
+          </button>
+        )}
         <button
           type="button"
           onClick={onImport}

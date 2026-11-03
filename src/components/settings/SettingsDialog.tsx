@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   ArrowLeft,
+  ChartColumn,
   CheckIcon,
   ChevronRight,
   ChevronsUpDown,
@@ -43,6 +44,7 @@ import { TypographyPreview } from "@/components/settings/TypographyPreview";
 import { ImportedFontsSection } from "@/components/settings/ImportedFontsSection";
 import { GuidedStyleSection } from "@/components/settings/GuidedStyleSection";
 import { ReaderFooterSettingsForm } from "@/components/settings/ReaderFooterSettingsForm";
+import { ReadingStatsSettingsForm } from "@/components/settings/ReadingStatsSettingsForm";
 import { UpdateSettings } from "@/components/settings/UpdateSettings";
 import { RELEASES_URL } from "@/lib/app-update";
 import { importedFontFamilies, useImportedFonts } from "@/lib/imported-fonts";
@@ -82,7 +84,7 @@ import {
   saveUiFontSize,
 } from "@/lib/ui-chrome-font";
 
-export type SettingsSection = "typography" | "appearance" | "footer" | "device" | "ai" | "sync" | "about";
+export type SettingsSection = "typography" | "appearance" | "footer" | "device" | "ai" | "stats" | "sync" | "about";
 
 const SECTIONS: { id: SettingsSection; labelKey: MessageKey; icon: LucideIcon }[] = [
   { id: "typography", labelKey: "settings.typography", icon: Type },
@@ -90,6 +92,7 @@ const SECTIONS: { id: SettingsSection; labelKey: MessageKey; icon: LucideIcon }[
   { id: "footer", labelKey: "reader.footer.title", icon: PanelBottom },
   { id: "device", labelKey: "mobile.device", icon: Smartphone },
   { id: "ai", labelKey: "settings.ai", icon: Sparkles },
+  { id: "stats", labelKey: "settings.stats", icon: ChartColumn },
   { id: "sync", labelKey: "settings.sync", icon: Cloud },
   { id: "about", labelKey: "settings.about", icon: Info },
 ];
@@ -947,9 +950,12 @@ export function SettingsDialog({
                       ? t("mobile.deviceDesc")
                       : section === "footer"
                         ? t("reader.footer.description")
-                        : scopeCopy}
+                        : section === "stats"
+                          ? t("settings.stats.description")
+                          : scopeCopy}
               </DialogDescription>
               {section === "footer" && <div className="max-w-md"><ReaderFooterSettingsForm /></div>}
+              {section === "stats" && <div className="max-w-md"><ReadingStatsSettingsForm /></div>}
               {section === "device" && <div className="max-w-md space-y-5">{deviceSettings}</div>}
               {section === "appearance" && (
                 <div className="max-w-md space-y-5">

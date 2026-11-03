@@ -13,6 +13,7 @@ mod library;
 mod open_paths;
 mod pi_sessions;
 mod preferences;
+mod reading_log;
 mod sync;
 mod sync_config;
 
@@ -120,6 +121,9 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            reading_log::record_sitting,
+            reading_log::get_reading_logs,
+            reading_log::sync_reading_logs,
             sync::sync_export_local_manifest,
             sync::sync_download_manifest,
             sync::sync_apply_merged_manifest,

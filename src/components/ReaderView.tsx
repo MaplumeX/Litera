@@ -218,6 +218,8 @@ interface ReaderViewProps {
   keysDisabled?: boolean;
   /** User-initiated relocate while TTS should resync from the new visible range. */
   onUserRelocate?: () => void;
+  /** Pointer, key or wheel input inside a section's iframe. */
+  onReaderActivity?: () => void;
   /** Reader CSS (font/theme) to inject into footnote popup inner views. */
   stylesCss?: string;
   /** A Guided session's marks: paragraphs read, skimmed, and at the Guide cursor. */
@@ -377,6 +379,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       onFindRequest,
       keysDisabled = false,
       onUserRelocate,
+      onReaderActivity,
       stylesCss,
       guideMarks,
       onMiddleTap,
@@ -401,6 +404,8 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
     onBookReadyRef.current = onBookReady;
     onTtsToggleRef.current = onTtsToggle;
     onUserRelocateRef.current = onUserRelocate;
+    const onReaderActivityRef = useRef(onReaderActivity);
+    onReaderActivityRef.current = onReaderActivity;
     const ttsActiveRef = useRef(ttsActive);
     ttsActiveRef.current = ttsActive;
     const onHistoryChangeRef = useRef(onHistoryChange);
@@ -868,6 +873,11 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
           // Selections here get the SelectionToolbar instead.
           platformBridge.setSelectionMenuHidden(true);
         };
+        const onDocActivity = () => onReaderActivityRef.current?.();
+        const activityOptions = { capture: true, passive: true };
+        doc.addEventListener("pointerdown", onDocActivity, activityOptions);
+        doc.addEventListener("keydown", onDocActivity, activityOptions);
+        doc.addEventListener("wheel", onDocActivity, activityOptions);
         doc.addEventListener("pointerdown", onDocPointerDown);
         doc.addEventListener("keydown", handleDocKeyDown);
         doc.addEventListener("wheel", handleWheel, { passive: false });
@@ -875,6 +885,9 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         unbindDoc = () => {
           unbindPointer();
           unbindTouchGuard?.();
+          doc.removeEventListener("pointerdown", onDocActivity, activityOptions);
+          doc.removeEventListener("keydown", onDocActivity, activityOptions);
+          doc.removeEventListener("wheel", onDocActivity, activityOptions);
           doc.removeEventListener("keydown", handleDocKeyDown);
           doc.removeEventListener("pointerdown", onDocPointerDown);
           doc.removeEventListener("wheel", handleWheel);

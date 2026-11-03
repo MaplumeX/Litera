@@ -8,6 +8,7 @@ import {
   Search,
   Settings,
   SlidersHorizontal,
+  ChartColumn,
   Trash2,
   X,
 } from "lucide-react";
@@ -41,6 +42,7 @@ interface MobileLibraryPageProps {
   openingBookId: string | null;
   onOpenSettings: () => void;
   onOpenTrash: () => void;
+  onOpenStats: () => void;
   /** The app bar is the search field (the shell owns it, so Back can close it). */
   searchOpen: boolean;
   onSearchOpenChange: (open: boolean) => void;
@@ -111,6 +113,7 @@ export function MobileLibraryPage({
   openingBookId,
   onOpenSettings,
   onOpenTrash,
+  onOpenStats,
   searchOpen,
   onSearchOpenChange,
 }: MobileLibraryPageProps) {
@@ -233,6 +236,10 @@ export function MobileLibraryPage({
                   </AppBarIconButton>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="min-w-48 py-2">
+                  <DropdownMenuItem className={MENU_ITEM} onSelect={onOpenStats}>
+                    <ChartColumn className="size-5" aria-hidden />
+                    <span className="min-w-0 flex-1 truncate">{t("stats.title")}</span>
+                  </DropdownMenuItem>
                   <DropdownMenuItem className={MENU_ITEM} disabled={busy} onSelect={onOpenTrash}>
                     <Trash2 className="size-5" aria-hidden />
                     <span className="min-w-0 flex-1 truncate">{t("library.trash")}</span>

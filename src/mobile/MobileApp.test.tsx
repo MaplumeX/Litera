@@ -174,6 +174,7 @@ function setupInvoke() {
         return Promise.resolve(books);
       case "list_trashed_books":
       case "list_system_fonts":
+      case "get_reading_logs":
         return Promise.resolve([]);
       case "get_book_open_context":
         return Promise.resolve({ ...openContext });
@@ -383,6 +384,18 @@ describe("MobileApp — navigation", () => {
     await waitFor(() =>
       expect(screen.queryByRole("dialog", { name: t("mobile.bookActions", { title: "第一本书" }) })).toBeNull(),
     );
+  });
+
+  it("opens Reading stats from the menu, and Back returns to the Library", async () => {
+    const screen = await renderApp();
+    fireEvent.pointerDown(screen.getByRole("button", { name: t("mobile.menu") }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: t("stats.title") }));
+    expect(await screen.findByText(t("stats.empty.recording"))).toBeTruthy();
+    expect(screen.queryByRole("heading", { level: 2, name: t("stats.title") })).toBeNull();
+
+    await back();
+    await waitFor(() => expect(screen.queryByText(t("stats.empty.recording"))).toBeNull());
+    expect(bridge.api.exitApp).not.toHaveBeenCalled();
   });
 
   it("changes sort and view from the app bar menu, which stays open for the next choice", async () => {

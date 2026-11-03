@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { loadReadingStatsEnabled, noteReadingLogUploaded } from "@/lib/reading-stats-prefs";
 import { mergeManifests, type SyncManifest } from "./sync-merge";
 import { hasUnsyncedActivity, takeUnsyncedActivity } from "./sync-activity";
 
@@ -125,6 +126,20 @@ export async function syncBeforeExit(timeoutMs: number): Promise<void> {
   }
 }
 
+/** Reading logs are not worth failing a pass over: the next one tries again. */
+async function syncReadingLogs(): Promise<void> {
+  try {
+    const summary = await invoke<{ uploaded: number; downloaded: number } | undefined>(
+      "sync_reading_logs",
+      { upload: loadReadingStatsEnabled() },
+    );
+    if (summary?.uploaded) noteReadingLogUploaded();
+    if (summary?.downloaded) window.dispatchEvent(new CustomEvent("litera:reading-logs-synced"));
+  } catch (error) {
+    console.warn("Failed to sync the reading log:", error);
+  }
+}
+
 async function runPassSteps(options: { uploadFiles?: boolean }): Promise<void> {
   if (options.uploadFiles) {
     await invoke("sync_upload_book_files");
@@ -156,6 +171,7 @@ async function runPassSteps(options: { uploadFiles?: boolean }): Promise<void> {
       await invoke("sync_sessions");
       // Open agent conversations pick up messages from other devices.
       window.dispatchEvent(new CustomEvent("litera:sessions-synced"));
+      await syncReadingLogs();
       return;
     } catch (error) {
       if (attempt < MAX_SYNC_ATTEMPTS - 1 && isPreconditionFailure(error)) {

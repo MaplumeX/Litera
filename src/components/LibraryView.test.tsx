@@ -165,6 +165,30 @@ describe("LibraryView", () => {
     alert.mockRestore();
   });
 
+  it("swaps the shelf for Reading stats, and goes back on a filter or a search", async () => {
+    setupInvoke({ list_books: () => [book], get_reading_logs: () => [] });
+    const { findByText, getByRole, getByPlaceholderText, queryByRole, queryByText } = render(
+      <LibraryView onOpenBook={vi.fn()} onOpenSettings={() => {}} />,
+    );
+    await findByText("Stored Title");
+
+    const entry = getByRole("button", { name: "阅读统计" });
+    fireEvent.click(entry);
+    expect(await findByText(/从现在开始记录阅读时长/)).toBeTruthy();
+    expect(entry.getAttribute("aria-current")).toBe("page");
+    expect(queryByText("Stored Title")).toBeNull();
+
+    fireEvent.click(getByRole("button", { name: /^全部/ }));
+    expect(await findByText("Stored Title")).toBeTruthy();
+    expect(entry.getAttribute("aria-current")).toBeNull();
+
+    fireEvent.click(entry);
+    expect(await findByText(/从现在开始记录阅读时长/)).toBeTruthy();
+    fireEvent.change(getByPlaceholderText(/搜索/), { target: { value: "Stored" } });
+    expect(await findByText("Stored Title")).toBeTruthy();
+    expect(queryByRole("group", { name: "过去一年" })).toBeNull();
+  });
+
   it("asks before overwrite and discards the staged import on cancel", async () => {
     const overwrite: ImportBookResult = {
       status: "overwrite",
