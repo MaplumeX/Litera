@@ -839,6 +839,32 @@ describe("LibraryView", () => {
     expect(queryByText("还没有书籍")).toBeNull();
   });
 
+  it("floats a dismissible notice over the shelf when a refresh fails", async () => {
+    let listCalls = 0;
+    setupInvoke({
+      list_books: () => {
+        listCalls += 1;
+        if (listCalls > 1) throw "disk on fire";
+        return [book];
+      },
+      import_book: () => [],
+    });
+    const { findByText, findByRole, getByRole, queryByRole } = render(
+      <LibraryView onOpenBook={() => {}} onOpenSettings={() => {}} />,
+    );
+    await findByText("Stored Title");
+    getByRole("button", { name: "导入书籍" }).click();
+
+    const notice = await findByRole("alert");
+    expect(notice.textContent).toContain("disk on fire");
+    // Over the page, not in its flow: the shelf must not move when it appears.
+    expect(notice.closest(".fixed")).not.toBeNull();
+    expect(getByRole("button", { name: /Stored Title/ })).toBeTruthy();
+
+    within(notice).getByRole("button", { name: "关闭" }).click();
+    await waitFor(() => expect(queryByRole("alert")).toBeNull());
+  });
+
   it("saves details without coverBytes when no new cover is chosen", async () => {
     const updated = { ...book, title: "New Title", author: "New Author" };
     setupInvoke({

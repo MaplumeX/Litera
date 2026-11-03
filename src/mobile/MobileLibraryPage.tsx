@@ -24,7 +24,6 @@ import {
 import { bookActions } from "@/components/BookCard";
 import { BookDetailsDialog } from "@/components/BookDetailsDialog";
 import { SORT_OPTIONS, STATUS_OPTIONS } from "@/components/LibraryShelfToolbar";
-import { BookImportNotices } from "@/components/BookImportFeedback";
 import { BookActionSheetProvider, type BookActionHandlers } from "@/components/BookActionsMenu";
 import type { BookRecord } from "@/types/library";
 import type { LibraryShelf } from "@/lib/use-library-shelf";
@@ -282,23 +281,16 @@ export function MobileLibraryPage({
         </div>
       )}
 
-      {loadError && (
-        <div role="alert" className="mx-4 mb-2 rounded-lg bg-destructive/10 px-4 py-2 text-sm text-destructive">
-          {t("library.loadFailed", { message: loadError })}
-        </div>
-      )}
-
-      <BookImportNotices
-        notices={shelf.notices}
-        dismissNotice={shelf.dismissNotice}
-        onOpenBook={onOpenBook}
-        actionDisabled={importing}
-      />
-
       <BookActionSheetProvider value={openActionSheet}>
         {/* Bottom padding clears the floating import button. */}
         <div className="min-h-0 flex-1 overflow-y-auto pb-[calc(var(--safe-bottom)+6rem)]">
-          {!loaded || (books.length === 0 && loadError) ? null : books.length === 0 ? (
+          {!loaded ? null : books.length === 0 && loadError ? (
+            <div className="flex h-full items-center justify-center px-8">
+              <p role="alert" className="text-center break-words text-sm text-destructive">
+                {t("library.loadFailed", { message: loadError })}
+              </p>
+            </div>
+          ) : books.length === 0 ? (
             <div className="flex h-full flex-col items-center justify-center gap-4 px-8 text-center">
               <p className="text-muted-foreground">{t("library.empty")}</p>
               <Button onClick={handleImport} disabled={busy} className="h-10 rounded-full px-6">

@@ -99,6 +99,8 @@ export function useLibraryShelf({ openingBookId = null }: { openingBookId?: stri
     void refreshBooks();
   }, [refreshBooks]);
 
+  const clearLoadError = useCallback(() => setLoadError(null), []);
+
   const refreshTrash = useCallback(async () => {
     try {
       setTrashEntries(await invoke<TrashEntry[]>("list_trashed_books"));
@@ -460,6 +462,7 @@ export function useLibraryShelf({ openingBookId = null }: { openingBookId?: stri
     books,
     loaded,
     loadError,
+    clearLoadError,
     refreshBooks,
     search,
     setSearch,
