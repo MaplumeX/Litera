@@ -158,3 +158,37 @@ export function saveLibrarySidebarCollapsed(collapsed: boolean): void {
     // private mode / quota
   }
 }
+
+export const LIBRARY_SIDEBAR_WIDTH_KEY = "litera.librarySidebarWidth";
+export const LIBRARY_SIDEBAR_WIDTH_DEFAULT = 208;
+export const LIBRARY_SIDEBAR_WIDTH_MIN = 160;
+export const LIBRARY_SIDEBAR_WIDTH_MAX = 360;
+
+/** Clamp a docked sidebar width (px) to its allowed range. */
+export function clampLibrarySidebarWidth(width: number): number {
+  if (!Number.isFinite(width)) return LIBRARY_SIDEBAR_WIDTH_DEFAULT;
+  return Math.min(
+    Math.max(Math.round(width), LIBRARY_SIDEBAR_WIDTH_MIN),
+    LIBRARY_SIDEBAR_WIDTH_MAX,
+  );
+}
+
+export function loadLibrarySidebarWidth(): number {
+  try {
+    if (typeof localStorage === "undefined") return LIBRARY_SIDEBAR_WIDTH_DEFAULT;
+    const raw = localStorage.getItem(LIBRARY_SIDEBAR_WIDTH_KEY);
+    if (raw == null) return LIBRARY_SIDEBAR_WIDTH_DEFAULT;
+    return clampLibrarySidebarWidth(Number.parseInt(raw, 10));
+  } catch {
+    return LIBRARY_SIDEBAR_WIDTH_DEFAULT;
+  }
+}
+
+export function saveLibrarySidebarWidth(width: number): void {
+  try {
+    if (typeof localStorage === "undefined") return;
+    localStorage.setItem(LIBRARY_SIDEBAR_WIDTH_KEY, String(clampLibrarySidebarWidth(width)));
+  } catch {
+    // private mode / quota
+  }
+}

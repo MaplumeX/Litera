@@ -47,6 +47,8 @@ interface LibrarySidebarProps {
   header?: ReactNode;
   /** The mobile drawer also leads to Settings; desktop has it in the titlebar. */
   onOpenSettings?: () => void;
+  /** Width in px when docked; the drawer keeps the default. */
+  width?: number;
   className?: string;
 }
 
@@ -68,6 +70,7 @@ export function LibrarySidebar({
   autoFocus = false,
   header,
   onOpenSettings,
+  width,
   className,
 }: LibrarySidebarProps) {
   const { t } = useT();
@@ -83,6 +86,7 @@ export function LibrarySidebar({
         "flex w-52 shrink-0 flex-col bg-sidebar text-sidebar-foreground",
         className,
       )}
+      style={width === undefined ? undefined : { width }}
     >
       {header}
       <nav

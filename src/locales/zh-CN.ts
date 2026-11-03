@@ -168,6 +168,7 @@ export const zhCN = {
   "library.clearSearch": "清除搜索",
   "library.importBooks": "导入书籍",
   "library.toggleSidebar": "切换侧边栏",
+  "library.resizeSidebar": "调整侧边栏宽度",
   "library.searchResults": "找到 {count} 本",
   "library.orderAsc": "升序",
   "library.orderDesc": "降序",

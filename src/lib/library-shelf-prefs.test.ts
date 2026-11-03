@@ -4,12 +4,18 @@ import {
   DEFAULT_LIBRARY_SORT,
   DEFAULT_LIBRARY_STATUS_FILTER,
   DEFAULT_LIBRARY_VIEW,
+  clampLibrarySidebarWidth,
   LIBRARY_SIDEBAR_COLLAPSED_KEY,
+  LIBRARY_SIDEBAR_WIDTH_DEFAULT,
+  LIBRARY_SIDEBAR_WIDTH_KEY,
+  LIBRARY_SIDEBAR_WIDTH_MAX,
+  LIBRARY_SIDEBAR_WIDTH_MIN,
   LIBRARY_SORT_KEY,
   LIBRARY_SORT_ORDER_KEY,
   LIBRARY_STATUS_FILTER_KEY,
   LIBRARY_VIEW_KEY,
   loadLibrarySidebarCollapsed,
+  loadLibrarySidebarWidth,
   loadLibrarySort,
   loadLibrarySortOrder,
   loadLibraryStatusFilter,
@@ -19,6 +25,7 @@ import {
   parseLibraryStatusFilter,
   parseLibraryView,
   saveLibrarySidebarCollapsed,
+  saveLibrarySidebarWidth,
   saveLibrarySort,
   saveLibrarySortOrder,
   saveLibraryStatusFilter,
@@ -31,6 +38,7 @@ afterEach(() => {
   localStorage.removeItem(LIBRARY_STATUS_FILTER_KEY);
   localStorage.removeItem(LIBRARY_VIEW_KEY);
   localStorage.removeItem(LIBRARY_SIDEBAR_COLLAPSED_KEY);
+  localStorage.removeItem(LIBRARY_SIDEBAR_WIDTH_KEY);
 });
 
 describe("parseLibrarySort / parseLibraryView", () => {
@@ -122,5 +130,24 @@ describe("library sidebar collapsed pref", () => {
   it("treats an unknown stored value as expanded", () => {
     localStorage.setItem(LIBRARY_SIDEBAR_COLLAPSED_KEY, "yes");
     expect(loadLibrarySidebarCollapsed()).toBe(false);
+  });
+});
+
+describe("library sidebar width", () => {
+  it("clamps to the allowed range and rounds", () => {
+    expect(clampLibrarySidebarWidth(10)).toBe(LIBRARY_SIDEBAR_WIDTH_MIN);
+    expect(clampLibrarySidebarWidth(9999)).toBe(LIBRARY_SIDEBAR_WIDTH_MAX);
+    expect(clampLibrarySidebarWidth(250.4)).toBe(250);
+    expect(clampLibrarySidebarWidth(Number.NaN)).toBe(LIBRARY_SIDEBAR_WIDTH_DEFAULT);
+  });
+
+  it("round-trips through storage and falls back on bad values", () => {
+    expect(loadLibrarySidebarWidth()).toBe(LIBRARY_SIDEBAR_WIDTH_DEFAULT);
+    saveLibrarySidebarWidth(280);
+    expect(loadLibrarySidebarWidth()).toBe(280);
+    localStorage.setItem(LIBRARY_SIDEBAR_WIDTH_KEY, "abc");
+    expect(loadLibrarySidebarWidth()).toBe(LIBRARY_SIDEBAR_WIDTH_DEFAULT);
+    localStorage.setItem(LIBRARY_SIDEBAR_WIDTH_KEY, "9999");
+    expect(loadLibrarySidebarWidth()).toBe(LIBRARY_SIDEBAR_WIDTH_MAX);
   });
 });
