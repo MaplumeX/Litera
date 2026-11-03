@@ -1,4 +1,4 @@
-import { Button } from "@/components/ui/button";
+import { Notice } from "@/components/Notice";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -18,48 +18,40 @@ export function BookImportNotices({
   dismissNotice,
   onOpenBook,
   actionDisabled = false,
+  variant,
 }: {
   notices: BookImportNotice[];
   dismissNotice: (id: string) => void;
   onOpenBook?: (bookId: string) => void | Promise<void>;
   actionDisabled?: boolean;
+  variant?: "card" | "snackbar";
 }) {
-  const { t } = useT();
   return (
     <>
-      {notices.map((notice) => (
-        <div
-          key={notice.id}
-          role={notice.kind === "error" ? "alert" : "status"}
-          className={
-            notice.kind === "error"
-              ? "flex items-center gap-3 border-b border-destructive/40 bg-destructive/10 px-4 py-2 text-sm text-destructive"
-              : "flex items-center gap-3 border-b bg-muted/60 px-4 py-2 text-sm"
-          }
-        >
-          <span className="min-w-0 flex-1">{notice.message}</span>
-          {notice.action && onOpenBook && (
-            <Button
-              size="sm"
-              variant="ghost"
-              disabled={actionDisabled}
-              onClick={() => {
-                dismissNotice(notice.id);
-                void onOpenBook(notice.action!.bookId);
-              }}
-            >
-              {notice.action.label}
-            </Button>
-          )}
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => dismissNotice(notice.id)}
-          >
-            {t("common.close")}
-          </Button>
-        </div>
-      ))}
+      {notices.map((notice) => {
+        const open = notice.action;
+        return (
+          <Notice
+            key={notice.id}
+            message={notice.message}
+            tone={notice.kind === "error" ? "error" : "info"}
+            variant={variant}
+            action={
+              open && onOpenBook
+                ? {
+                    label: open.label,
+                    disabled: actionDisabled,
+                    onClick: () => {
+                      dismissNotice(notice.id);
+                      void onOpenBook(open.bookId);
+                    },
+                  }
+                : undefined
+            }
+            onDismiss={() => dismissNotice(notice.id)}
+          />
+        );
+      })}
     </>
   );
 }

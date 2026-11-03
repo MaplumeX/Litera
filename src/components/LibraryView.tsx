@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import type { BookRecord, ReadingStatus } from "@/types/library";
 import { Button } from "@/components/ui/button";
@@ -36,11 +36,14 @@ import {
   saveLibrarySidebarCollapsed,
 } from "@/lib/library-shelf-prefs";
 import { useLibraryShelf } from "@/lib/use-library-shelf";
+import { Notice, NoticeStack } from "@/components/Notice";
 
 interface LibraryViewProps {
   onOpenBook: (bookId: string) => void | Promise<void>;
   openingBookId?: string | null;
   onOpenSettings: () => void;
+  /** Notices from outside the shelf, floated in the same stack as its own. */
+  appNotices?: ReactNode;
 }
 
 function isEpubPath(path: string): boolean {
@@ -85,7 +88,7 @@ function useWideWindow(): boolean {
   return wide;
 }
 
-export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }: LibraryViewProps) {
+export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings, appNotices }: LibraryViewProps) {
   const { t } = useT();
   const titlebarDrag = useTitlebarWindowDrag();
   const searchRef = useRef<HTMLInputElement>(null);
@@ -94,6 +97,7 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
     books,
     loaded,
     loadError,
+    clearLoadError,
     refreshBooks,
     search,
     setSearch,
@@ -433,21 +437,14 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
                 />
               ))}
 
-            {loadError && (
-              <div role="alert" className="border-b border-destructive/40 bg-destructive/10 px-4 py-2 text-sm text-destructive">
-                {t("library.loadFailed", { message: loadError })}
-              </div>
-            )}
-
-            <BookImportNotices
-              notices={notices}
-              dismissNotice={dismissNotice}
-              onOpenBook={onOpenBook}
-              actionDisabled={importing}
-            />
-
             <div className="flex-1 overflow-y-auto px-6 pb-6">
-              {!loaded || (books.length === 0 && loadError) ? null : books.length === 0 ? (
+              {!loaded ? null : books.length === 0 && loadError ? (
+                <div className="flex h-full items-center justify-center">
+                  <p role="alert" className="max-w-md text-center break-words text-sm text-destructive">
+                    {t("library.loadFailed", { message: loadError })}
+                  </p>
+                </div>
+              ) : books.length === 0 ? (
                 <div className="flex h-full items-center justify-center">
                   <div className="text-center space-y-3">
                     <p className="text-muted-foreground">{t("library.empty")}</p>
@@ -545,6 +542,24 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings }
           </div>
         </div>
       </div>
+
+      <NoticeStack>
+        {appNotices}
+        {/* A shelf with no Books shows this in place of the shelf instead. */}
+        {loadError && books.length > 0 && (
+          <Notice
+            tone="error"
+            message={t("library.loadFailed", { message: loadError })}
+            onDismiss={clearLoadError}
+          />
+        )}
+        <BookImportNotices
+          notices={notices}
+          dismissNotice={dismissNotice}
+          onOpenBook={onOpenBook}
+          actionDisabled={importing}
+        />
+      </NoticeStack>
 
       <BookDetailsDialog
         book={detailsBook}

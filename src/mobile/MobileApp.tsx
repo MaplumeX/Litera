@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { BookImportConfirmDialog } from "@/components/BookImportFeedback";
+import { BookImportConfirmDialog, BookImportNotices } from "@/components/BookImportFeedback";
+import { Notice } from "@/components/Notice";
 import { SettingsDialog, type SettingsSection } from "@/components/settings/SettingsDialog";
 import {
   readerModeForSnap,
@@ -91,27 +91,6 @@ function closeTopOverlay(): boolean {
 async function bookFilesAllowed(settings: MobileSettings = loadMobileSettings()): Promise<boolean> {
   if (!settings.wifiOnlyBookFiles) return true;
   return !(await platformBridge.isNetworkMetered());
-}
-
-/** A snackbar: problems that outlive a page, at the bottom where Android puts them. */
-function Banner({ message, onDismiss, alert }: { message: string; onDismiss: () => void; alert?: boolean }) {
-  const { t } = useT();
-  return (
-    <div
-      role={alert ? "alert" : "status"}
-      className="m-rise pointer-events-auto flex items-center gap-2 rounded-lg bg-foreground py-1.5 pr-1.5 pl-4 text-sm text-background shadow-float"
-    >
-      <span className="min-w-0 flex-1 py-1.5">{message}</span>
-      <Button
-        size="sm"
-        variant="ghost"
-        className="text-background hover:bg-background/10 hover:text-background"
-        onClick={onDismiss}
-      >
-        {t("common.close")}
-      </Button>
-    </div>
-  );
 }
 
 function DeviceSettings({
@@ -490,21 +469,40 @@ export default function MobileApp() {
           />
         )}
       </div>
-      {/* Always mounted: the update snackbar shows itself when there is one. */}
+      {/* Snackbars outlive a page, at the bottom where Android puts them. Always
+          mounted: the update snackbar shows itself when there is one. */}
       <div className="pointer-events-none fixed inset-x-0 bottom-[calc(var(--safe-bottom)+5.5rem)] z-40 flex flex-col gap-2 px-4">
         {session.persistenceError && (
-          <Banner
-            alert
+          <Notice
+            variant="snackbar"
+            tone="error"
             message={t("reader.persistFailed", { message: session.persistenceError })}
             onDismiss={session.clearPersistenceError}
           />
         )}
         {syncScheduler.persistentFailure && (
-          <Banner
+          <Notice
+            variant="snackbar"
             message={t("sync.failureNotice", { message: syncScheduler.persistentFailure })}
             onDismiss={syncScheduler.clearPersistentFailure}
           />
         )}
+        {/* An empty shelf shows this in place of the shelf instead. */}
+        {shelf.loadError && shelf.books.length > 0 && (
+          <Notice
+            variant="snackbar"
+            tone="error"
+            message={t("library.loadFailed", { message: shelf.loadError })}
+            onDismiss={shelf.clearLoadError}
+          />
+        )}
+        <BookImportNotices
+          variant="snackbar"
+          notices={shelf.notices}
+          dismissNotice={shelf.dismissNotice}
+          onOpenBook={session.openBook}
+          actionDisabled={shelf.importing}
+        />
         <UpdateBanner variant="snackbar" beforeRestart={session.flushReadingState} />
       </div>
       <SettingsDialog

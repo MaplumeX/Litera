@@ -74,52 +74,9 @@ import { useReaderTts } from "@/lib/use-reader-tts";
 import { isFindShortcut } from "@/lib/reader-paging";
 import { FinishBookPrompt } from "@/components/FinishBookPrompt";
 import { KosyncPrompt } from "@/components/KosyncPrompt";
+import { Notice, NoticeStack } from "@/components/Notice";
 import { UpdateBanner } from "@/components/UpdateBanner";
 import { useAutoUpdateCheck } from "@/lib/app-update";
-
-function PersistenceErrorBanner({
-  message,
-  onDismiss,
-}: {
-  message: string | null;
-  onDismiss: () => void;
-}) {
-  const { t } = useT();
-  if (!message) return null;
-  return (
-    <div
-      role="alert"
-      className="flex items-center gap-3 border-b border-destructive/40 bg-destructive/10 px-4 py-2 text-sm text-destructive"
-    >
-      <span className="min-w-0 flex-1">{t("reader.persistFailed", { message })}</span>
-      <Button size="sm" variant="ghost" onClick={onDismiss}>
-        {t("common.close")}
-      </Button>
-    </div>
-  );
-}
-
-function SyncFailureBanner({
-  message,
-  onDismiss,
-}: {
-  message: string | null;
-  onDismiss: () => void;
-}) {
-  const { t } = useT();
-  if (!message) return null;
-  return (
-    <div
-      role="status"
-      className="flex items-center gap-3 border-b border-border bg-muted px-4 py-2 text-sm text-muted-foreground"
-    >
-      <span className="min-w-0 flex-1">{t("sync.failureNotice", { message })}</span>
-      <Button size="sm" variant="ghost" onClick={onDismiss}>
-        {t("common.close")}
-      </Button>
-    </div>
-  );
-}
 
 /** The side panel floats this far in from its cell's edges (Tailwind `2`). */
 const SIDE_PANEL_INSET_PX = 8;
@@ -702,6 +659,30 @@ function App() {
     </Button>
   );
 
+  const appNotices = (
+    <>
+      {session.persistenceError && (
+        <Notice
+          tone="error"
+          message={t("reader.persistFailed", { message: session.persistenceError })}
+          onDismiss={session.clearPersistenceError}
+        />
+      )}
+      {syncScheduler.persistentFailure && (
+        <Notice
+          message={t("sync.failureNotice", { message: syncScheduler.persistentFailure })}
+          onDismiss={syncScheduler.clearPersistentFailure}
+        />
+      )}
+      <BookImportNotices
+        notices={bookImport.notices}
+        dismissNotice={bookImport.dismissNotice}
+        onOpenBook={handleOpenBook}
+        actionDisabled={bookImport.importing}
+      />
+    </>
+  );
+
   if (view === "library") {
     return (
       <main className="flex h-screen flex-col bg-background text-foreground">
@@ -716,26 +697,17 @@ function App() {
           </div>
         </div>
       )}
-        <PersistenceErrorBanner
-          message={session.persistenceError}
-          onDismiss={session.clearPersistenceError}
-        />
-        <SyncFailureBanner
-          message={syncScheduler.persistentFailure}
-          onDismiss={syncScheduler.clearPersistentFailure}
-        />
-        <BookImportNotices
-          notices={bookImport.notices}
-          dismissNotice={bookImport.dismissNotice}
-          onOpenBook={handleOpenBook}
-          actionDisabled={bookImport.importing}
-        />
         <LibraryView
           onOpenBook={handleOpenBook}
           openingBookId={session.openingBookId}
           onOpenSettings={() => setSettingsOpen(true)}
+          appNotices={
+            <>
+              {appNotices}
+              <UpdateBanner beforeRestart={flushReadingState} />
+            </>
+          }
         />
-        <UpdateBanner beforeRestart={flushReadingState} />
         {settingsDialog}
         <BookImportConfirmDialog
           confirmOpen={bookImport.confirmOpen}
@@ -748,20 +720,11 @@ function App() {
 
   return (
     <main className="flex h-screen flex-col bg-background text-foreground">
-      <PersistenceErrorBanner
-        message={session.persistenceError}
-        onDismiss={session.clearPersistenceError}
-      />
-      <SyncFailureBanner
-        message={syncScheduler.persistentFailure}
-        onDismiss={syncScheduler.clearPersistentFailure}
-      />
-      <BookImportNotices
-        notices={bookImport.notices}
-        dismissNotice={bookImport.dismissNotice}
-        onOpenBook={handleOpenBook}
-        actionDisabled={bookImport.importing}
-      />
+      <NoticeStack>
+        {appNotices}
+        {/* Cleared by the next read-aloud action, so there is nothing to dismiss. */}
+        {tts.error && <Notice tone="error" message={tts.error} />}
+      </NoticeStack>
       {/* Top toolbar: no rule underneath, tone and space separate it. */}
       <header className={titlebarClassName({ bordered: false })}>
         <Button
@@ -960,14 +923,6 @@ function App() {
             )}
             {readerMode === "reader" && sidePanel}
           </div>
-          {tts.error ? (
-            <div
-              role="alert"
-              className="mx-2 mb-1 rounded-lg bg-destructive/10 px-3 py-1.5 text-xs text-destructive"
-            >
-              {tts.error}
-            </div>
-          ) : null}
           {tts.status !== "idle" ? (
             <ReaderTtsBar
               playing={tts.status === "playing"}
