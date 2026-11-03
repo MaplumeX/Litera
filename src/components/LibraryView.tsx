@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+  type ReactNode,
+} from "react";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import type { BookRecord, ReadingStatus } from "@/types/library";
 import { Button } from "@/components/ui/button";
@@ -33,8 +40,11 @@ import { useT } from "@/lib/i18n";
 import { detectDesktopOs } from "@/lib/platform";
 import type { LibraryStatusFilter } from "@/lib/library-shelf";
 import {
+  clampLibrarySidebarWidth,
   loadLibrarySidebarCollapsed,
+  loadLibrarySidebarWidth,
   saveLibrarySidebarCollapsed,
+  saveLibrarySidebarWidth,
 } from "@/lib/library-shelf-prefs";
 import { useLibraryShelf } from "@/lib/use-library-shelf";
 import { Notice, NoticeStack } from "@/components/Notice";
@@ -153,6 +163,8 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings, 
   } = shelf;
   const wide = useWideWindow();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(loadLibrarySidebarCollapsed);
+  const [sidebarWidth, setSidebarWidth] = useState(loadLibrarySidebarWidth);
+  const sidebarResizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [trashOpen, setTrashOpen] = useState(false);
   const [statsOpen, setStatsOpen] = useState(false);
@@ -214,6 +226,37 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings, 
       return !collapsed;
     });
   }, [wide]);
+
+  const startSidebarResize = useCallback(
+    (e: ReactPointerEvent<HTMLDivElement>) => {
+      if (e.button !== 0) return;
+      sidebarResizeRef.current = { startX: e.clientX, startWidth: sidebarWidth };
+      e.currentTarget.setPointerCapture?.(e.pointerId);
+    },
+    [sidebarWidth],
+  );
+
+  const onSidebarResizeMove = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
+    const state = sidebarResizeRef.current;
+    if (!state) return;
+    setSidebarWidth(clampLibrarySidebarWidth(state.startWidth + e.clientX - state.startX));
+  }, []);
+
+  const endSidebarResize = useCallback((e: ReactPointerEvent<HTMLDivElement>) => {
+    const state = sidebarResizeRef.current;
+    if (!state) return;
+    sidebarResizeRef.current = null;
+    const next = clampLibrarySidebarWidth(state.startWidth + e.clientX - state.startX);
+    setSidebarWidth(next);
+    saveLibrarySidebarWidth(next);
+  }, []);
+
+  const cancelSidebarResize = useCallback(() => {
+    const state = sidebarResizeRef.current;
+    if (!state) return;
+    sidebarResizeRef.current = null;
+    setSidebarWidth(state.startWidth);
+  }, []);
 
   useEffect(() => {
     if (!drawerOpen) return;
@@ -317,16 +360,30 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings, 
   );
 
   return (
-    <div className="flex min-h-0 flex-1">
+    <div className="relative flex min-h-0 flex-1">
       {sidebarDocked && (
-        <LibrarySidebar
-          {...sidebarProps}
-          header={
-            <div className={cn(titlebarClassName({ bordered: false }), "gap-2")}>
-              {brand}
-            </div>
-          }
-        />
+        <>
+          <LibrarySidebar
+            {...sidebarProps}
+            width={sidebarWidth}
+            header={
+              <div className={cn(titlebarClassName({ bordered: false }), "gap-2")}>
+                {brand}
+              </div>
+            }
+          />
+          <div
+            className="absolute inset-y-0 z-10 w-1.5 cursor-col-resize touch-none select-none bg-transparent hover:bg-primary/30"
+            style={{ left: sidebarWidth - 3 }}
+            role="separator"
+            aria-orientation="vertical"
+            aria-label={t("library.resizeSidebar")}
+            onPointerDown={startSidebarResize}
+            onPointerMove={onSidebarResizeMove}
+            onPointerUp={endSidebarResize}
+            onPointerCancel={cancelSidebarResize}
+          />
+        </>
       )}
 
       <div className="flex min-w-0 flex-1 flex-col">

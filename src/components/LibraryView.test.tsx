@@ -57,6 +57,7 @@ import { setLocale } from "@/lib/i18n";
 import { formatLibraryTimestamp } from "@/lib/library-shelf";
 import {
   LIBRARY_SIDEBAR_COLLAPSED_KEY,
+  LIBRARY_SIDEBAR_WIDTH_KEY,
   LIBRARY_SORT_KEY,
   LIBRARY_SORT_ORDER_KEY,
   LIBRARY_STATUS_FILTER_KEY,
@@ -127,6 +128,7 @@ beforeEach(() => {
   localStorage.removeItem(LIBRARY_STATUS_FILTER_KEY);
   localStorage.removeItem(LIBRARY_VIEW_KEY);
   localStorage.removeItem(LIBRARY_SIDEBAR_COLLAPSED_KEY);
+  localStorage.removeItem(LIBRARY_SIDEBAR_WIDTH_KEY);
   setupInvoke();
 });
 
@@ -1636,6 +1638,59 @@ describe("LibraryView — sidebar layout", () => {
       expect(queryByRole("navigation", { name: "筛选" })).toBeNull();
     });
     expect(localStorage.getItem(LIBRARY_SIDEBAR_COLLAPSED_KEY)).toBe("1");
+  });
+
+  it("drags the handle to resize the sidebar and remembers the width", async () => {
+    const { findByText, getByRole } = render(
+      <LibraryView onOpenBook={() => {}} onOpenSettings={() => {}} />,
+    );
+    await findByText("Stored Title");
+    const sidebar = getByRole("navigation", { name: "筛选" }).closest("aside") as HTMLElement;
+    const handle = getByRole("separator", { name: "调整侧边栏宽度" });
+    expect(sidebar.style.width).toBe("208px");
+
+    fireEvent.pointerDown(handle, { clientX: 208, button: 0 });
+    fireEvent.pointerMove(handle, { clientX: 280, button: 0 });
+    await waitFor(() => expect(sidebar.style.width).toBe("280px"));
+    expect(localStorage.getItem(LIBRARY_SIDEBAR_WIDTH_KEY)).toBeNull();
+    expect(handle.style.left).toBe("277px");
+
+    fireEvent.pointerUp(handle, { clientX: 280, button: 0 });
+    expect(localStorage.getItem(LIBRARY_SIDEBAR_WIDTH_KEY)).toBe("280");
+  });
+
+  it("restores a saved width and clamps while dragging", async () => {
+    localStorage.setItem(LIBRARY_SIDEBAR_WIDTH_KEY, "300");
+    const { findByText, getByRole } = render(
+      <LibraryView onOpenBook={() => {}} onOpenSettings={() => {}} />,
+    );
+    await findByText("Stored Title");
+    const sidebar = getByRole("navigation", { name: "筛选" }).closest("aside") as HTMLElement;
+    const handle = getByRole("separator", { name: "调整侧边栏宽度" });
+    expect(sidebar.style.width).toBe("300px");
+
+    fireEvent.pointerDown(handle, { clientX: 300, button: 0 });
+    fireEvent.pointerMove(handle, { clientX: 5000, button: 0 });
+    await waitFor(() => expect(sidebar.style.width).toBe("360px"));
+    fireEvent.pointerUp(handle, { clientX: -5000, button: 0 });
+    await waitFor(() => expect(sidebar.style.width).toBe("160px"));
+    expect(localStorage.getItem(LIBRARY_SIDEBAR_WIDTH_KEY)).toBe("160");
+  });
+
+  it("restores the starting width when a drag is cancelled", async () => {
+    const { findByText, getByRole } = render(
+      <LibraryView onOpenBook={() => {}} onOpenSettings={() => {}} />,
+    );
+    await findByText("Stored Title");
+    const sidebar = getByRole("navigation", { name: "筛选" }).closest("aside") as HTMLElement;
+    const handle = getByRole("separator", { name: "调整侧边栏宽度" });
+
+    fireEvent.pointerDown(handle, { clientX: 208, button: 0 });
+    fireEvent.pointerMove(handle, { clientX: 300, button: 0 });
+    await waitFor(() => expect(sidebar.style.width).toBe("300px"));
+    fireEvent.pointerCancel(handle);
+    await waitFor(() => expect(sidebar.style.width).toBe("208px"));
+    expect(localStorage.getItem(LIBRARY_SIDEBAR_WIDTH_KEY)).toBeNull();
   });
 
   it("names the filter and its count in the shelf header", async () => {

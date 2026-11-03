@@ -170,6 +170,7 @@ export const en: { [K in MessageKey]: string } = {
   "library.clearSearch": "Clear search",
   "library.importBooks": "Import books",
   "library.toggleSidebar": "Toggle sidebar",
+  "library.resizeSidebar": "Resize sidebar",
   "library.searchResults": "{count} found",
   "library.orderAsc": "Ascending",
   "library.orderDesc": "Descending",
