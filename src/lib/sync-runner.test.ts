@@ -7,6 +7,7 @@ import {
   syncBeforeExit,
 } from "./sync-runner";
 import { hasUnsyncedActivity, notifySyncActivity } from "./sync-activity";
+import { saveReadingStatsEnabled } from "./reading-stats-prefs";
 
 const invokeMock = vi.fn();
 
@@ -86,6 +87,8 @@ function setupStore(): Store {
         return Promise.resolve(null);
       case "sync_sessions":
         return Promise.resolve({ uploaded: 0, downloaded: 0 });
+      case "sync_reading_logs":
+        return Promise.resolve({ uploaded: 0, downloaded: 0, skipped: 0 });
       case "sync_upload_book_files":
         return Promise.resolve({ books: 0, covers: 0, bytes: 0 });
       case "sync_upload_manifest": {
@@ -135,6 +138,65 @@ describe("runSyncOnce", () => {
     expect(commands).toContain("sync_sessions");
   });
 
+  describe("reading logs", () => {
+    /** The store, with `sync_reading_logs` answering `logs`. */
+    function withLogs(logs: () => Promise<unknown>) {
+      setupStore();
+      const base = invokeMock.getMockImplementation()!;
+      invokeMock.mockImplementation((cmd: string, args?: unknown) =>
+        cmd === "sync_reading_logs" ? logs() : base(cmd, args),
+      );
+    }
+
+    beforeEach(() => localStorage.clear());
+
+    it("does not upload with recording off", async () => {
+      withLogs(async () => ({ uploaded: 0, downloaded: 0 }));
+      saveReadingStatsEnabled(false);
+
+      await runSyncOnce();
+
+      expect(invokeMock).toHaveBeenCalledWith("sync_reading_logs", { upload: false });
+    });
+
+    it("does not fail the pass when the logs fail", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      withLogs(() => Promise.reject(new Error("backend down")));
+
+      await expect(runSyncOnce()).resolves.toBeUndefined();
+
+      expect(warn).toHaveBeenCalled();
+      warn.mockRestore();
+    });
+
+    it("tells an open stats page only when logs arrived", async () => {
+      const synced = vi.fn();
+      window.addEventListener("litera:reading-logs-synced", synced);
+      withLogs(async () => ({ uploaded: 0, downloaded: 0 }));
+      await runSyncOnce();
+      expect(synced).not.toHaveBeenCalled();
+
+      withLogs(async () => ({ uploaded: 0, downloaded: 1 }));
+      await runSyncOnce();
+      expect(synced).toHaveBeenCalledOnce();
+      window.removeEventListener("litera:reading-logs-synced", synced);
+    });
+
+    it("makes the notice due after the first upload, and only once", async () => {
+      withLogs(async () => ({ uploaded: 0, downloaded: 0 }));
+      await runSyncOnce();
+      expect(localStorage.getItem("litera.readingLogSyncNotice")).toBeNull();
+
+      withLogs(async () => ({ uploaded: 1, downloaded: 0 }));
+      await runSyncOnce();
+      expect(localStorage.getItem("litera.readingLogSyncNotice")).toBe("pending");
+
+      localStorage.setItem("litera.readingLogSyncNotice", "dismissed");
+      await runSyncOnce();
+      expect(localStorage.getItem("litera.readingLogSyncNotice")).toBe("dismissed");
+    });
+  });
+
   it("downloads, merges, applies, and uploads with the downloaded etag", async () => {
     const store = setupStore();
 
@@ -146,6 +208,7 @@ describe("runSyncOnce", () => {
       "sync_apply_merged_manifest",
       "sync_upload_manifest",
       "sync_sessions",
+      "sync_reading_logs",
     ]);
     // Both sides' books survive the merge and reach both apply and upload.
     const applied = invokeMock.mock.calls.find(

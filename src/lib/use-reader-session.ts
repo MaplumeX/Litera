@@ -42,7 +42,7 @@ import { createLatestSerializedTaskController } from "@/lib/latest-serialized-ta
 import { notifySyncActivity } from "@/lib/sync-activity";
 import { pullBeforeOpen } from "@/lib/sync-runner";
 import { useT } from "@/lib/i18n";
-import { isReaderMode, type ReaderMode } from "@/lib/reader-mode";
+import { isReaderMode, resolveReaderMode, type ReaderMode } from "@/lib/reader-mode";
 import { isReaderLayout } from "@/lib/reader-layout";
 import {
   ancestorKeysForHref,
@@ -53,6 +53,7 @@ import {
 import { useBookSearch } from "@/lib/use-book-search";
 import { loadReaderFlow } from "@/lib/reader-flow";
 import { useReadingStatus } from "@/lib/use-reading-status";
+import { useReadingTracker } from "@/lib/use-reading-tracker";
 import { useKosync } from "@/lib/use-kosync";
 
 export interface FileData {
@@ -180,6 +181,7 @@ export function useReaderSession(options: UseReaderSessionOptions = {}) {
   }, []);
 
   const readingStatus = useReadingStatus({ onError: reportPersistenceError });
+  const readingTracker = useReadingTracker();
 
   const getLocalFraction = useCallback(() => lastKnownFractionRef.current, []);
   const kosync = useKosync({
@@ -236,6 +238,7 @@ export function useReaderSession(options: UseReaderSessionOptions = {}) {
           persistReaderMode.flush(),
           persistLayout.flush(),
           flushPreferences(),
+          readingTracker.flush(),
         ]);
       } catch (error) {
         reportPersistenceError(error);
@@ -249,6 +252,7 @@ export function useReaderSession(options: UseReaderSessionOptions = {}) {
       persistLayout,
       reportPersistenceError,
       flushPreferences,
+      readingTracker,
     ],
   );
 
@@ -268,10 +272,11 @@ export function useReaderSession(options: UseReaderSessionOptions = {}) {
   const rememberReaderMode = useCallback(
     (mode: ReaderMode) => {
       setCurrentBook((current) => (current ? { ...current, lastReaderMode: mode } : current));
+      readingTracker.setMode(mode);
       const bookId = bookIdRef.current;
       if (bookId) persistReaderMode.schedule(bookId, mode);
     },
-    [persistReaderMode],
+    [persistReaderMode, readingTracker],
   );
 
   // Apply theme class to <html> so CSS variables cascade to portaled dialogs.
@@ -362,6 +367,11 @@ export function useReaderSession(options: UseReaderSessionOptions = {}) {
       // The full record is fetched from list_books; this context stays lightweight.
       lastKnownFractionRef.current = context.lastFraction;
       readingStatus.begin(context.bookId, context.readingStatus);
+      readingTracker.begin(
+        context.bookId,
+        context.lastFraction ?? 0,
+        resolveReaderMode(context.lastReaderMode),
+      );
       setProgress({
         index: 0,
         fraction: context.lastFraction ?? 0,
@@ -407,7 +417,7 @@ export function useReaderSession(options: UseReaderSessionOptions = {}) {
     } finally {
       if (request.isLatest()) setOpeningBookId(null);
     }
-  }, [flushReadingState, readingStatus.begin, reportPersistenceError, t]);
+  }, [flushReadingState, readingStatus.begin, readingTracker, reportPersistenceError, t]);
 
   /** Close the open Book; false (and the Book stays open) when saving failed. */
   const closeBook = useCallback(async (): Promise<boolean> => {
@@ -419,6 +429,8 @@ export function useReaderSession(options: UseReaderSessionOptions = {}) {
     void kosync.flush();
     embeddedAgentRuntime.closeBook();
     readingStatus.end();
+    readingTracker.end();
+    void readingTracker.flush();
     setFileData(null);
     setCurrentBook(null);
     setProgress({ index: 0, fraction: 0 });
@@ -429,20 +441,21 @@ export function useReaderSession(options: UseReaderSessionOptions = {}) {
     annotationsRef.current = emptyAnnotations();
     annotationsWritableRef.current = false;
     return true;
-  }, [flushReadingState, kosync.flush, readingStatus.end]);
+  }, [flushReadingState, kosync.flush, readingStatus.end, readingTracker]);
 
   const handleRelocate = useCallback(
     (index: number, fraction: number, label?: string, chapterHref?: string, cfi?: string) => {
       lastKnownFractionRef.current = fraction;
       setProgress({ index, fraction, label, chapterHref });
       readingStatus.onRelocate(fraction);
+      readingTracker.relocate(fraction);
       kosync.onRelocate(fraction);
       // Persist reading position. Do not write lastCfi / lastFraction into currentBook.
       if (fileData?.bookId) {
         persistPosition.schedule(fileData.bookId, fraction, cfi);
       }
     },
-    [fileData?.bookId, kosync.onRelocate, persistPosition, readingStatus.onRelocate],
+    [fileData?.bookId, kosync.onRelocate, persistPosition, readingStatus.onRelocate, readingTracker],
   );
 
   const handleBookReady = useCallback((bookToc: TocItem[]) => {
@@ -645,6 +658,7 @@ export function useReaderSession(options: UseReaderSessionOptions = {}) {
     clearPersistenceError: useCallback(() => setPersistenceError(null), []),
     reportPersistenceError,
     openingBookId,
+    readingTracker,
     // Theme and typography
     globalTheme,
     setGlobalTheme,

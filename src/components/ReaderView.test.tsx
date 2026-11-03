@@ -483,3 +483,24 @@ describe("ReaderView images", () => {
     expect(viewEl().next).not.toHaveBeenCalled();
   });
 });
+
+describe("ReaderView activity", () => {
+  it("reports input inside a section's iframe, until the section is replaced", () => {
+    const onReaderActivity = vi.fn();
+    renderReader({ onReaderActivity });
+    const load = (doc: Document) =>
+      act(() => {
+        viewEl().dispatchEvent(new CustomEvent("load", { detail: { doc } }));
+      });
+    const first = document.implementation.createHTMLDocument("one");
+    load(first);
+    first.body.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+    first.body.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true }));
+    first.body.dispatchEvent(new WheelEvent("wheel", { bubbles: true }));
+    expect(onReaderActivity).toHaveBeenCalledTimes(3);
+
+    load(document.implementation.createHTMLDocument("two"));
+    first.body.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
+    expect(onReaderActivity).toHaveBeenCalledTimes(3);
+  });
+});

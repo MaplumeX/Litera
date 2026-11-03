@@ -346,6 +346,7 @@ pub fn rebase_annotations(
 /// first bulk upload asks for confirmation again. Local data — Tombstones,
 /// timestamps — is kept and merges into the new backend.
 pub fn note_sync_backend_changed(root: &Path) -> AppResult<()> {
+    crate::reading_log::forget_sync_state(root)?;
     update_sync_state(root, |state| {
         state.book_revisions.clear();
         state.session_revisions.clear();
@@ -358,7 +359,7 @@ pub fn note_sync_backend_changed(root: &Path) -> AppResult<()> {
     })
 }
 
-fn validate_sync_id(id: &str) -> AppResult<()> {
+pub(crate) fn validate_sync_id(id: &str) -> AppResult<()> {
     if id.is_empty() || id.contains('/') || id.contains('\\') || id.contains("..") {
         return Err(AppError::invalid_input("Invalid sync id"));
     }
@@ -1291,6 +1292,16 @@ pub fn update_sync_state<T>(
     let result = update(&mut state)?;
     write_sync_state(root, &state)?;
     Ok(result)
+}
+
+/// This device's id, saved so it stays the same. `read_sync_state` makes a new
+/// one on every call while the file is missing, as it is until something first
+/// writes Sync state, which may be never with Sync off.
+pub fn ensure_device_id(root: &Path) -> AppResult<String> {
+    if sync_state_path(root).exists() {
+        return Ok(read_sync_state(root)?.device_id);
+    }
+    update_sync_state(root, |state| Ok(state.device_id.clone()))
 }
 
 pub fn write_sync_state(root: &Path, state: &SyncState) -> AppResult<()> {

@@ -29,6 +29,9 @@
   --chart-3: oklch(0.398 0.07 227.392);
   --chart-4: oklch(0.828 0.189 84.429);
   --chart-5: oklch(0.769 0.188 70.08);
+  /* Reading stats: one hue for magnitude. The theme's dark chart-1 is too dark on
+   * a dark surface, and its hue would change the meaning between themes. */
+  --stats-mark: var(--chart-1);
   /* 圆角分层：sm 6 / md 8（按钮、输入框）/ lg 10（菜单、卡片）/ xl 14（弹窗）；
    * 封面单独用 rounded-cover（3px），太圆会像 App 图标而不像书。 */
   --radius: 0.625rem;
@@ -68,6 +71,7 @@
   --border: oklch(1 0 0 / 9%);
   --input: oklch(1 0 0 / 12%);
   --ring: oklch(0.55 0.012 70);
+  --stats-mark: #d27c0e;
   --chart-1: oklch(0.488 0.243 264.376);
   --chart-2: oklch(0.696 0.17 162.48);
   --chart-3: oklch(0.769 0.188 70.08);

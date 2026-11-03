@@ -24,6 +24,7 @@ import {
   LibraryShelfToolbar,
 } from "@/components/LibraryShelfToolbar";
 import { LibrarySidebar } from "@/components/LibrarySidebar";
+import { ReadingStatsPage } from "@/components/stats/ReadingStatsPage";
 import {
   BookImportConfirmDialog,
   BookImportNotices,
@@ -154,6 +155,7 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings, 
   const [sidebarCollapsed, setSidebarCollapsed] = useState(loadLibrarySidebarCollapsed);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [trashOpen, setTrashOpen] = useState(false);
+  const [statsOpen, setStatsOpen] = useState(false);
 
   const handleDroppedPaths = useCallback(async (paths: string[]) => {
     const epubs = paths.filter(isEpubPath);
@@ -194,6 +196,7 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings, 
   const handleStatusFilterChange = useCallback(
     (value: LibraryStatusFilter) => {
       shelf.handleStatusFilterChange(value);
+      setStatsOpen(false);
       setDrawerOpen(false);
     },
     [shelf.handleStatusFilterChange],
@@ -273,6 +276,12 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings, 
       setDrawerOpen(false);
       setTrashOpen(true);
     },
+    statsActive: statsOpen,
+    onOpenStats: () => {
+      setDrawerOpen(false);
+      if (selectMode) exitSelectMode();
+      setStatsOpen(true);
+    },
     busy,
   };
 
@@ -344,7 +353,11 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings, 
               type="text"
               placeholder={t("library.searchPlaceholder")}
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => {
+                // Searching is about the shelf: go back to where the results are.
+                setStatsOpen(false);
+                setSearch(e.target.value);
+              }}
               onKeyDown={(e) => {
                 if (e.key === "Escape" && e.currentTarget.value) {
                   e.preventDefault();
@@ -410,7 +423,7 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings, 
           )}
 
           <div className="flex min-w-0 flex-1 flex-col">
-            {books.length > 0 &&
+            {!statsOpen && books.length > 0 &&
               (selectMode ? (
                 <LibrarySelectionBar
                   selectedCount={selectedIds.size}
@@ -438,7 +451,14 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings, 
               ))}
 
             <div className="flex-1 overflow-y-auto px-6 pb-6">
-              {!loaded ? null : books.length === 0 && loadError ? (
+              {!loaded ? null : statsOpen ? (
+                <ReadingStatsPage
+                  books={books}
+                  coverRev={coverRev}
+                  openingBookId={openingBookId}
+                  onOpenBook={onOpenBook}
+                />
+              ) : books.length === 0 && loadError ? (
                 <div className="flex h-full items-center justify-center">
                   <p role="alert" className="max-w-md text-center break-words text-sm text-destructive">
                     {t("library.loadFailed", { message: loadError })}

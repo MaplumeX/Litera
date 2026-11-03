@@ -80,6 +80,14 @@ _Avoid_: Index, sync database
 A visual outline rendered inside a Session's message flow, derived from a single tool call's markdown outline. Not a stored object; it lives exactly as long as the tool call entry that produced it.
 _Avoid_: Note, diagram, knowledge graph
 
+**Sitting**:
+One continuous stretch of reading one Book on one device, with its active time and how far the reading position moved. Time counts while the Book is open, the window is visible and there is recent activity, in Reading and Agent mode alike.
+_Avoid_: Session (that is an assistant conversation), reading session
+
+**Reading log**:
+A device's own record of its Sittings. Reading stats are always derived from it, never stored. Each device writes only its own log, so logs never need merging.
+_Avoid_: Stats file, history
+
 **Citation**:
 A verbatim quote from the Book inside an assistant message, marked with the chapter it came from. Checked against the Book text whenever it is shown (verified, relocated to another chapter, or unverified); the check is never stored. Paraphrase is not a Citation.
 _Avoid_: Reference, source, footnote
