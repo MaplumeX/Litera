@@ -109,7 +109,7 @@ export function BookStatusMenu({
           }}
           aria-label={`${t("library.fieldReadingStatus")}: ${currentLabel}`}
           className={cn(
-            "inline-flex h-5 max-w-full items-center gap-1 rounded-full px-2 text-[11px] font-medium leading-none tracking-wide ring-1 ring-inset transition-[filter,opacity] hover:brightness-95 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:hover:brightness-110",
+            "inline-flex h-5 max-w-full items-center gap-1 rounded-full px-2 text-2xs font-medium leading-none tracking-wide ring-1 ring-inset transition-[filter,opacity] hover:brightness-95 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:hover:brightness-110",
             tone.chip,
             quiet &&
               "opacity-0 group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100",

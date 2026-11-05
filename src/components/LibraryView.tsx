@@ -438,7 +438,7 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings, 
             {search ? (
               <button
                 type="button"
-                className="absolute right-1.5 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                className="absolute right-1.5 top-1/2 flex size-5 -translate-y-1/2 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 aria-label={t("library.clearSearch")}
                 onClick={() => {
                   setSearch("");
@@ -449,7 +449,7 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings, 
               </button>
             ) : (
               <kbd
-                className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 rounded border bg-muted px-1.5 font-sans text-[11px] text-muted-foreground peer-focus:hidden"
+                className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 rounded border bg-muted px-1.5 font-sans text-2xs text-muted-foreground peer-focus:hidden"
                 aria-hidden
               >
                 {detectDesktopOs() === "macos" ? "⌘F" : "Ctrl F"}

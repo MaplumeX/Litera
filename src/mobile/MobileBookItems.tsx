@@ -105,7 +105,7 @@ export function MobileBookTile({ book, actions, opening, disabled, coverRev }: M
           )}
         </span>
         <span className="line-clamp-2 text-[0.8125rem] leading-[1.125rem] font-medium">{book.title}</span>
-        <span className="-mt-1 truncate text-[0.6875rem] text-muted-foreground tabular-nums">{caption}</span>
+        <span className="-mt-1 truncate text-2xs text-muted-foreground tabular-nums">{caption}</span>
       </button>
     </BookActionContext>
   );
@@ -147,7 +147,7 @@ export function MobileBookRow({ book, actions, opening, disabled, coverRev }: Mo
             )}
             <span className="mt-2 flex items-center gap-2">
               <ProgressRail pct={pct} className="w-20" />
-              <span className="text-[0.6875rem] text-muted-foreground tabular-nums">{caption}</span>
+              <span className="text-2xs text-muted-foreground tabular-nums">{caption}</span>
             </span>
           </span>
         </button>

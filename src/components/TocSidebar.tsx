@@ -32,7 +32,7 @@ function GuideMark({ progress }: { progress: GuideChapterProgress }) {
   return (
     <Tip label={progress.current ? `${label} · ${t("toc.guide.current")}` : label}>
       <span
-        className="ml-1 flex shrink-0 items-center gap-1 text-[11px] tabular-nums text-muted-foreground"
+        className="ml-1 flex shrink-0 items-center gap-1 text-2xs tabular-nums text-muted-foreground"
         aria-label={progress.current ? `${label}, ${t("toc.guide.current")}` : label}
       >
         {progress.current && <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-primary" />}

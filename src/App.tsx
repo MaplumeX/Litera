@@ -863,7 +863,7 @@ function App() {
                   if (readerMode !== mode) handleReaderModeChange(mode);
                 }}
                 className={cn(
-                  "h-8 rounded-lg px-2.5 text-xs transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring motion-reduce:transition-none",
+                  "h-8 rounded-lg px-2.5 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none",
                   readerMode === mode
                     ? "bg-secondary font-medium text-foreground"
                     : "text-muted-foreground hover:text-foreground",

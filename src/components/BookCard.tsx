@@ -193,7 +193,7 @@ export function BookCard({
                   style={{ width: `${pct}%` }}
                 />
               </span>
-              <span className="absolute bottom-1.5 right-1.5 rounded-sm bg-background/80 px-1 py-px text-[11px] font-medium tabular-nums text-foreground/80 opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-within:opacity-100 motion-reduce:transition-none">
+              <span className="absolute bottom-1.5 right-1.5 rounded-sm bg-background/80 px-1 py-px text-2xs font-medium tabular-nums text-foreground/80 opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-within:opacity-100 motion-reduce:transition-none">
                 {pct}%
               </span>
             </>
@@ -236,7 +236,7 @@ export function BookCard({
             <button
               type="button"
               className={cn(
-                "shrink-0 rounded-sm p-0.5 text-muted-foreground transition-[color,opacity] hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring motion-reduce:transition-none",
+                "shrink-0 rounded-sm p-0.5 text-muted-foreground transition-[color,opacity] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none",
                 starred
                   ? "text-star hover:text-star"
                   : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100",
@@ -351,7 +351,7 @@ export function BookListHeader({
         type="button"
         data-sort-column={key}
         className={cn(
-          "inline-flex items-center gap-0.5 rounded-sm hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+          "inline-flex items-center gap-0.5 rounded-sm hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
           active && "text-foreground",
         )}
         onClick={() => {
@@ -461,7 +461,7 @@ export function BookListRow({
       <button
         type="button"
         data-row-main
-        className="flex min-w-0 flex-1 scroll-mt-24 items-center gap-3 rounded-sm text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        className="flex min-w-0 flex-1 scroll-mt-24 items-center gap-3 rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         onClick={(e) => {
           if (selectMode) {
             if (e.shiftKey && onSelectRange) onSelectRange(book.id);
@@ -572,7 +572,7 @@ export function BookListRow({
           <button
             type="button"
             className={cn(
-              "shrink-0 rounded-sm p-1 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+              "shrink-0 rounded-sm p-1 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
               starred
                 ? "text-star hover:text-star"
                 : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100",

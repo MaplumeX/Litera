@@ -224,7 +224,7 @@ export function ReaderProgressBar({
         {previewText && (
           <div
             data-testid="reader-progress-preview"
-            className="pointer-events-none absolute bottom-full z-10 mb-1 whitespace-nowrap rounded-md border bg-popover px-2 py-1 text-[11px] font-medium text-popover-foreground tabular-nums shadow-float"
+            className="pointer-events-none absolute bottom-full z-10 mb-1 whitespace-nowrap rounded-md border bg-popover px-2 py-1 text-2xs font-medium text-popover-foreground tabular-nums shadow-float"
             // Shifting by the same fraction of its own width keeps the bubble
             // inside the track: left-aligned at 0%, centred at 50%, right-aligned at 100%.
             style={{

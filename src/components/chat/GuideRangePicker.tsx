@@ -194,7 +194,7 @@ export function GuideRangePicker({ open, onOpenChange, step, loadOutline, onPick
                           <span className={cn("min-w-0 flex-1 truncate", block.heading === 0 && "text-muted-foreground")}>
                             {block.kind === "image" ? t("chat.guide.pickImage", { alt: block.snippet }) : block.snippet}
                           </span>
-                          <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
+                          <span className="shrink-0 text-2xs tabular-nums text-muted-foreground">
                             {block.heading > 0 ? t("chat.guide.pickSection") : isGuideParagraph(block) ? paragraph : null}
                           </span>
                         </button>

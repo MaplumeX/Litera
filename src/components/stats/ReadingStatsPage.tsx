@@ -101,7 +101,7 @@ function BookRow({
       onClick={() => onOpen(total.bookId)}
       className={cn(
         rowClass,
-        "transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-60 motion-reduce:transition-none",
+        "transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60 motion-reduce:transition-none",
       )}
     >
       {content}
@@ -211,7 +211,7 @@ export function ReadingStatsPage({
                 aria-pressed={kind === item.kind}
                 onClick={() => changePeriod(item.kind)}
                 className={cn(
-                  "rounded-[5px] px-2.5 py-0.5 text-xs transition-colors pointer-coarse:px-3 pointer-coarse:py-1.5 pointer-coarse:text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring motion-reduce:transition-none",
+                  "rounded-[5px] px-2.5 py-0.5 text-xs transition-colors pointer-coarse:px-3 pointer-coarse:py-1.5 pointer-coarse:text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none",
                   kind === item.kind
                     ? "bg-background font-medium shadow-soft"
                     : "text-muted-foreground hover:text-foreground",

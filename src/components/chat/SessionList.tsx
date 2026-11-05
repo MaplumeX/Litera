@@ -167,7 +167,7 @@ export function SessionList({
         )}
         {groupSessions(sessions).map(({ group, items }) => (
           <section key={group} className="mt-2 first:mt-0">
-            <h3 className="px-2 pt-1 pb-0.5 text-[11px] font-medium text-muted-foreground/80">
+            <h3 className="px-2 pt-1 pb-0.5 text-2xs font-medium text-muted-foreground/80">
               {t(`chat.sessionGroup.${group}`)}
             </h3>
             {items.map((session) => {
@@ -239,7 +239,7 @@ export function SessionList({
                               {session.title}
                             </span>
                             {session.guide && (
-                              <span className="truncate text-[11px] text-muted-foreground">
+                              <span className="truncate text-2xs text-muted-foreground">
                                 {guidePositionLabel(session.guide)}
                               </span>
                             )}
@@ -247,7 +247,7 @@ export function SessionList({
                           {/* The time gives way to the actions button on hover,
                               keyboard focus, or while the menu is open. */}
                           <span
-                            className="min-w-6 shrink-0 text-right text-[11px] tabular-nums text-muted-foreground group-hover:invisible group-has-[:focus-visible]:invisible group-has-[[data-state=open]]:invisible"
+                            className="min-w-6 shrink-0 text-right text-2xs tabular-nums text-muted-foreground group-hover:invisible group-has-[:focus-visible]:invisible group-has-[[data-state=open]]:invisible"
                           >
                             {formatSessionTime(session.updatedAt, locale)}
                           </span>

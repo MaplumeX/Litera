@@ -49,7 +49,7 @@ export const STATUS_OPTIONS: { value: LibraryStatusFilter; labelKey: MessageKey 
 const TOOLBAR_CLASS = "sticky top-0 z-10 -mx-7 flex h-14 shrink-0 items-center gap-2 bg-background px-7";
 
 const SEGMENT_CLASS =
-  "inline-flex size-6 items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring motion-reduce:transition-none [&_svg]:size-3.5";
+  "inline-flex size-6 items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none [&_svg]:size-3.5";
 
 interface LibraryShelfToolbarProps {
   statusFilter: LibraryStatusFilter;

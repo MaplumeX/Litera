@@ -36,6 +36,8 @@ import {
   CommandSeparator,
 } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { SegmentedControl } from "@/components/ui/segmented-control";
+import { NAV_ITEM_ACTIVE_CLASS, NAV_ITEM_CLASS, NAV_ITEM_IDLE_CLASS } from "@/components/ui/nav-item";
 import { Slider } from "@/components/ui/slider";
 import { AgentConfigForm } from "@/components/AgentConfigForm";
 import { SyncSettingsForm } from "@/components/settings/SyncSettingsForm";
@@ -103,8 +105,6 @@ const SECTIONS: { id: SettingsSection; labelKey: MessageKey; icon: LucideIcon }[
   { id: "sync", labelKey: "settings.sync", icon: Cloud },
   { id: "about", labelKey: "settings.about", icon: Info },
 ];
-
-const SECTION_CARD_CLASS = "max-w-lg rounded-xl border p-5";
 
 const ABOUT_REPO_URL = "https://github.com/MaplumeX/Litera";
 
@@ -560,75 +560,6 @@ function FontFamilyPicker({
   );
 }
 
-type SegmentedOption<T extends string> = { value: T; label: string };
-
-function SegmentedControl<T extends string>({
-  value,
-  options,
-  onChange,
-  ariaLabel,
-  fullWidth = true,
-}: {
-  value: T;
-  options: readonly SegmentedOption<T>[];
-  onChange: (value: T) => void;
-  ariaLabel: string;
-  fullWidth?: boolean;
-}) {
-  const buttonRefs = useRef<Array<HTMLButtonElement | null>>([]);
-
-  function moveFocus(from: number, delta: number) {
-    const next = (from + delta + options.length) % options.length;
-    buttonRefs.current[next]?.focus();
-  }
-
-  return (
-    <div
-      role="radiogroup"
-      aria-label={ariaLabel}
-      className={cn("inline-flex rounded-lg bg-muted p-0.5", fullWidth && "w-full")}
-    >
-      {options.map((option, index) => {
-        const selected = option.value === value;
-        return (
-          <button
-            key={option.value}
-            ref={(node) => {
-              buttonRefs.current[index] = node;
-            }}
-            type="button"
-            role="radio"
-            aria-checked={selected}
-            tabIndex={selected ? 0 : -1}
-            onClick={() => onChange(option.value)}
-            onKeyDown={(event) => {
-              if (event.key === "ArrowRight" || event.key === "ArrowDown") {
-                event.preventDefault();
-                moveFocus(index, 1);
-              } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
-                event.preventDefault();
-                moveFocus(index, -1);
-              } else if (event.key === " " || event.key === "Enter") {
-                event.preventDefault();
-                onChange(option.value);
-              }
-            }}
-            className={cn(
-              "rounded-md px-2.5 py-1 text-xs transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none",
-              fullWidth && "flex-1",
-              selected
-                ? "bg-background font-medium text-foreground shadow-soft"
-                : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            {option.label}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
 export function SettingsDialog({
   open,
   onClose,
@@ -648,6 +579,8 @@ export function SettingsDialog({
 }: SettingsDialogProps) {
   const { t, locale, setLocale } = useT();
   const page = layout === "page";
+  // A page is already a surface of its own: only the dialog sets its sections in cards.
+  const sectionCardClass = page ? undefined : "max-w-lg rounded-xl border p-5";
   // The reading footer only exists in the mobile reader.
   const sections = SECTIONS.filter(
     (item) => (item.id !== "device" || deviceSettings) && (item.id !== "footer" || page),
@@ -776,13 +709,11 @@ export function SettingsDialog({
                     onClick={() => setSection(item.id)}
                     aria-current={section === item.id ? "page" : undefined}
                     className={cn(
-                      "flex h-8 items-center gap-2.5 rounded-lg px-2.5 text-left text-sm transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none",
-                      section === item.id
-                        ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground shadow-soft"
-                        : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground",
+                      NAV_ITEM_CLASS,
+                      section === item.id ? NAV_ITEM_ACTIVE_CLASS : NAV_ITEM_IDLE_CLASS,
                     )}
                   >
-                    <Icon className={cn("size-4 shrink-0", section === item.id && "text-primary")} aria-hidden />
+                    <Icon className="size-4 shrink-0" aria-hidden />
                     <span className="min-w-0 truncate">{t(item.labelKey)}</span>
                   </button>
                 );
@@ -982,11 +913,11 @@ export function SettingsDialog({
                           ? t("settings.stats.description")
                           : scopeCopy}
               </DialogDescription>
-              {section === "footer" && <div className={SECTION_CARD_CLASS}><ReaderFooterSettingsForm /></div>}
-              {section === "stats" && <div className={SECTION_CARD_CLASS}><ReadingStatsSettingsForm /></div>}
-              {section === "device" && <div className={cn(SECTION_CARD_CLASS, "space-y-5")}>{deviceSettings}</div>}
+              {section === "footer" && <div className={sectionCardClass}><ReaderFooterSettingsForm /></div>}
+              {section === "stats" && <div className={sectionCardClass}><ReadingStatsSettingsForm /></div>}
+              {section === "device" && <div className={cn(sectionCardClass, "space-y-5")}>{deviceSettings}</div>}
               {section === "appearance" && (
-                <div className={cn(SECTION_CARD_CLASS, "space-y-5")}>
+                <div className={cn(sectionCardClass, "space-y-5")}>
                   <PresetRow label={t("settings.theme")}>
                     <SegmentedControl
                       value={theme}
@@ -1114,10 +1045,10 @@ export function SettingsDialog({
 
               {section === "ai" && (
                 <div className="space-y-4">
-                  <div className={SECTION_CARD_CLASS}>
+                  <div className={sectionCardClass}>
                     <AgentConfigForm />
                   </div>
-                  <div className={SECTION_CARD_CLASS}>
+                  <div className={sectionCardClass}>
                     <GuidedStyleSection />
                   </div>
                 </div>
@@ -1125,17 +1056,17 @@ export function SettingsDialog({
 
               {section === "sync" && (
                 <div className="space-y-4">
-                  <div className={SECTION_CARD_CLASS}>
+                  <div className={sectionCardClass}>
                     <SyncSettingsForm />
                   </div>
-                  <div className={SECTION_CARD_CLASS}>
+                  <div className={sectionCardClass}>
                     <KosyncSettingsForm />
                   </div>
                 </div>
               )}
 
               {section === "about" && (
-                <div className={cn(SECTION_CARD_CLASS, "space-y-5")}>
+                <div className={cn(sectionCardClass, "space-y-5")}>
                   <div>
                     <div className="text-base font-medium">Litera</div>
                     <div className="mt-2 flex items-baseline gap-2">

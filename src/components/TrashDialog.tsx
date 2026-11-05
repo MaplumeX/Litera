@@ -68,16 +68,16 @@ export function TrashEntryList({
       {entries.map((entry) => (
         <li
           key={entry.entryId}
-          className="flex items-center gap-3 rounded-lg p-2 transition-colors duration-150 hover:bg-muted/70 motion-reduce:transition-none"
+          className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg p-2 transition-colors sm:flex-nowrap duration-150 hover:bg-muted/70 motion-reduce:transition-none"
         >
           <span className="h-14 w-10 shrink-0 overflow-hidden rounded-cover bg-muted shadow-cover">
             <TrashCover entry={entry} />
           </span>
-          <span className="min-w-0 flex-1">
+          <span className="min-w-0 flex-1 max-sm:basis-[calc(100%-3.25rem)]">
             <span className="block truncate text-sm font-medium">
               {entry.title || t("library.trashUnnamed")}
             </span>
-            <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+            <span className="mt-0.5 block text-xs text-muted-foreground sm:truncate">
               {[
                 entry.author,
                 entry.deletedAt
@@ -95,25 +95,27 @@ export function TrashEntryList({
               </span>
             )}
           </span>
-          {entry.restorable && (
+          <span className="flex shrink-0 items-center gap-1 max-sm:w-full max-sm:justify-end">
+            {entry.restorable && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => onRestore(entry)}
+              >
+                {t("library.trashRestore")}
+              </Button>
+            )}
             <Button
               type="button"
               size="sm"
-              variant="outline"
-              onClick={() => onRestore(entry)}
+              variant="ghost"
+              className="text-destructive hover:bg-destructive/10 hover:text-destructive dark:hover:bg-destructive/15"
+              onClick={() => onPurge(entry)}
             >
-              {t("library.trashRestore")}
+              {t("library.trashPurge")}
             </Button>
-          )}
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            className="text-destructive hover:bg-destructive/10 hover:text-destructive dark:hover:bg-destructive/15"
-            onClick={() => onPurge(entry)}
-          >
-            {t("library.trashPurge")}
-          </Button>
+          </span>
         </li>
       ))}
     </ul>

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Switch } from "@/components/ui/switch";
 import { invokeErrorMessage } from "@/lib/app-error";
 import { useT } from "@/lib/i18n";
@@ -215,34 +216,16 @@ export function SyncSettingsForm() {
         <div className="text-xs font-medium text-muted-foreground">
           {t("settings.sync.enable")}
         </div>
-        <div className="inline-flex rounded-lg bg-muted p-0.5">
-          <button
-            type="button"
-            role="radio"
-            aria-checked={!draft.enabled}
-            onClick={() => patch({ enabled: false })}
-            className={
-              !draft.enabled
-                ? "rounded-md bg-background px-3 py-1 text-xs font-medium shadow-soft"
-                : "rounded-md px-3 py-1 text-xs text-muted-foreground hover:text-foreground"
-            }
-          >
-            {t("settings.override.off")}
-          </button>
-          <button
-            type="button"
-            role="radio"
-            aria-checked={draft.enabled}
-            onClick={() => patch({ enabled: true })}
-            className={
-              draft.enabled
-                ? "rounded-md bg-background px-3 py-1 text-xs font-medium shadow-soft"
-                : "rounded-md px-3 py-1 text-xs text-muted-foreground hover:text-foreground"
-            }
-          >
-            {t("settings.override.on")}
-          </button>
-        </div>
+        <SegmentedControl
+          fullWidth={false}
+          ariaLabel={t("settings.sync.enable")}
+          value={draft.enabled ? "on" : "off"}
+          options={[
+            { value: "off", label: t("settings.override.off") },
+            { value: "on", label: t("settings.override.on") },
+          ]}
+          onChange={(next) => patch({ enabled: next === "on" })}
+        />
       </div>
 
       {draft.enabled && (
@@ -292,7 +275,7 @@ export function SyncSettingsForm() {
             <div className="text-xs font-medium text-muted-foreground">
               {t("settings.sync.pathStyle")}
             </div>
-            <div className="text-[11px] text-muted-foreground/80">
+            <div className="text-2xs text-muted-foreground/80">
               {t("settings.sync.pathStyle.hint")}
             </div>
           </div>
@@ -324,7 +307,7 @@ export function SyncSettingsForm() {
             onChange={(event) => patch({ secretKey: event.target.value })}
           />
           {loaded && hasStoredSecret && !draft.secretKey && (
-            <span className="block text-[11px] text-muted-foreground">
+            <span className="block text-2xs text-muted-foreground">
               {t("settings.sync.secretKey.configured")}
             </span>
           )}

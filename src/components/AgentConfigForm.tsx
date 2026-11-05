@@ -485,7 +485,7 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
           <label className="flex items-center justify-between gap-2">
             <div className="min-w-0">
               <div className="text-xs font-medium text-muted-foreground">{t("agent.imageInput")}</div>
-              <div className="text-[11px] text-muted-foreground/80">{t("agent.imageInputHint")}</div>
+              <div className="text-2xs text-muted-foreground/80">{t("agent.imageInputHint")}</div>
             </div>
             <Switch
               checked={customImageInput}
