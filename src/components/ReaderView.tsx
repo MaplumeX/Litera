@@ -28,6 +28,7 @@ import {
 import type { ReaderFlow } from "@/lib/reader-flow";
 import { hideUntilFontsReady } from "@/lib/reader-font-gate";
 import { opensImageViewer, readerImageAt, type ReaderImage } from "@/lib/reader-images";
+import { styleBookScrollbar } from "@/lib/reader-scrollbar";
 import {
   QUOTE_FLASH_MS,
   QUOTE_HIGHLIGHT_COLOR,
@@ -823,6 +824,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         const detail = (e as CustomEvent<{ doc?: Document; index?: number }>).detail;
         const doc = detail?.doc;
         if (!doc) return;
+        styleBookScrollbar(doc);
         markGuidedDoc(el, doc, detail.index, guideMarksRef.current);
         void hideUntilFontsReady(doc);
         const unbindPointer = bindPointerPaging(
@@ -966,6 +968,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         // (iframe keydown does not reach the parent window).
         inner.addEventListener("load", ((loadEvent) => {
           const doc = (loadEvent as CustomEvent<{ doc?: Document }>).detail?.doc;
+          if (doc) styleBookScrollbar(doc);
           // No SelectionToolbar in the footnote: keep the native menu there.
           doc?.addEventListener("pointerdown", () => {
             platformBridge.setSelectionMenuHidden(false);

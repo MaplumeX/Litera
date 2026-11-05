@@ -492,7 +492,9 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings, 
           )}
 
           <div className="flex min-w-0 flex-1 flex-col">
-            <div className="flex-1 overflow-y-auto px-7 pb-10">
+            {/* Gutters on both edges: the shelf stays centered, and does not jump
+                when a filter leaves too few books to scroll. */}
+            <div className="flex-1 overflow-y-auto px-7 pb-10 [scrollbar-gutter:stable_both-edges]">
               {!statsOpen && recents.length > 0 && (
                 <div className="pt-1">
                   <ContinueReadingHero
