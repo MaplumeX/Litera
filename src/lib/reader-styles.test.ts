@@ -270,7 +270,8 @@ describe("generateStylesCss", () => {
         "img, svg image { cursor: zoom-in; } a[href] img, a[href] image { cursor: pointer; }\n" +
         'a[epub\\:type~="noteref"], a[epub|type~="noteref"], sup > a[href^="#"] { font-size: 0.83em !important; vertical-align: super !important; line-height: 1 !important; text-decoration: none !important; color: #3b5bdb !important; }\n' +
         'a[href] > sup { font-size: 0.83em !important; vertical-align: super !important; line-height: 1 !important; color: #3b5bdb !important; }\n' +
-        'a[href]:has(> sup) { text-decoration: none !important; color: #3b5bdb !important; }',
+        'a[href]:has(> sup) { text-decoration: none !important; color: #3b5bdb !important; }\n' +
+        "html, body { background: transparent !important; color: #18181b !important; }",
     );
     expect(css).not.toContain("font-family: serif !important");
     expect(css).not.toContain("code, kbd, pre, samp");
@@ -307,6 +308,11 @@ describe("generateStylesCss", () => {
     expect(css).not.toContain("color: #7c93f5 !important");
     // @namespace must be the very first statement of the sheet.
     expect(css.startsWith('@namespace epub url(')).toBe(true);
+  });
+
+  it("keeps the light page transparent so a book's own page color cannot show", () => {
+    const css = generateStylesCss({ ...DARK_STYLES, theme: "light" });
+    expect(css).toContain("html, body { background: transparent !important; color: #18181b !important; }");
   });
 
   it("keeps the dark page transparent so the hosting surface shows through", () => {
