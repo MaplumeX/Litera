@@ -21,7 +21,7 @@ export function KosyncPrompt({
     <div
       role="alertdialog"
       aria-label={t("settings.kosync.title")}
-      className="absolute top-4 left-1/2 z-10 flex max-w-[90%] -translate-x-1/2 items-center gap-2 rounded-lg border bg-background/95 py-1.5 pr-1.5 pl-3 text-sm shadow-float"
+      className="absolute top-14 left-1/2 z-10 flex max-w-[90%] -translate-x-1/2 items-center gap-2 rounded-lg border bg-background/95 py-1.5 pr-1.5 pl-3 text-sm shadow-float"
     >
       <span>
         {t("reader.kosyncPrompt", {

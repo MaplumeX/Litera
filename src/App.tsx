@@ -53,6 +53,7 @@ import { usePlatformLifecycle } from "@/lib/use-platform-lifecycle";
 import { useReaderSession } from "@/lib/use-reader-session";
 import { useSyncScheduler } from "@/lib/use-sync-scheduler";
 import { pushBeforeLeaving } from "@/lib/sync-runner";
+import { useIdleChrome } from "@/lib/use-idle-chrome";
 import { useT } from "@/lib/i18n";
 import { shortBookTitle } from "@/lib/book-title";
 import { cn } from "@/lib/utils";
@@ -80,7 +81,10 @@ import { UpdateBanner } from "@/components/UpdateBanner";
 import { useAutoUpdateCheck } from "@/lib/app-update";
 
 /** The side panel floats this far in from its cell's edges (Tailwind `2`). */
-const SIDE_PANEL_INSET_PX = 8;
+const SIDE_PANEL_INSET_PX = 16;
+
+const READER_PILL_CLASS =
+  "flex items-center gap-0.5 rounded-xl bg-popover/75 p-0.5 shadow-soft backdrop-blur-xl";
 
 function App() {
   const { t } = useT();
@@ -567,6 +571,12 @@ function App() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [view]);
 
+  // Paginated, the bars float in the page's own 48px margins (foliate's default),
+  // clear of the text, so the Book runs the window's full height. Scrolled text
+  // would pass under them, so there they keep their own rows, as in Agent mode.
+  const floatingChrome =
+    view !== "library" && readerMode === "reader" && session.readerFlow === "paginated";
+
   const sidePanel = sidePanelOpen ? (
     <>
       {/* Clicking outside closes the panel; the book stays fully legible. */}
@@ -584,7 +594,10 @@ function App() {
       />
       <div
         ref={sidePanelRef}
-        className="reader-drawer-in absolute inset-y-2 left-2 z-30 overflow-hidden rounded-xl border bg-card shadow-float"
+        className={cn(
+          "reader-drawer-in absolute left-4 z-30 overflow-hidden rounded-xl bg-popover shadow-float",
+          floatingChrome ? "top-14 bottom-4" : "inset-y-2",
+        )}
         style={{ width: tocWidth }}
       >
         <ReaderSidePanel
@@ -635,7 +648,10 @@ function App() {
         </ReaderSidePanel>
       </div>
       <div
-        className="absolute inset-y-2 z-40 w-1.5 cursor-col-resize touch-none select-none bg-transparent hover:bg-primary/30"
+        className={cn(
+          "absolute z-40 w-1.5 cursor-col-resize touch-none select-none bg-transparent hover:bg-primary/30",
+          floatingChrome ? "top-14 bottom-4" : "inset-y-2",
+        )}
         style={{ left: SIDE_PANEL_INSET_PX + tocWidth - 3 }}
         role="separator"
         aria-orientation="vertical"
@@ -661,6 +677,21 @@ function App() {
     >
       <List />
     </Button>
+  );
+
+  // Only the plain reading view fades its bars: any open panel or Read aloud
+  // is something the reader is working with.
+  const { idle: chromeIdle, wake: wakeChrome } = useIdleChrome(
+    view !== "library" &&
+      readerMode === "reader" &&
+      chatCollapsed &&
+      !sidePanelOpen &&
+      !settingsOpen &&
+      tts.status === "idle",
+  );
+  const chromeFadeClass = cn(
+    "transition-opacity duration-300 motion-reduce:transition-none",
+    chromeIdle && "opacity-0",
   );
 
   const appNotices = (
@@ -690,7 +721,7 @@ function App() {
 
   if (view === "library") {
     return (
-      <main className="flex h-screen flex-col bg-background text-foreground">
+      <main className="flex h-screen flex-col bg-sidebar text-foreground">
       {closing && (
         <div
           role="status"
@@ -724,14 +755,31 @@ function App() {
   }
 
   return (
-    <main className="flex h-screen flex-col bg-background text-foreground">
+    <main
+      className={cn(
+        "relative flex h-screen flex-col text-foreground",
+        // The page runs under the bars when reading; Agent mode's panels float
+        // on the window's base tone, like the shelf.
+        readerMode === "reader" ? "bg-page" : "bg-sidebar",
+      )}
+      onPointerMove={wakeChrome}
+      onFocusCapture={wakeChrome}
+    >
       <NoticeStack>
         {appNotices}
         {/* Cleared by the next read-aloud action, so there is nothing to dismiss. */}
         {tts.error && <Notice tone="error" message={tts.error} />}
       </NoticeStack>
       {/* Top toolbar: no rule underneath, tone and space separate it. */}
-      <header className={titlebarClassName({ bordered: false })}>
+      <header
+        data-reader-chrome
+        className={cn(
+          titlebarClassName({ bordered: false }),
+          chromeFadeClass,
+          floatingChrome && "absolute inset-x-0 top-0 z-40",
+        )}
+      >
+        <div className={cn(READER_PILL_CLASS, "min-w-0 shrink")}>
         <Button
           size="icon-sm"
           variant="ghost"
@@ -762,19 +810,20 @@ function App() {
         )}
         <Tip label={bookTitle} side="bottom">
           <h1
-            className="min-w-0 shrink truncate select-none text-sm font-medium"
+            className="min-w-0 shrink truncate pr-2.5 pl-1 select-none text-sm font-medium"
             data-titlebar-drag
             {...titlebarDrag}
           >
             {shortBookTitle(bookTitle)}
           </h1>
         </Tip>
+        </div>
         <div
           className="min-h-0 min-w-0 flex-1 select-none self-stretch"
           data-titlebar-drag
           {...titlebarDrag}
         />
-        <div className="flex items-center gap-1">
+        <div className={READER_PILL_CLASS}>
           {/* Read-aloud reads the Book pane; with the pane hidden in Agent
               mode it has nothing to read, so it steps aside. */}
           {!(readerMode === "agent" && bookHidden) && (
@@ -799,8 +848,7 @@ function App() {
             <Type />
           </Button>
           {readerMode === "agent" ? sidePanelButton : null}
-        </div>
-        <div className="flex items-center gap-1">
+          <span aria-hidden className="mx-1 h-4 w-px bg-border" />
           <div
             role="group"
             aria-label={t("reader.mode")}
@@ -815,7 +863,7 @@ function App() {
                   if (readerMode !== mode) handleReaderModeChange(mode);
                 }}
                 className={cn(
-                  "h-7 rounded-md px-2 text-xs transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring motion-reduce:transition-none",
+                  "h-8 rounded-lg px-2.5 text-xs transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring motion-reduce:transition-none",
                   readerMode === mode
                     ? "bg-secondary font-medium text-foreground"
                     : "text-muted-foreground hover:text-foreground",
@@ -883,7 +931,7 @@ function App() {
               : readerMode === "agent"
                 ? // Mirrors the docked chat in reading mode: beside the Session
                   // workspace, the Book floats as a card instead of a ruled pane.
-                  "relative my-2 mr-2 ml-1 flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border bg-card shadow-soft"
+                  "relative my-2 mr-2 ml-1 flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl bg-page shadow-soft"
                 : "relative flex min-h-0 min-w-0 flex-col overflow-hidden"
           }
           style={{ gridArea: "book" }}
@@ -943,6 +991,11 @@ function App() {
             />
           ) : null}
           <ReaderProgressBar
+            className={cn(
+              chromeFadeClass,
+              // Read aloud's bar sits above it and takes a row, so it stays in flow too.
+              floatingChrome && tts.status === "idle" && "absolute inset-x-0 bottom-0 z-10",
+            )}
             fraction={progress.fraction}
             chapterLabel={chapterLabel}
             ticks={chapterTicks}
@@ -963,8 +1016,15 @@ function App() {
           hidden={chatHidden}
           className={
             !chatHidden && readerMode === "reader"
-              ? "relative h-full min-h-0 min-w-0 overflow-hidden py-2 pr-2 pl-1"
-              : "relative h-full min-h-0 min-w-0 overflow-hidden"
+              ? cn(
+                  "relative h-full min-h-0 min-w-0 overflow-hidden pr-2 pb-2 pl-1",
+                  floatingChrome ? "pt-14" : "pt-2",
+                )
+              : cn(
+                  "relative h-full min-h-0 min-w-0 overflow-hidden",
+                  // With the Book hidden, the workspace reaches the window's edge margin.
+                  bookHidden && "pr-1",
+                )
           }
           style={{ gridArea: "chat" }}
         >
@@ -975,7 +1035,7 @@ function App() {
             data-testid="reader-chat-card"
             className={
               readerMode === "reader"
-                ? "h-full overflow-hidden rounded-xl border bg-card shadow-soft"
+                ? "h-full overflow-hidden rounded-xl bg-card shadow-soft"
                 : "h-full"
             }
           >

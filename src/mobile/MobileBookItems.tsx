@@ -1,3 +1,4 @@
+import { convertFileSrc } from "@tauri-apps/api/core";
 import { CloudOff, Star } from "lucide-react";
 import type { BookRecord } from "@/types/library";
 import { BookCoverImage } from "@/components/BookCard";
@@ -6,7 +7,8 @@ import {
   BookActionDropdown,
   type BookActionHandlers,
 } from "@/components/BookActionsMenu";
-import { progressPercent } from "@/lib/library-shelf";
+import { paletteStyle, useCoverPalette } from "@/lib/cover-palette";
+import { progressPercent, withCoverRevision } from "@/lib/library-shelf";
 import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { rememberCoverOrigin } from "@/mobile/page-transition";
@@ -29,10 +31,19 @@ export function useProgressCaption(book: BookRecord, opening: boolean): string {
   return pct ? t("mobile.readPct", { pct }) : t("mobile.notStarted");
 }
 
-function ProgressRail({ pct, className }: { pct: number; className?: string }) {
+function ProgressRail({
+  pct,
+  className,
+  onColor = false,
+}: {
+  pct: number;
+  className?: string;
+  /** On a cover's ambient colour, where the accent would not show. */
+  onColor?: boolean;
+}) {
   return (
-    <span className={cn("block h-1 overflow-hidden rounded-full bg-foreground/10", className)}>
-      <span className="block h-full rounded-full bg-primary" style={{ width: `${pct}%` }} />
+    <span className={cn("block h-1 overflow-hidden rounded-full", onColor ? "bg-white/20" : "bg-foreground/10", className)}>
+      <span className={cn("block h-full rounded-full", onColor ? "bg-white" : "bg-primary")} style={{ width: `${pct}%` }} />
     </span>
   );
 }
@@ -93,7 +104,7 @@ export function MobileBookTile({ book, actions, opening, disabled, coverRev }: M
             </span>
           )}
         </span>
-        <span className="line-clamp-2 min-h-[2.25rem] text-[0.8125rem] leading-[1.125rem] font-medium">{book.title}</span>
+        <span className="line-clamp-2 text-[0.8125rem] leading-[1.125rem] font-medium">{book.title}</span>
         <span className="-mt-1 truncate text-[0.6875rem] text-muted-foreground tabular-nums">{caption}</span>
       </button>
     </BookActionContext>
@@ -153,12 +164,17 @@ export function MobileBookRow({ book, actions, opening, disabled, coverRev }: Mo
 export function MobileResumeCard({ book, actions, opening, disabled, coverRev }: MobileBookItemProps) {
   const { t } = useT();
   const pct = progressPercent(book.lastFraction) ?? 0;
+  const coverSrc = book.coverPath
+    ? withCoverRevision(convertFileSrc(book.coverPath), coverRev)
+    : null;
+  const palette = useCoverPalette(coverSrc, book.title);
   return (
     <BookActionContext {...actions}>
       <button
         type="button"
         title={book.title}
-        className="flex w-full items-center gap-4 rounded-2xl bg-card p-3 text-left shadow-soft transition-transform duration-150 active:scale-[0.99] disabled:opacity-60 motion-reduce:transition-none"
+        style={paletteStyle(palette)}
+        className="cover-ambient flex w-full items-center gap-4 rounded-2xl p-3 text-left transition-transform duration-150 active:scale-[0.99] disabled:opacity-60 motion-reduce:transition-none"
         onClick={(event) => {
           rememberCoverOrigin(event.currentTarget);
           actions.onOpen();
@@ -174,11 +190,11 @@ export function MobileResumeCard({ book, actions, opening, disabled, coverRev }:
         <span className="flex min-w-0 flex-1 flex-col self-stretch py-0.5">
           <span className="line-clamp-2 text-[0.9375rem] leading-5 font-medium">{book.title}</span>
           {book.author && (
-            <span className="mt-0.5 truncate text-[0.8125rem] text-muted-foreground">{book.author}</span>
+            <span className="mt-0.5 truncate text-[0.8125rem] text-white/75">{book.author}</span>
           )}
           <span className="mt-auto flex items-center gap-2 pt-2">
-            <ProgressRail pct={pct} className="flex-1" />
-            <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+            <ProgressRail pct={pct} className="flex-1" onColor />
+            <span className="shrink-0 text-xs text-white/85 tabular-nums">
               {opening ? t("library.opening") : `${pct}%`}
             </span>
           </span>

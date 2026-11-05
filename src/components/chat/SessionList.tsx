@@ -195,7 +195,7 @@ export function SessionList({
                   )}
                   {editingSessionId === session.id ? (
                     <input
-                      className="mx-1 my-0.5 min-w-0 flex-1 rounded border bg-background px-1.5 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                      className="mx-1 my-0.5 min-w-0 flex-1 rounded-lg border bg-background px-1.5 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
                       value={editingTitle}
                       onChange={(event) => onTitleChange(event.target.value)}
                       onKeyDown={(event) => {

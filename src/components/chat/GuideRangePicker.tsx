@@ -230,7 +230,7 @@ export function GuideRangePicker({ open, onOpenChange, step, loadOutline, onPick
               : t("chat.guide.pickNone")}
           </p>
           {end && chars > LONG_STEP_CHARS && (
-            <p className="text-amber-600 dark:text-amber-400">{t("chat.guide.pickLong", { count: format(chars) })}</p>
+            <p className="text-warning">{t("chat.guide.pickLong", { count: format(chars) })}</p>
           )}
         </div>
 

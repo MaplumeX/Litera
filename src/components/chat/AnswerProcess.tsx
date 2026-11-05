@@ -115,7 +115,7 @@ function SourceSegments({ summary }: { summary: SourceSummary }) {
             <span className="mx-1.5 text-muted-foreground/50">{index === 0 ? "" : "·"}</span>
             <span
               className={cn(
-                segment.partial && "text-amber-700 dark:text-amber-500",
+                segment.partial && "text-warning",
                 segment.error && "text-destructive",
               )}
             >
@@ -410,7 +410,7 @@ export const AnswerProcess = memo(function AnswerProcess({
     label = <span className="animate-pulse motion-reduce:animate-none">{activityText(t, activity)}</span>;
   } else if (sources) {
     icon = partial ? (
-      <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" role="img" aria-label={t("chat.sources.partialHint")} />
+      <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" role="img" aria-label={t("chat.sources.partialHint")} />
     ) : (
       <BookOpen className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
     );
@@ -420,7 +420,7 @@ export const AnswerProcess = memo(function AnswerProcess({
     label = <span className="italic text-muted-foreground/70">{t("chat.thinking")}</span>;
   }
   return (
-    <div className="-ml-1 rounded px-1 transition-colors hover:bg-muted/40" data-testid="answer-process">
+    <div className="-ml-1 rounded-md px-1 transition-colors hover:bg-muted/40" data-testid="answer-process">
       <button
         type="button"
         onClick={() => setExpanded((value) => !value)}

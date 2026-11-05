@@ -27,10 +27,13 @@ const FILTER_ICONS: Record<LibraryStatusFilter, LucideIcon> = {
 };
 
 const ITEM_CLASS =
-  "flex h-8 w-full items-center gap-2.5 rounded-md px-2.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-sidebar-ring disabled:pointer-events-none disabled:opacity-50 motion-reduce:transition-none";
+  "flex h-8 w-full items-center gap-2.5 rounded-lg px-2.5 text-sm transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring disabled:pointer-events-none disabled:opacity-50 motion-reduce:transition-none";
 
 const IDLE_ITEM_CLASS =
-  "text-sidebar-foreground/75 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground";
+  "text-muted-foreground hover:bg-foreground/5 hover:text-sidebar-foreground";
+
+const ACTIVE_ITEM_CLASS =
+  "bg-sidebar-accent font-medium text-sidebar-accent-foreground shadow-soft [&>svg]:text-primary [&>svg]:opacity-100";
 
 interface LibrarySidebarProps {
   statusFilter: LibraryStatusFilter;
@@ -97,7 +100,7 @@ export function LibrarySidebar({
       {header}
       <nav
         aria-label={t("library.statusFilter")}
-        className={cn("min-h-0 flex-1 overflow-y-auto p-2", header && "pt-1")}
+        className={cn("flex min-h-0 flex-1 flex-col gap-px overflow-y-auto p-2", header && "pt-1")}
       >
         {STATUS_OPTIONS.map((option) => {
           const active = !statsActive && option.value === statusFilter;
@@ -113,9 +116,9 @@ export function LibrarySidebar({
               className={cn(
                 ITEM_CLASS,
                 // Starred is orthogonal to Reading status, not a fifth status.
-                option.value === "starred" && "mt-4",
+                option.value === "starred" && "mt-3.5",
                 active
-                  ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
+                  ? ACTIVE_ITEM_CLASS
                   : IDLE_ITEM_CLASS,
               )}
             >
@@ -134,7 +137,7 @@ export function LibrarySidebar({
           );
         })}
       </nav>
-      <div className="p-2">
+      <div className="flex flex-col gap-px p-2">
         {onOpenStats && (
           <button
             type="button"
@@ -143,7 +146,7 @@ export function LibrarySidebar({
             className={cn(
               ITEM_CLASS,
               statsActive
-                ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
+                ? ACTIVE_ITEM_CLASS
                 : IDLE_ITEM_CLASS,
             )}
           >

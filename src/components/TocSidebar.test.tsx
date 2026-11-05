@@ -111,7 +111,7 @@ describe("TocSidebar", () => {
     const onGoTo = vi.fn();
     const { getByText } = renderSidebar({ currentHref: "c1", onGoTo });
     const current = rowOf(getByText("第一章"));
-    expect(current.className).toContain("bg-accent");
+    expect(current.className).toContain("bg-primary/10");
     expect(current.className).toContain("font-medium");
     // Background alone marks it: no extra side bar.
     expect(current.className).not.toContain("before:");

@@ -303,7 +303,7 @@ export function MobileReaderPage({
     READER_FOOTER_POSITIONS.some((position) => footerSettings[position] !== "none");
 
   return (
-    <div className="relative h-full min-h-0 overflow-hidden" data-testid="mobile-reader">
+    <div className="relative h-full min-h-0 overflow-hidden bg-page" data-testid="mobile-reader">
       {/* The cutout stays when the bars hide, so the page keeps clear of it
           and doesn't reflow as the toolbars come and go. */}
       <div

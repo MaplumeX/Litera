@@ -27,7 +27,7 @@ export function ReaderSidePanel({ tab, onTabChange, actions, children }: ReaderS
   return (
     <div className="flex h-full w-full flex-col overflow-hidden">
       <div className="flex h-12 shrink-0 items-center gap-1 px-2">
-        <div role="tablist" className="flex items-center gap-0.5">
+        <div role="tablist" className="flex items-center gap-0.5 rounded-lg bg-muted p-0.5">
           {TABS.map((option) => {
             const selected = option.value === tab;
             return (
@@ -38,9 +38,9 @@ export function ReaderSidePanel({ tab, onTabChange, actions, children }: ReaderS
                 aria-selected={selected}
                 onClick={() => onTabChange(option.value)}
                 className={cn(
-                  "h-7 rounded-md px-2.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring motion-reduce:transition-none",
+                  "h-7 rounded-md px-2.5 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none",
                   selected
-                    ? "bg-secondary font-medium text-foreground"
+                    ? "bg-background font-medium text-foreground shadow-soft"
                     : "text-muted-foreground hover:text-foreground",
                 )}
               >

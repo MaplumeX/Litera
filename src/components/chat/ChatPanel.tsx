@@ -21,7 +21,7 @@ import { CHATGPT_PROVIDER_ID, isCustomProviderId } from "@/types/agent-config";
 import { AgentConfigDialog } from "@/components/AgentConfigDialog";
 import { MessageBubble } from "./MessageBubble";
 import { BranchSwitcher } from "./BranchSwitcher";
-import { AssistantMessage, BotAvatar } from "./AssistantMessage";
+import { AssistantMessage } from "./AssistantMessage";
 import { ChatInput } from "./ChatInput";
 import { CitationContext, type CitationActions } from "./Citation";
 import { ModelSwitcher } from "./ModelSwitcher";
@@ -723,7 +723,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
           data-testid="chat-panel"
           className={cn(
             "relative flex h-full min-h-0 font-chat",
-            isWorkspace ? "bg-background" : "bg-card",
+            !isWorkspace && "bg-card",
           )}
         >
           {isWorkspace && (
@@ -752,7 +752,15 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
               onPointerCancel={cancelRailResize}
             />
           )}
-          <div className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col">
+          <div
+            className={cn(
+              "relative flex min-h-0 min-w-0 flex-1 flex-col",
+              // In Agent mode the conversation is a panel on the window's base tone.
+              isWorkspace
+                ? cn("my-2 mr-1 overflow-hidden rounded-xl bg-background shadow-soft", railOpen ? "ml-1" : "ml-2")
+                : "h-full",
+            )}
+          >
           {/* No header of its own: the titlebar names the book, and the session
               button and model switcher sit in the input row. Only a notice shows
               while the book is still loading. */}
@@ -774,7 +782,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
               }
             >
             {configSnapshot && !configSnapshot.configured && (
-              <div className="flex items-start gap-2 rounded border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-sm text-amber-700 dark:text-amber-400">
+              <div className="flex items-start gap-2 rounded-lg border border-warning/50 bg-warning/10 px-3 py-2 text-sm text-warning">
                 <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
                 <div className="flex-1">
                   {t("chat.unconfigured")}
@@ -875,12 +883,11 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
             ))}
             {isStreaming && (!lastChatMessage || lastChatMessage.role === "user") && (
               <div className="flex gap-2">
-                <BotAvatar />
                 <TypingIndicator />
               </div>
             )}
             {error && (
-              <div className="flex items-center gap-2 rounded border border-destructive/50 bg-destructive/10 px-2 py-1 text-xs text-destructive">
+              <div className="flex items-center gap-2 rounded-lg border border-destructive/50 bg-destructive/10 px-2 py-1 text-xs text-destructive">
                 <AlertCircle className="h-3.5 w-3.5 shrink-0" />
                 <span>{error}</span>
               </div>

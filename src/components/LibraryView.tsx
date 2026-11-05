@@ -15,16 +15,16 @@ import {
   titlebarClassName,
   useTitlebarWindowDrag,
 } from "@/components/WindowControls";
-import { PanelLeft, Plus, Settings, X } from "lucide-react";
+import { BookOpen, PanelLeft, Plus, Settings, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   BookCard,
   BookListHeader,
   BookListRow,
-  BookResumeTile,
   handleBookListKeyDown,
 } from "@/components/BookCard";
 import { BookDetailsDialog } from "@/components/BookDetailsDialog";
+import { ContinueReadingHero } from "@/components/ContinueReadingHero";
 import { TrashDialog } from "@/components/TrashDialog";
 import {
   LibrarySelectionBar,
@@ -344,6 +344,12 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings, 
       >
         <PanelLeft />
       </Button>
+      <span
+        aria-hidden
+        className="flex size-5 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground"
+      >
+        <BookOpen className="size-3" />
+      </span>
       <h1
         className="select-none text-sm font-medium"
         data-titlebar-drag
@@ -373,7 +379,7 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings, 
             }
           />
           <div
-            className="absolute inset-y-0 z-10 w-1.5 cursor-col-resize touch-none select-none bg-transparent hover:bg-primary/30"
+            className="absolute inset-y-0 z-10 w-1.5 cursor-col-resize touch-none select-none bg-transparent hover:bg-primary/20"
             style={{ left: sidebarWidth - 3 }}
             role="separator"
             aria-orientation="vertical"
@@ -386,7 +392,13 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings, 
         </>
       )}
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      {/* The content floats on the window's base tone; the sidebar sits directly on it. */}
+      <div
+        className={cn(
+          "m-2 flex min-w-0 flex-1 flex-col overflow-hidden rounded-xl bg-background shadow-soft",
+          sidebarDocked && "ml-0",
+        )}
+      >
         <header
           className={titlebarClassName({
             bordered: false,
@@ -421,7 +433,7 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings, 
                   setSearch("");
                 }
               }}
-              className="peer h-8 w-full pr-14"
+              className="peer h-8 w-full rounded-lg border-transparent bg-muted pr-14 shadow-none focus-visible:bg-background dark:bg-muted dark:focus-visible:bg-background"
             />
             {search ? (
               <button
@@ -480,34 +492,50 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings, 
           )}
 
           <div className="flex min-w-0 flex-1 flex-col">
-            {!statsOpen && books.length > 0 &&
-              (selectMode ? (
-                <LibrarySelectionBar
-                  selectedCount={selectedIds.size}
-                  allSelected={allVisibleSelected}
-                  onSelectAll={handleSelectAll}
-                  allStarred={allSelectedStarred}
-                  onToggleStar={handleBatchStar}
-                  onMarkAs={handleBatchStatus}
-                  onDelete={() => void requestDelete(selectedBooks)}
-                  onCancel={exitSelectMode}
-                  busy={busy}
-                />
-              ) : (
-                <LibraryShelfToolbar
-                  statusFilter={statusFilter}
-                  count={visible.length}
-                  searching={searching}
-                  sort={sort}
-                  onSortChange={handleSortChange}
-                  order={order}
-                  onOrderChange={handleOrderChange}
-                  view={view}
-                  onViewChange={handleViewChange}
-                />
-              ))}
-
-            <div className="flex-1 overflow-y-auto px-6 pb-6">
+            <div className="flex-1 overflow-y-auto px-7 pb-10">
+              {!statsOpen && recents.length > 0 && (
+                <div className="pt-1">
+                  <ContinueReadingHero
+                    books={recents}
+                    coverRev={coverRev}
+                    openingBookId={openingBookId}
+                    onOpen={onOpenBook}
+                    onDelete={handleDelete}
+                    onDetails={setDetailsBook}
+                    onToggleStar={bookProps.onToggleStar}
+                    onChangeStatus={bookProps.onChangeStatus}
+                    onEnterSelect={handleEnterSelect}
+                    deleteDisabled={busy}
+                    openDisabled={importing}
+                  />
+                </div>
+              )}
+              {!statsOpen && books.length > 0 &&
+                (selectMode ? (
+                  <LibrarySelectionBar
+                    selectedCount={selectedIds.size}
+                    allSelected={allVisibleSelected}
+                    onSelectAll={handleSelectAll}
+                    allStarred={allSelectedStarred}
+                    onToggleStar={handleBatchStar}
+                    onMarkAs={handleBatchStatus}
+                    onDelete={() => void requestDelete(selectedBooks)}
+                    onCancel={exitSelectMode}
+                    busy={busy}
+                  />
+                ) : (
+                  <LibraryShelfToolbar
+                    statusFilter={statusFilter}
+                    count={visible.length}
+                    searching={searching}
+                    sort={sort}
+                    onSortChange={handleSortChange}
+                    order={order}
+                    onOrderChange={handleOrderChange}
+                    view={view}
+                    onViewChange={handleViewChange}
+                  />
+                ))}
               {!loaded ? null : statsOpen ? (
                 <ReadingStatsPage
                   books={books}
@@ -523,8 +551,11 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings, 
                 </div>
               ) : books.length === 0 ? (
                 <div className="flex h-full items-center justify-center">
-                  <div className="text-center space-y-3">
-                    <p className="text-muted-foreground">{t("library.empty")}</p>
+                  <div className="flex flex-col items-center gap-3 text-center">
+                    <span aria-hidden className="flex size-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                      <BookOpen className="size-5" />
+                    </span>
+                    <p className="text-base font-semibold">{t("library.empty")}</p>
                     <p className="text-xs text-muted-foreground">{t("library.dropHint")}</p>
                     <Button
                       onClick={() => void handleImport()}
@@ -538,7 +569,7 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings, 
               ) : visible.length === 0 ? (
                 // The status filter is persisted, so a reopened app can land on a
                 // narrowed shelf: name the filter and offer a way out.
-                <div className="flex h-full items-center justify-center">
+                <div className="flex min-h-64 items-center justify-center">
                   <div className="text-center space-y-3">
                     <p className="text-muted-foreground">
                       {statusFilterOption && statusFilter !== "all"
@@ -553,25 +584,7 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings, 
                   </div>
                 </div>
               ) : (
-                <div className="space-y-6 pt-2">
-                  {recents.length > 0 && (
-                    <section>
-                      <h2 className="mb-1 text-sm font-medium">
-                        {t("library.continueReading")}
-                      </h2>
-                      <div className="-mx-6 flex gap-4 overflow-x-auto px-6 pb-3 pt-1">
-                        {recents.map((book) => (
-                          <BookResumeTile
-                            key={`recent-${book.id}`}
-                            book={book}
-                            opening={openingBookId === book.id}
-                            coverRev={coverRev[book.id]}
-                            {...bookProps}
-                          />
-                        ))}
-                      </div>
-                    </section>
-                  )}
+                <div className="pt-1">
                   {view === "list" ? (
                     <div data-shelf="main">
                       <BookListHeader
@@ -600,7 +613,7 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings, 
                       </div>
                     </div>
                   ) : (
-                    <div data-shelf="main" className="grid grid-cols-[repeat(auto-fill,140px)] justify-between gap-x-6 gap-y-8">
+                    <div data-shelf="main" className="grid grid-cols-[repeat(auto-fill,minmax(128px,1fr))] gap-x-6 gap-y-7">
                       {visible.map((book) => (
                         <BookCard
                           key={book.id}

@@ -23,7 +23,7 @@ function Passage({ location }: { location: QuoteLocation }) {
   return (
     <>
       {passage.slice(0, matchStart)}
-      <mark className="rounded-sm bg-amber-200/70 px-0.5 text-foreground dark:bg-amber-500/30">
+      <mark className="rounded-sm bg-primary/15 px-0.5 text-foreground">
         {passage.slice(matchStart, matchEnd)}
       </mark>
       {passage.slice(matchEnd)}
@@ -82,7 +82,7 @@ export function Citation({
           {children}
           {unverified && (
             <TriangleAlert
-              className="ml-0.5 inline h-3 w-3 -translate-y-px text-amber-600"
+              className="ml-0.5 inline h-3 w-3 -translate-y-px text-warning"
               role="img"
               aria-label={t("chat.citation.unverified")}
             />
@@ -94,7 +94,7 @@ export function Citation({
           <p className="text-muted-foreground">{t("chat.citation.checking")}</p>
         ) : unverified ? (
           <p className="flex items-start gap-1.5 text-muted-foreground">
-            <TriangleAlert className="mt-px h-3.5 w-3.5 shrink-0 text-amber-600" aria-hidden="true" />
+            <TriangleAlert className="mt-px h-3.5 w-3.5 shrink-0 text-warning" aria-hidden="true" />
             {t("chat.citation.unverifiedDetail")}
           </p>
         ) : (

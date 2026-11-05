@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { Trash2 } from "lucide-react";
 import type { TrashEntry } from "@/types/library";
 import { Button } from "@/components/ui/button";
 import {
@@ -10,6 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { paletteFromText, paletteStyle } from "@/lib/cover-palette";
 import { formatLibraryTimestamp } from "@/lib/library-shelf";
 import { formatByteSize } from "@/lib/trash";
 import { useT } from "@/lib/i18n";
@@ -17,7 +19,6 @@ import { cn } from "@/lib/utils";
 
 function TrashCover({ entry }: { entry: TrashEntry }) {
   const [failed, setFailed] = useState(false);
-  const initial = entry.title.charAt(0) || "?";
   if (entry.coverPath && !failed) {
     return (
       <img
@@ -29,9 +30,12 @@ function TrashCover({ entry }: { entry: TrashEntry }) {
     );
   }
   return (
-    <span className="flex h-full w-full items-center justify-center bg-muted text-lg font-medium text-muted-foreground/40">
-      {initial}
-    </span>
+    <span
+      className="generated-cover"
+      style={paletteStyle(paletteFromText(entry.title))}
+      data-small
+      data-title={entry.title.charAt(0) || "?"}
+    />
   );
 }
 
@@ -51,17 +55,20 @@ export function TrashEntryList({
   const { t, locale } = useT();
   if (entries.length === 0) {
     return (
-      <p className="py-6 text-center text-sm text-muted-foreground">
-        {t("library.trashEmpty")}
-      </p>
+      <div className="flex flex-col items-center gap-3 py-10 text-center">
+        <span aria-hidden className="flex size-11 items-center justify-center rounded-xl bg-muted text-muted-foreground">
+          <Trash2 className="size-5" />
+        </span>
+        <p className="text-sm text-muted-foreground">{t("library.trashEmpty")}</p>
+      </div>
     );
   }
   return (
-    <ul className={cn("flex max-h-80 flex-col gap-2 overflow-y-auto", className)}>
+    <ul className={cn("-mx-2 flex max-h-80 flex-col gap-px overflow-y-auto", className)}>
       {entries.map((entry) => (
         <li
           key={entry.entryId}
-          className="flex items-center gap-3 rounded-lg border p-2"
+          className="flex items-center gap-3 rounded-lg p-2 transition-colors duration-150 hover:bg-muted/70 motion-reduce:transition-none"
         >
           <span className="h-14 w-10 shrink-0 overflow-hidden rounded-cover bg-muted shadow-cover">
             <TrashCover entry={entry} />
@@ -102,7 +109,7 @@ export function TrashEntryList({
             type="button"
             size="sm"
             variant="ghost"
-            className="text-destructive hover:text-destructive"
+            className="text-destructive hover:bg-destructive/10 hover:text-destructive dark:hover:bg-destructive/15"
             onClick={() => onPurge(entry)}
           >
             {t("library.trashPurge")}
@@ -148,11 +155,18 @@ export function TrashDialog({
 
         <TrashEntryList entries={entries} onRestore={onRestore} onPurge={onPurge} />
 
-        <DialogFooter>
-          {entries.length > 0 && (
-            <Button type="button" variant="destructive" onClick={onPurgeAll}>
+        <DialogFooter className="sm:justify-between">
+          {entries.length > 0 ? (
+            <Button
+              type="button"
+              variant="ghost"
+              className="text-destructive hover:bg-destructive/10 hover:text-destructive dark:hover:bg-destructive/15"
+              onClick={onPurgeAll}
+            >
               {t("library.trashPurgeAll")}
             </Button>
+          ) : (
+            <span />
           )}
           <Button
             type="button"

@@ -171,7 +171,7 @@ export function MindmapCard({ call }: { call: AgentToolCall }) {
   const resultText = typeof call.result === "string" ? call.result : "";
 
   return (
-    <div className="-ml-1 rounded px-1 transition-colors hover:bg-muted/40">
+    <div className="-ml-1 rounded-md px-1 transition-colors hover:bg-muted/40">
       <ToolCallHeader
         call={call}
         expanded={expanded}

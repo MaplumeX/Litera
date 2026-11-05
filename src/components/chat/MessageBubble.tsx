@@ -1,6 +1,7 @@
 import type { KeyboardEvent, ReactNode } from "react";
 import { BookOpen, Check, Pencil, Quote, X } from "lucide-react";
 import type { UserMessage } from "@/types/agent";
+import { MESSAGE_ACTION_CLASS } from "./CopyButton";
 import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -39,10 +40,10 @@ export function MessageBubble({
   };
 
   return (
-    <div className="flex flex-col items-end gap-1">
+    <div className="message-row flex flex-col items-end gap-1">
       {message.selection && (
-        <div className="flex max-w-[85%] items-start gap-1.5 rounded-lg border bg-card/80 px-3 py-1.5 text-xs italic text-muted-foreground">
-          <Quote className="mt-0.5 h-3 w-3 shrink-0" />
+        <div className="flex max-w-[85%] items-start gap-1.5 border-l-2 pl-2.5 text-xs leading-relaxed text-muted-foreground">
+          <Quote className="sr-only" />
           <span>&ldquo;{message.selection}&rdquo;</span>
         </div>
       )}
@@ -51,16 +52,16 @@ export function MessageBubble({
           value={draft}
           onChange={(event) => onDraftChange(event.target.value)}
           onKeyDown={handleKeyDown}
-          className="max-w-[85%] min-w-[12rem] resize-none rounded-xl bg-primary px-3 py-2 text-sm text-primary-foreground outline-none ring-0 placeholder:text-primary-foreground/50"
+          className="max-w-[85%] min-w-[12rem] resize-none rounded-2xl bg-secondary px-3 py-2 text-sm text-secondary-foreground outline-none ring-2 ring-primary/30"
           rows={Math.min(8, Math.max(2, draft.split("\n").length))}
           autoFocus
         />
       ) : (
         <div
           className={cn(
-            "flex max-w-[85%] items-start gap-1.5 rounded-xl px-3 py-2",
+            "flex max-w-[85%] items-start gap-1.5 rounded-2xl rounded-br-md bg-secondary px-3 py-2 text-secondary-foreground",
             // Continue or a pick: sent for the reader by a button, quieter than what they typed.
-            message.guideRequest ? "bg-secondary text-xs text-secondary-foreground" : "bg-primary text-sm text-primary-foreground",
+            message.guideRequest ? "text-xs" : "text-sm",
           )}
         >
           {message.guideRequest && <BookOpen className="mt-px h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
@@ -74,7 +75,7 @@ export function MessageBubble({
             <button
               type="button"
               onClick={onCancel}
-              className="text-muted-foreground/50 transition-colors hover:text-muted-foreground"
+              className={MESSAGE_ACTION_CLASS}
               aria-label={t("common.cancel")}
             >
               <X className="h-3.5 w-3.5" />
@@ -83,7 +84,7 @@ export function MessageBubble({
               type="button"
               onClick={onSave}
               disabled={!canSave}
-              className="text-muted-foreground/50 transition-colors hover:text-muted-foreground disabled:pointer-events-none disabled:opacity-30"
+              className={MESSAGE_ACTION_CLASS}
               aria-label={t("common.save")}
             >
               <Check className="h-3.5 w-3.5" />
@@ -94,7 +95,7 @@ export function MessageBubble({
             type="button"
             onClick={onStartEdit}
             disabled={editDisabled}
-            className="text-muted-foreground/50 transition-colors hover:text-muted-foreground disabled:pointer-events-none disabled:opacity-30"
+            className={cn(MESSAGE_ACTION_CLASS, "message-actions")}
             aria-label={t("chat.edit")}
           >
             <Pencil className="h-3.5 w-3.5" />

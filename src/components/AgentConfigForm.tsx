@@ -497,12 +497,12 @@ export function AgentConfigForm({ active = true, onClose }: AgentConfigFormProps
       </div>
 
       {error && (
-        <div className="mt-3 rounded border border-destructive/50 bg-destructive/10 px-2 py-1 text-xs text-destructive">
+        <div className="mt-3 rounded-lg border border-destructive/50 bg-destructive/10 px-2 py-1 text-xs text-destructive">
           ⚠ {error}
         </div>
       )}
       {successMessage && (
-        <div className="mt-3 rounded border border-green-500/50 bg-green-500/10 px-2 py-1 text-xs text-green-600">
+        <div className="mt-3 rounded-lg border border-success/50 bg-success/10 px-2 py-1 text-xs text-success">
           ✓ {successMessage}
         </div>
       )}

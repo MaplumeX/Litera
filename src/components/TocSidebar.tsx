@@ -94,7 +94,7 @@ function TocNode({
         className={cn(
           "relative flex w-full items-center rounded-md px-2 py-1.5 text-sm transition-colors duration-150 motion-reduce:transition-none",
           isCurrent
-            ? "bg-accent font-medium text-accent-foreground"
+            ? "bg-primary/10 font-medium text-primary"
             : "text-muted-foreground hover:bg-accent/70 hover:text-accent-foreground",
         )}
         style={{ paddingLeft: `${(path.length - 1) * 12 + 12}px` }}

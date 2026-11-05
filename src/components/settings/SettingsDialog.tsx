@@ -64,6 +64,13 @@ import {
   type ReaderStyleState,
   type TypographyKey,
 } from "@/lib/reader-styles";
+import {
+  UI_ACCENTS,
+  applyUiAccent,
+  loadUiAccent,
+  saveUiAccent,
+  type UiAccent,
+} from "@/lib/ui-accent";
 import { useT, type MessageKey } from "@/lib/i18n";
 import {
   loadDefaultReaderMode,
@@ -97,6 +104,8 @@ const SECTIONS: { id: SettingsSection; labelKey: MessageKey; icon: LucideIcon }[
   { id: "about", labelKey: "settings.about", icon: Info },
 ];
 
+const SECTION_CARD_CLASS = "max-w-lg rounded-xl border p-5";
+
 const ABOUT_REPO_URL = "https://github.com/MaplumeX/Litera";
 
 const noopAsync = async () => {};
@@ -105,6 +114,14 @@ const THEME_LABEL_KEYS: Record<(typeof THEMES)[number], MessageKey> = {
   light: "settings.theme.light",
   dark: "settings.theme.dark",
   system: "settings.theme.system",
+};
+
+const ACCENT_LABEL_KEYS: Record<UiAccent, MessageKey> = {
+  cobalt: "settings.accent.cobalt",
+  violet: "settings.accent.violet",
+  pine: "settings.accent.pine",
+  amber: "settings.accent.amber",
+  graphite: "settings.accent.graphite",
 };
 
 const ALIGN_LABEL_KEYS: Record<(typeof TEXT_ALIGNS)[number]["value"], MessageKey> = {
@@ -569,7 +586,7 @@ function SegmentedControl<T extends string>({
     <div
       role="radiogroup"
       aria-label={ariaLabel}
-      className={cn("inline-flex rounded-md bg-muted p-0.5", fullWidth && "w-full")}
+      className={cn("inline-flex rounded-lg bg-muted p-0.5", fullWidth && "w-full")}
     >
       {options.map((option, index) => {
         const selected = option.value === value;
@@ -597,11 +614,11 @@ function SegmentedControl<T extends string>({
               }
             }}
             className={cn(
-              "rounded-sm border px-2 py-1 text-xs transition-colors duration-200 motion-reduce:transition-none",
+              "rounded-md px-2.5 py-1 text-xs transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none",
               fullWidth && "flex-1",
               selected
-                ? "border-border bg-background text-foreground"
-                : "border-transparent text-muted-foreground hover:text-foreground",
+                ? "bg-background font-medium text-foreground shadow-soft"
+                : "text-muted-foreground hover:text-foreground",
             )}
           >
             {option.label}
@@ -652,6 +669,7 @@ export function SettingsDialog({
   const [uiFontFamily, setUiFontFamily] = useState(loadUiFontFamily);
   const [uiFontSize, setUiFontSize] = useState(loadUiFontSize);
   const [chatFontFamily, setChatFontFamily] = useState(loadChatFontFamily);
+  const [accent, setAccent] = useState(loadUiAccent);
   const [version, setVersion] = useState<string | null>(null);
 
   useEffect(() => {
@@ -669,6 +687,7 @@ export function SettingsDialog({
     setUiFontFamily(loadUiFontFamily());
     setUiFontSize(loadUiFontSize());
     setChatFontFamily(loadChatFontFamily());
+    setAccent(loadUiAccent());
   }, [open]);
 
   useEffect(() => {
@@ -743,24 +762,31 @@ export function SettingsDialog({
             </DialogTitle>
           </DialogHeader>
         ) : (
-          <aside className="flex w-48 shrink-0 flex-col border-r">
+          <aside className="flex w-48 shrink-0 flex-col bg-sidebar">
             <DialogHeader className="gap-0 p-0 text-left">
               <DialogTitle className="px-4 py-3 text-sm font-semibold">{t("settings.title")}</DialogTitle>
             </DialogHeader>
-            <nav className="flex flex-col gap-1 px-2">
-              {sections.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => setSection(item.id)}
-                  className={cn(
-                    "rounded-md px-3 py-1.5 text-left text-sm transition-colors",
-                    section === item.id ? "bg-secondary text-secondary-foreground" : "hover:bg-accent",
-                  )}
-                >
-                  {t(item.labelKey)}
-                </button>
-              ))}
+            <nav className="flex flex-col gap-px px-2">
+              {sections.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => setSection(item.id)}
+                    aria-current={section === item.id ? "page" : undefined}
+                    className={cn(
+                      "flex h-8 items-center gap-2.5 rounded-lg px-2.5 text-left text-sm transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none",
+                      section === item.id
+                        ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground shadow-soft"
+                        : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground",
+                    )}
+                  >
+                    <Icon className={cn("size-4 shrink-0", section === item.id && "text-primary")} aria-hidden />
+                    <span className="min-w-0 truncate">{t(item.labelKey)}</span>
+                  </button>
+                );
+              })}
             </nav>
           </aside>
         )}
@@ -954,11 +980,11 @@ export function SettingsDialog({
                           ? t("settings.stats.description")
                           : scopeCopy}
               </DialogDescription>
-              {section === "footer" && <div className="max-w-md"><ReaderFooterSettingsForm /></div>}
-              {section === "stats" && <div className="max-w-md"><ReadingStatsSettingsForm /></div>}
-              {section === "device" && <div className="max-w-md space-y-5">{deviceSettings}</div>}
+              {section === "footer" && <div className={SECTION_CARD_CLASS}><ReaderFooterSettingsForm /></div>}
+              {section === "stats" && <div className={SECTION_CARD_CLASS}><ReadingStatsSettingsForm /></div>}
+              {section === "device" && <div className={cn(SECTION_CARD_CLASS, "space-y-5")}>{deviceSettings}</div>}
               {section === "appearance" && (
-                <div className="max-w-md space-y-5">
+                <div className={cn(SECTION_CARD_CLASS, "space-y-5")}>
                   <PresetRow label={t("settings.theme")}>
                     <SegmentedControl
                       value={theme}
@@ -969,6 +995,29 @@ export function SettingsDialog({
                       onChange={onThemeChange}
                       ariaLabel={t("settings.theme")}
                     />
+                  </PresetRow>
+                  <PresetRow inline label={t("settings.accent")}>
+                    <div role="radiogroup" aria-label={t("settings.accent")} className="flex gap-2 p-0.5">
+                      {UI_ACCENTS.map((option) => (
+                        <button
+                          key={option}
+                          type="button"
+                          role="radio"
+                          aria-checked={accent === option}
+                          aria-label={t(ACCENT_LABEL_KEYS[option])}
+                          style={{ backgroundColor: `var(--accent-${option})` }}
+                          onClick={() => {
+                            saveUiAccent(option);
+                            setAccent(option);
+                            applyUiAccent(option);
+                          }}
+                          className={cn(
+                            "size-5 rounded-full transition-transform duration-150 hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background motion-reduce:transition-none",
+                            accent === option && "ring-2 ring-primary ring-offset-2 ring-offset-background",
+                          )}
+                        />
+                      ))}
+                    </div>
                   </PresetRow>
                   <PresetRow label={t("settings.chrome.font")} contentClassName="w-full">
                     <FontFamilyPicker
@@ -1062,7 +1111,7 @@ export function SettingsDialog({
               )}
 
               {section === "ai" && (
-                <div className="max-w-md space-y-8">
+                <div className={cn(SECTION_CARD_CLASS, "space-y-8")}>
                   <AgentConfigForm />
                   <div className="border-t border-border pt-6">
                     <GuidedStyleSection />
@@ -1071,7 +1120,7 @@ export function SettingsDialog({
               )}
 
               {section === "sync" && (
-                <div className="max-w-md space-y-8">
+                <div className={cn(SECTION_CARD_CLASS, "space-y-8")}>
                   <SyncSettingsForm />
                   <div className="border-t border-border pt-6">
                     <KosyncSettingsForm />
@@ -1080,7 +1129,7 @@ export function SettingsDialog({
               )}
 
               {section === "about" && (
-                <div className="max-w-md space-y-5">
+                <div className={cn(SECTION_CARD_CLASS, "space-y-5")}>
                   <div>
                     <div className="text-base font-medium">Litera</div>
                     <div className="mt-2 flex items-baseline gap-2">

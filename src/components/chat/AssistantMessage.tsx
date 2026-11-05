@@ -4,12 +4,12 @@ import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import "katex/dist/katex.min.css";
-import { AlertCircle, Bot, RefreshCw } from "lucide-react";
+import { AlertCircle, RefreshCw } from "lucide-react";
 import type { AssistantBlock, AssistantChatMessage } from "@/types/agent";
 import { ToolCallCard } from "./ToolCallCard";
 import { AnswerProcess } from "./AnswerProcess";
 import { Citation, CitationSettledContext } from "./Citation";
-import { CopyButton } from "./CopyButton";
+import { CopyButton, MESSAGE_ACTION_CLASS } from "./CopyButton";
 import { TypingIndicator } from "./TypingIndicator";
 import { useT } from "@/lib/i18n";
 import { summarizeSources } from "@/lib/source-summary";
@@ -38,17 +38,6 @@ const markdownComponents: Components = {
 
 // Keep `cite:` links for Citations; everything else gets the default sanitizing.
 const urlTransform = (url: string) => (isCitationHref(url) ? url : defaultUrlTransform(url));
-
-export function BotAvatar() {
-  return (
-    <div
-      className="flex size-6 shrink-0 items-center justify-center rounded-md bg-muted"
-      aria-hidden="true"
-    >
-      <Bot className="h-3.5 w-3.5 text-muted-foreground" />
-    </div>
-  );
-}
 
 /**
  * LaTeX 定界符预处理：
@@ -121,16 +110,16 @@ const TextBlock = memo(function TextBlock({
           <MarkdownBody text={normalized} />
         </CitationSettledContext.Provider>
         {streaming && (
-          <span className="ml-0.5 inline-block h-4 w-2 animate-pulse bg-primary/70 motion-reduce:animate-none" />
+          <span className="ml-0.5 inline-block h-4 w-0.5 translate-y-0.5 animate-pulse rounded-full bg-primary motion-reduce:animate-none" />
         )}
       </div>
-      <div className="flex h-6 items-center gap-1">
+      <div className="message-actions mt-1 -ml-1 flex h-6 items-center gap-0.5">
         <CopyButton text={stripCitations(text)} />
         {onRegenerate && (
           <button
             type="button"
             onClick={onRegenerate}
-            className="text-xs text-muted-foreground/50 transition-colors hover:text-muted-foreground"
+            className={MESSAGE_ACTION_CLASS}
             aria-label={t("chat.regenerate")}
           >
             <RefreshCw className="h-3.5 w-3.5" />
@@ -170,9 +159,8 @@ export const AssistantMessage = memo(function AssistantMessage({
   const liveThinking = activity?.kind === "thinking" && lastBlock?.type === "thinking" ? lastBlock.text : undefined;
   const lastTextIndex = answer.reduce((last, entry) => (entry.block.type === "text" ? entry.index : last), -1);
   return (
-    <div className="flex gap-2">
-      <BotAvatar />
-      <div className="min-w-0 max-w-[90%] space-y-1">
+    <div className="message-row min-w-0">
+      <div className="min-w-0 space-y-2">
         {streaming && blocks.length === 0 && <TypingIndicator />}
         {(process.length > 0 || activity) && (
           <AnswerProcess steps={process} sources={sources} activity={activity} liveThinking={liveThinking} />
@@ -192,11 +180,11 @@ export const AssistantMessage = memo(function AssistantMessage({
           ) : null,
         )}
         {!streaming && canRegenerate && lastTextIndex === -1 && onRegenerate && (
-          <div className="flex h-6 items-center gap-1">
+          <div className="message-actions -ml-1 flex h-6 items-center gap-0.5">
             <button
               type="button"
               onClick={onRegenerate}
-              className="text-xs text-muted-foreground/50 transition-colors hover:text-muted-foreground"
+              className={MESSAGE_ACTION_CLASS}
               aria-label={t("chat.regenerate")}
             >
               <RefreshCw className="h-3.5 w-3.5" />
@@ -209,7 +197,7 @@ export const AssistantMessage = memo(function AssistantMessage({
           </div>
         )}
         {!streaming && message.stopReason === "error" && (
-          <div role="alert" className="flex items-start gap-1.5 text-xs text-destructive">
+          <div role="alert" className="flex items-start gap-1.5 rounded-lg bg-destructive/10 px-2.5 py-2 text-xs text-destructive">
             <AlertCircle className="mt-px h-3.5 w-3.5 shrink-0" />
             <span>{message.errorMessage ?? t("chat.requestFailed")}</span>
           </div>

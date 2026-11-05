@@ -26,7 +26,7 @@ function mockTrackRect(el: HTMLElement) {
 }
 
 function fillWidth(container: HTMLElement): string | undefined {
-  const fill = container.querySelector(".bg-primary.h-full") as HTMLElement | null;
+  const fill = container.querySelector('[data-testid="reader-progress-fill"]') as HTMLElement | null;
   return fill?.style.width;
 }
 

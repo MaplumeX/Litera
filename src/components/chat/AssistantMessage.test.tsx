@@ -157,7 +157,7 @@ describe("AssistantMessage", () => {
         }}
       />,
     );
-    const children = Array.from(container.querySelectorAll(".space-y-1 > *"));
+    const children = Array.from(container.querySelectorAll(".space-y-2 > *"));
     expect(children).toHaveLength(2);
     expect(children[0].getAttribute("data-testid")).toBe("answer-process");
     expect(children[1].textContent).toContain("结论");
@@ -189,7 +189,7 @@ describe("AssistantMessage", () => {
 
   it("summarises the sources in the collapsed row and folds narration into the process", () => {
     const { container, getByText, getByRole, queryByText, getAllByRole } = render(<AssistantMessage message={researched} />);
-    const children = Array.from(container.querySelectorAll(".space-y-1 > *"));
+    const children = Array.from(container.querySelectorAll(".space-y-2 > *"));
     expect(children).toHaveLength(2);
     expect(getByText("第三章 归来（读了 2/3 段）")).toBeTruthy();
     expect(getByText("搜索 1 次，命中 1 处")).toBeTruthy();

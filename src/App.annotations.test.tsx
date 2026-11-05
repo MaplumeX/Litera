@@ -700,9 +700,7 @@ describe("reader TOC drawer resize", () => {
   async function openToc() {
     const screen = await openReader();
     fireEvent.click(screen.getByLabelText("目录、标注与搜索"));
-    const drawer = screen.container.querySelector(
-      ".absolute.inset-y-2.left-2.z-30",
-    ) as HTMLElement | null;
+    const drawer = screen.container.querySelector(".reader-drawer-in") as HTMLElement | null;
     const container = drawer?.parentElement as HTMLElement | null;
     expect(drawer).toBeTruthy();
     expect(container).toBeTruthy();
@@ -753,7 +751,7 @@ describe("reader TOC drawer resize", () => {
     fireEvent.pointerDown(handle, { clientX: 224, button: 0 });
     fireEvent.pointerMove(handle, { clientX: 2000, button: 0 });
     // The panel floats 8px in from both edges of its 800px cell.
-    expect(drawer.style.width).toBe("784px");
+    expect(drawer.style.width).toBe("768px");
   });
 
   it("keeps the width after closing and reopening the drawer", async () => {
@@ -767,9 +765,7 @@ describe("reader TOC drawer resize", () => {
     fireEvent.click(screen.getByLabelText("目录、标注与搜索"));
     expect(screen.queryByRole("separator", { orientation: "vertical" })).toBeNull();
     fireEvent.click(screen.getByLabelText("目录、标注与搜索"));
-    const reopened = screen.container.querySelector(
-      ".absolute.inset-y-2.left-2.z-30",
-    ) as HTMLElement | null;
+    const reopened = screen.container.querySelector(".reader-drawer-in") as HTMLElement | null;
     expect(reopened?.style.width).toBe("324px");
   });
 });

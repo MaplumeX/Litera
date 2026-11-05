@@ -85,7 +85,7 @@ export function ToolCallHeader({
       )}
       {error && <CircleX className="h-3.5 w-3.5 shrink-0 text-destructive" aria-hidden="true" />}
       {!running && !error && (
-        <Check className="h-3.5 w-3.5 shrink-0 text-green-600" aria-hidden="true" />
+        <Check className="h-3.5 w-3.5 shrink-0 text-success" aria-hidden="true" />
       )}
       <span
         className={cn(
@@ -150,7 +150,7 @@ export const ToolCallCard = memo(function ToolCallCard({ call }: { call: AgentTo
   // parameter dump, and expanding reveals the interactive map.
   if (call.tool === "draw_mindmap") return <MindmapCard call={call} />;
   return (
-    <div className="-ml-1 rounded px-1 transition-colors hover:bg-muted/40">
+    <div className="-ml-1 rounded-md px-1 transition-colors hover:bg-muted/40">
       <ToolCallHeader
         call={call}
         expanded={expanded}

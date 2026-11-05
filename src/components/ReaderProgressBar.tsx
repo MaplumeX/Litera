@@ -18,6 +18,7 @@ const CHAPTER_ARROW_CLASS =
 const KEY_STEP = 0.01;
 
 interface ReaderProgressBarProps {
+  className?: string;
   fraction: number;
   chapterLabel: string;
   ticks?: number[];
@@ -35,6 +36,7 @@ interface ReaderProgressBarProps {
 }
 
 export function ReaderProgressBar({
+  className,
   fraction,
   chapterLabel,
   ticks = [],
@@ -86,7 +88,8 @@ export function ReaderProgressBar({
   return (
     <div
       data-testid="reader-progress-bar"
-      className="group/bar flex h-11 shrink-0 items-center gap-1 px-2 pb-2"
+      data-reader-chrome
+      className={cn("group/bar mx-auto flex h-11 w-full max-w-3xl shrink-0 items-center gap-1 px-2 pb-2", className)}
     >
       {/* Back / forward show right after a jump, when the way back is the
           thing the reader is looking for; App hides them once the reader
@@ -233,13 +236,13 @@ export function ReaderProgressBar({
           </div>
         )}
         {/* Rail thickens on hover / drag so the seek target is easier to hit. */}
-        <div className="relative h-1 w-full overflow-hidden rounded-full bg-foreground/10 transition-[height] duration-150 group-hover/progress:h-1.5 group-focus-visible/progress:h-1.5 group-data-[dragging]/progress:h-1.5 motion-reduce:transition-none">
+        <div className="relative h-0.5 w-full overflow-hidden rounded-full bg-foreground/10 transition-[height] duration-150 group-hover/progress:h-1.5 group-focus-visible/progress:h-1.5 group-data-[dragging]/progress:h-1.5 motion-reduce:transition-none">
           {/* The rest of the current chapter, tinted so its end is visible. */}
           {chapter && (
             <div
               data-testid="reader-chapter-remaining"
               className={cn(
-                "absolute inset-y-0 bg-primary/25",
+                "absolute inset-y-0 bg-foreground/10",
                 draftFraction == null &&
                   "transition-[left,width] duration-200 motion-reduce:transition-none",
               )}
@@ -247,8 +250,9 @@ export function ReaderProgressBar({
             />
           )}
           <div
+            data-testid="reader-progress-fill"
             className={cn(
-              "relative h-full rounded-full bg-primary",
+              "relative h-full rounded-full bg-foreground/40 group-hover/progress:bg-primary group-focus-visible/progress:bg-primary group-data-[dragging]/progress:bg-primary",
               draftFraction == null &&
                 "transition-[width] duration-200 motion-reduce:transition-none",
             )}

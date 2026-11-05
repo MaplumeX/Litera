@@ -212,7 +212,7 @@ export function KosyncSettingsForm() {
       </div>
 
       {testSuccess && (
-        <p className="text-xs text-green-600 dark:text-green-400">
+        <p className="text-xs text-success">
           {t("settings.sync.test.success")}
         </p>
       )}
