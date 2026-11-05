@@ -55,11 +55,14 @@ export function ToolCallHeader({
   expanded,
   onToggle,
   summary,
+  label,
 }: {
   call: AgentToolCall;
   expanded: boolean;
   onToggle: () => void;
   summary?: string;
+  /** What the reader calls this tool, in place of its internal name. */
+  label?: string;
 }) {
   const { t } = useT();
   const running = !call.done;
@@ -94,7 +97,7 @@ export function ToolCallHeader({
           running && "animate-pulse motion-reduce:animate-none",
         )}
       >
-        {call.tool}
+        {label ?? call.tool}
       </span>
       {error && <span className="shrink-0 text-xs text-destructive">{t("chat.toolError")}</span>}
       {summary && <span className="truncate text-xs text-muted-foreground/70">{summary}</span>}

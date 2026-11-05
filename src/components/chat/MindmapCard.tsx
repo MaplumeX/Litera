@@ -164,6 +164,7 @@ function MindmapCanvas({ params }: { params: MindmapParams }) {
  * name and title only, expanding into the interactive map.
  */
 export function MindmapCard({ call }: { call: AgentToolCall }) {
+  const { t } = useT();
   const [expanded, setExpanded] = useState(false);
   const error = call.done && call.isError === true;
   const params = mindmapParams(call.params);
@@ -177,6 +178,7 @@ export function MindmapCard({ call }: { call: AgentToolCall }) {
         expanded={expanded}
         onToggle={() => setExpanded((value) => !value)}
         summary={params?.title}
+        label={t("chat.process.mindmap")}
       />
       {expanded && (
         <div className="space-y-1 pb-1">

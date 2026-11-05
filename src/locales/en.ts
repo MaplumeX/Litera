@@ -515,6 +515,7 @@ export const en: { [K in MessageKey]: string } = {
   "chat.process.hits": "{count} hits",
   "chat.process.noHits": "no results",
   "chat.process.toc": "Looked at the contents",
+  "chat.process.mindmap": "Mind map",
   "chat.process.blocks": "Looked at the paragraph list",
   "chat.process.guideStep": "Took a guided step",
   "chat.process.metadata": "Looked at the book info",

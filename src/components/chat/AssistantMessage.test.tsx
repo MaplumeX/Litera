@@ -305,7 +305,7 @@ describe("AssistantMessage", () => {
     );
     expect(getByText("序")).toBeTruthy();
     expect(queryByRole("img", { name: "部分章节未读完，回答可能不完整" })).toBeNull();
-    expect(getByText("draw_mindmap")).toBeTruthy();
+    expect(getByText("思维导图")).toBeTruthy();
   });
 
   it("renders no process row for answers without thinking or book tools", () => {

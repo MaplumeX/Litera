@@ -513,6 +513,7 @@ export const zhCN = {
   "chat.process.hits": "{count} 处命中",
   "chat.process.noHits": "无结果",
   "chat.process.toc": "查看目录",
+  "chat.process.mindmap": "思维导图",
   "chat.process.blocks": "查看段落列表",
   "chat.process.guideStep": "带读这一步",
   "chat.process.metadata": "查看书籍信息",

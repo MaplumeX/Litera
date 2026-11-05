@@ -68,7 +68,7 @@ function StarBadge() {
     <span
       role="img"
       aria-label={t("library.status.starred")}
-      className="absolute top-1.5 right-1.5 flex items-center rounded-full bg-background/85 p-1 text-foreground"
+      className="absolute top-1.5 right-1.5 flex items-center rounded-full bg-background/85 p-1 text-star"
     >
       <Star className="size-3 fill-current" aria-hidden />
     </span>
@@ -137,7 +137,7 @@ export function MobileBookRow({ book, actions, opening, disabled, coverRev }: Mo
           <span className="min-w-0 flex-1">
             <span className="flex items-center gap-1">
               <span className="truncate text-[0.9375rem] font-medium">{book.title}</span>
-              {book.starred && <Star className="size-3.5 shrink-0 fill-current" aria-hidden />}
+              {book.starred && <Star className="size-3.5 shrink-0 fill-current text-star" aria-hidden />}
               {book.cached === false && (
                 <CloudOff className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
               )}

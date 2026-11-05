@@ -38,7 +38,7 @@ function makeMindmapCall(overrides: Partial<Parameters<typeof ToolCallCard>[0]["
 describe("MindmapCard (via ToolCallCard)", () => {
   it("renders collapsed by default with the tool name and title only", () => {
     const { container, getByRole } = render(<ToolCallCard call={makeMindmapCall()} />);
-    const button = getByRole("button", { name: /draw_mindmap/ });
+    const button = getByRole("button", { name: /思维导图/ });
     expect(button.textContent).toContain("Chapter 3 structure");
     // The outline is the map payload, not collapsed-row summary text.
     expect(button.textContent).not.toContain("point one");
@@ -47,14 +47,14 @@ describe("MindmapCard (via ToolCallCard)", () => {
 
   it("expands on click to reveal the map container and the SVG export affordance", () => {
     const { container, getByRole } = render(<ToolCallCard call={makeMindmapCall()} />);
-    fireEvent.click(getByRole("button", { name: /draw_mindmap/ }));
+    fireEvent.click(getByRole("button", { name: /思维导图/ }));
     expect(container.querySelector(".mindmap-canvas")).toBeTruthy();
     expect(getByRole("button", { name: "导出 SVG" })).toBeTruthy();
   });
 
   it("sizes the canvas svg to fill its container so the map is not squeezed into a corner", async () => {
     const { container, getByRole } = render(<ToolCallCard call={makeMindmapCall()} />);
-    fireEvent.click(getByRole("button", { name: /draw_mindmap/ }));
+    fireEvent.click(getByRole("button", { name: /思维导图/ }));
     const svg = await waitFor(() => {
       const el = container.querySelector(".mindmap-canvas svg");
       expect(el).toBeTruthy();
@@ -68,7 +68,7 @@ describe("MindmapCard (via ToolCallCard)", () => {
 
   it("returns to collapsed on a second click", () => {
     const { container, getByRole } = render(<ToolCallCard call={makeMindmapCall()} />);
-    const button = getByRole("button", { name: /draw_mindmap/ });
+    const button = getByRole("button", { name: /思维导图/ });
     fireEvent.click(button);
     fireEvent.click(button);
     expect(container.querySelector(".mindmap-canvas")).toBeNull();
@@ -85,7 +85,7 @@ describe("MindmapCard (via ToolCallCard)", () => {
     );
     expect(getByText("调用失败")).toBeTruthy();
     expect(container.querySelector(".text-destructive")).toBeTruthy();
-    fireEvent.click(getByRole("button", { name: /draw_mindmap/ }));
+    fireEvent.click(getByRole("button", { name: /思维导图/ }));
     // The validation error is shown; the broken outline is not rendered as a map.
     expect(container.querySelector(".mindmap-canvas")).toBeNull();
     expect(getByText(/exceeding the limit of 4 levels/)).toBeTruthy();
@@ -95,7 +95,7 @@ describe("MindmapCard (via ToolCallCard)", () => {
     const { container, getByRole } = render(
       <ToolCallCard call={makeMindmapCall({ done: false, result: undefined })} />,
     );
-    expect(getByRole("button", { name: /draw_mindmap/ }).textContent).toContain(
+    expect(getByRole("button", { name: /思维导图/ }).textContent).toContain(
       "Chapter 3 structure",
     );
     expect(container.querySelector(".animate-spin")).toBeTruthy();
@@ -105,7 +105,7 @@ describe("MindmapCard (via ToolCallCard)", () => {
     const { setLocale } = await import("@/lib/i18n");
     setLocale("en");
     const { getByRole, unmount } = render(<ToolCallCard call={makeMindmapCall()} />);
-    fireEvent.click(getByRole("button", { name: /draw_mindmap/ }));
+    fireEvent.click(getByRole("button", { name: /Mind map/ }));
     expect(getByRole("button", { name: "Export SVG" })).toBeTruthy();
     unmount();
     setLocale("zh-CN");

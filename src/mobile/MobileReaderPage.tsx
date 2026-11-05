@@ -382,7 +382,7 @@ export function MobileReaderPage({
             inert={!chromeVisible}
             data-shown={chromeVisible}
             className={cn(
-              "m-slide absolute inset-x-0 top-0 z-20 bg-background shadow-soft",
+              "m-slide absolute inset-x-0 top-0 z-20 bg-page shadow-soft",
               !chromeVisible && "invisible -translate-y-full",
             )}
           >
@@ -413,7 +413,7 @@ export function MobileReaderPage({
             inert={!chromeVisible}
             data-shown={chromeVisible}
             className={cn(
-              "m-slide absolute inset-x-0 bottom-0 z-20 bg-background pb-[var(--safe-bottom)] shadow-float",
+              "m-slide absolute inset-x-0 bottom-0 z-20 bg-page pb-[var(--safe-bottom)] shadow-float",
               !chromeVisible && "invisible translate-y-full",
             )}
           >
