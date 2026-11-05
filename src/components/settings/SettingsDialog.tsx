@@ -967,7 +967,9 @@ export function SettingsDialog({
             </div>
           ) : (
             <div className="min-h-0 flex-1 overflow-y-auto p-6">
-              <DialogDescription className="mb-5">
+              {/* Appearance and AI are not about the Book's typography, so they have no line to
+                  show; the dialog still needs a description for screen readers. */}
+              <DialogDescription className={section === "appearance" || section === "ai" ? "sr-only" : "mb-5"}>
                 {section === "about"
                   ? t("settings.about.description")
                   : section === "sync"
@@ -1111,18 +1113,22 @@ export function SettingsDialog({
               )}
 
               {section === "ai" && (
-                <div className={cn(SECTION_CARD_CLASS, "space-y-8")}>
-                  <AgentConfigForm />
-                  <div className="border-t border-border pt-6">
+                <div className="space-y-4">
+                  <div className={SECTION_CARD_CLASS}>
+                    <AgentConfigForm />
+                  </div>
+                  <div className={SECTION_CARD_CLASS}>
                     <GuidedStyleSection />
                   </div>
                 </div>
               )}
 
               {section === "sync" && (
-                <div className={cn(SECTION_CARD_CLASS, "space-y-8")}>
-                  <SyncSettingsForm />
-                  <div className="border-t border-border pt-6">
+                <div className="space-y-4">
+                  <div className={SECTION_CARD_CLASS}>
+                    <SyncSettingsForm />
+                  </div>
+                  <div className={SECTION_CARD_CLASS}>
                     <KosyncSettingsForm />
                   </div>
                 </div>

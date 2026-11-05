@@ -449,7 +449,7 @@ export function LibraryView({ onOpenBook, openingBookId = null, onOpenSettings, 
               </button>
             ) : (
               <kbd
-                className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 rounded border bg-muted px-1.5 font-sans text-[10px] text-muted-foreground peer-focus:hidden"
+                className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 rounded border bg-muted px-1.5 font-sans text-[11px] text-muted-foreground peer-focus:hidden"
                 aria-hidden
               >
                 {detectDesktopOs() === "macos" ? "⌘F" : "Ctrl F"}

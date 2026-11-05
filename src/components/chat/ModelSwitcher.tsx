@@ -81,7 +81,7 @@ export function ModelSwitcher({
             <button
               type="button"
               aria-label={t("chat.modelLabel")}
-              className="flex h-6 w-auto max-w-44 items-center gap-0.5 rounded-sm border-none bg-transparent px-1.5 text-[10px] text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
+              className="flex h-6 w-auto max-w-44 items-center gap-0.5 rounded-sm border-none bg-transparent px-1.5 text-[11px] text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
             >
               <span className="min-w-0 truncate">{label}</span>
               <ChevronDown className="h-3 w-3 shrink-0 opacity-70" />
@@ -136,7 +136,7 @@ export function ModelSwitcher({
           aria-label={t("chat.modelLabel")}
           onClick={onOpenConfig}
           disabled={disabled}
-          className="flex h-6 w-auto max-w-44 items-center gap-0.5 rounded-sm border-none bg-transparent px-1.5 text-[10px] text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+          className="flex h-6 w-auto max-w-44 items-center gap-0.5 rounded-sm border-none bg-transparent px-1.5 text-[11px] text-muted-foreground transition-colors hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
         >
           <span className="min-w-0 truncate">{label}</span>
           <ChevronDown className="h-3 w-3 shrink-0 opacity-70" />

@@ -26,12 +26,16 @@ export const STATUS_LABEL_KEYS: Record<ReadingStatus, MessageKey> = {
   finished: "library.status.finished",
 };
 
+export function statusDotClass(status: ReadingStatus): string {
+  return (STATUS_TONES[status] ?? STATUS_TONES.unread).dot;
+}
+
 /** A status in a menu: its dot and name, and a check on the current one. */
 export function StatusMenuRow({ status, current }: { status: ReadingStatus; current?: ReadingStatus }) {
   const { t } = useT();
   return (
     <>
-      <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", (STATUS_TONES[status] ?? STATUS_TONES.unread).dot)} />
+      <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", statusDotClass(status))} />
       {t(STATUS_LABEL_KEYS[status])}
       <Check className={cn("ml-auto size-4 text-primary", status === current ? "opacity-100" : "opacity-0")} />
     </>

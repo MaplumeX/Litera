@@ -144,13 +144,13 @@ function MindmapCanvas({ params }: { params: MindmapParams }) {
     <div className="relative pb-1">
       <div
         ref={holderRef}
-        className="mindmap-canvas h-96 w-full overflow-hidden rounded-md border bg-background text-foreground"
+        className="mindmap-canvas h-96 w-full overflow-hidden rounded-xl border bg-background text-foreground"
         data-testid="mindmap-canvas"
       />
       <button
         type="button"
         onClick={() => void exportSvg()}
-        className="absolute right-2 top-2 flex items-center gap-1 rounded-md border bg-background/90 px-2 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+        className="absolute right-2 top-2 flex items-center gap-1 rounded-lg bg-popover/90 px-2 py-1 text-xs text-muted-foreground shadow-soft backdrop-blur-sm transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         <Download className="h-3 w-3" aria-hidden="true" />
         <span className="mindmap-export-label">{t("chat.exportSvg")}</span>

@@ -210,12 +210,12 @@ export function SyncSettingsForm() {
   const fieldClass = "h-8 w-full";
 
   return (
-    <div className="max-w-md space-y-5">
+    <div className="space-y-5">
       <div className="flex items-center justify-between gap-2">
         <div className="text-xs font-medium text-muted-foreground">
           {t("settings.sync.enable")}
         </div>
-        <div className="inline-flex rounded-md bg-muted p-0.5">
+        <div className="inline-flex rounded-lg bg-muted p-0.5">
           <button
             type="button"
             role="radio"
@@ -223,8 +223,8 @@ export function SyncSettingsForm() {
             onClick={() => patch({ enabled: false })}
             className={
               !draft.enabled
-                ? "rounded-sm border border-border bg-background px-3 py-1 text-xs"
-                : "rounded-sm border border-transparent px-3 py-1 text-xs text-muted-foreground"
+                ? "rounded-md bg-background px-3 py-1 text-xs font-medium shadow-soft"
+                : "rounded-md px-3 py-1 text-xs text-muted-foreground hover:text-foreground"
             }
           >
             {t("settings.override.off")}
@@ -236,8 +236,8 @@ export function SyncSettingsForm() {
             onClick={() => patch({ enabled: true })}
             className={
               draft.enabled
-                ? "rounded-sm border border-border bg-background px-3 py-1 text-xs"
-                : "rounded-sm border border-transparent px-3 py-1 text-xs text-muted-foreground"
+                ? "rounded-md bg-background px-3 py-1 text-xs font-medium shadow-soft"
+                : "rounded-md px-3 py-1 text-xs text-muted-foreground hover:text-foreground"
             }
           >
             {t("settings.override.on")}
@@ -246,13 +246,13 @@ export function SyncSettingsForm() {
       </div>
 
       {draft.enabled && (
-        <p className="rounded-md bg-muted p-3 text-xs text-muted-foreground">
+        <p className="rounded-lg bg-muted p-3 text-xs leading-relaxed text-muted-foreground">
           {t("settings.sync.plaintext")}
         </p>
       )}
 
-      <div className="space-y-3">
-        <label className="block space-y-1.5">
+      <div className="grid gap-x-3 gap-y-4 sm:grid-cols-2">
+        <label className="block min-w-0 space-y-1.5 sm:col-span-2">
           <span className="text-xs font-medium text-muted-foreground">
             {t("settings.sync.endpoint")}
           </span>
@@ -264,7 +264,7 @@ export function SyncSettingsForm() {
             placeholder="https://s3.us-east-1.amazonaws.com"
           />
         </label>
-        <label className="block space-y-1.5">
+        <label className="block min-w-0 space-y-1.5">
           <span className="text-xs font-medium text-muted-foreground">
             {t("settings.sync.region")}
           </span>
@@ -276,7 +276,7 @@ export function SyncSettingsForm() {
             placeholder="us-east-1"
           />
         </label>
-        <label className="block space-y-1.5">
+        <label className="block min-w-0 space-y-1.5">
           <span className="text-xs font-medium text-muted-foreground">
             {t("settings.sync.bucket")}
           </span>
@@ -287,7 +287,7 @@ export function SyncSettingsForm() {
             onChange={(event) => patch({ bucket: event.target.value })}
           />
         </label>
-        <label className="flex items-center justify-between gap-2">
+        <label className="flex items-center justify-between gap-2 sm:col-span-2">
           <div className="min-w-0">
             <div className="text-xs font-medium text-muted-foreground">
               {t("settings.sync.pathStyle")}
@@ -301,7 +301,7 @@ export function SyncSettingsForm() {
             onCheckedChange={(pathStyle) => patch({ pathStyle })}
           />
         </label>
-        <label className="block space-y-1.5">
+        <label className="block min-w-0 space-y-1.5">
           <span className="text-xs font-medium text-muted-foreground">
             {t("settings.sync.accessKey")}
           </span>
@@ -312,7 +312,7 @@ export function SyncSettingsForm() {
             onChange={(event) => patch({ accessKey: event.target.value })}
           />
         </label>
-        <label className="block space-y-1.5">
+        <label className="block min-w-0 space-y-1.5">
           <span className="text-xs font-medium text-muted-foreground">
             {t("settings.sync.secretKey")}
           </span>
@@ -367,7 +367,7 @@ export function SyncSettingsForm() {
         </p>
       )}
       {estimate && (
-        <div className="space-y-2 rounded-md border border-border p-3">
+        <div className="space-y-2 rounded-lg border border-border p-3">
           <div className="text-xs font-medium">
             {t("settings.sync.estimate.title")}
           </div>

@@ -193,7 +193,7 @@ export const AssistantMessage = memo(function AssistantMessage({
         )}
         {!streaming && message.stopReason === "aborted" && (
           <div className="flex h-6 items-center">
-            <span className="text-[10px] text-muted-foreground/70">{t("chat.stopped")}</span>
+            <span className="text-[11px] text-muted-foreground/70">{t("chat.stopped")}</span>
           </div>
         )}
         {!streaming && message.stopReason === "error" && (

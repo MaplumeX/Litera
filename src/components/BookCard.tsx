@@ -193,7 +193,7 @@ export function BookCard({
                   style={{ width: `${pct}%` }}
                 />
               </span>
-              <span className="absolute bottom-1.5 right-1.5 rounded-sm bg-background/80 px-1 py-px text-[10px] font-medium tabular-nums text-foreground/80 opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-within:opacity-100 motion-reduce:transition-none">
+              <span className="absolute bottom-1.5 right-1.5 rounded-sm bg-background/80 px-1 py-px text-[11px] font-medium tabular-nums text-foreground/80 opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-within:opacity-100 motion-reduce:transition-none">
                 {pct}%
               </span>
             </>

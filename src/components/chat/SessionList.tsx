@@ -106,11 +106,11 @@ export function SessionList({
           toggle, so it leads with the new-session action alone; the popover
           names itself and keeps that action in its title row. */}
       {isRail ? (
-        <div className="p-2 pb-1">
+        <div className="flex flex-col gap-px p-2 pb-1">
           <Button
             size="sm"
             variant="ghost"
-            className="w-full justify-start font-normal text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground"
+            className="w-full justify-start rounded-lg font-normal text-muted-foreground hover:bg-foreground/5 hover:text-foreground dark:hover:bg-foreground/5"
             onClick={onNewSession}
             disabled={isStreaming}
           >
@@ -120,7 +120,7 @@ export function SessionList({
           <Button
             size="sm"
             variant="ghost"
-            className="w-full justify-start font-normal text-muted-foreground hover:bg-sidebar-accent/60 hover:text-foreground"
+            className="w-full justify-start rounded-lg font-normal text-muted-foreground hover:bg-foreground/5 hover:text-foreground dark:hover:bg-foreground/5"
             onClick={onNewGuided}
             disabled={isStreaming}
           >
@@ -176,26 +176,20 @@ export function SessionList({
                 <div
                   key={session.id}
                   className={cn(
-                    "group relative flex items-center rounded-md text-sm",
+                    "group relative flex items-center rounded-lg text-sm transition-colors duration-150 motion-reduce:transition-none",
                     // The rail sits on the sidebar tone, the popover on its own surface.
                     active
                       ? isRail
-                        ? "bg-sidebar-accent"
-                        : "bg-accent"
+                        ? "bg-sidebar-accent shadow-soft"
+                        : "bg-primary/10"
                       : isRail
-                        ? "hover:bg-sidebar-accent/60"
-                        : "hover:bg-accent/60",
+                        ? "hover:bg-foreground/5"
+                        : "hover:bg-accent/70",
                   )}
                 >
-                  {active && (
-                    <span
-                      aria-hidden
-                      className="absolute top-1/2 left-0 h-4 w-0.5 -translate-y-1/2 rounded-full bg-primary"
-                    />
-                  )}
                   {editingSessionId === session.id ? (
                     <input
-                      className="mx-1 my-0.5 min-w-0 flex-1 rounded-lg border bg-background px-1.5 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                      className="mx-1 my-0.5 min-w-0 flex-1 rounded-lg border bg-background px-1.5 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring/50"
                       value={editingTitle}
                       onChange={(event) => onTitleChange(event.target.value)}
                       onKeyDown={(event) => {
@@ -229,14 +223,14 @@ export function SessionList({
                         side="right"
                       >
                         <button
-                          className="flex min-w-0 flex-1 items-center gap-2 rounded-md py-1.5 pr-2 pl-2.5 text-left outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:opacity-50"
+                          className="flex min-w-0 flex-1 items-center gap-2 rounded-lg py-1.5 pr-2 pl-2.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
                           onClick={() => onSwitchSession(session.id)}
                           disabled={isStreaming}
                           aria-current={active ? "true" : undefined}
                         >
                           {session.kind === "guided" && (
                             <BookOpen
-                              className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
+                              className={cn("h-3.5 w-3.5 shrink-0", active ? "text-primary" : "text-muted-foreground")}
                               aria-label={t("chat.guide.badge")}
                             />
                           )}
@@ -263,7 +257,7 @@ export function SessionList({
                         <DropdownMenuTrigger asChild>
                           <button
                             type="button"
-                            className="absolute right-1 flex h-6 w-6 items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-opacity outline-none hover:text-foreground focus-visible:opacity-100 focus-visible:ring-1 focus-visible:ring-ring group-hover:opacity-100 group-has-[:focus-visible]:opacity-100 disabled:pointer-events-none data-[state=open]:opacity-100"
+                            className="absolute right-1 flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity outline-none hover:bg-foreground/5 hover:text-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring group-hover:opacity-100 group-has-[:focus-visible]:opacity-100 disabled:pointer-events-none data-[state=open]:opacity-100"
                             disabled={isStreaming}
                             aria-label={t("chat.sessionActions")}
                           >

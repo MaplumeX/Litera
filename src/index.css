@@ -46,11 +46,12 @@
   --success: #15803d;
   --warning: #b45309;
   --star: #e0a100;
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
+  /* 思维导图的分支色：同等饱和度和明度，第一支跟随强调色。 */
+  --chart-1: var(--primary);
+  --chart-2: #0e8a7a;
+  --chart-3: #c77a0a;
+  --chart-4: #d6457a;
+  --chart-5: #7c5ae0;
   /* Reading stats: one hue for magnitude, the same one as every other accent. */
   --stats-mark: var(--primary);
   /* 圆角分层：sm 6 / md 8（按钮、输入框）/ lg 10（菜单）/ xl 14（面板、弹窗）；
@@ -101,11 +102,11 @@
   --success: #4ade80;
   --warning: #fbbf24;
   --star: #fbbf24;
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
+  --chart-1: var(--primary);
+  --chart-2: #3fc7a6;
+  --chart-3: #f0a050;
+  --chart-4: #f07aa6;
+  --chart-5: #a48bf5;
   --sidebar: #0e0f11;
   --sidebar-foreground: #ededef;
   --sidebar-primary: var(--primary);

@@ -113,11 +113,11 @@ export function KosyncSettingsForm() {
   const fieldClass = "h-8 w-full";
   const segment = (active: boolean) =>
     active
-      ? "rounded-sm border border-border bg-background px-3 py-1 text-xs"
-      : "rounded-sm border border-transparent px-3 py-1 text-xs text-muted-foreground";
+      ? "rounded-md bg-background px-3 py-1 text-xs font-medium shadow-soft"
+      : "rounded-md px-3 py-1 text-xs text-muted-foreground hover:text-foreground";
 
   return (
-    <div className="max-w-md space-y-5">
+    <div className="space-y-5">
       <div className="space-y-1">
         <div className="text-sm font-medium">{t("settings.kosync.title")}</div>
         <p className="text-xs text-muted-foreground">{t("settings.kosync.description")}</p>
@@ -127,7 +127,7 @@ export function KosyncSettingsForm() {
         <div className="text-xs font-medium text-muted-foreground">
           {t("settings.kosync.enable")}
         </div>
-        <div className="inline-flex rounded-md bg-muted p-0.5">
+        <div className="inline-flex rounded-lg bg-muted p-0.5">
           <button
             type="button"
             role="radio"

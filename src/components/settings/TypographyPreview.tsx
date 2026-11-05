@@ -13,7 +13,7 @@ export function TypographyPreview({ styleState }: TypographyPreviewProps) {
     <div className="space-y-2">
       <style dangerouslySetInnerHTML={{ __html: css }} />
       <div className="text-xs font-medium text-muted-foreground">{t("settings.preview")}</div>
-      <div className="litera-typography-preview rounded-md border bg-muted/40 p-4 text-foreground">
+      <div className="litera-typography-preview rounded-xl bg-page p-4 text-foreground shadow-soft">
         <p>{t("settings.preview.paragraph1")}</p>
         <p>{t("settings.preview.paragraph2")}</p>
       </div>

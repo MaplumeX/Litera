@@ -104,7 +104,7 @@ export function ChatInput({
             {leadingControls}
             <Select value={thinkingLevel} onValueChange={onThinkingLevelChange} disabled={isStreaming}>
               <Tip label={t("chat.thinkingLevel")}>
-                <SelectTrigger className="h-6 w-auto gap-1 border-none bg-transparent px-1.5 text-[10px] text-muted-foreground shadow-none focus:ring-0 dark:bg-transparent dark:hover:bg-transparent" aria-label={t("chat.thinkingLevel")}>
+                <SelectTrigger className="h-6 w-auto gap-1 border-none bg-transparent px-1.5 text-[11px] text-muted-foreground shadow-none focus:ring-0 dark:bg-transparent dark:hover:bg-transparent" aria-label={t("chat.thinkingLevel")}>
                   <Brain className={cn("size-3", thinkingLevel === "off" && "opacity-50")} />
                   <SelectValue />
                 </SelectTrigger>
@@ -116,7 +116,7 @@ export function ChatInput({
               </SelectContent>
             </Select>
             {/* The key hint only matters while typing. */}
-            <span className="hidden truncate text-[10px] text-muted-foreground group-focus-within/input:inline">
+            <span className="hidden truncate text-[11px] text-muted-foreground group-focus-within/input:inline">
               {t("chat.inputHint")}
             </span>
           </div>
