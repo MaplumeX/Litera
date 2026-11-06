@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type UIEvent } from "react";
 import { DropdownMenu as DropdownMenuPrimitive } from "radix-ui";
 import {
   ArrowLeft,
@@ -33,8 +33,10 @@ import type { LibraryViewMode } from "@/lib/library-shelf-prefs";
 import { useT, type MessageKey } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { AppBarIconButton, MobileAppBar } from "@/mobile/MobileAppBar";
-import { MobileBookRow, MobileBookTile, MobileResumeCard } from "@/mobile/MobileBookItems";
+import { MobileBookRow, MobileBookTile } from "@/mobile/MobileBookItems";
+import { MobileContinueHero } from "@/mobile/MobileContinueHero";
 import { MobileBookActionSheet } from "@/mobile/MobileBookActionSheet";
+import { ChoiceChips } from "@/mobile/ChoiceChips";
 
 interface MobileLibraryPageProps {
   shelf: LibraryShelf;
@@ -102,8 +104,9 @@ function MenuRadioGroup<T extends string>({
 
 /**
  * The phone's Library, laid out like other Android readers: a top app bar
- * (search, sort and view menu, overflow menu), filter chips, the Books you're reading as
- * cards, then the shelf; a floating button imports. The overflow menu holds
+ * (search, sort and view menu, overflow menu) under a large title that hands
+ * over to it on scroll, filter chips that stick under the app bar, the
+ * Continue reading Hero, then the shelf; a floating button imports. The overflow menu holds
  * Trash and Settings; a long-press on a Book opens its actions as a bottom
  * sheet.
  */
@@ -122,6 +125,9 @@ export function MobileLibraryPage({
   // star and status as they change (and closes if the Book goes).
   const [actionsBookId, setActionsBookId] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const largeTitleRef = useRef<HTMLParagraphElement>(null);
+  // The large title has scrolled under the app bar, which takes the title over.
+  const [scrolledPast, setScrolledPast] = useState(false);
   const {
     books,
     loaded,
@@ -167,6 +173,13 @@ export function MobileLibraryPage({
 
   const closeSearch = () => onSearchOpenChange(false);
 
+  const largeTitle = !searchOpen && books.length > 0;
+  const titleCollapsed = !largeTitle || scrolledPast;
+  const handleScroll = (event: UIEvent<HTMLDivElement>) => {
+    const title = largeTitleRef.current;
+    setScrolledPast(title !== null && event.currentTarget.scrollTop >= title.offsetHeight - 8);
+  };
+
   return (
     <div className="relative flex h-full min-h-0 flex-col">
       {searchOpen ? (
@@ -192,7 +205,17 @@ export function MobileLibraryPage({
         </MobileAppBar>
       ) : (
         <MobileAppBar
-          title={t("mobile.shelf")}
+          title={
+            // Stays the page's heading for screen readers while the large title shows it.
+            <span
+              className={cn(
+                "transition-opacity duration-150 motion-reduce:transition-none",
+                !titleCollapsed && "opacity-0",
+              )}
+            >
+              {t("mobile.shelf")}
+            </span>
+          }
           actions={
             <>
               <AppBarIconButton label={t("mobile.searchLibrary")} onClick={() => onSearchOpenChange(true)}>
@@ -258,47 +281,43 @@ export function MobileLibraryPage({
         />
       )}
 
-      {books.length > 0 && (
-        <div
-          role="radiogroup"
-          aria-label={t("library.statusFilter")}
-          className="flex shrink-0 gap-2 overflow-x-auto px-4 pt-1 pb-3 no-scrollbar"
-        >
-          {STATUS_OPTIONS.map((option) => {
-            const active = option.value === statusFilter;
-            return (
-              <button
-                key={option.value}
-                type="button"
-                role="radio"
-                aria-checked={active}
-                onClick={() => shelf.handleStatusFilterChange(option.value)}
-                className={cn(
-                  "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border px-3 text-sm transition-colors motion-reduce:transition-none",
-                  active
-                    ? "border-transparent bg-secondary font-medium text-secondary-foreground"
-                    : "border-border text-foreground/80 active:bg-foreground/5",
-                )}
-              >
-                {active && <Check className="size-4" aria-hidden />}
-                {t(option.labelKey)}
-              </button>
-            );
-          })}
-        </div>
-      )}
-
       <BookActionSheetProvider value={openActionSheet}>
         {/* Bottom padding clears the floating import button. */}
-        <div className="min-h-0 flex-1 overflow-y-auto pb-[calc(var(--safe-bottom)+6rem)]">
+        <div
+          onScroll={largeTitle ? handleScroll : undefined}
+          className="flex min-h-0 flex-1 flex-col overflow-y-auto pb-[calc(var(--safe-bottom)+6rem)]"
+        >
+          {largeTitle && (
+            <p
+              ref={largeTitleRef}
+              aria-hidden
+              className="shrink-0 px-4 pt-1 pb-2 text-[1.75rem] leading-9 font-semibold tracking-[-0.022em] select-none"
+            >
+              {t("mobile.shelf")}
+            </p>
+          )}
+          {books.length > 0 && (
+            // Sticks under the app bar, so the filter in force stays in view.
+            <ChoiceChips
+              ariaLabel={t("library.statusFilter")}
+              value={statusFilter}
+              options={STATUS_OPTIONS.map((option) => ({ value: option.value, label: t(option.labelKey) }))}
+              onChange={shelf.handleStatusFilterChange}
+              className={cn(
+                "sticky top-0 z-10 shrink-0 bg-background px-4 pt-1 pb-3 transition-shadow motion-reduce:transition-none",
+                // Once the shelf runs under it, a hairline parts the two.
+                scrolledPast && "shadow-[0_1px_0_var(--border)]",
+              )}
+            />
+          )}
           {!loaded ? null : books.length === 0 && loadError ? (
-            <div className="flex h-full items-center justify-center px-8">
+            <div className="flex flex-1 items-center justify-center px-8">
               <p role="alert" className="text-center break-words text-sm text-destructive">
                 {t("library.loadFailed", { message: loadError })}
               </p>
             </div>
           ) : books.length === 0 ? (
-            <div className="flex h-full flex-col items-center justify-center gap-4 px-8 text-center">
+            <div className="flex flex-1 flex-col items-center justify-center gap-4 px-8 text-center">
               <p className="text-muted-foreground">{t("library.empty")}</p>
               <Button onClick={handleImport} disabled={busy} className="h-10 rounded-full px-6">
                 <Plus className="size-4" />
@@ -306,7 +325,7 @@ export function MobileLibraryPage({
               </Button>
             </div>
           ) : visible.length === 0 ? (
-            <div className="flex h-full flex-col items-center justify-center gap-4 px-8 text-center">
+            <div className="flex flex-1 flex-col items-center justify-center gap-4 px-8 text-center">
               <p className="text-muted-foreground">
                 {statusFilterOption && statusFilter !== "all"
                   ? t("library.noMatchesInFilter", { filter: t(statusFilterOption.labelKey) })
@@ -319,25 +338,13 @@ export function MobileLibraryPage({
           ) : (
             <div className="space-y-4">
               {recents.length > 0 && (
-                <section aria-label={t("library.continueReading")}>
-                  <h2 className="px-4 pb-2 text-sm font-medium text-muted-foreground">
-                    {t("library.continueReading")}
-                  </h2>
-                  {/* One card fills the width; more peek in from the right and snap. */}
-                  <div
-                    data-shelf="recent"
-                    className="flex snap-x snap-mandatory gap-3 overflow-x-auto scroll-px-4 px-4 pb-2 no-scrollbar"
-                  >
-                    {recents.map((book) => (
-                      <div
-                        key={`recent-${book.id}`}
-                        className={cn("shrink-0 snap-start", recents.length > 1 ? "w-[85%]" : "w-full")}
-                      >
-                        <MobileResumeCard {...itemProps(book)} />
-                      </div>
-                    ))}
-                  </div>
-                </section>
+                <MobileContinueHero
+                  books={recents}
+                  actionsFor={actionsFor}
+                  coverRev={coverRev}
+                  openingBookId={openingBookId}
+                  disabled={importing}
+                />
               )}
               {view === "list" ? (
                 <div data-shelf="main" className="flex flex-col">

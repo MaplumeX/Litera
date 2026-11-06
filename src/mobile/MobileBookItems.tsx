@@ -1,4 +1,3 @@
-import { convertFileSrc } from "@tauri-apps/api/core";
 import { CloudOff, Star } from "lucide-react";
 import type { BookRecord } from "@/types/library";
 import { BookCoverImage } from "@/components/BookCard";
@@ -7,8 +6,7 @@ import {
   BookActionDropdown,
   type BookActionHandlers,
 } from "@/components/BookActionsMenu";
-import { paletteStyle, useCoverPalette } from "@/lib/cover-palette";
-import { progressPercent, withCoverRevision } from "@/lib/library-shelf";
+import { progressPercent } from "@/lib/library-shelf";
 import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { rememberCoverOrigin } from "@/mobile/page-transition";
@@ -31,7 +29,7 @@ export function useProgressCaption(book: BookRecord, opening: boolean): string {
   return pct ? t("mobile.readPct", { pct }) : t("mobile.notStarted");
 }
 
-function ProgressRail({
+export function ProgressRail({
   pct,
   className,
   onColor = false,
@@ -153,53 +151,6 @@ export function MobileBookRow({ book, actions, opening, disabled, coverRev }: Mo
         </button>
         <BookActionDropdown className="size-10 rounded-full [&_svg]:size-5" {...actions} />
       </div>
-    </BookActionContext>
-  );
-}
-
-/**
- * A "Continue reading" card: the Book you were in, big enough to tap
- * without looking, with where you left off.
- */
-export function MobileResumeCard({ book, actions, opening, disabled, coverRev }: MobileBookItemProps) {
-  const { t } = useT();
-  const pct = progressPercent(book.lastFraction) ?? 0;
-  const coverSrc = book.coverPath
-    ? withCoverRevision(convertFileSrc(book.coverPath), coverRev)
-    : null;
-  const palette = useCoverPalette(coverSrc, book.title);
-  return (
-    <BookActionContext {...actions}>
-      <button
-        type="button"
-        title={book.title}
-        style={paletteStyle(palette)}
-        className="cover-ambient flex w-full items-center gap-4 rounded-2xl p-3 text-left transition-transform duration-150 active:scale-[0.99] disabled:opacity-60 motion-reduce:transition-none"
-        onClick={(event) => {
-          rememberCoverOrigin(event.currentTarget);
-          actions.onOpen();
-        }}
-        disabled={opening || disabled}
-      >
-        <span
-          data-book-cover={book.id}
-          className="relative block h-24 w-16 shrink-0 overflow-hidden rounded-cover bg-muted shadow-cover"
-        >
-          <BookCoverImage book={book} coverRev={coverRev} small />
-        </span>
-        <span className="flex min-w-0 flex-1 flex-col self-stretch py-0.5">
-          <span className="line-clamp-2 text-[0.9375rem] leading-5 font-medium">{book.title}</span>
-          {book.author && (
-            <span className="mt-0.5 truncate text-[0.8125rem] text-white/75">{book.author}</span>
-          )}
-          <span className="mt-auto flex items-center gap-2 pt-2">
-            <ProgressRail pct={pct} className="flex-1" onColor />
-            <span className="shrink-0 text-xs text-white/85 tabular-nums">
-              {opening ? t("library.opening") : `${pct}%`}
-            </span>
-          </span>
-        </span>
-      </button>
     </BookActionContext>
   );
 }

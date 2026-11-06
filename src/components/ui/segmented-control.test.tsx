@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { SegmentedControl } from "@/components/ui/segmented-control";
+import { SegmentedControl, SegmentedSizeContext } from "@/components/ui/segmented-control";
 
 const OPTIONS = [
   { value: "off", label: "Off" },
@@ -37,5 +37,21 @@ describe("SegmentedControl", () => {
     fireEvent.keyDown(off, { key: "ArrowLeft" });
     fireEvent.keyDown(on, { key: " " });
     expect(onChange).toHaveBeenCalledWith("on");
+  });
+
+  it("takes its size from the context unless given one, and keeps arrow keys at touch size", () => {
+    const { getByRole } = render(
+      <SegmentedSizeContext.Provider value="touch">
+        <SegmentedControl value="off" options={OPTIONS} onChange={vi.fn()} ariaLabel="Sync" />
+        <SegmentedControl size="default" value="off" options={OPTIONS} onChange={vi.fn()} ariaLabel="Theme" />
+      </SegmentedSizeContext.Provider>,
+    );
+    const sync = getByRole("radiogroup", { name: "Sync" });
+    expect(sync.dataset.size).toBe("touch");
+    expect(getByRole("radiogroup", { name: "Theme" }).dataset.size).toBe("default");
+    const [off, on] = Array.from(sync.querySelectorAll<HTMLElement>("[role=radio]"));
+    off.focus();
+    fireEvent.keyDown(off, { key: "ArrowRight" });
+    expect(document.activeElement).toBe(on);
   });
 });
