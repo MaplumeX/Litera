@@ -13,6 +13,7 @@ import { importedFontFamilies, useImportedFonts } from "@/lib/imported-fonts";
 import { saveReaderFlow, type ReaderFlow } from "@/lib/reader-flow";
 import { useT, type MessageKey } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 
 /** Coarser than the desktop sliders: one tap should be a visible change. */
 const STEPPERS: { key: ContinuousKey; labelKey: MessageKey; step: number; digits: number }[] = [
@@ -26,41 +27,6 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
     <div className="flex min-h-12 items-center gap-4 px-6">
       <span className="w-12 shrink-0 text-sm text-muted-foreground">{label}</span>
       <div className="flex min-w-0 flex-1 justify-end">{children}</div>
-    </div>
-  );
-}
-
-function Segmented<T extends string>({
-  label,
-  value,
-  options,
-  onChange,
-}: {
-  label: string;
-  value: T;
-  options: { value: T; label: string }[];
-  onChange: (value: T) => void;
-}) {
-  return (
-    <div role="radiogroup" aria-label={label} className="flex w-full rounded-full bg-muted p-1">
-      {options.map((option) => {
-        const active = option.value === value;
-        return (
-          <button
-            key={option.value}
-            type="button"
-            role="radio"
-            aria-checked={active}
-            onClick={() => onChange(option.value)}
-            className={cn(
-              "h-9 min-w-0 flex-1 truncate rounded-full px-2 text-sm transition-colors motion-reduce:transition-none",
-              active ? "bg-background font-medium text-foreground shadow-soft" : "text-muted-foreground",
-            )}
-          >
-            {option.label}
-          </button>
-        );
-      })}
     </div>
   );
 }
@@ -251,8 +217,9 @@ export function ReaderQuickSettings({
             );
           })}
           <Row label={t("mobile.pageTurn")}>
-            <Segmented
-              label={t("mobile.pageTurn")}
+            <SegmentedControl
+              size="touch"
+              ariaLabel={t("mobile.pageTurn")}
               value={flow}
               options={[
                 { value: "paginated" as ReaderFlow, label: t("settings.flow.paginated") },

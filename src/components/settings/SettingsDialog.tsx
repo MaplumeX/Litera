@@ -36,7 +36,7 @@ import {
   CommandSeparator,
 } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { SegmentedControl } from "@/components/ui/segmented-control";
+import { SegmentedControl, SegmentedSizeContext } from "@/components/ui/segmented-control";
 import { NAV_ITEM_ACTIVE_CLASS, NAV_ITEM_CLASS, NAV_ITEM_IDLE_CLASS } from "@/components/ui/nav-item";
 import { Slider } from "@/components/ui/slider";
 import { AgentConfigForm } from "@/components/AgentConfigForm";
@@ -651,7 +651,7 @@ export function SettingsDialog({
     });
   }
 
-  return (
+  const dialog = (
     <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
       <DialogContent
         // On a section page Back goes to the list, not out: nothing to preview.
@@ -930,7 +930,7 @@ export function SettingsDialog({
                     />
                   </PresetRow>
                   <PresetRow inline label={t("settings.accent")}>
-                    <div role="radiogroup" aria-label={t("settings.accent")} className="flex gap-2 p-0.5">
+                    <div role="radiogroup" aria-label={t("settings.accent")} className={cn("flex p-0.5", page ? "gap-4" : "gap-2")}>
                       {UI_ACCENTS.map((option) => (
                         <button
                           key={option}
@@ -945,7 +945,9 @@ export function SettingsDialog({
                             applyUiAccent(option);
                           }}
                           className={cn(
-                            "size-5 rounded-full transition-transform duration-150 hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background motion-reduce:transition-none",
+                            // On the phone a 32px swatch, its 48dp touch target reaching past it.
+                            page ? "relative size-8 after:absolute after:-inset-2 after:content-['']" : "size-5",
+                            "rounded-full transition-transform duration-150 hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background motion-reduce:transition-none",
                             accent === option && "ring-2 ring-primary ring-offset-2 ring-offset-background",
                           )}
                         />
@@ -1104,5 +1106,10 @@ export function SettingsDialog({
         </div>
       </DialogContent>
     </Dialog>
+  );
+
+  // Phone Settings take touch-sized segmented controls, the Sync forms' included.
+  return (
+    <SegmentedSizeContext.Provider value={page ? "touch" : "default"}>{dialog}</SegmentedSizeContext.Provider>
   );
 }

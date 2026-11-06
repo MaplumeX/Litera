@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { BookOpen, Check, Info, Star, Trash2, type LucideIcon } from "lucide-react";
+import { BookOpen, Info, Star, Trash2, type LucideIcon } from "lucide-react";
 import type { BookRecord } from "@/types/library";
 import type { BookActionHandlers } from "@/components/BookActionsMenu";
 import { BookCoverImage } from "@/components/BookCard";
@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { AppBarIconButton } from "@/mobile/MobileAppBar";
 import { useProgressCaption } from "@/mobile/MobileBookItems";
 import { MobileSheet } from "@/mobile/MobileSheet";
+import { ChoiceChips } from "@/mobile/ChoiceChips";
 
 function ActionRow({
   icon: Icon,
@@ -116,33 +117,17 @@ function SheetBody({
       {actions.onChangeStatus && (
         <div className="border-t px-6 pt-3 pb-4">
           <h3 className="pb-2 text-xs font-medium text-muted-foreground">{t("library.fieldReadingStatus")}</h3>
-          <div role="radiogroup" aria-label={t("library.fieldReadingStatus")} className="flex flex-wrap gap-2">
-            {READING_STATUSES.map((status) => {
-              const active = status === book.readingStatus;
-              return (
-                <button
-                  key={status}
-                  type="button"
-                  role="radio"
-                  aria-checked={active}
-                  onClick={() => actions.onChangeStatus?.(status)}
-                  className={cn(
-                    "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border px-3 text-sm transition-colors motion-reduce:transition-none",
-                    active
-                      ? "border-transparent bg-primary/10 font-medium text-primary"
-                      : "border-border text-foreground/80 active:bg-foreground/5",
-                  )}
-                >
-                  {active ? (
-                    <Check className="size-4" aria-hidden />
-                  ) : (
-                    <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", statusDotClass(status))} />
-                  )}
-                  {t(STATUS_LABEL_KEYS[status])}
-                </button>
-              );
-            })}
-          </div>
+          <ChoiceChips
+            wrap
+            ariaLabel={t("library.fieldReadingStatus")}
+            value={book.readingStatus}
+            options={READING_STATUSES.map((status) => ({
+              value: status,
+              label: t(STATUS_LABEL_KEYS[status]),
+              dotClass: statusDotClass(status),
+            }))}
+            onChange={(status) => actions.onChangeStatus?.(status)}
+          />
         </div>
       )}
 

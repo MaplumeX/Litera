@@ -269,6 +269,55 @@
   content: none;
 }
 
+/* 阅读页的进度滑块：强调色的已读段、细轨道和圆形拇指，与书架封面上的进度条同一套样式。
+ * 已读比例由 --range-fill 传入（MobileReaderPage）。 */
+.reader-range {
+  appearance: none;
+  background: transparent;
+}
+.reader-range::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 9999px;
+  background: linear-gradient(to right, var(--primary) var(--range-fill, 0%), color-mix(in srgb, var(--foreground) 12%, transparent) var(--range-fill, 0%));
+}
+.reader-range::-webkit-slider-thumb {
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  margin-top: -8px;
+  border-radius: 9999px;
+  background: var(--primary);
+  box-shadow: 0 0 0 4px var(--page), 0 1px 4px rgb(0 0 0 / 25%);
+  transition: scale 150ms;
+}
+.reader-range:active::-webkit-slider-thumb {
+  scale: 1.15;
+}
+.reader-range:focus-visible {
+  outline: none;
+}
+.reader-range:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 4px var(--page), 0 0 0 6px var(--ring);
+}
+.reader-range::-moz-range-track {
+  height: 4px;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--foreground) 12%, transparent);
+}
+.reader-range::-moz-range-progress {
+  height: 4px;
+  border-radius: 9999px;
+  background: var(--primary);
+}
+.reader-range::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: 9999px;
+  background: var(--primary);
+  box-shadow: 0 0 0 4px var(--page), 0 1px 4px rgb(0 0 0 / 25%);
+}
+
 /* 横向滑动行（标签、书架卡片）：露出的半张卡片已提示可滑，不画滚动条。 */
 @utility no-scrollbar {
   scrollbar-width: none;
@@ -443,7 +492,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .cover-ambient {
+  .cover-ambient,
+  .reader-range::-webkit-slider-thumb {
     transition: none;
   }
   .reader-drawer-in {
@@ -597,6 +647,14 @@ html.mobile-ui,
     transition-timing-function: var(--ease-emphasized-accelerate);
     transition-duration: var(--motion-feedback);
   }
+}
+
+/* A page dialog opened or closed inside a view transition (Book details
+ * container transform): the transition moves it, so its own entrance and
+ * exit stand down, and on close it leaves at once for the new snapshot. */
+.mobile-ui[data-page-motion] .m-page-dialog.m-page-dialog[data-state],
+.mobile-ui[data-page-motion] .m-page-backdrop.m-page-backdrop[data-state] {
+  animation: none;
 }
 
 /* Page changes through the View Transitions API (src/mobile/page-transition.ts

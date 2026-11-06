@@ -198,7 +198,7 @@ export const AssistantSheet = forwardRef<ChatPanelHandle, AssistantSheetProps>(
           <div
             role="region"
             aria-label={t("mobile.assistantPeek")}
-            className="absolute inset-x-3 z-30 flex items-center gap-1 rounded-2xl border bg-card p-1 shadow-float transition-[bottom] duration-[var(--motion-feedback)] ease-[var(--ease-emphasized-decelerate)] m-rise motion-reduce:transition-none"
+            className="absolute inset-x-3 z-30 flex items-center gap-1 rounded-2xl bg-card p-1 shadow-float transition-[bottom] duration-[var(--motion-feedback)] ease-[var(--ease-emphasized-decelerate)] m-rise motion-reduce:transition-none"
             style={{ bottom: `calc(${peekOffset} + 0.5rem)` }}
           >
             <button
@@ -207,7 +207,7 @@ export const AssistantSheet = forwardRef<ChatPanelHandle, AssistantSheetProps>(
               aria-label={t("mobile.peekOpen")}
               className="flex min-h-12 min-w-0 flex-1 items-center gap-3 rounded-xl px-2 text-left active:bg-foreground/5"
             >
-              <span aria-hidden className="flex size-8 shrink-0 items-center justify-center rounded-full bg-secondary">
+              <span aria-hidden className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
                 {activity.answering ? (
                   <Loader2 className="size-4 animate-spin motion-reduce:animate-none" />
                 ) : activity.failed ? (

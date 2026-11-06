@@ -382,8 +382,11 @@ export default function MobileApp() {
   }, []);
 
   // The status and navigation bar icons follow the app's theme, not the
-  // system's: dark icons on a light page, light ones on a dark page.
-  const lightBars = session.resolvedTheme !== "dark";
+  // system's: dark icons on a light page, light ones on a dark page. Book
+  // details run their cover's dark colour up under the status bar, so light
+  // icons while they show.
+  const detailsShown = page === "library" && shelf.detailsBook !== null;
+  const lightBars = session.resolvedTheme !== "dark" && !detailsShown;
   useEffect(() => {
     void platformBridge.setSystemBarsLight(lightBars).catch((error: unknown) => {
       console.error("setSystemBarsLight failed:", error);

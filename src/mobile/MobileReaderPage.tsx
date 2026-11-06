@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import {
   ArrowLeft,
   BookmarkPlus,
@@ -64,7 +64,7 @@ function ToolbarTab({
       <span
         className={cn(
           "flex h-8 w-14 items-center justify-center rounded-full transition-colors motion-reduce:transition-none",
-          pressed && "bg-secondary text-foreground",
+          pressed && "bg-primary/10 text-primary",
         )}
       >
         <Icon className="size-[1.375rem]" aria-hidden />
@@ -138,7 +138,8 @@ function MobileProgressRow({ session }: { session: ReaderSession }) {
           onTouchEnd={commit}
           onKeyUp={commit}
           onBlur={commit}
-          className="h-12 min-w-0 flex-1 cursor-pointer accent-primary"
+          style={{ "--range-fill": `${fraction * 100}%` } as CSSProperties}
+          className="reader-range h-12 min-w-0 flex-1 cursor-pointer"
         />
         <button
           type="button"
@@ -354,7 +355,11 @@ export function MobileReaderPage({
             chapterLabel={session.chapterLabel}
             fraction={progress.fraction}
             ticks={session.chapterTicks}
-            className="pointer-events-none absolute inset-x-0 bottom-0 h-12 px-6 text-2xs text-muted-foreground/80"
+            className={cn(
+              "pointer-events-none absolute inset-x-0 bottom-0 h-12 px-6 text-2xs text-muted-foreground/80 transition-opacity motion-reduce:transition-none",
+              // The floating toolbar says the same and leaves the footer showing below it.
+              chromeVisible && "opacity-0",
+            )}
           />
         )}
         {session.kosync.prompt && (
@@ -382,11 +387,14 @@ export function MobileReaderPage({
             inert={!chromeVisible}
             data-shown={chromeVisible}
             className={cn(
-              "m-slide absolute inset-x-0 top-0 z-20 bg-page shadow-soft",
+              // No shadow: the bar takes the page's tone and fades into it below.
+              "m-slide absolute inset-x-0 top-0 z-20 bg-page",
+              "after:pointer-events-none after:absolute after:inset-x-0 after:top-full after:h-4 after:bg-linear-to-b after:from-page after:to-transparent",
               !chromeVisible && "invisible -translate-y-full",
             )}
           >
             <MobileAppBar
+              className="bg-transparent"
               navigation={
                 <AppBarIconButton label={t("reader.backToLibrary")} onClick={onBack}>
                   <ArrowLeft />
@@ -413,8 +421,9 @@ export function MobileReaderPage({
             inert={!chromeVisible}
             data-shown={chromeVisible}
             className={cn(
-              "m-slide absolute inset-x-0 bottom-0 z-20 bg-page pb-[var(--safe-bottom)] shadow-float",
-              !chromeVisible && "invisible translate-y-full",
+              // An island floating over the page, clear of the gesture bar.
+              "m-slide absolute inset-x-3 bottom-[calc(var(--safe-bottom)+0.75rem)] z-20 overflow-hidden rounded-3xl bg-page/90 shadow-float backdrop-blur-xl",
+              !chromeVisible && "invisible translate-y-[calc(100%+var(--safe-bottom)+0.75rem)]",
             )}
           >
             {/* The "Aa" settings stand in for the progress row, over the tabs. */}
@@ -468,7 +477,7 @@ export function MobileReaderPage({
           bookId={fileData.bookId}
           currentChapterHref={progress.chapterHref}
           onOpenQuote={handleOpenQuote}
-          peekOffset={chromeVisible ? `${bottomBarHeight}px` : undefined}
+          peekOffset={chromeVisible ? `calc(${bottomBarHeight}px + var(--safe-bottom) + 0.75rem)` : undefined}
           onGuideStepsChange={setGuideSteps}
         />
       )}
@@ -547,7 +556,7 @@ export function MobileReaderPage({
                   onClick={() => onPanelChange(tab.value)}
                   className={cn(
                     "h-10 min-w-0 truncate rounded-full px-4 text-[0.9375rem] transition-colors active:bg-foreground/5 motion-reduce:transition-none",
-                    drawerTab === tab.value ? "bg-secondary font-medium text-secondary-foreground" : "text-foreground/80",
+                    drawerTab === tab.value ? "bg-primary/10 font-medium text-primary" : "text-foreground/80",
                   )}
                 >
                   {tab.label}
