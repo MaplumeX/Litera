@@ -93,6 +93,8 @@ export function paletteStyle(palette: CoverPalette): Record<string, string> {
 }
 
 const cache = new Map<string, Promise<CoverPalette | null>>();
+/** Palettes already read, so a cover seen before paints its colour on the first frame. */
+const resolved = new Map<string, CoverPalette>();
 
 function readPalette(src: string): Promise<CoverPalette | null> {
   return new Promise((resolve) => {
@@ -130,11 +132,14 @@ export function useCoverPalette(src: string | null, fallbackText: string): Cover
   const [read, setRead] = useState<{ src: string; palette: CoverPalette } | null>(null);
 
   useEffect(() => {
-    if (!src) return;
+    if (!src || resolved.has(src)) return;
     let current = true;
     let pending = cache.get(src);
     if (!pending) {
-      pending = readPalette(src);
+      pending = readPalette(src).then((palette) => {
+        if (palette) resolved.set(src, palette);
+        return palette;
+      });
       cache.set(src, pending);
     }
     void pending.then((palette) => {
@@ -145,5 +150,9 @@ export function useCoverPalette(src: string | null, fallbackText: string): Cover
     };
   }, [src]);
 
+  if (src) {
+    const known = resolved.get(src);
+    if (known) return known;
+  }
   return read && read.src === src ? read.palette : paletteFromText(fallbackText);
 }

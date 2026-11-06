@@ -1,5 +1,5 @@
 import * as React from "react"
-import { Tooltip as TooltipPrimitive } from "radix-ui"
+import { Slot, Tooltip as TooltipPrimitive } from "radix-ui"
 
 import { cn } from "@/lib/utils"
 
@@ -64,6 +64,10 @@ function overflows(root: HTMLElement) {
  * and shows `label` on hover / keyboard focus. With `overflowOnly` the tip only
  * appears while the element's text is cut off (truncate / line-clamp), so rows
  * that show their full label stay quiet.
+ *
+ * Any other props, and a ref, pass through to the wrapped element, so a Tip can
+ * sit inside another `asChild` trigger (a context menu, say) without swallowing
+ * that trigger's handlers.
  */
 function Tip({
   label,
@@ -71,16 +75,33 @@ function Tip({
   align,
   overflowOnly = false,
   children,
+  ref,
+  ...passThrough
 }: {
   label: React.ReactNode
   side?: React.ComponentProps<typeof TooltipPrimitive.Content>["side"]
   align?: React.ComponentProps<typeof TooltipPrimitive.Content>["align"]
   overflowOnly?: boolean
   children: React.ReactElement
-}) {
+  ref?: React.Ref<HTMLElement>
+} & Omit<React.HTMLAttributes<HTMLElement>, "children">) {
   const [open, setOpen] = React.useState(false)
-  const triggerRef = React.useRef<HTMLElement>(null)
-  if (label == null || label === "") return children
+  const triggerRef = React.useRef<HTMLElement | null>(null)
+  const setTriggerRef = React.useCallback(
+    (node: HTMLElement | null) => {
+      triggerRef.current = node
+      if (typeof ref === "function") return ref(node)
+      if (ref) ref.current = node
+    },
+    [ref]
+  )
+  if (label == null || label === "") {
+    return (
+      <Slot.Root ref={ref} {...passThrough}>
+        {children}
+      </Slot.Root>
+    )
+  }
   return (
     <Tooltip
       open={open}
@@ -89,7 +110,11 @@ function Tip({
         setOpen(next)
       }}
     >
-      <TooltipTrigger asChild ref={triggerRef as React.Ref<HTMLButtonElement>}>
+      <TooltipTrigger
+        asChild
+        ref={setTriggerRef as React.Ref<HTMLButtonElement>}
+        {...(passThrough as React.HTMLAttributes<HTMLButtonElement>)}
+      >
         {children}
       </TooltipTrigger>
       <TooltipContent side={side} align={align}>
