@@ -554,6 +554,63 @@ describe("LibraryView", () => {
     expect(onOpenBook).toHaveBeenCalledWith("book-1");
   });
 
+  it("keeps a right-click menu on the smaller continue reading covers", async () => {
+    const latest: BookRecord = {
+      ...book,
+      id: "latest",
+      title: "Latest Book",
+      readingStatus: "reading",
+      lastOpenedAt: "2026-06-01T00:00:00+00:00",
+    };
+    const earlier: BookRecord = {
+      ...book,
+      id: "earlier",
+      title: "Earlier Book",
+      readingStatus: "reading",
+      lastOpenedAt: "2026-01-01T00:00:00+00:00",
+    };
+    localStorage.setItem(LIBRARY_SORT_KEY, "title");
+    setupInvoke({ list_books: () => [latest, earlier] });
+    const onOpenBook = vi.fn();
+    const { findByText, getByRole } = render(
+      <LibraryView onOpenBook={onOpenBook} onOpenSettings={() => {}} />,
+    );
+    const heading = await findByText("继续阅读");
+    const recents = heading.closest("section") as HTMLElement;
+    fireEvent.contextMenu(within(recents).getByRole("button", { name: "Earlier Book" }));
+    (await waitFor(() => getByRole("menuitem", { name: "打开" }))).click();
+    expect(onOpenBook).toHaveBeenCalledWith("earlier");
+  });
+
+  it("keeps the last read book in the continue reading card while another cover is hovered", async () => {
+    const latest: BookRecord = {
+      ...book,
+      id: "latest",
+      title: "Latest Book",
+      readingStatus: "reading",
+      lastOpenedAt: "2026-06-01T00:00:00+00:00",
+    };
+    const earlier: BookRecord = {
+      ...book,
+      id: "earlier",
+      title: "Earlier Book",
+      readingStatus: "reading",
+      lastOpenedAt: "2026-01-01T00:00:00+00:00",
+    };
+    setupInvoke({ list_books: () => [latest, earlier] });
+    const onOpenBook = vi.fn();
+    const { findByText } = render(
+      <LibraryView onOpenBook={onOpenBook} onOpenSettings={() => {}} />,
+    );
+    const heading = await findByText("继续阅读");
+    const recents = heading.closest("section") as HTMLElement;
+    const other = within(recents).getByRole("button", { name: "Earlier Book" });
+    fireEvent.pointerEnter(other);
+    fireEvent.focus(other);
+    within(recents).getByRole("button", { name: "继续" }).click();
+    expect(onOpenBook).toHaveBeenCalledWith("latest");
+  });
+
   it("reorders the main list when sort changes without moving continue reading", async () => {
     const alpha: BookRecord = {
       ...book,
