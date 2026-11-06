@@ -37,6 +37,7 @@ import { MobileBookRow, MobileBookTile } from "@/mobile/MobileBookItems";
 import { MobileContinueHero } from "@/mobile/MobileContinueHero";
 import { MobileBookActionSheet } from "@/mobile/MobileBookActionSheet";
 import { ChoiceChips } from "@/mobile/ChoiceChips";
+import { bookCover, transitionPage } from "@/mobile/page-transition";
 
 interface MobileLibraryPageProps {
   shelf: LibraryShelf;
@@ -148,10 +149,31 @@ export function MobileLibraryPage({
     if (searchOpen) searchRef.current?.focus();
   }, [searchOpen]);
 
+  // Details open as a page that grows out of the Book's cover and shrinks back into it.
+  const detailsCover = (bookId: string) =>
+    document.querySelector(`[data-details-cover="${CSS.escape(bookId)}"]`);
+  const openDetails = (book: BookRecord) =>
+    void transitionPage({
+      motion: "open",
+      commit: () => shelf.setDetailsBook(book),
+      sharedFrom: () => bookCover(book.id),
+      sharedTo: () => detailsCover(book.id),
+    });
+  const closeDetails = () => {
+    const book = shelf.detailsBook;
+    if (!book) return;
+    void transitionPage({
+      motion: "close",
+      commit: () => shelf.setDetailsBook(null),
+      sharedFrom: () => detailsCover(book.id),
+      sharedTo: () => bookCover(book.id),
+    });
+  };
+
   const actionsFor = (book: BookRecord) =>
     bookActions(book, {
       onOpen: onOpenBook,
-      onDetails: shelf.setDetailsBook,
+      onDetails: openDetails,
       onDelete: shelf.handleDelete,
       deleteDisabled: busy,
       onToggleStar: (target) => void shelf.handleToggleStar(target),
@@ -384,13 +406,23 @@ export function MobileLibraryPage({
       />
 
       <BookDetailsDialog
+        layout="page"
         book={shelf.detailsBook}
         coverRev={shelf.detailsBook ? coverRev[shelf.detailsBook.id] : undefined}
         open={shelf.detailsBook !== null}
         onOpenChange={(open) => {
-          if (!open) shelf.setDetailsBook(null);
+          if (!open) closeDetails();
         }}
         onSaved={shelf.handleDetailsSaved}
+        onOpen={
+          shelf.detailsBook
+            ? () => {
+                const bookId = shelf.detailsBook?.id;
+                shelf.setDetailsBook(null);
+                if (bookId) void onOpenBook(bookId);
+              }
+            : undefined
+        }
       />
     </div>
   );

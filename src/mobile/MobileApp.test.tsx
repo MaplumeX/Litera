@@ -386,6 +386,51 @@ describe("MobileApp — navigation", () => {
     );
   });
 
+  it("opens Book details as a page with light status bar icons, saves from its bar, and Back closes it", async () => {
+    const screen = await renderApp();
+    const shelf = screen.container.querySelector('[data-shelf="main"]') as HTMLElement;
+    const openDetails = async () => {
+      fireEvent.contextMenu(within(shelf).getAllByTitle("第一本书")[0]);
+      const sheet = await screen.findByRole("dialog", { name: t("mobile.bookActions", { title: "第一本书" }) });
+      fireEvent.click(within(sheet).getByRole("button", { name: t("library.details") }));
+      return screen.findByRole("dialog", { name: t("library.detailsTitle") });
+    };
+
+    let details = await openDetails();
+    await waitFor(() => expect(bridge.api.setSystemBarsLight).toHaveBeenLastCalledWith(false));
+    expect(within(details).getByRole("button", { name: t("mobile.startReading") })).toBeTruthy();
+
+    await back();
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: t("library.detailsTitle") })).toBeNull());
+    await waitFor(() => expect(bridge.api.setSystemBarsLight).toHaveBeenLastCalledWith(true));
+
+    const base = invokeMock.getMockImplementation();
+    invokeMock.mockImplementation((cmd: string, args?: Record<string, unknown>) =>
+      cmd === "update_book_metadata" ? Promise.resolve({ ...books[0], title: args?.title }) : base?.(cmd, args),
+    );
+    details = await openDetails();
+    fireEvent.change(within(details).getByLabelText(t("library.fieldTitle")), { target: { value: "新书名" } });
+    await act(async () => {
+      fireEvent.click(within(details).getByRole("button", { name: t("common.save") }));
+    });
+    expect(calls("update_book_metadata")[0][1]).toMatchObject({ bookId: "book1", title: "新书名" });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: t("library.detailsTitle") })).toBeNull());
+  });
+
+  it("opens the Book from its details page", async () => {
+    const screen = await renderApp();
+    const shelf = screen.container.querySelector('[data-shelf="main"]') as HTMLElement;
+    fireEvent.contextMenu(within(shelf).getAllByTitle("第一本书")[0]);
+    const sheet = await screen.findByRole("dialog", { name: t("mobile.bookActions", { title: "第一本书" }) });
+    fireEvent.click(within(sheet).getByRole("button", { name: t("library.details") }));
+    const details = await screen.findByRole("dialog", { name: t("library.detailsTitle") });
+    await act(async () => {
+      fireEvent.click(within(details).getByRole("button", { name: t("mobile.startReading") }));
+    });
+    await waitFor(() => expect(screen.getByTestId("reader-view")).toBeTruthy());
+    expect(screen.queryByRole("dialog", { name: t("library.detailsTitle") })).toBeNull();
+  });
+
   it("opens Reading stats from the menu, and Back returns to the Library", async () => {
     const screen = await renderApp();
     fireEvent.pointerDown(screen.getByRole("button", { name: t("mobile.menu") }));

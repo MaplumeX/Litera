@@ -649,6 +649,14 @@ html.mobile-ui,
   }
 }
 
+/* A page dialog opened or closed inside a view transition (Book details
+ * container transform): the transition moves it, so its own entrance and
+ * exit stand down, and on close it leaves at once for the new snapshot. */
+.mobile-ui[data-page-motion] .m-page-dialog.m-page-dialog[data-state],
+.mobile-ui[data-page-motion] .m-page-backdrop.m-page-backdrop[data-state] {
+  animation: none;
+}
+
 /* Page changes through the View Transitions API (src/mobile/page-transition.ts
  * sets data-page-motion on <html> for the length of one). Material 3's
  * shared X axis and container transform. Old and new pictures overlap so
