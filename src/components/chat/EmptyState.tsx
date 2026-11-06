@@ -26,7 +26,7 @@ export function EmptyState({ hasSelection, bookReady, guided = false, onSuggesti
   if (guided) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-4 px-6 py-8 text-center">
-        <BookOpen className="h-5 w-5 text-muted-foreground" aria-hidden="true" />
+        <span aria-hidden="true" className="flex size-10 items-center justify-center rounded-xl bg-primary/10 text-primary"><BookOpen className="size-5" /></span>
         <div>
           <h3 className="text-sm font-semibold">{t("chat.guide.emptyTitle")}</h3>
           <p className="mt-1 max-w-80 text-sm text-muted-foreground">{t("chat.guide.emptySubtitle")}</p>
@@ -37,7 +37,7 @@ export function EmptyState({ hasSelection, bookReady, guided = false, onSuggesti
   const suggestionKeys = hasSelection ? SELECTION_SUGGESTIONS : bookReady ? BOOK_SUGGESTIONS : [];
   return (
     <div className="flex h-full flex-col items-center justify-center gap-4 px-6 py-8 text-center">
-      <Bot className="h-5 w-5 text-muted-foreground" aria-hidden="true" />
+      <span aria-hidden="true" className="flex size-10 items-center justify-center rounded-xl bg-primary/10 text-primary"><Bot className="size-5" /></span>
       <div>
         <h3 className="text-sm font-semibold">{t("chat.title")}</h3>
         <p className="mt-1 text-sm text-muted-foreground">
@@ -51,7 +51,7 @@ export function EmptyState({ hasSelection, bookReady, guided = false, onSuggesti
               key={key}
               variant="outline"
               size="sm"
-              className="justify-start"
+              className="h-auto justify-start rounded-xl py-1.5 text-left font-normal whitespace-normal"
               onClick={() => onSuggestion(t(key))}
             >
               {t(key)}

@@ -32,11 +32,11 @@ describe("SelectionToolbar", () => {
       "用粉色高亮",
       "用橙色高亮",
       "复制",
-      "问 agent",
+      "问 Agent",
     ]);
     fireEvent.click(getByLabelText("用蓝色高亮"));
     fireEvent.click(getByLabelText("复制"));
-    fireEvent.click(getByText("问 agent"));
+    fireEvent.click(getByText("问 Agent"));
     expect(onHighlight).toHaveBeenCalledWith("blue");
     expect(onCopy).toHaveBeenCalledOnce();
     expect(onAskAgent).toHaveBeenCalledOnce();

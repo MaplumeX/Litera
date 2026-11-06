@@ -26,6 +26,22 @@ export const STATUS_LABEL_KEYS: Record<ReadingStatus, MessageKey> = {
   finished: "library.status.finished",
 };
 
+export function statusDotClass(status: ReadingStatus): string {
+  return (STATUS_TONES[status] ?? STATUS_TONES.unread).dot;
+}
+
+/** A status in a menu: its dot and name, and a check on the current one. */
+export function StatusMenuRow({ status, current }: { status: ReadingStatus; current?: ReadingStatus }) {
+  const { t } = useT();
+  return (
+    <>
+      <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", statusDotClass(status))} />
+      {t(STATUS_LABEL_KEYS[status])}
+      <Check className={cn("ml-auto size-4 text-primary", status === current ? "opacity-100" : "opacity-0")} />
+    </>
+  );
+}
+
 /** Each status's chip tint and dot, kept low-chroma so the chip never outweighs the title. */
 const STATUS_TONES: Record<ReadingStatus, { chip: string; dot: string }> = {
   unread: {
@@ -33,16 +49,16 @@ const STATUS_TONES: Record<ReadingStatus, { chip: string; dot: string }> = {
     dot: "border border-muted-foreground/60",
   },
   reading: {
-    chip: "bg-primary/[0.06] text-foreground/75 ring-primary/15",
-    dot: "bg-primary/70",
+    chip: "bg-primary/10 text-primary ring-primary/20",
+    dot: "bg-primary",
   },
   paused: {
-    chip: "bg-amber-500/10 text-amber-800 ring-amber-600/20 dark:text-amber-300 dark:ring-amber-400/20",
-    dot: "bg-amber-500",
+    chip: "bg-warning/10 text-warning ring-warning/20",
+    dot: "bg-warning",
   },
   finished: {
-    chip: "bg-emerald-600/10 text-emerald-800 ring-emerald-700/20 dark:text-emerald-300 dark:ring-emerald-400/20",
-    dot: "bg-emerald-600 dark:bg-emerald-400",
+    chip: "bg-success/10 text-success ring-success/20",
+    dot: "bg-success",
   },
 };
 
@@ -93,7 +109,7 @@ export function BookStatusMenu({
           }}
           aria-label={`${t("library.fieldReadingStatus")}: ${currentLabel}`}
           className={cn(
-            "inline-flex h-5 max-w-full items-center gap-1 rounded-full px-2 text-[11px] font-medium leading-none tracking-wide ring-1 ring-inset transition-[filter,opacity] hover:brightness-95 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:hover:brightness-110",
+            "inline-flex h-5 max-w-full items-center gap-1 rounded-full px-2 text-2xs font-medium leading-none tracking-wide ring-1 ring-inset transition-[filter,opacity] hover:brightness-95 motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:hover:brightness-110",
             tone.chip,
             quiet &&
               "opacity-0 group-hover:opacity-100 focus-visible:opacity-100 data-[state=open]:opacity-100",
@@ -112,10 +128,7 @@ export function BookStatusMenu({
       >
         {READING_STATUSES.map((status) => (
           <DropdownMenuItem key={status} onSelect={() => onChange(status)}>
-            <Check
-              className={cn("size-4", status === current ? "opacity-100" : "opacity-0")}
-            />
-            {t(STATUS_LABEL_KEYS[status])}
+            <StatusMenuRow status={status} current={current} />
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>

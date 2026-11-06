@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { CircleAlert } from "lucide-react";
+import { CircleAlert, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -40,9 +40,9 @@ export function Notice({
     <div
       role={tone === "error" ? "alert" : "status"}
       className={cn(
-        "m-rise pointer-events-auto flex items-center gap-2 rounded-lg py-1.5 pl-4 text-sm shadow-float",
+        "m-rise pointer-events-auto flex items-center gap-2 rounded-xl py-1.5 pl-4 text-sm shadow-float",
         action || onDismiss ? "pr-1.5" : "pr-4",
-        snackbar ? "bg-foreground text-background" : "border bg-popover text-popover-foreground",
+        snackbar ? "bg-foreground text-background" : "bg-popover text-popover-foreground",
       )}
     >
       {tone === "error" && !snackbar && (
@@ -55,11 +55,22 @@ export function Notice({
           {action.label}
         </Button>
       )}
-      {onDismiss && (
-        <Button size="sm" variant="ghost" className={ghost} onClick={onDismiss}>
-          {t("common.close")}
-        </Button>
-      )}
+      {onDismiss &&
+        (snackbar ? (
+          <Button size="sm" variant="ghost" className={ghost} onClick={onDismiss}>
+            {t("common.close")}
+          </Button>
+        ) : (
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            className="text-muted-foreground"
+            aria-label={t("common.close")}
+            onClick={onDismiss}
+          >
+            <X />
+          </Button>
+        ))}
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { invokeErrorMessage } from "@/lib/app-error";
 import { useT } from "@/lib/i18n";
 import { formatLibraryTimestamp } from "@/lib/library-shelf";
@@ -111,13 +112,9 @@ export function KosyncSettingsForm() {
   }
 
   const fieldClass = "h-8 w-full";
-  const segment = (active: boolean) =>
-    active
-      ? "rounded-sm border border-border bg-background px-3 py-1 text-xs"
-      : "rounded-sm border border-transparent px-3 py-1 text-xs text-muted-foreground";
 
   return (
-    <div className="max-w-md space-y-5">
+    <div className="space-y-5">
       <div className="space-y-1">
         <div className="text-sm font-medium">{t("settings.kosync.title")}</div>
         <p className="text-xs text-muted-foreground">{t("settings.kosync.description")}</p>
@@ -127,26 +124,16 @@ export function KosyncSettingsForm() {
         <div className="text-xs font-medium text-muted-foreground">
           {t("settings.kosync.enable")}
         </div>
-        <div className="inline-flex rounded-md bg-muted p-0.5">
-          <button
-            type="button"
-            role="radio"
-            aria-checked={!draft.enabled}
-            onClick={() => patch({ enabled: false })}
-            className={segment(!draft.enabled)}
-          >
-            {t("settings.override.off")}
-          </button>
-          <button
-            type="button"
-            role="radio"
-            aria-checked={draft.enabled}
-            onClick={() => patch({ enabled: true })}
-            className={segment(draft.enabled)}
-          >
-            {t("settings.override.on")}
-          </button>
-        </div>
+        <SegmentedControl
+          fullWidth={false}
+          ariaLabel={t("settings.kosync.enable")}
+          value={draft.enabled ? "on" : "off"}
+          options={[
+            { value: "off", label: t("settings.override.off") },
+            { value: "on", label: t("settings.override.on") },
+          ]}
+          onChange={(next) => patch({ enabled: next === "on" })}
+        />
       </div>
 
       <div className="space-y-3">
@@ -161,7 +148,7 @@ export function KosyncSettingsForm() {
             onChange={(event) => patch({ serverUrl: event.target.value })}
             placeholder="https://sync.koreader.rocks"
           />
-          <span className="block text-[11px] text-muted-foreground/80">
+          <span className="block text-2xs text-muted-foreground/80">
             {t("settings.kosync.serverUrl.hint")}
           </span>
         </label>
@@ -188,7 +175,7 @@ export function KosyncSettingsForm() {
             onChange={(event) => patch({ password: event.target.value })}
           />
           {loaded && hasStoredKey && !draft.password && (
-            <span className="block text-[11px] text-muted-foreground">
+            <span className="block text-2xs text-muted-foreground">
               {t("settings.kosync.password.configured")}
             </span>
           )}
@@ -212,7 +199,7 @@ export function KosyncSettingsForm() {
       </div>
 
       {testSuccess && (
-        <p className="text-xs text-green-600 dark:text-green-400">
+        <p className="text-xs text-success">
           {t("settings.sync.test.success")}
         </p>
       )}

@@ -1,10 +1,11 @@
-import { useState, type KeyboardEvent } from "react";
+import { useMemo, useState, type KeyboardEvent } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { ArrowDown, ArrowUp, Check, CloudOff, Star } from "lucide-react";
 import type { BookRecord, ReadingStatus } from "@/types/library";
 import { BookStatusMenu } from "@/components/BookStatusMenu";
 import { Tip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { paletteFromText, paletteStyle } from "@/lib/cover-palette";
 import { useT, type MessageKey } from "@/lib/i18n";
 import {
   formatLibraryTimestamp,
@@ -53,35 +54,34 @@ export function BookCoverImage({
 }: {
   book: BookRecord;
   coverRev?: number;
-  /** Thumbnail slot: the initial-letter fallback scales down to fit. */
+  /** Thumbnail slot: the generated fallback shows only the initial. */
   small?: boolean;
 }) {
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
   const src = book.coverPath ? coverUrl(book.coverPath, coverRev) : null;
   const showCover = src && failedSrc !== src;
-  const initial = book.title.charAt(0) || "?";
+  const generatedStyle = useMemo(() => paletteStyle(paletteFromText(book.title)), [book.title]);
 
-  if (showCover) {
-    return (
-      <img
-        src={src}
-        alt={book.title}
-        className="h-full w-full object-cover"
-        onError={() => setFailedSrc(src)}
-      />
-    );
-  }
   return (
-    <div className="flex h-full w-full items-center justify-center bg-muted">
-      <span
-        className={cn(
-          "font-medium text-muted-foreground/40",
-          small ? "text-sm" : "text-4xl",
-        )}
-      >
-        {initial}
-      </span>
-    </div>
+    <>
+      {showCover ? (
+        <img
+          src={src}
+          alt={book.title}
+          className="h-full w-full object-cover"
+          onError={() => setFailedSrc(src)}
+        />
+      ) : (
+        <div
+          className="generated-cover"
+          style={generatedStyle}
+          data-small={small}
+          data-title={small ? book.title.charAt(0) || "?" : book.title || "?"}
+          data-author={book.author}
+        />
+      )}
+      {!small && <span aria-hidden className="cover-sheen" />}
+    </>
   );
 }
 
@@ -155,7 +155,7 @@ export function BookCard({
         <button
           type="button"
           className={cn(
-            "relative aspect-[2/3] w-full overflow-hidden rounded-cover bg-muted shadow-cover transition-[box-shadow,transform,opacity] duration-200 hover:shadow-cover-hover active:scale-[0.98] motion-reduce:transition-none motion-reduce:active:scale-100",
+            "relative aspect-[2/3] w-full overflow-hidden rounded-cover bg-muted shadow-cover transition-[box-shadow,transform,translate,opacity] duration-200 hover:-translate-y-[3px] hover:shadow-cover-hover active:scale-[0.98] motion-reduce:transition-none motion-reduce:hover:translate-y-0 motion-reduce:active:scale-100",
             selectMode && selected && "ring-2 ring-primary ring-offset-2 ring-offset-background",
           )}
           onClick={(e) => {
@@ -187,13 +187,13 @@ export function BookCard({
           )}
           {pct != null && !opening && (
             <>
-              <span className="absolute inset-x-0 bottom-0 h-0.5 bg-foreground/15">
+              <span className="absolute inset-x-0 bottom-0 h-[3px] bg-black/25">
                 <span
                   className="block h-full bg-primary"
                   style={{ width: `${pct}%` }}
                 />
               </span>
-              <span className="absolute bottom-1.5 right-1.5 rounded-sm bg-background/80 px-1 py-px text-[10px] font-medium tabular-nums text-foreground/80 opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-within:opacity-100 motion-reduce:transition-none">
+              <span className="absolute bottom-1.5 right-1.5 rounded-sm bg-background/80 px-1 py-px text-2xs font-medium tabular-nums text-foreground/80 opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-within:opacity-100 motion-reduce:transition-none">
                 {pct}%
               </span>
             </>
@@ -221,7 +221,7 @@ export function BookCard({
       {!selectMode && (
         <div className="absolute right-1 top-1 z-10 opacity-0 transition-opacity duration-200 group-hover:opacity-100 has-[:focus-visible]:opacity-100 has-[[data-state=open]]:opacity-100 motion-reduce:transition-none">
           <BookActionDropdown
-            className="h-6 w-6 border border-border/80 bg-background"
+            className="size-6 rounded-md bg-black/55 text-white backdrop-blur-md hover:bg-black/75 hover:text-white dark:hover:bg-black/75"
             {...actions}
           />
         </div>
@@ -229,16 +229,16 @@ export function BookCard({
 
       <div className="px-1">
         <div className="flex items-start gap-1">
-          <p className="line-clamp-2 min-h-[2.5em] min-w-0 flex-1 text-sm font-medium leading-tight">
+          <p className="min-w-0 flex-1 truncate text-sm font-medium leading-5">
             {book.title}
           </p>
           {!selectMode && onToggleStar && (
             <button
               type="button"
               className={cn(
-                "shrink-0 rounded-sm p-0.5 text-muted-foreground transition-[color,opacity] hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring motion-reduce:transition-none",
+                "shrink-0 rounded-sm p-0.5 text-muted-foreground transition-[color,opacity] hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none",
                 starred
-                  ? "text-foreground"
+                  ? "text-star hover:text-star"
                   : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100",
               )}
               aria-label={t(starred ? "library.unstar" : "library.star")}
@@ -351,7 +351,7 @@ export function BookListHeader({
         type="button"
         data-sort-column={key}
         className={cn(
-          "inline-flex items-center gap-0.5 rounded-sm hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+          "inline-flex items-center gap-0.5 rounded-sm hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
           active && "text-foreground",
         )}
         onClick={() => {
@@ -373,7 +373,7 @@ export function BookListHeader({
   };
 
   return (
-    <div className="sticky top-0 z-10 flex h-8 items-center gap-3 border-b bg-background px-2 text-xs text-muted-foreground">
+    <div className="sticky top-14 z-10 flex h-8 items-center gap-3 border-b bg-background px-2 text-xs text-muted-foreground">
       <div className="flex min-w-0 flex-1 items-center gap-3">
         {selectMode && <span className={LIST_COLUMNS.select} />}
         <span className={LIST_COLUMNS.cover} />
@@ -454,14 +454,14 @@ export function BookListRow({
     <div
       data-book-row
       className={cn(
-        "group flex items-center gap-3 rounded-md px-2 py-1.5 transition-colors hover:bg-muted/70 motion-reduce:transition-none",
+        "group flex items-center gap-3 rounded-lg px-2 py-1.5 transition-colors hover:bg-muted/70 motion-reduce:transition-none",
         selectMode && selected && "ring-1 ring-primary",
       )}
     >
       <button
         type="button"
         data-row-main
-        className="flex min-w-0 flex-1 scroll-mt-10 items-center gap-3 rounded-sm text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        className="flex min-w-0 flex-1 scroll-mt-24 items-center gap-3 rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         onClick={(e) => {
           if (selectMode) {
             if (e.shiftKey && onSelectRange) onSelectRange(book.id);
@@ -572,9 +572,9 @@ export function BookListRow({
           <button
             type="button"
             className={cn(
-              "shrink-0 rounded-sm p-1 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+              "shrink-0 rounded-sm p-1 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
               starred
-                ? "text-foreground"
+                ? "text-star hover:text-star"
                 : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100",
             )}
             aria-label={t(starred ? "library.unstar" : "library.star")}
@@ -591,78 +591,4 @@ export function BookListRow({
 
   if (selectMode) return row;
   return <BookActionContext {...actions}>{row}</BookActionContext>;
-}
-
-/**
- * A Continue reading tile: the cover and the progress to resume from. It is
- * never shown in select mode, so it carries no selection state.
- */
-export function BookResumeTile({
-  book,
-  onOpen,
-  onDelete,
-  onDetails,
-  onToggleStar,
-  onChangeStatus,
-  opening = false,
-  deleteDisabled = false,
-  openDisabled = false,
-  onEnterSelect,
-  coverRev,
-}: BookCardProps) {
-  const { t } = useT();
-  const pct = progressPercent(book.lastFraction);
-  const actions = bookActions(book, {
-    onOpen,
-    onDetails,
-    onDelete,
-    deleteDisabled,
-    onToggleStar,
-    onChangeStatus,
-    onEnterSelect,
-  });
-
-  return (
-    <BookActionContext {...actions}>
-      <div className="group relative w-24 shrink-0">
-        <Tip label={book.title}>
-          <button
-            type="button"
-            aria-label={book.title}
-            className="flex w-full flex-col gap-1.5 text-left disabled:opacity-60"
-            onClick={() => {
-              void onOpen(book.id);
-            }}
-            disabled={opening || openDisabled}
-          >
-            <span className="block aspect-[2/3] w-full overflow-hidden rounded-cover bg-muted shadow-cover transition-[box-shadow,transform] duration-200 group-hover:shadow-cover-hover group-active:scale-[0.98] motion-reduce:transition-none motion-reduce:group-active:scale-100">
-              <BookCoverImage book={book} coverRev={coverRev} />
-            </span>
-            <span className="block truncate text-xs font-medium">{book.title}</span>
-            <span className="flex items-center gap-1.5">
-              <span className="h-0.5 flex-1 overflow-hidden rounded-full bg-foreground/10">
-                <span
-                  className="block h-full bg-primary"
-                  style={{ width: `${pct ?? 0}%` }}
-                />
-              </span>
-              <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
-                {opening
-                  ? t("library.opening")
-                  : pct == null
-                    ? t("library.noProgress")
-                    : `${pct}%`}
-              </span>
-            </span>
-          </button>
-        </Tip>
-        <div className="absolute right-1 top-1 z-10 opacity-0 transition-opacity duration-200 group-hover:opacity-100 has-[:focus-visible]:opacity-100 has-[[data-state=open]]:opacity-100 motion-reduce:transition-none">
-          <BookActionDropdown
-            className="h-6 w-6 border border-border/80 bg-background"
-            {...actions}
-          />
-        </div>
-      </div>
-    </BookActionContext>
-  );
 }

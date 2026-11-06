@@ -6,7 +6,15 @@ import {
   type ReactNode,
 } from "react";
 import { Slot } from "radix-ui";
-import { Check, EllipsisVertical } from "lucide-react";
+import {
+  BookOpen,
+  Bookmark,
+  CircleCheck,
+  Ellipsis,
+  Info,
+  Star,
+  Trash2,
+} from "lucide-react";
 import type { ReadingStatus } from "@/types/library";
 import { Button } from "@/components/ui/button";
 import {
@@ -29,10 +37,7 @@ import {
   ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
-import {
-  READING_STATUSES,
-  STATUS_LABEL_KEYS,
-} from "@/components/BookStatusMenu";
+import { READING_STATUSES, StatusMenuRow } from "@/components/BookStatusMenu";
 import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
@@ -93,6 +98,8 @@ const CONTEXT_PARTS: MenuParts = {
 const BookActionSheetContext = createContext<((actions: BookActionHandlers) => void) | null>(null);
 export const BookActionSheetProvider = BookActionSheetContext.Provider;
 
+const MENU_ICON_CLASS = "text-muted-foreground";
+
 function BookActionItems({
   parts: { Item, Separator, Sub, SubTrigger, SubContent },
   onOpen,
@@ -108,17 +115,20 @@ function BookActionItems({
   const { t } = useT();
   return (
     <>
-      <Item onSelect={onOpen}>{t("library.open")}</Item>
+      <Item onSelect={onOpen}>
+        <BookOpen aria-hidden className={MENU_ICON_CLASS} />
+        {t("library.open")}
+      </Item>
       {onChangeStatus && (
         <Sub>
-          <SubTrigger>{t("library.fieldReadingStatus")}</SubTrigger>
+          <SubTrigger>
+            <Bookmark aria-hidden className={MENU_ICON_CLASS} />
+            {t("library.fieldReadingStatus")}
+          </SubTrigger>
           <SubContent>
             {READING_STATUSES.map((status) => (
               <Item key={status} onSelect={() => onChangeStatus(status)}>
-                <Check
-                  className={cn("size-4", status === readingStatus ? "opacity-100" : "opacity-0")}
-                />
-                {t(STATUS_LABEL_KEYS[status])}
+                <StatusMenuRow status={status} current={readingStatus} />
               </Item>
             ))}
           </SubContent>
@@ -126,13 +136,23 @@ function BookActionItems({
       )}
       {onToggleStar && (
         <Item onSelect={onToggleStar}>
+          <Star aria-hidden className={cn(MENU_ICON_CLASS, starred && "fill-star text-star")} />
           {t(starred ? "library.unstar" : "library.star")}
         </Item>
       )}
-      <Item onSelect={onDetails}>{t("library.details")}</Item>
-      {onSelect && <Item onSelect={onSelect}>{t("library.select")}</Item>}
+      <Item onSelect={onDetails}>
+        <Info aria-hidden className={MENU_ICON_CLASS} />
+        {t("library.details")}
+      </Item>
+      {onSelect && (
+        <Item onSelect={onSelect}>
+          <CircleCheck aria-hidden className={MENU_ICON_CLASS} />
+          {t("library.select")}
+        </Item>
+      )}
       <Separator />
       <Item variant="destructive" onSelect={onDelete} disabled={deleteDisabled}>
+        <Trash2 aria-hidden />
         {t("library.deleteEllipsis")}
       </Item>
     </>
@@ -158,7 +178,7 @@ export function BookActionDropdown({
           openSheet(handlers);
         }}
       >
-        <EllipsisVertical />
+        <Ellipsis />
       </Button>
     );
   }
@@ -172,10 +192,10 @@ export function BookActionDropdown({
           className={cn("text-muted-foreground hover:text-foreground", className)}
           aria-label={t("library.actions")}
         >
-          <EllipsisVertical />
+          <Ellipsis />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
+      <DropdownMenuContent align="end" className="min-w-44">
         <BookActionItems parts={DROPDOWN_PARTS} {...handlers} />
       </DropdownMenuContent>
     </DropdownMenu>
@@ -202,7 +222,7 @@ export function BookActionContext({
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
-      <ContextMenuContent>
+      <ContextMenuContent className="min-w-44">
         <BookActionItems parts={CONTEXT_PARTS} {...handlers} />
       </ContextMenuContent>
     </ContextMenu>

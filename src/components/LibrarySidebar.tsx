@@ -13,6 +13,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { STATUS_OPTIONS } from "@/components/LibraryShelfToolbar";
+import { NAV_ITEM_ACTIVE_CLASS, NAV_ITEM_CLASS, NAV_ITEM_IDLE_CLASS } from "@/components/ui/nav-item";
 import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import type { LibraryStatusFilter } from "@/lib/library-shelf";
@@ -26,11 +27,6 @@ const FILTER_ICONS: Record<LibraryStatusFilter, LucideIcon> = {
   starred: Star,
 };
 
-const ITEM_CLASS =
-  "flex h-8 w-full items-center gap-2.5 rounded-md px-2.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-sidebar-ring disabled:pointer-events-none disabled:opacity-50 motion-reduce:transition-none";
-
-const IDLE_ITEM_CLASS =
-  "text-sidebar-foreground/75 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground";
 
 interface LibrarySidebarProps {
   statusFilter: LibraryStatusFilter;
@@ -97,7 +93,7 @@ export function LibrarySidebar({
       {header}
       <nav
         aria-label={t("library.statusFilter")}
-        className={cn("min-h-0 flex-1 overflow-y-auto p-2", header && "pt-1")}
+        className={cn("flex min-h-0 flex-1 flex-col gap-px overflow-y-auto p-2", header && "pt-1")}
       >
         {STATUS_OPTIONS.map((option) => {
           const active = !statsActive && option.value === statusFilter;
@@ -111,15 +107,15 @@ export function LibrarySidebar({
               aria-current={active ? "page" : undefined}
               onClick={() => onStatusFilterChange(option.value)}
               className={cn(
-                ITEM_CLASS,
+                NAV_ITEM_CLASS,
                 // Starred is orthogonal to Reading status, not a fifth status.
-                option.value === "starred" && "mt-4",
+                option.value === "starred" && "mt-3.5",
                 active
-                  ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
-                  : IDLE_ITEM_CLASS,
+                  ? NAV_ITEM_ACTIVE_CLASS
+                  : NAV_ITEM_IDLE_CLASS,
               )}
             >
-              <Icon className="size-4 shrink-0 opacity-70" aria-hidden />
+              <Icon className="size-4 shrink-0" aria-hidden />
               <span className="min-w-0 flex-1 truncate text-left">
                 {t(option.labelKey)}
               </span>
@@ -134,20 +130,20 @@ export function LibrarySidebar({
           );
         })}
       </nav>
-      <div className="p-2">
+      <div className="flex flex-col gap-px p-2">
         {onOpenStats && (
           <button
             type="button"
             aria-current={statsActive ? "page" : undefined}
             onClick={onOpenStats}
             className={cn(
-              ITEM_CLASS,
+              NAV_ITEM_CLASS,
               statsActive
-                ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
-                : IDLE_ITEM_CLASS,
+                ? NAV_ITEM_ACTIVE_CLASS
+                : NAV_ITEM_IDLE_CLASS,
             )}
           >
-            <ChartColumn className="size-4 shrink-0 opacity-70" aria-hidden />
+            <ChartColumn className="size-4 shrink-0" aria-hidden />
             <span className="min-w-0 flex-1 truncate text-left">{t("stats.title")}</span>
           </button>
         )}
@@ -155,9 +151,9 @@ export function LibrarySidebar({
           type="button"
           onClick={onImport}
           disabled={busy}
-          className={cn(ITEM_CLASS, IDLE_ITEM_CLASS)}
+          className={cn(NAV_ITEM_CLASS, NAV_ITEM_IDLE_CLASS)}
         >
-          <Plus className="size-4 shrink-0 opacity-70" aria-hidden />
+          <Plus className="size-4 shrink-0" aria-hidden />
           <span className="min-w-0 flex-1 truncate text-left">
             {importing ? t("library.importing") : t("library.importBooks")}
           </span>
@@ -170,9 +166,9 @@ export function LibrarySidebar({
           data-trash-count={trashCount}
           onClick={onOpenTrash}
           disabled={busy}
-          className={cn(ITEM_CLASS, IDLE_ITEM_CLASS)}
+          className={cn(NAV_ITEM_CLASS, NAV_ITEM_IDLE_CLASS)}
         >
-          <Trash2 className="size-4 shrink-0 opacity-70" aria-hidden />
+          <Trash2 className="size-4 shrink-0" aria-hidden />
           <span className="min-w-0 flex-1 truncate text-left">
             {t("library.trash")}
           </span>
@@ -186,9 +182,9 @@ export function LibrarySidebar({
           <button
             type="button"
             onClick={onOpenSettings}
-            className={cn(ITEM_CLASS, IDLE_ITEM_CLASS)}
+            className={cn(NAV_ITEM_CLASS, NAV_ITEM_IDLE_CLASS)}
           >
-            <Settings className="size-4 shrink-0 opacity-70" aria-hidden />
+            <Settings className="size-4 shrink-0" aria-hidden />
             <span className="min-w-0 flex-1 truncate text-left">{t("library.settings")}</span>
           </button>
         )}

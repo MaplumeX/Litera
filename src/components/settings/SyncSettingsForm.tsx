@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { SegmentedControl } from "@/components/ui/segmented-control";
 import { Switch } from "@/components/ui/switch";
 import { invokeErrorMessage } from "@/lib/app-error";
 import { useT } from "@/lib/i18n";
@@ -210,49 +211,31 @@ export function SyncSettingsForm() {
   const fieldClass = "h-8 w-full";
 
   return (
-    <div className="max-w-md space-y-5">
+    <div className="space-y-5">
       <div className="flex items-center justify-between gap-2">
         <div className="text-xs font-medium text-muted-foreground">
           {t("settings.sync.enable")}
         </div>
-        <div className="inline-flex rounded-md bg-muted p-0.5">
-          <button
-            type="button"
-            role="radio"
-            aria-checked={!draft.enabled}
-            onClick={() => patch({ enabled: false })}
-            className={
-              !draft.enabled
-                ? "rounded-sm border border-border bg-background px-3 py-1 text-xs"
-                : "rounded-sm border border-transparent px-3 py-1 text-xs text-muted-foreground"
-            }
-          >
-            {t("settings.override.off")}
-          </button>
-          <button
-            type="button"
-            role="radio"
-            aria-checked={draft.enabled}
-            onClick={() => patch({ enabled: true })}
-            className={
-              draft.enabled
-                ? "rounded-sm border border-border bg-background px-3 py-1 text-xs"
-                : "rounded-sm border border-transparent px-3 py-1 text-xs text-muted-foreground"
-            }
-          >
-            {t("settings.override.on")}
-          </button>
-        </div>
+        <SegmentedControl
+          fullWidth={false}
+          ariaLabel={t("settings.sync.enable")}
+          value={draft.enabled ? "on" : "off"}
+          options={[
+            { value: "off", label: t("settings.override.off") },
+            { value: "on", label: t("settings.override.on") },
+          ]}
+          onChange={(next) => patch({ enabled: next === "on" })}
+        />
       </div>
 
       {draft.enabled && (
-        <p className="rounded-md bg-muted p-3 text-xs text-muted-foreground">
+        <p className="rounded-lg bg-muted p-3 text-xs leading-relaxed text-muted-foreground">
           {t("settings.sync.plaintext")}
         </p>
       )}
 
-      <div className="space-y-3">
-        <label className="block space-y-1.5">
+      <div className="grid gap-x-3 gap-y-4 sm:grid-cols-2">
+        <label className="block min-w-0 space-y-1.5 sm:col-span-2">
           <span className="text-xs font-medium text-muted-foreground">
             {t("settings.sync.endpoint")}
           </span>
@@ -264,7 +247,7 @@ export function SyncSettingsForm() {
             placeholder="https://s3.us-east-1.amazonaws.com"
           />
         </label>
-        <label className="block space-y-1.5">
+        <label className="block min-w-0 space-y-1.5">
           <span className="text-xs font-medium text-muted-foreground">
             {t("settings.sync.region")}
           </span>
@@ -276,7 +259,7 @@ export function SyncSettingsForm() {
             placeholder="us-east-1"
           />
         </label>
-        <label className="block space-y-1.5">
+        <label className="block min-w-0 space-y-1.5">
           <span className="text-xs font-medium text-muted-foreground">
             {t("settings.sync.bucket")}
           </span>
@@ -287,12 +270,12 @@ export function SyncSettingsForm() {
             onChange={(event) => patch({ bucket: event.target.value })}
           />
         </label>
-        <label className="flex items-center justify-between gap-2">
+        <label className="flex items-center justify-between gap-2 sm:col-span-2">
           <div className="min-w-0">
             <div className="text-xs font-medium text-muted-foreground">
               {t("settings.sync.pathStyle")}
             </div>
-            <div className="text-[11px] text-muted-foreground/80">
+            <div className="text-2xs text-muted-foreground/80">
               {t("settings.sync.pathStyle.hint")}
             </div>
           </div>
@@ -301,7 +284,7 @@ export function SyncSettingsForm() {
             onCheckedChange={(pathStyle) => patch({ pathStyle })}
           />
         </label>
-        <label className="block space-y-1.5">
+        <label className="block min-w-0 space-y-1.5">
           <span className="text-xs font-medium text-muted-foreground">
             {t("settings.sync.accessKey")}
           </span>
@@ -312,7 +295,7 @@ export function SyncSettingsForm() {
             onChange={(event) => patch({ accessKey: event.target.value })}
           />
         </label>
-        <label className="block space-y-1.5">
+        <label className="block min-w-0 space-y-1.5">
           <span className="text-xs font-medium text-muted-foreground">
             {t("settings.sync.secretKey")}
           </span>
@@ -324,7 +307,7 @@ export function SyncSettingsForm() {
             onChange={(event) => patch({ secretKey: event.target.value })}
           />
           {loaded && hasStoredSecret && !draft.secretKey && (
-            <span className="block text-[11px] text-muted-foreground">
+            <span className="block text-2xs text-muted-foreground">
               {t("settings.sync.secretKey.configured")}
             </span>
           )}
@@ -362,12 +345,12 @@ export function SyncSettingsForm() {
       </div>
 
       {testSuccess && (
-        <p className="text-xs text-green-600 dark:text-green-400">
+        <p className="text-xs text-success">
           {t("settings.sync.test.success")}
         </p>
       )}
       {estimate && (
-        <div className="space-y-2 rounded-md border border-border p-3">
+        <div className="space-y-2 rounded-lg border border-border p-3">
           <div className="text-xs font-medium">
             {t("settings.sync.estimate.title")}
           </div>

@@ -1,102 +1,145 @@
 @import "tailwindcss";
+@import "./scrollbar.css";
 @plugin "@tailwindcss/typography";
 
 @custom-variant dark (&:is(.dark *));
 
+/* 封面氛围色（.cover-ambient）注册为颜色，切换书时才能平滑过渡。 */
+@property --cover-deep {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #1c1d22;
+}
+@property --cover-glow {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #55565e;
+}
+
 :root {
-  /* 暖调纸张色：低饱和（chroma ≤ 0.015）、色相 60–85，取代 shadcn 默认的冷灰 zinc。 */
-  --background: oklch(0.984 0.004 85);
-  --foreground: oklch(0.24 0.012 60);
-  --card: oklch(0.995 0.002 85);
-  --card-foreground: oklch(0.24 0.012 60);
-  --popover: oklch(0.995 0.002 85);
-  --popover-foreground: oklch(0.24 0.012 60);
-  --primary: oklch(0.27 0.014 60);
-  --primary-foreground: oklch(0.984 0.004 85);
-  --secondary: oklch(0.955 0.006 80);
-  --secondary-foreground: oklch(0.24 0.012 60);
-  --muted: oklch(0.955 0.006 80);
-  --muted-foreground: oklch(0.53 0.015 65);
-  --accent: oklch(0.945 0.008 80);
-  --accent-foreground: oklch(0.24 0.012 60);
-  --destructive: oklch(0.577 0.245 27.325);
-  --destructive-foreground: oklch(0.984 0.004 85);
-  --border: oklch(0.905 0.008 80);
-  --input: oklch(0.895 0.009 80);
-  --ring: oklch(0.70 0.02 70);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  /* Reading stats: one hue for magnitude. The theme's dark chart-1 is too dark on
-   * a dark surface, and its hue would change the meaning between themes. */
-  --stats-mark: var(--chart-1);
-  /* 圆角分层：sm 6 / md 8（按钮、输入框）/ lg 10（菜单、卡片）/ xl 14（弹窗）；
-   * 封面单独用 rounded-cover（3px），太圆会像 App 图标而不像书。 */
+  /* 中性灰打底，彩色只来自封面和一个强调色。--sidebar 是窗口底层，--background 是浮在其上的内容层。 */
+  --accent-cobalt: #3b5bdb;
+  --accent-violet: #6741d9;
+  --accent-pine: #0b7a63;
+  --accent-amber: #b4570a;
+  --accent-graphite: #27272a;
+  --background: #ffffff;
+  --foreground: #18181b;
+  --card: #ffffff;
+  --card-foreground: #18181b;
+  --popover: #ffffff;
+  --popover-foreground: #18181b;
+  --primary: var(--accent-cobalt);
+  --primary-foreground: #ffffff;
+  --secondary: #f4f4f5;
+  --secondary-foreground: #18181b;
+  --muted: #f4f4f5;
+  --muted-foreground: #6b6b74;
+  --accent: #f0f0f2;
+  --accent-foreground: #18181b;
+  --destructive: #d92d20;
+  --destructive-foreground: #ffffff;
+  --border: rgb(24 24 27 / 9%);
+  --input: rgb(24 24 27 / 14%);
+  --ring: var(--primary);
+  /* 书页单独一层：改界面配色不牵动阅读页。取纯白：与内容层同色，也与多数书自带的白底无缝。 */
+  --page: #ffffff;
+  --scrollbar-thumb: oklch(0.6 0 0 / 35%);
+  --scrollbar-thumb-hover: oklch(0.5 0 0 / 55%);
+  --success: #15803d;
+  --warning: #b45309;
+  --star: #e0a100;
+  /* 思维导图的分支色：同等饱和度和明度，第一支跟随强调色。 */
+  --chart-1: var(--primary);
+  --chart-2: #0e8a7a;
+  --chart-3: #c77a0a;
+  --chart-4: #d6457a;
+  --chart-5: #7c5ae0;
+  /* Reading stats: one hue for magnitude, the same one as every other accent. */
+  --stats-mark: var(--primary);
+  /* 圆角分层：sm 6 / md 8（按钮、输入框）/ lg 10（菜单）/ xl 14（面板、弹窗）；
+   * 封面单独用 rounded-cover（4px），太圆会像 App 图标而不像书。 */
   --radius: 0.625rem;
-  --sidebar: oklch(0.965 0.006 80);
-  --sidebar-foreground: oklch(0.24 0.012 60);
-  --sidebar-primary: oklch(0.27 0.014 60);
-  --sidebar-primary-foreground: oklch(0.984 0.004 85);
-  --sidebar-accent: oklch(0.92 0.008 80);
-  --sidebar-accent-foreground: oklch(0.24 0.012 60);
-  --sidebar-border: oklch(0.905 0.008 80);
-  --sidebar-ring: oklch(0.70 0.02 70);
-  /* 层级阴影：暖褐色调，替代描边分隔。 */
-  --elevation-soft: 0 1px 2px oklch(0.3 0.02 60 / 6%), 0 1px 3px oklch(0.3 0.02 60 / 5%);
-  --elevation-cover: 0 1px 2px oklch(0.3 0.02 60 / 12%), 0 3px 8px oklch(0.3 0.02 60 / 10%);
-  --elevation-cover-hover: 0 2px 4px oklch(0.3 0.02 60 / 14%), 0 8px 20px oklch(0.3 0.02 60 / 14%);
-  --elevation-float: 0 4px 12px oklch(0.3 0.02 60 / 8%), 0 12px 32px oklch(0.3 0.02 60 / 10%);
+  --sidebar: #f4f4f5;
+  --sidebar-foreground: #18181b;
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #ffffff;
+  --sidebar-accent-foreground: #18181b;
+  --sidebar-border: rgb(24 24 27 / 9%);
+  --sidebar-ring: var(--primary);
+  /* 层级阴影：一圈极淡的描边加柔和投影，替代实线分隔。 */
+  --elevation-soft: 0 1px 2px rgb(24 24 27 / 4%), 0 0 0 1px rgb(24 24 27 / 6%);
+  --elevation-cover: 0 1px 2px rgb(24 24 27 / 16%), 0 6px 14px rgb(24 24 27 / 12%);
+  --elevation-cover-hover: 0 2px 4px rgb(24 24 27 / 14%), 0 14px 30px rgb(24 24 27 / 20%);
+  --elevation-float: 0 0 0 1px rgb(24 24 27 / 7%), 0 8px 20px rgb(24 24 27 / 8%), 0 24px 56px rgb(24 24 27 / 12%);
 }
 
 .dark {
-  /* 阅读器夜间页面透明（reader-styles.ts THEME_CSS.dark），书页底色即所在容器的 --background / --card。 */
-  --background: oklch(0.21 0.005 70);
-  --foreground: oklch(0.93 0.008 80);
-  --card: oklch(0.235 0.006 70);
-  --card-foreground: oklch(0.93 0.008 80);
-  --popover: oklch(0.245 0.006 70);
-  --popover-foreground: oklch(0.93 0.008 80);
-  --primary: oklch(0.93 0.008 80);
-  --primary-foreground: oklch(0.22 0.006 70);
-  --secondary: oklch(0.28 0.007 70);
-  --secondary-foreground: oklch(0.93 0.008 80);
-  --muted: oklch(0.28 0.007 70);
-  --muted-foreground: oklch(0.70 0.012 75);
-  --accent: oklch(0.29 0.008 70);
-  --accent-foreground: oklch(0.93 0.008 80);
+  /* 阅读器夜间页面透明（reader-styles.ts THEME_CSS.dark），书页底色即 --page。 */
+  --accent-cobalt: #7c93f5;
+  --accent-violet: #a48bf5;
+  --accent-pine: #3fc7a6;
+  --accent-amber: #f0a050;
+  --accent-graphite: #e4e4e7;
+  --background: #17181b;
+  --foreground: #ededef;
+  --card: #17181b;
+  --card-foreground: #ededef;
+  --popover: #1f2024;
+  --popover-foreground: #ededef;
+  --primary: var(--accent-cobalt);
+  --primary-foreground: #0e0f11;
+  --secondary: #26272b;
+  --secondary-foreground: #ededef;
+  --muted: #26272b;
+  --muted-foreground: #9a9ba3;
+  --accent: #26272b;
+  --accent-foreground: #ededef;
   --destructive: oklch(0.704 0.191 22.216);
-  --destructive-foreground: oklch(0.984 0.004 85);
-  --border: oklch(1 0 0 / 9%);
-  --input: oklch(1 0 0 / 12%);
-  --ring: oklch(0.55 0.012 70);
-  --stats-mark: #d27c0e;
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.235 0.006 70);
-  --sidebar-foreground: oklch(0.93 0.008 80);
-  --sidebar-primary: oklch(0.93 0.008 80);
-  --sidebar-primary-foreground: oklch(0.22 0.006 70);
-  --sidebar-accent: oklch(0.28 0.007 70);
-  --sidebar-accent-foreground: oklch(0.93 0.008 80);
-  --sidebar-border: oklch(1 0 0 / 9%);
-  --sidebar-ring: oklch(0.55 0.012 70);
+  --destructive-foreground: #ffffff;
+  --border: rgb(255 255 255 / 8%);
+  --input: rgb(255 255 255 / 12%);
+  --ring: var(--primary);
+  --page: #17181b;
+  --scrollbar-thumb: oklch(0.8 0 0 / 30%);
+  --scrollbar-thumb-hover: oklch(0.85 0 0 / 50%);
+  --success: #4ade80;
+  --warning: #fbbf24;
+  --star: #fbbf24;
+  --chart-1: var(--primary);
+  --chart-2: #3fc7a6;
+  --chart-3: #f0a050;
+  --chart-4: #f07aa6;
+  --chart-5: #a48bf5;
+  --sidebar: #0e0f11;
+  --sidebar-foreground: #ededef;
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: #0e0f11;
+  --sidebar-accent: rgb(255 255 255 / 8%);
+  --sidebar-accent-foreground: #ededef;
+  --sidebar-border: rgb(255 255 255 / 8%);
+  --sidebar-ring: var(--primary);
   /* 深色底上阴影几乎不可见，靠更高不透明度 + 一圈极淡的亮边勾出轮廓。 */
-  --elevation-soft: 0 1px 2px oklch(0 0 0 / 30%), 0 0 0 1px oklch(1 0 0 / 5%);
-  --elevation-cover: 0 1px 2px oklch(0 0 0 / 40%), 0 3px 8px oklch(0 0 0 / 35%);
-  --elevation-cover-hover: 0 2px 4px oklch(0 0 0 / 45%), 0 8px 20px oklch(0 0 0 / 45%);
-  --elevation-float: 0 0 0 1px oklch(1 0 0 / 6%), 0 8px 24px oklch(0 0 0 / 45%);
+  --elevation-soft: 0 0 0 1px rgb(255 255 255 / 6%), 0 8px 30px rgb(0 0 0 / 30%);
+  --elevation-cover: 0 1px 2px rgb(0 0 0 / 50%), 0 6px 16px rgb(0 0 0 / 40%);
+  --elevation-cover-hover: 0 2px 4px rgb(0 0 0 / 50%), 0 16px 36px rgb(0 0 0 / 60%);
+  --elevation-float: 0 0 0 1px rgb(255 255 255 / 8%), 0 12px 40px rgb(0 0 0 / 55%);
 }
+
+/* 强调色（ui-accent.ts）：各色的明暗值在上面，这里只切换指向。 */
+:root[data-accent="violet"] { --primary: var(--accent-violet); }
+:root[data-accent="pine"] { --primary: var(--accent-pine); }
+:root[data-accent="amber"] { --primary: var(--accent-amber); }
+:root[data-accent="graphite"] { --primary: var(--accent-graphite); }
 
 /* Non-inline so .font-sans / --default-font-family stay var(--font-sans). */
 @theme {
   --font-sans: "Geist Variable", "PingFang SC", "Microsoft YaHei", "Noto Sans SC", ui-sans-serif, system-ui, sans-serif;
   /* The assistant chat; overridden on <html> when the reader picks its own face. */
   --font-chat: var(--font-sans);
+  /* The smallest step of the type scale. In rem, so it follows the interface font size setting. */
+  --text-2xs: 0.6875rem;
 }
 
 @theme inline {
@@ -119,6 +162,10 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-page: var(--page);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-star: var(--star);
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
   --color-chart-3: var(--chart-3);
@@ -128,7 +175,7 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
-  --radius-cover: 3px;
+  --radius-cover: 4px;
   --shadow-soft: var(--elevation-soft);
   --shadow-cover: var(--elevation-cover);
   --shadow-cover-hover: var(--elevation-cover-hover);
@@ -152,45 +199,74 @@
   }
 }
 
-/* --- 美化滚动条 ---
- * 适配 light/dark 两套主题，细圆角、半透明，hover 时加深。
- * 仅作用于主应用 DOM；阅读器内容处于 closed Shadow DOM 内，不受影响。
- * 只在精确指针（桌面）下生效：触屏 WebView 一旦命中 ::-webkit-scrollbar
- * 就会放弃系统的浮层滚动条（滚动时浮现、停下淡出），改画常驻滚动条。
- */
-@media (hover: hover) and (pointer: fine) {
-  * {
-    scrollbar-width: thin;
-    scrollbar-color: oklch(0.6 0 0 / 35%) transparent;
-  }
-  .dark * {
-    scrollbar-color: oklch(0.8 0 0 / 30%) transparent;
-  }
-  *::-webkit-scrollbar {
-    width: 10px;
-    height: 10px;
-  }
-  *::-webkit-scrollbar-track {
-    background: transparent;
-  }
-  *::-webkit-scrollbar-thumb {
-    background-color: oklch(0.6 0 0 / 35%);
-    border-radius: 9999px;
-    border: 2px solid transparent;
-    background-clip: padding-box;
-  }
-  .dark *::-webkit-scrollbar-thumb {
-    background-color: oklch(0.8 0 0 / 30%);
-  }
-  *::-webkit-scrollbar-thumb:hover {
-    background-color: oklch(0.5 0 0 / 55%);
-  }
-  .dark *::-webkit-scrollbar-thumb:hover {
-    background-color: oklch(0.85 0 0 / 50%);
-  }
-  *::-webkit-scrollbar-corner {
-    background: transparent;
-  }
+/* 封面氛围色：背景取自当前这本书（cover-palette.ts），深浅模式相同，文字恒为白色。 */
+.cover-ambient {
+  color: #fff;
+  background:
+    radial-gradient(90% 150% at 88% -10%, var(--cover-glow), transparent 62%),
+    radial-gradient(70% 120% at 0% 110%, color-mix(in srgb, var(--cover-glow) 40%, transparent), transparent 70%),
+    var(--cover-deep);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 10%);
+  transition: --cover-deep 600ms var(--ease-emphasized-decelerate), --cover-glow 600ms var(--ease-emphasized-decelerate);
+}
+
+/* 封面左侧的书脊高光和一层极淡的反光，让平面图片有书的厚度。 */
+.cover-sheen {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: inherit;
+  background:
+    linear-gradient(90deg, rgb(0 0 0 / 14%) 0, rgb(255 255 255 / 9%) 2.2%, transparent 5%),
+    linear-gradient(160deg, rgb(255 255 255 / 8%), transparent 42%);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 6%);
+}
+
+/* 没有封面的书：按书名生成配色，再用文字排一张封面。文字放在伪元素里，
+ * 书名不会在无障碍树和页面文本里重复一遍。 */
+.generated-cover {
+  container-type: inline-size;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  width: 100%;
+  height: 100%;
+  padding: 11%;
+  overflow: hidden;
+  color: #fff;
+  text-align: left;
+  background: linear-gradient(160deg, var(--cover-glow), var(--cover-deep));
+}
+.generated-cover::before {
+  content: attr(data-title);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 5;
+  overflow: hidden;
+  font-size: 13cqw;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+.generated-cover::after {
+  content: attr(data-author);
+  overflow: hidden;
+  font-size: 7cqw;
+  opacity: 0.78;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.generated-cover[data-small="true"] {
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+.generated-cover[data-small="true"]::before {
+  font-size: 42cqw;
+}
+.generated-cover[data-small="true"]::after {
+  content: none;
 }
 
 /* 横向滑动行（标签、书架卡片）：露出的半张卡片已提示可滑，不画滚动条。 */
@@ -229,6 +305,83 @@
   margin-block: 0.75em;
 }
 
+/* 助手回答的 Markdown：typography 插件的默认配色和界面无关（深蓝代码块、字面反引号、
+ * 斜体引用），这里全部接回主题 token，深浅模式共用一套。 */
+.prose {
+  --tw-prose-body: var(--foreground);
+  --tw-prose-headings: var(--foreground);
+  --tw-prose-lead: var(--muted-foreground);
+  --tw-prose-links: var(--primary);
+  --tw-prose-bold: var(--foreground);
+  --tw-prose-counters: var(--muted-foreground);
+  --tw-prose-bullets: var(--muted-foreground);
+  --tw-prose-hr: var(--border);
+  --tw-prose-quotes: var(--muted-foreground);
+  --tw-prose-quote-borders: var(--border);
+  --tw-prose-captions: var(--muted-foreground);
+  --tw-prose-code: var(--foreground);
+  --tw-prose-pre-code: var(--foreground);
+  --tw-prose-pre-bg: var(--muted);
+  --tw-prose-th-borders: var(--border);
+  --tw-prose-td-borders: var(--border);
+  line-height: 1.75;
+}
+.prose :is(h1, h2, h3, h4) {
+  margin-top: 1.25em;
+  margin-bottom: 0.4em;
+  font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: -0.01em;
+}
+.prose h1 { font-size: 1.25em; }
+.prose h2 { font-size: 1.15em; }
+.prose :is(h3, h4) { font-size: 1.05em; }
+.prose p { margin-block: 0.7em; }
+.prose :is(ul, ol) { margin-block: 0.7em; }
+.prose li { margin-block: 0.25em; }
+.prose blockquote {
+  margin-block: 0.8em;
+  padding-left: 0.85em;
+  border-left-width: 2px;
+  font-style: normal;
+  font-weight: 400;
+}
+.prose blockquote p:first-of-type::before,
+.prose blockquote p:last-of-type::after,
+.prose code::before,
+.prose code::after {
+  content: none;
+}
+.prose :not(pre) > code {
+  padding: 0.1em 0.35em;
+  border-radius: 0.3rem;
+  background: var(--muted);
+  font-size: 0.875em;
+  font-weight: 400;
+}
+.prose pre {
+  margin-block: 0.8em;
+  padding: 0.7em 0.9em;
+  border-radius: 0.625rem;
+  font-size: 0.875em;
+  line-height: 1.6;
+}
+.prose table { font-size: 0.9em; }
+.prose thead th { font-weight: 500; color: var(--muted-foreground); }
+.prose > :first-child { margin-top: 0; }
+.prose > :last-child { margin-bottom: 0; }
+
+/* 消息的复制、编辑等操作：指针悬停在这条消息上才出现；触屏没有悬停，始终显示。 */
+@media (hover: hover) {
+  .message-actions {
+    opacity: 0;
+    transition: opacity 150ms;
+  }
+  :is(.message-row:hover, .message-row:focus-within) .message-actions {
+    opacity: 1;
+  }
+}
+
 /* 对话消息流：消息气泡内的嵌套可滚区域（思考块、代码块、长表格、
  * 长公式、工具结果等）统一隐藏滚动条但仍可滚——气泡内部出现独立
  * 滚动条会跟外层对话滚动区打架，视觉上像“消息里套滚动条”。
@@ -260,23 +413,8 @@
 /* 对话消息流本身的滚动条：平时隐藏，指针移入消息流时才浮现，
  * 不在对话和书之间多画一道竖条。 */
 @media (hover: hover) and (pointer: fine) {
-  .chat-message-scroll {
-    scrollbar-color: transparent transparent;
-  }
-  .chat-message-scroll:hover {
-    scrollbar-color: oklch(0.6 0 0 / 35%) transparent;
-  }
-  .dark .chat-message-scroll:hover {
-    scrollbar-color: oklch(0.8 0 0 / 30%) transparent;
-  }
-  .chat-message-scroll::-webkit-scrollbar-thumb {
+  .chat-message-scroll:not(:hover)::-webkit-scrollbar-thumb {
     background-color: transparent;
-  }
-  .chat-message-scroll:hover::-webkit-scrollbar-thumb {
-    background-color: oklch(0.6 0 0 / 35%);
-  }
-  .dark .chat-message-scroll:hover::-webkit-scrollbar-thumb {
-    background-color: oklch(0.8 0 0 / 30%);
   }
 }
 
@@ -305,6 +443,9 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .cover-ambient {
+    transition: none;
+  }
   .reader-drawer-in {
     animation: none;
   }

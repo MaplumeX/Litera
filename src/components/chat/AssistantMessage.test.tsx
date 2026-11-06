@@ -157,7 +157,7 @@ describe("AssistantMessage", () => {
         }}
       />,
     );
-    const children = Array.from(container.querySelectorAll(".space-y-1 > *"));
+    const children = Array.from(container.querySelectorAll(".space-y-2 > *"));
     expect(children).toHaveLength(2);
     expect(children[0].getAttribute("data-testid")).toBe("answer-process");
     expect(children[1].textContent).toContain("结论");
@@ -189,7 +189,7 @@ describe("AssistantMessage", () => {
 
   it("summarises the sources in the collapsed row and folds narration into the process", () => {
     const { container, getByText, getByRole, queryByText, getAllByRole } = render(<AssistantMessage message={researched} />);
-    const children = Array.from(container.querySelectorAll(".space-y-1 > *"));
+    const children = Array.from(container.querySelectorAll(".space-y-2 > *"));
     expect(children).toHaveLength(2);
     expect(getByText("第三章 归来（读了 2/3 段）")).toBeTruthy();
     expect(getByText("搜索 1 次，命中 1 处")).toBeTruthy();
@@ -305,7 +305,7 @@ describe("AssistantMessage", () => {
     );
     expect(getByText("序")).toBeTruthy();
     expect(queryByRole("img", { name: "部分章节未读完，回答可能不完整" })).toBeNull();
-    expect(getByText("draw_mindmap")).toBeTruthy();
+    expect(getByText("思维导图")).toBeTruthy();
   });
 
   it("renders no process row for answers without thinking or book tools", () => {

@@ -45,11 +45,11 @@ export const STATUS_OPTIONS: { value: LibraryStatusFilter; labelKey: MessageKey 
   { value: "starred", labelKey: "library.status.starred" },
 ];
 
-// No rule underneath: the page title and the shelf below it share one surface.
-const TOOLBAR_CLASS = "flex h-12 shrink-0 items-center gap-2 px-6";
+// Sticks to the top of the shelf's scroller, past the Continue reading card.
+const TOOLBAR_CLASS = "sticky top-0 z-10 -mx-7 flex h-14 shrink-0 items-center gap-2 bg-background px-7";
 
 const SEGMENT_CLASS =
-  "inline-flex size-7 items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring motion-reduce:transition-none [&_svg]:size-4";
+  "inline-flex size-6 items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none [&_svg]:size-3.5";
 
 interface LibraryShelfToolbarProps {
   statusFilter: LibraryStatusFilter;
@@ -87,7 +87,7 @@ export function LibraryShelfToolbar({
   const orderLabel = t(order === "asc" ? "library.orderAsc" : "library.orderDesc");
   return (
     <div className={TOOLBAR_CLASS}>
-      <h2 className="min-w-0 truncate text-lg font-semibold tracking-tight">
+      <h2 className="min-w-0 truncate text-xl font-semibold tracking-[-0.02em]">
         {filterOption && t(filterOption.labelKey)}
         <span className="ml-2 text-sm font-normal tabular-nums text-muted-foreground">
           {searching ? t("library.searchResults", { count }) : count}
@@ -139,7 +139,7 @@ export function LibraryShelfToolbar({
           </DropdownMenuContent>
         </DropdownMenu>
 
-        <div className="flex items-center gap-0.5">
+        <div className="flex items-center gap-0.5 rounded-lg bg-muted p-0.5">
           {(
             [
               ["grid", "library.viewGrid", LayoutGrid],
@@ -155,7 +155,7 @@ export function LibraryShelfToolbar({
               className={cn(
                 SEGMENT_CLASS,
                 view === mode
-                  ? "bg-secondary text-foreground"
+                  ? "bg-background text-foreground shadow-soft"
                   : "text-muted-foreground hover:text-foreground",
               )}
             >

@@ -69,7 +69,7 @@ export function ChatInput({
   return (
     <div className="px-2 pb-2 pt-1">
       {pendingSelection && (
-        <div className="mb-1.5 flex items-start gap-1.5 rounded-lg bg-muted/50 px-3 py-1.5 text-xs text-muted-foreground">
+        <div className="mb-1.5 flex items-start gap-1.5 rounded-xl bg-muted px-3 py-1.5 text-xs text-muted-foreground">
           <Quote className="mt-0.5 h-3 w-3 shrink-0" />
           <span className="min-w-0 flex-1">
             {t("chat.quoteSelection", {
@@ -85,7 +85,7 @@ export function ChatInput({
           </button>
         </div>
       )}
-      <div className="group/input rounded-2xl border bg-background shadow-soft transition-shadow duration-200 focus-within:ring-1 focus-within:ring-ring motion-reduce:transition-none">
+      <div className="group/input rounded-2xl border bg-popover shadow-soft transition-[box-shadow,border-color] duration-150 focus-within:border-primary focus-within:ring-[3px] focus-within:ring-primary/20 motion-reduce:transition-none">
         <textarea
           ref={textareaRef}
           className={cn(
@@ -99,12 +99,12 @@ export function ChatInput({
           onKeyDown={handleKeyDown}
           disabled={isStreaming || !bookReady}
         />
-        <div className="flex items-center justify-between px-2 pb-1.5 pt-0.5">
-          <div className="flex min-w-0 items-center gap-2">
+        <div className="flex items-end justify-between gap-2 px-2 pb-1.5 pt-0.5">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-2">
             {leadingControls}
             <Select value={thinkingLevel} onValueChange={onThinkingLevelChange} disabled={isStreaming}>
               <Tip label={t("chat.thinkingLevel")}>
-                <SelectTrigger className="h-6 w-auto gap-1 border-none bg-transparent px-1.5 text-[10px] text-muted-foreground shadow-none focus:ring-0 dark:bg-transparent dark:hover:bg-transparent" aria-label={t("chat.thinkingLevel")}>
+                <SelectTrigger className="h-6 w-auto gap-1 border-none bg-transparent px-1.5 text-2xs text-muted-foreground shadow-none focus:ring-0 dark:bg-transparent dark:hover:bg-transparent" aria-label={t("chat.thinkingLevel")}>
                   <Brain className={cn("size-3", thinkingLevel === "off" && "opacity-50")} />
                   <SelectValue />
                 </SelectTrigger>
@@ -116,7 +116,7 @@ export function ChatInput({
               </SelectContent>
             </Select>
             {/* The key hint only matters while typing. */}
-            <span className="hidden truncate text-[10px] text-muted-foreground group-focus-within/input:inline">
+            <span className="hidden truncate text-2xs text-muted-foreground group-focus-within/input:inline">
               {t("chat.inputHint")}
             </span>
           </div>

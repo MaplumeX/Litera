@@ -17,6 +17,9 @@ interface SelectionToolbarProps {
   onGuideTo?: () => void;
 }
 
+const TOOL_CLASS =
+  "flex size-7 items-center justify-center rounded-full transition-colors duration-150 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none";
+
 /** One click highlights in a color; picking a color later is the editor's job. */
 export function SelectionToolbar({
   x,
@@ -32,7 +35,7 @@ export function SelectionToolbar({
     <div
       className={cn(
         "fixed z-50 flex -translate-x-1/2 -translate-y-full items-center gap-0.5",
-        "rounded-full border bg-popover p-1 text-xs font-medium text-popover-foreground shadow-float",
+        "rounded-full bg-popover p-1 font-sans text-xs font-medium text-popover-foreground shadow-float",
       )}
       style={{ left: `${x}px`, top: `${y - 8}px` }}
       role="toolbar"
@@ -42,14 +45,14 @@ export function SelectionToolbar({
         <button
           key={id}
           type="button"
-          className="flex size-7 items-center justify-center rounded-full transition-colors duration-200 hover:bg-accent motion-reduce:transition-none"
+          className={TOOL_CLASS}
           aria-label={t("reader.highlightIn", { color: t(`annotations.color.${id}`) })}
           onClick={() => onHighlight(id)}
         >
           <span
             className={cn(
-              "size-4 rounded-full border border-black/10 transition-transform duration-200 motion-reduce:transition-none",
-              id === lastColor && "ring-2 ring-ring ring-offset-1 ring-offset-popover",
+              "size-4 rounded-full shadow-[inset_0_0_0_1px_rgb(0_0_0/10%)] transition-transform duration-150 hover:scale-110 motion-reduce:transition-none",
+              id === lastColor && "ring-2 ring-foreground/50 ring-offset-1 ring-offset-popover",
             )}
             style={{ backgroundColor: HIGHLIGHT_COLOR_HEX[id] }}
           />
@@ -58,7 +61,7 @@ export function SelectionToolbar({
       <span className="mx-1 h-4 w-px bg-border" aria-hidden />
       <button
         type="button"
-        className="flex size-7 items-center justify-center rounded-full transition-colors duration-200 hover:bg-accent motion-reduce:transition-none"
+        className={TOOL_CLASS}
         aria-label={t("reader.copy")}
         onClick={onCopy}
       >
@@ -68,7 +71,7 @@ export function SelectionToolbar({
         <Tip label={t("reader.guideTo")}>
           <button
             type="button"
-            className="flex size-7 items-center justify-center rounded-full transition-colors duration-200 hover:bg-accent motion-reduce:transition-none"
+            className={TOOL_CLASS}
             aria-label={t("reader.guideTo")}
             onClick={onGuideTo}
           >
@@ -78,7 +81,7 @@ export function SelectionToolbar({
       )}
       <button
         type="button"
-        className="flex h-7 items-center gap-1.5 rounded-full pr-3 pl-2.5 transition-colors duration-200 hover:bg-accent motion-reduce:transition-none"
+        className="ml-0.5 flex h-7 items-center gap-1.5 rounded-full bg-primary/10 pr-3 pl-2.5 text-primary transition-colors duration-150 hover:bg-primary/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
         onClick={onAskAgent}
       >
         <MessageSquare className="size-3.5" aria-hidden />

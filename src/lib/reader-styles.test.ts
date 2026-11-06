@@ -268,9 +268,10 @@ describe("generateStylesCss", () => {
         ":where(blockquote) { margin-block: 1em; margin-inline: 1em 0; padding-inline: 1em 0; border-inline-start: 3px solid color-mix(in srgb, currentColor 20%, transparent); color: color-mix(in srgb, currentColor 80%, transparent); }\n" +
         "blockquote > p:last-child { margin-block-end: 0 !important; }\n" +
         "img, svg image { cursor: zoom-in; } a[href] img, a[href] image { cursor: pointer; }\n" +
-        'a[epub\\:type~="noteref"], a[epub|type~="noteref"], sup > a[href^="#"] { font-size: 0.83em !important; vertical-align: super !important; line-height: 1 !important; text-decoration: none !important; color: #2563eb !important; }\n' +
-        'a[href] > sup { font-size: 0.83em !important; vertical-align: super !important; line-height: 1 !important; color: #2563eb !important; }\n' +
-        'a[href]:has(> sup) { text-decoration: none !important; color: #2563eb !important; }',
+        'a[epub\\:type~="noteref"], a[epub|type~="noteref"], sup > a[href^="#"] { font-size: 0.83em !important; vertical-align: super !important; line-height: 1 !important; text-decoration: none !important; color: #3b5bdb !important; }\n' +
+        'a[href] > sup { font-size: 0.83em !important; vertical-align: super !important; line-height: 1 !important; color: #3b5bdb !important; }\n' +
+        'a[href]:has(> sup) { text-decoration: none !important; color: #3b5bdb !important; }\n' +
+        "html, body { background: transparent !important; color: #18181b !important; }",
     );
     expect(css).not.toContain("font-family: serif !important");
     expect(css).not.toContain("code, kbd, pre, samp");
@@ -303,22 +304,27 @@ describe("generateStylesCss", () => {
     expect(css).toContain("font-size: 0.83em !important");
     expect(css).toContain("vertical-align: super !important");
     expect(css).toContain("text-decoration: none !important");
-    expect(css).toContain("color: #2563eb !important");
-    expect(css).not.toContain("color: #6db4ff !important");
+    expect(css).toContain("color: #3b5bdb !important");
+    expect(css).not.toContain("color: #7c93f5 !important");
     // @namespace must be the very first statement of the sheet.
     expect(css.startsWith('@namespace epub url(')).toBe(true);
   });
 
+  it("keeps the light page transparent so a book's own page color cannot show", () => {
+    const css = generateStylesCss({ ...DARK_STYLES, theme: "light" });
+    expect(css).toContain("html, body { background: transparent !important; color: #18181b !important; }");
+  });
+
   it("keeps the dark page transparent so the hosting surface shows through", () => {
     const css = generateStylesCss({ ...DARK_STYLES });
-    expect(css).toContain("html, body { background: transparent !important; color: #cbc7bf !important; }");
+    expect(css).toContain("html, body { background: transparent !important; color: #cfcfd4 !important; }");
   });
 
   it("uses the dark-theme accent for noteref marks in dark theme", () => {
     const css = generateStylesCss({ ...DARK_STYLES });
     expect(css).toContain("noteref");
-    expect(css).toContain("color: #6db4ff !important");
-    expect(css).not.toContain("color: #2563eb !important");
+    expect(css).toContain("color: #7c93f5 !important");
+    expect(css).not.toContain("color: #3b5bdb !important");
     expect(css).toContain("a[href] > sup");
     expect(css).toContain("a[href]:has(> sup)");
   });

@@ -3,7 +3,7 @@ import { BookOpen, Check, Info, Star, Trash2, type LucideIcon } from "lucide-rea
 import type { BookRecord } from "@/types/library";
 import type { BookActionHandlers } from "@/components/BookActionsMenu";
 import { BookCoverImage } from "@/components/BookCard";
-import { READING_STATUSES, STATUS_LABEL_KEYS } from "@/components/BookStatusMenu";
+import { READING_STATUSES, STATUS_LABEL_KEYS, statusDotClass } from "@/components/BookStatusMenu";
 import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { AppBarIconButton } from "@/mobile/MobileAppBar";
@@ -106,7 +106,7 @@ function SheetBody({
             label={t("library.star")}
             aria-pressed={book.starred === true}
             onClick={actions.onToggleStar}
-            className={cn("-mt-1", book.starred && "text-primary")}
+            className={cn("-mt-1", book.starred && "text-star")}
           >
             <Star className={cn(book.starred && "fill-current")} />
           </AppBarIconButton>
@@ -129,11 +129,15 @@ function SheetBody({
                   className={cn(
                     "inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg border px-3 text-sm transition-colors motion-reduce:transition-none",
                     active
-                      ? "border-transparent bg-secondary font-medium text-secondary-foreground"
+                      ? "border-transparent bg-primary/10 font-medium text-primary"
                       : "border-border text-foreground/80 active:bg-foreground/5",
                   )}
                 >
-                  {active && <Check className="size-4" aria-hidden />}
+                  {active ? (
+                    <Check className="size-4" aria-hidden />
+                  ) : (
+                    <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", statusDotClass(status))} />
+                  )}
                   {t(STATUS_LABEL_KEYS[status])}
                 </button>
               );

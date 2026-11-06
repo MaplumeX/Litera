@@ -303,8 +303,8 @@ export function generatePreviewCss(state: ReaderStyleState): string {
 ${PREVIEW_SELECTOR} p { margin-block-end: ${state.paragraphSpacing}em; text-indent: ${state.firstLineIndent}em; }`;
 }
 
-const NOTEREF_ACCENT_LIGHT = "#2563eb";
-const NOTEREF_ACCENT_DARK = "#6db4ff";
+const NOTEREF_ACCENT_LIGHT = "#3b5bdb";
+const NOTEREF_ACCENT_DARK = "#7c93f5";
 
 /** Academic superscript style for footnote reference marks.
  *  EPUB XHTML chapters are parsed as XML, where `epub:type` is a namespaced
@@ -324,12 +324,14 @@ a[href]:has(> sup) { text-decoration: none !important; color: ${accent} !importa
 }
 
 /** The page stays transparent in both themes so the surface hosting the Book
- *  (the reader pane, or Agent mode's floating card) supplies its color; the
- *  dark branch only needs `!important` to wipe out a book's own white page. */
+ *  (the reader pane, or Agent mode's floating card) supplies its color.
+ *  `!important` wipes out a book's own page color, which foliate would otherwise
+ *  paint across the whole pane; the text color is forced with it, so a book
+ *  whose body pairs a dark page with light text stays readable. */
 const THEME_CSS: Record<string, string> = {
-  light: "",
-  dark: `html, body { background: transparent !important; color: #cbc7bf !important; }
-a { color: #6db4ff !important; }
+  light: "html, body { background: transparent !important; color: #18181b !important; }",
+  dark: `html, body { background: transparent !important; color: #cfcfd4 !important; }
+a { color: #7c93f5 !important; }
 img { filter: brightness(0.8) !important; }`,
 };
 

@@ -50,8 +50,8 @@ export function UpdateBanner({
     <div
       role="status"
       className={cn(
-        "m-rise pointer-events-auto flex items-center gap-2 rounded-lg py-1.5 pr-1.5 pl-4 text-sm shadow-float",
-        snackbar ? "bg-foreground text-background" : "border bg-popover text-popover-foreground",
+        "m-rise pointer-events-auto flex items-center gap-2 rounded-xl py-1.5 pr-1.5 pl-4 text-sm shadow-float",
+        snackbar ? "bg-foreground text-background" : "bg-popover text-popover-foreground",
       )}
     >
       <span className="min-w-0 flex-1 py-1.5">{message}</span>

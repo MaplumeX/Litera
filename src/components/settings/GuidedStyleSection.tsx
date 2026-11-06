@@ -46,7 +46,7 @@ export function GuidedStyleSection() {
         value={draft}
         onChange={(event) => { setDraft(event.target.value); setJustSaved(false); }}
         maxLength={GUIDED_STYLE_MAX_CHARS}
-        className="w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 dark:bg-input/30"
+        className="w-full resize-y rounded-lg border border-input bg-transparent px-3 py-2 font-mono text-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 dark:bg-input/30"
         rows={12}
         spellCheck={false}
       />

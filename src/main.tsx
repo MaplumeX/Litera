@@ -13,12 +13,14 @@ import {
   loadUiFontFamily,
   loadUiFontSize,
 } from "@/lib/ui-chrome-font";
+import { applyUiAccent, loadUiAccent } from "@/lib/ui-accent";
 import "@fontsource-variable/geist/wght.css";
 import "./index.css";
 
 initLocale();
 primeImportedFonts();
 applyUiChrome(loadUiFontSize(), loadUiFontFamily());
+applyUiAccent(loadUiAccent());
 applyChatFont(loadChatFontFamily());
 void refreshImportedFonts();
 

@@ -55,11 +55,14 @@ export function ToolCallHeader({
   expanded,
   onToggle,
   summary,
+  label,
 }: {
   call: AgentToolCall;
   expanded: boolean;
   onToggle: () => void;
   summary?: string;
+  /** What the reader calls this tool, in place of its internal name. */
+  label?: string;
 }) {
   const { t } = useT();
   const running = !call.done;
@@ -85,7 +88,7 @@ export function ToolCallHeader({
       )}
       {error && <CircleX className="h-3.5 w-3.5 shrink-0 text-destructive" aria-hidden="true" />}
       {!running && !error && (
-        <Check className="h-3.5 w-3.5 shrink-0 text-green-600" aria-hidden="true" />
+        <Check className="h-3.5 w-3.5 shrink-0 text-success" aria-hidden="true" />
       )}
       <span
         className={cn(
@@ -94,7 +97,7 @@ export function ToolCallHeader({
           running && "animate-pulse motion-reduce:animate-none",
         )}
       >
-        {call.tool}
+        {label ?? call.tool}
       </span>
       {error && <span className="shrink-0 text-xs text-destructive">{t("chat.toolError")}</span>}
       {summary && <span className="truncate text-xs text-muted-foreground/70">{summary}</span>}
@@ -150,7 +153,7 @@ export const ToolCallCard = memo(function ToolCallCard({ call }: { call: AgentTo
   // parameter dump, and expanding reveals the interactive map.
   if (call.tool === "draw_mindmap") return <MindmapCard call={call} />;
   return (
-    <div className="-ml-1 rounded px-1 transition-colors hover:bg-muted/40">
+    <div className="-ml-1 rounded-md px-1 transition-colors hover:bg-muted/40">
       <ToolCallHeader
         call={call}
         expanded={expanded}

@@ -69,7 +69,7 @@ function ToolbarTab({
       >
         <Icon className="size-[1.375rem]" aria-hidden />
       </span>
-      <span className="max-w-full truncate px-1 text-[0.6875rem] leading-none">{label}</span>
+      <span className="max-w-full truncate px-1 text-2xs leading-none">{label}</span>
     </button>
   );
 }
@@ -303,7 +303,7 @@ export function MobileReaderPage({
     READER_FOOTER_POSITIONS.some((position) => footerSettings[position] !== "none");
 
   return (
-    <div className="relative h-full min-h-0 overflow-hidden" data-testid="mobile-reader">
+    <div className="relative h-full min-h-0 overflow-hidden bg-page" data-testid="mobile-reader">
       {/* The cutout stays when the bars hide, so the page keeps clear of it
           and doesn't reflow as the toolbars come and go. */}
       <div
@@ -344,7 +344,7 @@ export function MobileReaderPage({
         {fileData && paginated && (
           <div
             aria-hidden
-            className="pointer-events-none absolute inset-x-0 top-0 flex h-12 items-center px-6 text-[0.6875rem] text-muted-foreground/80"
+            className="pointer-events-none absolute inset-x-0 top-0 flex h-12 items-center px-6 text-2xs text-muted-foreground/80"
           >
             <span className="truncate">{session.chapterLabel}</span>
           </div>
@@ -354,7 +354,7 @@ export function MobileReaderPage({
             chapterLabel={session.chapterLabel}
             fraction={progress.fraction}
             ticks={session.chapterTicks}
-            className="pointer-events-none absolute inset-x-0 bottom-0 h-12 px-6 text-[0.6875rem] text-muted-foreground/80"
+            className="pointer-events-none absolute inset-x-0 bottom-0 h-12 px-6 text-2xs text-muted-foreground/80"
           />
         )}
         {session.kosync.prompt && (
@@ -382,7 +382,7 @@ export function MobileReaderPage({
             inert={!chromeVisible}
             data-shown={chromeVisible}
             className={cn(
-              "m-slide absolute inset-x-0 top-0 z-20 bg-background shadow-soft",
+              "m-slide absolute inset-x-0 top-0 z-20 bg-page shadow-soft",
               !chromeVisible && "invisible -translate-y-full",
             )}
           >
@@ -413,7 +413,7 @@ export function MobileReaderPage({
             inert={!chromeVisible}
             data-shown={chromeVisible}
             className={cn(
-              "m-slide absolute inset-x-0 bottom-0 z-20 bg-background pb-[var(--safe-bottom)] shadow-float",
+              "m-slide absolute inset-x-0 bottom-0 z-20 bg-page pb-[var(--safe-bottom)] shadow-float",
               !chromeVisible && "invisible translate-y-full",
             )}
           >

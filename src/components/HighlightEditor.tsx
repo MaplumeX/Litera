@@ -58,13 +58,13 @@ export function HighlightEditor({
     <div
       className={cn(
         "fixed z-50 w-64 -translate-x-1/2 -translate-y-full",
-        "rounded-lg border bg-popover p-2 text-popover-foreground shadow-float",
+        "rounded-xl bg-popover p-2.5 font-sans text-popover-foreground shadow-float",
       )}
       style={{ left: `${x}px`, top: `${y - 8}px` }}
       role="group"
       aria-label={t("annotations.editor")}
     >
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-1.5 pl-0.5">
         {HIGHLIGHT_COLORS.map((id) => (
           <button
             key={id}
@@ -72,8 +72,8 @@ export function HighlightEditor({
             aria-label={t(`annotations.color.${id}`)}
             aria-pressed={color === id}
             className={cn(
-              "size-5 rounded-full border border-black/10",
-              color === id && "ring-2 ring-ring ring-offset-1",
+              "size-[18px] rounded-full shadow-[inset_0_0_0_1px_rgb(0_0_0/10%)] transition-transform duration-150 hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-popover motion-reduce:transition-none",
+              color === id && "ring-2 ring-foreground/50 ring-offset-2 ring-offset-popover",
             )}
             style={{ backgroundColor: HIGHLIGHT_COLOR_HEX[id] }}
             onClick={() => onColorChange(id)}
@@ -83,7 +83,7 @@ export function HighlightEditor({
           type="button"
           size="icon-xs"
           variant="ghost"
-          className="ml-auto"
+          className="ml-auto text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
           aria-label={t("annotations.deleteHighlight")}
           onClick={onDelete}
         >
@@ -97,7 +97,7 @@ export function HighlightEditor({
         placeholder={t("annotations.notePlaceholder")}
         onChange={(event) => setNote(event.target.value)}
         onBlur={commitNote}
-        className="mt-2 min-h-16 resize-none px-2 py-1.5"
+        className="mt-2.5 min-h-16 resize-none rounded-lg border-transparent bg-muted px-2.5 py-2 shadow-none focus-visible:bg-popover dark:bg-muted dark:focus-visible:bg-popover"
       />
     </div>
   );
