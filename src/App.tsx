@@ -756,12 +756,10 @@ function App() {
 
   return (
     <main
-      className={cn(
-        "relative flex h-screen flex-col text-foreground",
-        // The page runs under the bars when reading; Agent mode's panels float
-        // on the window's base tone, like the shelf.
-        readerMode === "reader" ? "bg-page" : "bg-sidebar",
-      )}
+      // One ground for both modes, so switching them moves the panels without
+      // repainting the window: the page runs under the bars when reading, and
+      // Agent mode's conversation and Book float on that same page.
+      className="relative flex h-screen flex-col bg-page text-foreground"
       onPointerMove={wakeChrome}
       onFocusCapture={wakeChrome}
     >

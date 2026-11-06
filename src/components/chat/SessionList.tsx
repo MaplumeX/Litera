@@ -97,8 +97,8 @@ export function SessionList({
     <div
       className={
         isRail
-          ? // Set apart from the conversation by tone, like the library sidebar.
-            "flex h-full min-h-0 w-full flex-col bg-sidebar"
+          ? // On the window's ground; the conversation beside it is the card.
+            "flex h-full min-h-0 w-full flex-col"
           : "flex max-h-[min(60vh,28rem)] min-h-0 flex-col"
       }
     >
@@ -177,14 +177,7 @@ export function SessionList({
                   key={session.id}
                   className={cn(
                     "group relative flex items-center rounded-lg text-sm transition-colors duration-150 motion-reduce:transition-none",
-                    // The rail sits on the sidebar tone, the popover on its own surface.
-                    active
-                      ? isRail
-                        ? "bg-sidebar-accent shadow-soft"
-                        : "bg-primary/10"
-                      : isRail
-                        ? "hover:bg-foreground/5"
-                        : "hover:bg-accent/70",
+                    active ? "bg-primary/10" : "hover:bg-foreground/5",
                   )}
                 >
                   {editingSessionId === session.id ? (

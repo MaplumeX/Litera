@@ -755,7 +755,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
           <div
             className={cn(
               "relative flex min-h-0 min-w-0 flex-1 flex-col",
-              // In Agent mode the conversation is a panel on the window's base tone.
+              // In Agent mode the conversation is a card on the window's ground.
               isWorkspace
                 ? cn("my-2 mr-1 overflow-hidden rounded-xl bg-background shadow-soft", railOpen ? "ml-1" : "ml-2")
                 : "h-full",
