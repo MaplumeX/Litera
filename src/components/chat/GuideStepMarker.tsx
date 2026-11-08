@@ -2,6 +2,11 @@ import { useState, type ReactNode } from "react";
 import { BookOpen, FastForward } from "lucide-react";
 import { useT } from "@/lib/i18n";
 
+/** The marker's line, kept empty while its `guide_step` runs and the label is not known yet. */
+export function GuideStepMarkerPlaceholder() {
+  return <div data-testid="guide-step-pending" aria-hidden className="invisible py-1 text-xs">&nbsp;</div>;
+}
+
 /**
  * Transcript marker for a guided step the assistant took (or, in Sessions
  * recorded before, one sent as the reader's message): what the guide covered,
