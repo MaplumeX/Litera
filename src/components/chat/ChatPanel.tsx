@@ -33,7 +33,8 @@ import { SessionList } from "./SessionList";
 import { TypingIndicator } from "./TypingIndicator";
 import { CompactionNotice, CompactionStatus } from "./CompactionNotice";
 import { GuideRecap } from "./GuideRecap";
-import { GuideStepMarker } from "./GuideStepMarker";
+import { GuideStepMarker, GuideStepMarkerPlaceholder } from "./GuideStepMarker";
+import { HoldHeight } from "./HoldHeight";
 import { ChatOutlineRail, userMessagePreview } from "./ChatOutlineRail";
 import { useT } from "@/lib/i18n";
 import {
@@ -44,10 +45,12 @@ import {
 import { isTranscriptMarker, takenGuideSteps, type AgentToolCall, type AssistantChatMessage, type GuideRequest, type GuideSelection, type GuideStep, type RecordedGuideStep } from "@/types/agent";
 import { chatActivity, type ChatActivity } from "@/lib/chat-activity";
 
-/** The `guide_step` calls of an assistant message that took a step, in order. */
-function guideCalls(message: AssistantChatMessage): Array<AgentToolCall & { guide: RecordedGuideStep }> {
+/** The `guide_step` calls of an assistant message that took a step or, while it streams, are taking one, in order. */
+function guideCalls(message: AssistantChatMessage, streaming: boolean): AgentToolCall[] {
   return (message.blocks ?? []).flatMap((block) =>
-    block.type === "toolCall" && block.toolCall.guide ? [block.toolCall as AgentToolCall & { guide: RecordedGuideStep }] : [],
+    block.type === "toolCall" && (block.toolCall.guide || (streaming && block.toolCall.tool === "guide_step" && !block.toolCall.done))
+      ? [block.toolCall]
+      : [],
   );
 }
 
@@ -859,23 +862,29 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                     />
                   );
                 })()}
-                {message.role === "assistant" && guideCalls(message).map((call) => (
-                  <GuideStepMarker
-                    key={call.toolCallId}
-                    label={guideStepLabel(call.guide)}
-                    skim={!!call.guide.skim}
-                    onOpen={canOpenGuideStep ? () => openGuideStep(call.guide) : undefined}
-                  />
-                ))}
                 {message.role === "assistant" && (
-                  <AssistantMessage
-                    message={message}
-                    streaming={isStreaming && index === lastChatIndex}
-                    canRegenerate={
-                      !isStreaming && bookReady && hasUserMessage && index === lastChatIndex
-                    }
-                    onRegenerate={handleRegenerate}
-                  />
+                  <HoldHeight active={isStreaming && index === lastChatIndex}>
+                    {guideCalls(message, isStreaming && index === lastChatIndex).map((call) => {
+                      const step = call.guide;
+                      if (!step) return <GuideStepMarkerPlaceholder key={call.toolCallId} />;
+                      return (
+                        <GuideStepMarker
+                          key={call.toolCallId}
+                          label={guideStepLabel(step)}
+                          skim={!!step.skim}
+                          onOpen={canOpenGuideStep ? () => openGuideStep(step) : undefined}
+                        />
+                      );
+                    })}
+                    <AssistantMessage
+                      message={message}
+                      streaming={isStreaming && index === lastChatIndex}
+                      canRegenerate={
+                        !isStreaming && bookReady && hasUserMessage && index === lastChatIndex
+                      }
+                      onRegenerate={handleRegenerate}
+                    />
+                  </HoldHeight>
                 )}
                 {message.role === "notice" && <CompactionNotice notice={message} />}
                 {message.role === "recap" && <GuideRecap recap={message} />}

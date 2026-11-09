@@ -104,6 +104,21 @@ afterEach(() => {
 });
 
 describe("ChatPanel in a Guided session", () => {
+  it("keeps a line for the marker while guide_step runs, only as long as it streams", () => {
+    const messages: AgentState["messages"] = [
+      { role: "user", content: "继续" },
+      { role: "assistant", content: "", blocks: [{ type: "toolCall", toolCall: { toolCallId: "c1", tool: "guide_step", params: {}, done: false } }] },
+    ];
+    bridgeState = guidedState({ status: "prompting", promptId: "p", messages });
+    const view = renderPanel();
+    expect(view.getByTestId("guide-step-pending")).toBeTruthy();
+    expect(view.queryByTestId("guide-step")).toBeNull();
+
+    bridgeState = guidedState({ messages });
+    view.rerender(<ChatPanel variant="workspace" currentChapterHref="OEBPS/ch3.xhtml" bookId="book-1" />);
+    expect(view.queryByTestId("guide-step-pending")).toBeNull();
+  });
+
   it("offers to start from the chapter in scope and sends the step", async () => {
     const view = renderPanel();
     const start = await view.findByRole("button", { name: "开始带读：第三章" });
