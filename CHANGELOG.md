@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **书里的公式可以复制成 LaTeX**：选中带公式的文字复制时，公式以 `$…$`（书上排版为独立公式的是 `$$…$$`）的 LaTeX 源码粘出，其余文字照旧；只选中分数的一角也会复制整条公式。Ctrl/Cmd+C 和选中栏里的复制按钮都一样。公式以图片排进书里的（多数扫描转换的 EPUB）没有可复制的文字，仍然复制不了。
+
 ## [0.8.0] - 2026-11-06
 
 ### Added

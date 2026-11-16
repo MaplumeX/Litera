@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../foliate-js/view.js", () => ({}));
@@ -502,5 +502,95 @@ describe("ReaderView activity", () => {
     load(document.implementation.createHTMLDocument("two"));
     first.body.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true }));
     expect(onReaderActivity).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("ReaderView copy", () => {
+  const loadChapter = (html: string) => {
+    renderReader();
+    const doc = document.implementation.createHTMLDocument("chapter");
+    doc.body.innerHTML = html;
+    act(() => {
+      viewEl().dispatchEvent(new CustomEvent("load", { detail: { doc } }));
+    });
+    return doc;
+  };
+
+  /** jsdom gives a `createHTMLDocument` chapter no Selection of its own. */
+  const selectAll = (doc: Document) => {
+    const range = doc.createRange();
+    range.selectNodeContents(doc.body);
+    Object.defineProperty(doc, "getSelection", {
+      value: () => ({ isCollapsed: false, rangeCount: 1, getRangeAt: () => range }),
+    });
+  };
+
+  /** A copy event this realm can carry: jsdom's ClipboardEvent has no data. */
+  const copyEvent = () => {
+    const setData = vi.fn();
+    const event = Object.assign(new Event("copy", { bubbles: true, cancelable: true }), {
+      clipboardData: { setData },
+    });
+    return { event, setData };
+  };
+
+  it("copies a formula as LaTeX on Ctrl+C", () => {
+    const doc = loadChapter(
+      "<p>取 <math><mfrac><mn>1</mn><mn>2</mn></mfrac></math> 即可。</p>",
+    );
+    selectAll(doc);
+    const { event, setData } = copyEvent();
+    act(() => {
+      doc.dispatchEvent(event);
+    });
+    expect(setData).toHaveBeenCalledWith("text/plain", "取 $\\frac{1}{2}$ 即可。");
+    expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("leaves a selection without formulas to the browser", () => {
+    const doc = loadChapter("<p>只是文字。</p>");
+    selectAll(doc);
+    const { event, setData } = copyEvent();
+    act(() => {
+      doc.dispatchEvent(event);
+    });
+    expect(setData).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(false);
+  });
+});
+
+describe("ReaderView copy button", () => {
+  it("writes the LaTeX of a selected formula", async () => {
+    const writeText = vi.fn(async () => {});
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    });
+    renderReader();
+    const doc = document.implementation.createHTMLDocument("chapter");
+    doc.body.innerHTML = "<p>取 <math><mfrac><mn>1</mn><mn>2</mn></mfrac></math> 即可。</p>";
+    act(() => {
+      viewEl().dispatchEvent(new CustomEvent("load", { detail: { doc } }));
+    });
+    const range = doc.createRange();
+    range.selectNodeContents(doc.body);
+    Object.defineProperty(range, "getBoundingClientRect", {
+      value: () => ({ left: 40, top: 60, width: 120, height: 16 }),
+    });
+    Object.defineProperty(doc, "getSelection", {
+      value: () => ({
+        isCollapsed: false,
+        rangeCount: 1,
+        toString: () => range.toString(),
+        getRangeAt: () => range,
+        removeAllRanges: () => {},
+      }),
+    });
+    act(() => {
+      doc.dispatchEvent(new Event("selectionchange"));
+    });
+    const toolbar = await screen.findByRole("toolbar");
+    fireEvent.click(within(toolbar).getByLabelText(/^(Copy|复制)$/));
+    expect(writeText).toHaveBeenCalledWith("取 $\\frac{1}{2}$ 即可。");
   });
 });
