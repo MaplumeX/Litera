@@ -10,7 +10,7 @@ import {
   type QuoteLocation,
   type SearchHit,
 } from "./book-content";
-import { isMathElement, mathMarkdown, mathText } from "./mathml";
+import { isMathElement, mathMarkdown, mathText } from "@/lib/mathml";
 
 interface ManifestItem {
   href: string;

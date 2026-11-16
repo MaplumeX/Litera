@@ -49,6 +49,7 @@ import {
 } from "@/lib/annotations";
 import { SelectionToolbar } from "@/components/SelectionToolbar";
 import { selectionParagraph } from "@/lib/selection-paragraph";
+import { latexSelectionText } from "@/lib/selection-copy";
 import { applyGuideMarks, findGuideParagraph, type GuideBlockTarget, type GuidePageMarks } from "@/lib/guide-marks";
 import { hrefMatches } from "@/agent/book/book-content";
 import { t as translate } from "@/lib/i18n";
@@ -816,7 +817,12 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         }
         lastSelectionDocRef.current = doc;
         closeHighlightEditorRef.current();
-        setSelectionPos({ x: pos.x, y: pos.y, text, paragraph: selectionParagraph(range) });
+        setSelectionPos({
+          x: pos.x,
+          y: pos.y,
+          text,
+          paragraph: selectionParagraph(range),
+        });
       };
       const handleLoad = (e: Event) => {
         unbindDoc?.();
@@ -870,6 +876,17 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
           ? bindTapTouchGuard(win, () => !scrolledRef.current)
           : undefined;
         const onSelectionChange = () => handleIframeSelection(doc);
+        // Ctrl/Cmd+C and the system's own Copy both fire here. Only a
+        // selection with formulas is rewritten; the rest keeps the
+        // browser's copy, formatting and line breaks included.
+        const handleDocCopy = (event: ClipboardEvent) => {
+          const selection = doc.getSelection();
+          if (!selection || selection.isCollapsed || selection.rangeCount === 0) return;
+          const latex = latexSelectionText(selection.getRangeAt(0));
+          if (latex === null || !event.clipboardData) return;
+          event.clipboardData.setData("text/plain", latex);
+          event.preventDefault();
+        };
         const onDocPointerDown = () => {
           lastScrollArea = null;
           // Selections here get the SelectionToolbar instead.
@@ -884,6 +901,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         doc.addEventListener("keydown", handleDocKeyDown);
         doc.addEventListener("wheel", handleWheel, { passive: false });
         doc.addEventListener("selectionchange", onSelectionChange);
+        doc.addEventListener("copy", handleDocCopy);
         unbindDoc = () => {
           unbindPointer();
           unbindTouchGuard?.();
@@ -894,6 +912,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
           doc.removeEventListener("pointerdown", onDocPointerDown);
           doc.removeEventListener("wheel", handleWheel);
           doc.removeEventListener("selectionchange", onSelectionChange);
+          doc.removeEventListener("copy", handleDocCopy);
         };
       };
       el.addEventListener("load", handleLoad as EventListener);
@@ -1259,7 +1278,12 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
 
     const handleCopySelection = useCallback(() => {
       if (!selectionPos) return;
-      void navigator.clipboard.writeText(selectionPos.text);
+      // Formulas become LaTeX on the way out; computed here, not while the
+      // reader is still dragging the selection. Other selections copy as before.
+      const selection = lastSelectionDocRef.current?.getSelection();
+      const range = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
+      const latex = range ? latexSelectionText(range) : null;
+      void navigator.clipboard.writeText(latex ?? selectionPos.text);
       clearIframeSelection();
     }, [selectionPos, clearIframeSelection]);
 
