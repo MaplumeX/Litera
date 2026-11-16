@@ -136,4 +136,8 @@ See [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 
-This repository does not currently include a top-level license file. [foliate-js](https://github.com/johnfactotum/foliate-js) is MIT-licensed.
+Litera is released under the [MIT License](LICENSE): use it, fork it, change it, ship it commercially — just keep the copyright and permission notice. The Litera name and logo are not covered by the license.
+
+Bundled third-party code and fonts keep their own licenses — [foliate-js](https://github.com/johnfactotum/foliate-js), zip.js, fflate, Geist, and the npm packages Litera depends on. See [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+
+Contributions are accepted under the MIT License (inbound = outbound): opening a pull request means you agree to license your changes on those terms.

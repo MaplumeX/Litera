@@ -138,4 +138,8 @@ APK 的版本名和版本号取自 `tauri.conf.json`，`npm run version:bump` �
 
 ## 许可
 
-仓库目前没有顶层 LICENSE 文件。[foliate-js](https://github.com/johnfactotum/foliate-js) 为 MIT。
+Litera 以 [MIT 协议](LICENSE)发布：可以自由使用、fork、修改，也允许商业分发，只需保留版权与许可声明。Litera 的名称与图标不在授权范围内。
+
+随应用打包的第三方代码与字体遵循各自的协议 —— [foliate-js](https://github.com/johnfactotum/foliate-js)、zip.js、fflate、Geist 字体，以及 Litera 依赖的 npm 包，详见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
+
+贡献按 MIT 协议接收（inbound = outbound）：提交 pull request 即表示同意以此协议授权你的改动。
