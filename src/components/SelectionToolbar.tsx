@@ -1,4 +1,4 @@
-import { Copy, ListEnd, MessageSquare } from "lucide-react";
+import { BookOpen, Copy, ListEnd, MessageSquare } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Tip } from "@/components/ui/tooltip";
 import { useT } from "@/lib/i18n";
@@ -15,6 +15,8 @@ interface SelectionToolbarProps {
   onAskAgent: () => void;
   /** In a Guided session: read up to the selection. Absent hides the button. */
   onGuideTo?: () => void;
+  /** When the selection lies inside an already-guided paragraph: view its guide card. */
+  onViewGuideCard?: () => void;
 }
 
 const TOOL_CLASS =
@@ -29,6 +31,7 @@ export function SelectionToolbar({
   onCopy,
   onAskAgent,
   onGuideTo,
+  onViewGuideCard,
 }: SelectionToolbarProps) {
   const { t } = useT();
   return (
@@ -67,7 +70,18 @@ export function SelectionToolbar({
       >
         <Copy className="size-3.5" aria-hidden />
       </button>
-      {onGuideTo && (
+      {onViewGuideCard ? (
+        <Tip label={t("reader.viewGuideCard")}>
+          <button
+            type="button"
+            className={TOOL_CLASS}
+            aria-label={t("reader.viewGuideCard")}
+            onClick={onViewGuideCard}
+          >
+            <BookOpen className="size-3.5" aria-hidden />
+          </button>
+        </Tip>
+      ) : onGuideTo && (
         <Tip label={t("reader.guideTo")}>
           <button
             type="button"

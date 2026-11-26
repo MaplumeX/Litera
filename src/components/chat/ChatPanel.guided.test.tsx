@@ -13,6 +13,7 @@ const nextGuideStep = vi.fn(async (_startHref?: string) => nextStep);
 const switchSession = vi.fn(async (_id: string) => {});
 let afterChapter: GuideStep | null = null;
 const guideStepAfterChapter = vi.fn(async (_step: GuideStep) => afterChapter);
+const guideStepAtHref = vi.fn(async (_href: string): Promise<GuideStep | null> => afterChapter);
 const guideSkimStep = vi.fn(async (step: GuideStep): Promise<GuideStep | null> => ({ ...step, skim: true }));
 const guideOutline = vi.fn(async (_step: GuideStep, _after?: number) => ({
   chapters: [{ chapterIndex: 2, chapterTitle: "第三章", firstBlock: 0, blocks: [{ snippet: "开头一段", chars: 40, heading: 0, part: 0 }, { snippet: "第二段", chars: 60, heading: 0, part: 0 }] }],
@@ -41,6 +42,7 @@ vi.mock("@/lib/use-agent-bridge", () => ({
     newSession,
     nextGuideStep,
     guideStepAfterChapter,
+    guideStepAtHref,
     guideSkimStep,
     guideOutline,
     guideStepTo,
@@ -85,6 +87,7 @@ beforeEach(() => {
   nextGuideStep.mockClear();
   switchSession.mockClear();
   guideStepAfterChapter.mockClear();
+  guideStepAtHref.mockClear();
   guideSkimStep.mockClear();
   guideOutline.mockClear();
   guideStepTo.mockClear();
@@ -290,18 +293,31 @@ describe("ChatPanel in a Guided session", () => {
     expect(await view.findByText("已带读到全书末尾")).toBeTruthy();
   });
 
-  it("creates Guided sessions from the rail and marks them with their position", async () => {
+  it("shows the Book's single canonical Guide in the rail and switches to it without creating duplicates", async () => {
     bridgeState = guidedState({
       sessionId: "chat-1",
       sessions: [
-        { id: "chat-1", title: "普通会话", createdAt: "1", updatedAt: "1" },
+        { id: "chat-1", title: "普通会话", createdAt: "2", updatedAt: "2" },
         { id: "guided-1", title: "带读会话", createdAt: "1", updatedAt: "1", kind: "guided", guide: stepOne },
+        { id: "guided-old", title: "旧带读", createdAt: "0", updatedAt: "0", kind: "guided", archived: true },
       ],
     });
     const view = renderPanel();
     expect(view.queryByRole("button", { name: /开始带读/ })).toBeNull();
     expect(view.getByText("第三章 · 1/3")).toBeTruthy();
-    fireEvent.click(view.getByRole("button", { name: "新建带读" }));
+    expect(view.getByText("历史带读")).toBeTruthy();
+    fireEvent.click(view.getByText("第三章 · 1/3").closest("button")!);
+    expect(switchSession).toHaveBeenCalledWith("guided-1");
+    expect(newSession).not.toHaveBeenCalled();
+  });
+
+  it("creates the canonical Guided session from the rail when the Book does not have one yet", () => {
+    bridgeState = guidedState({
+      sessionId: "chat-1",
+      sessions: [{ id: "chat-1", title: "普通会话", createdAt: "1", updatedAt: "1" }],
+    });
+    const view = renderPanel();
+    fireEvent.click(view.getByRole("button", { name: "带读" }));
     expect(newSession).toHaveBeenCalledWith("guided");
   });
 
@@ -355,5 +371,53 @@ describe("ChatPanel and the TOC in a Guided session", () => {
     bridgeState = guidedState({ sessions: [{ id: "guided-1", title: "t", createdAt: "1", updatedAt: "1" }] });
     view.rerender(<ChatPanel bookId="book-1" onGuideStepsChange={onGuideStepsChange} />);
     await waitFor(() => expect(onGuideStepsChange).toHaveBeenLastCalledWith(null));
+  });
+
+  it("jumps guided reading directly to a chapter picked from the TOC via guideChapter", async () => {
+    const ref = createRef<ChatPanelHandle>();
+    bridgeState = guidedState({
+      messages: [
+        { role: "user", content: "带读：第三章（第 1/3 部分）", guide: stepOne },
+        { role: "assistant", content: "讲述" },
+      ],
+    });
+    render(<ChatPanel ref={ref} variant="workspace" bookId="book-1" />);
+    await act(async () => {
+      ref.current?.guideChapter("OEBPS/ch4.xhtml");
+    });
+    await waitFor(() => expect(guideStepAtHref).toHaveBeenCalledWith("OEBPS/ch4.xhtml"));
+    expect(prompt).toHaveBeenCalledWith(
+      "带读：第四章",
+      { guideRequest: { step: afterChapter } },
+      { role: "user", content: "带读：第四章", guideRequest: { step: afterChapter } },
+    );
+  });
+
+  it("regenerates an earlier guided step while preserving its guideRequest", async () => {
+    bridgeState = guidedState({
+      messages: [
+        { role: "user", content: "带读：第三章（第 1/3 部分）", guideRequest: { step: stepOne } },
+        { role: "assistant", content: "第一部分讲解" },
+        { role: "user", content: "继续带读", guideRequest: {} },
+        { role: "assistant", content: "第二部分讲解" },
+      ],
+    });
+    const view = renderPanel();
+    const buttons = view.getAllByRole("button", { name: "重新生成" });
+    expect(buttons).toHaveLength(2);
+    fireEvent.click(buttons[0]);
+    await waitFor(() => expect(editPrompt).toHaveBeenCalledTimes(1));
+    expect(editPrompt).toHaveBeenCalledWith(
+      0,
+      "带读：第三章（第 1/3 部分）",
+      { selection: undefined, chapterHref: undefined, guideRequest: { step: stepOne } },
+      {
+        role: "user",
+        content: "带读：第三章（第 1/3 部分）",
+        selection: undefined,
+        chapterHref: undefined,
+        guideRequest: { step: stepOne },
+      },
+    );
   });
 });

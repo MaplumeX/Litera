@@ -1,5 +1,5 @@
 import { useEffect, useRef, type RefObject } from "react";
-import { Check, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, Play } from "lucide-react";
 import type { TocItem } from "@/components/ReaderView";
 import type { GuideChapterProgress } from "@/agent/runtime/guide";
 import { Button } from "@/components/ui/button";
@@ -16,6 +16,8 @@ interface TocSidebarProps {
   onGoTo: (href: string) => void;
   /** Agent mode in a Guided session: how far the guide has got, per href. */
   guideProgress?: Record<string, GuideChapterProgress>;
+  /** In a Guided session: start or jump guided reading directly to a chapter. */
+  onGuideChapter?: (href: string) => void;
 }
 
 /** A Guided session's progress on one TOC row. */
@@ -57,6 +59,7 @@ function TocNode({
   onGoTo,
   listRef,
   guideProgress,
+  onGuideChapter,
 }: {
   item: TocItem;
   path: number[];
@@ -66,8 +69,10 @@ function TocNode({
   onGoTo: (href: string) => void;
   listRef: RefObject<HTMLDivElement | null>;
   guideProgress?: Record<string, GuideChapterProgress>;
+  onGuideChapter?: (href: string) => void;
 }) {
   const progress = item.href ? guideProgress?.[item.href] : undefined;
+  const completed = Boolean(progress && (progress.skimmed || progress.coveredBlocks >= progress.totalBlocks));
   const { t } = useT();
   const isCurrent = Boolean(currentHref) && item.href === currentHref;
   const rowRef = useRef<HTMLDivElement>(null);
@@ -92,7 +97,7 @@ function TocNode({
       <div
         ref={rowRef}
         className={cn(
-          "relative flex w-full items-center rounded-md px-2 py-1.5 text-sm transition-colors duration-150 motion-reduce:transition-none",
+          "group relative flex w-full items-center rounded-md px-2 py-1.5 text-sm transition-colors duration-150 motion-reduce:transition-none",
           isCurrent
             ? "bg-primary/10 font-medium text-primary"
             : "text-muted-foreground hover:bg-accent/70 hover:text-accent-foreground",
@@ -129,6 +134,23 @@ function TocNode({
           </Tip>
         )}
         {progress && <GuideMark progress={progress} />}
+        {item.href && onGuideChapter && (
+          <Tip label={t(completed ? "toc.guide.reguideChapter" : "toc.guide.startChapter")}>
+            <Button
+              type="button"
+              size="icon-xs"
+              variant="ghost"
+              className="ml-0.5 shrink-0 text-muted-foreground opacity-0 transition-opacity hover:text-primary focus-visible:opacity-100 group-hover:opacity-100 [@media(hover:none)]:opacity-100"
+              aria-label={t(completed ? "toc.guide.reguideChapterAria" : "toc.guide.startChapterAria", { title: item.label })}
+              onClick={(event) => {
+                event.stopPropagation();
+                onGuideChapter(item.href);
+              }}
+            >
+              <Play className="h-3 w-3" />
+            </Button>
+          </Tip>
+        )}
       </div>
       {hasChildren && isExpanded
         ? item.subitems?.map((sub, i) => (
@@ -142,6 +164,7 @@ function TocNode({
               onGoTo={onGoTo}
               listRef={listRef}
               guideProgress={guideProgress}
+              onGuideChapter={onGuideChapter}
             />
           ))
         : null}
@@ -191,6 +214,7 @@ export function TocSidebar({
   onToggle,
   onGoTo,
   guideProgress,
+  onGuideChapter,
 }: TocSidebarProps) {
   const { t } = useT();
   const listRef = useRef<HTMLDivElement>(null);
@@ -211,6 +235,7 @@ export function TocSidebar({
               onGoTo={onGoTo}
               listRef={listRef}
               guideProgress={guideProgress}
+              onGuideChapter={onGuideChapter}
             />
           ))
         )}

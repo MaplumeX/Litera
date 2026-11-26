@@ -44,14 +44,17 @@ describe("guide_step in the runtime",()=>{
     expect(guided.tools[0]).toContain("guide_step");
   });
 
-  it("takes the asked step in the turn: tells the model what to read and records the step on the tool result",async()=>{
+  it("takes the asked step in the turn: inlines step text and records the step on the tool result",async()=>{
     const {runtime,batches,events}=setup(undefined,null,[takeStep({chapterIndex:0,toBlock:2}),"retold","title"]);
     await runtime.openBook("book",new ArrayBuffer(1));
     await runtime.newSession(undefined,"guided");
     await runtime.prompt("带读第一章到第 3 段",{});
     const [taken]=guideStepResults(batches);
     expect(taken).toMatchObject({isError:false,guide:{from:{chapterIndex:0,block:0,snippet:"a",paragraph:1},to:{chapterIndex:0,block:2,snippet:"c",paragraph:3}}});
-    expect(taken.text).toContain("chapterIndex 0, fromBlock 0, toBlock 1; chapterIndex 0, fromBlock 2, toBlock 2");
+    expect(taken.text).toContain("do NOT call read_chapter");
+    expect(taken.text).toContain("chapterIndex 0, blocks 0–1");
+    expect(taken.text).toContain("chapterIndex 0, blocks 2–2");
+    expect(taken.text).toContain("chapter");
     const user=batches.flat().find((entry)=>entry.type==="message"&&(entry.message as {role?:string}).role==="user");
     expect(user).not.toHaveProperty("guide");
     expect(events.find((event)=>event.type==="prompt_end")).not.toHaveProperty("guideStep");
@@ -147,6 +150,10 @@ describe("Guided sessions in the runtime",()=>{
     expect(await runtime.nextGuideStep("two.xhtml")).toMatchObject({from:{chapterIndex:0,block:2},part:{index:1,total:2}});
     await runtime.prompt("side question",{});
     expect(await runtime.nextGuideStep()).toMatchObject({from:{chapterIndex:0,block:2},part:{index:1,total:2}});
+    // guideStepAtHref can jump freely to any chapter even after the guide has started.
+    expect(await runtime.guideStepAtHref("two.xhtml")).toMatchObject({from:{chapterIndex:1,block:0},part:{index:0,total:1}});
+    expect(await runtime.guideStepAtHref("one.xhtml")).toMatchObject({from:{chapterIndex:0,block:0},part:{index:0,total:2}});
+    expect(await runtime.guideStepAtHref("missing.xhtml")).toBeNull();
   });
 
   it("keeps the Guide cursor at the furthest step when the model goes back over a chapter",async()=>{
@@ -197,13 +204,13 @@ describe("Guided sessions in the runtime",()=>{
     expect(guideStepResults(batches)[1].guide).toMatchObject({from:{chapterIndex:0,block:2},to:{chapterIndex:1,block:1}});
   });
 
-  it("takes a range step across chapters and records the snippets of its ends",async()=>{
+  it("takes a range step across chapters, inlines up to the cap and lists remaining reads",async()=>{
     const {runtime,batches}=setup(undefined,null,[takeStep({toChapterIndex:1,toBlock:0}),"retold","title"]);
     await runtime.openBook("book",new ArrayBuffer(1));
     await runtime.newSession(undefined,"guided");
     await runtime.prompt("step",{});
     const [taken]=guideStepResults(batches);
-    expect(taken.text).toContain("chapterIndex 0, fromBlock 0, toBlock 1; chapterIndex 0, fromBlock 2, toBlock 3; chapterIndex 1, fromBlock 0, toBlock 0");
+    expect(taken.text).toContain("The first 2 part(s) are below; call read_chapter ONLY for the remaining part(s): chapterIndex 1, fromBlock 0, toBlock 0");
     expect(taken.guide).toMatchObject({from:{chapterIndex:0,block:0,snippet:"a"},to:{chapterIndex:1,block:0,snippet:"e"}});
     expect(await runtime.nextGuideStep()).toMatchObject({from:{chapterIndex:1,block:1},to:{chapterIndex:1,block:1}});
   });
@@ -266,8 +273,8 @@ describe("Guided sessions in the runtime",()=>{
     // An older Session's part steps, then a block range.
     const steps=[{chapterIndex:0,part:0,totalParts:2},{chapterIndex:0,part:1,totalParts:2,skim:true as const},{from:{chapterIndex:1,block:0},to:{chapterIndex:1,block:0}}];
     expect(await runtime.guidePageMarks(steps)).toEqual({
-      "one.xhtml":{read:["aa","b"],skimmed:["c","d"]},
-      "two.xhtml":{read:["e"],skimmed:[],cursor:"e"},
+      "one.xhtml":{read:["aa","b"],skimmed:["c","d"],steps:{aa:0,b:0,c:1,d:1}},
+      "two.xhtml":{read:["e"],skimmed:[],cursor:"e",steps:{e:2}},
     });
   });
 
@@ -314,8 +321,8 @@ describe("Guided sessions in the runtime",()=>{
     expect(recapRequest).toContain("part one retold");
     expect(recapRequest).toContain("part two retold");
     const recap=batches.at(-1)![0];
-    expect(recap).toMatchObject({type:"custom_message",customType:"guideRecap",details:{chapterIndex:0,chapterTitle:"One",text:"The chapter in short."}});
-    expect(events.find((event)=>event.type==="guide_recap_added")).toMatchObject({messages:expect.arrayContaining([{role:"recap",chapterIndex:0,chapterTitle:"One",text:"The chapter in short."}])});
+    expect(recap).toMatchObject({type:"custom_message",customType:"guideRecap",display:false,details:{chapterIndex:0,chapterTitle:"One",text:"The chapter in short."}});
+    expect(events.find((event)=>event.type==="guide_recap_added")).toBeTruthy();
     await runtime.prompt("继续带读",{guideRequest:{}});
     expect(requests.at(-1)).toContain("Chapter recap (chapterIndex 0");
   });
@@ -335,9 +342,9 @@ describe("Guided sessions in the runtime",()=>{
     expect(recapRequest).toContain("through chapterIndex 1");
     const recaps=batches.flat().filter((entry)=>entry.customType==="guideRecap");
     expect(recaps).toHaveLength(1);
-    expect(recaps[0]).toMatchObject({details:{chapterIndex:0,chapterTitle:"One",throughChapterIndex:1,throughChapterTitle:"Two",text:"Both chapters in short."}});
+    expect(recaps[0]).toMatchObject({display:false,details:{chapterIndex:0,chapterTitle:"One",throughChapterIndex:1,throughChapterTitle:"Two",text:"Both chapters in short."}});
     expect(recaps[0].content).toContain("Chapter recap (chapterIndex 0, \"One\" through chapterIndex 1, \"Two\")");
-    expect(events.find((event)=>event.type==="guide_recap_added")).toMatchObject({messages:expect.arrayContaining([expect.objectContaining({role:"recap",chapterIndex:0,throughChapterIndex:1})])});
+    expect(events.find((event)=>event.type==="guide_recap_added")).toBeTruthy();
   });
 
   it("writes no recap in an ordinary Session",async()=>{
@@ -355,5 +362,77 @@ describe("Guided sessions in the runtime",()=>{
     await runtime.openBook("book",new ArrayBuffer(1));
     await runtime.prompt("question",{});
     expect(systemPrompts[0]).toBe(SYSTEM_PROMPT);
+  });
+
+  it("auto-clears prior chapter turns on non-adjacent chapter jumps and supports manual context reset",async()=>{
+    const threeToc=[
+      {index:0,label:"One",ancestors:[],depth:0,hrefs:["one.xhtml"],chars:100,parts:1,blocks:2,partStarts:[0]},
+      {index:1,label:"Two",ancestors:[],depth:0,hrefs:["two.xhtml"],chars:100,parts:1,blocks:2,partStarts:[0]},
+      {index:2,label:"Three",ancestors:[],depth:0,hrefs:["three.xhtml"],chars:100,parts:1,blocks:2,partStarts:[0]},
+    ];
+    let current=session("guided");
+    const batches:PiSessionEntry[][]=[];const requests:string[]=[];const events:AgentEvent[]=[];
+    const sessions:SessionPort={create:async(_book,requested)=>{current=session(requested);return current;},list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,entries)=>{batches.push(entries);return entries.at(-1)?.id??null;}};
+    const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:3}),toc:async()=>threeToc,readChapter:async(chapterIndex)=>({chapterIndex,chapterNumber:chapterIndex+1,part:0,totalParts:1,fromBlock:0,toBlock:1,totalBlocks:2,text:`text-${chapterIndex}`}),guideBlocks:async()=>[{snippet:"p1",chars:10,heading:0,part:0},{snippet:"p2",chars:10,heading:0,part:0}],locateGuideBlock:async()=>null,search:async()=>[],locateQuote:async()=>({status:"unverified",chapterIndex:0}),readImage:async()=>{throw new Error("no");},close:()=>{}};
+    const faux=createFauxCore({tokensPerSecond:10_000});
+    faux.setResponses([
+      takeStep({chapterIndex:0}),"chapter-one-unique-phrase","title","recap-for-ch-one",
+      takeStep({chapterIndex:2}),"chapter-three-retold","recap-for-ch-three",
+      "after-reset-answer",
+    ].map((response)=>typeof response==="string"?fauxAssistantMessage(response):response));
+    const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret",thinkingLevel:"off"};
+    const runtime=new LiteraAgentRuntime({sessions,book,loadConfig:async()=>config,loadStream:async()=>((requestModel,context,options)=>{requests.push(JSON.stringify(context.messages));return faux.streamSimple(requestModel,context,options);})});
+    runtime.subscribe((event)=>{events.push(event);});
+    await runtime.openBook("book",new ArrayBuffer(1));
+    await runtime.newSession(undefined,"guided");
+    await runtime.prompt("带读：One",{guideRequest:{step:{chapterIndex:0,part:0,totalParts:1}}});
+    await new Promise((resolve)=>setTimeout(resolve,20));
+    await runtime.settled();
+    // Jump directly from chapter 0 to chapter 2 (non-adjacent): chapter 0 turns drop out while recap stays.
+    await runtime.prompt("带读：Three",{guideRequest:{step:{chapterIndex:2,part:0,totalParts:1}}});
+    await runtime.settled();
+    const jumpRequest=requests.find((payload)=>payload.includes("带读：Three"))!;
+    expect(jumpRequest).toContain("recap-for-ch-one");
+    expect(jumpRequest).not.toContain("chapter-one-unique-phrase");
+    expect(batches.flat().some((entry)=>entry.type==="guide_window_cut"&&entry.reason==="jump")).toBe(true);
+    // Manual reset emits divider and clears short-term turns while preserving recaps.
+    await runtime.resetGuideContext();
+    expect(events.find((event)=>event.type==="guide_window_updated")).toMatchObject({
+      messages:expect.arrayContaining([{role:"guide_cut",reason:"manual"}]),
+    });
+    expect(runtime.guideContextStats()).toMatchObject({recapCount:2,activeTokens:0});
+    await runtime.prompt("question after reset",{});
+    expect(requests.at(-1)).toContain("recap-for-ch-one");
+    expect(requests.at(-1)).toContain("recap-for-ch-three");
+    expect(requests.at(-1)).not.toContain("chapter-three-retold");
+  });
+
+  it("archives the active Guided session and starts a fresh canonical one on restart",async()=>{
+    const {runtime,batches,created,events}=setup();
+    await runtime.openBook("book",new ArrayBuffer(1));
+    await runtime.newSession(undefined,"guided");
+    await runtime.restartGuidedSession("session-1");
+    expect(batches.flat()).toContainEqual(expect.objectContaining({type:"session_info",archived:true}));
+    expect(events.some((event)=>event.type==="session_archived")).toBe(true);
+    expect(created).toEqual(["guided","guided"]);
+  });
+
+  it("lets the model search earlier guided explanations and reader questions after a context reset",async()=>{
+    const {runtime,batches}=setup(undefined,null,[
+      takeStep(),"这段详述了土地财政的制度起源。","title",
+      fauxAssistantMessage(fauxToolCall("search_guide_history",{queries:["土地财政"]}),{stopReason:"toolUse"}),
+      "之前我们在第一章讨论过土地财政。",
+    ]);
+    await runtime.openBook("book",new ArrayBuffer(1));
+    await runtime.newSession(undefined,"guided");
+    await runtime.prompt("开始带读",{guideRequest:{}});
+    await runtime.settled();
+    await runtime.resetGuideContext();
+    await runtime.prompt("前面哪段提过土地财政？",{});
+    const historyResult=batches.flat().flatMap((entry)=>{
+      const message=entry.type==="message"?entry.message as {role?:string;toolName?:string;content?:Array<{type?:string;text?:string}>}:undefined;
+      return message?.role==="toolResult"&&message.toolName==="search_guide_history"?[message.content?.[0]?.text??""]:[];
+    });
+    expect(historyResult[0]).toContain("土地财政的制度起源");
   });
 });

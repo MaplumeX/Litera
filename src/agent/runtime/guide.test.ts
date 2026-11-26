@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { BookTocEntry, GuideBlock } from "@/agent/book/book-content";
 import type { GuideStep, LegacyGuideStep } from "@/types/agent";
-import { dueRecap, findGuideBlock, findableGuideBlock, guideBlockPage, guideCursor, guidedPrompt, guideOutlinePlan, guidePageMarkPlan, guideReadingState, guideRequestContext, guideSpanTo, guideStepContext, guideStepRequestFor, guideTocProgress, locateGuideStep, nextGuideSpan, recappedChapters, recordGuideSpan, requestedGuideSpan, skimGuideSpan, skipChapterSpan, stepChapters, type GuidePoint, type GuideSpan } from "./guide";
+import { dueRecap, findGuideBlock, findableGuideBlock, firstBodyChapter, guideBlockPage, guideCursor, guidedPrompt, guideOutlinePlan, guidePageMarkPlan, guideReadingState, guideRequestContext, guideSpanTo, guideStepContext, guideStepRequestFor, guideTocProgress, isNonAdjacentChapterJump, locateGuideStep, nearbySectionBreaks, nextGuideSpan, recappedChapters, recordGuideSpan, requestedGuideSpan, skimGuideSpan, skipChapterSpan, stepChapters, type GuidePoint, type GuideSpan } from "./guide";
 
 // Every part holds three blocks.
 const chapter = (index: number, parts: number, chars = 1000, label = `Chapter ${index + 1}`): BookTocEntry => ({
@@ -256,10 +256,10 @@ describe("guideOutlinePlan", () => {
 });
 
 describe("guidePageMarkPlan", () => {
-  it("lists read and skimmed blocks per chapter, its files, and the Guide cursor", () => {
+  it("lists read and skimmed blocks per chapter, its files, step index mapping, and the Guide cursor", () => {
     expect(guidePageMarkPlan(toc, [part(0, 0), span([0, 3], [2, 1]), part(2, 0, true), part(0, 0)])).toEqual([
-      { chapterIndex: 0, files: ["c0.xhtml"], read: [0, 1, 2, 3, 4, 5], skimmed: [] },
-      { chapterIndex: 2, files: ["c2.xhtml"], read: [0, 1], skimmed: [2, 3, 4, 5, 6, 7, 8], cursor: 8 },
+      { chapterIndex: 0, files: ["c0.xhtml"], read: [0, 1, 2, 3, 4, 5], skimmed: [], stepByBlock: { 0: 3, 1: 3, 2: 3, 3: 1, 4: 1, 5: 1 } },
+      { chapterIndex: 2, files: ["c2.xhtml"], read: [0, 1], skimmed: [2, 3, 4, 5, 6, 7, 8], cursor: 8, stepByBlock: { 0: 2, 1: 2, 2: 2, 3: 2, 4: 2, 5: 2, 6: 2, 7: 2, 8: 2 } },
     ]);
   });
 
@@ -445,5 +445,44 @@ describe("guideStepRequestFor", () => {
   it("tells the model the exact call for a picked step, and leaves Continue's end to it", () => {
     expect(guideRequestContext(toc, cursor, nextGuideSpan(toc, null, 3)!)).toContain('guide_step {"chapterIndex":3}');
     expect(guideRequestContext(toc, cursor)).toContain("natural break");
+  });
+});
+
+describe("firstBodyChapter, isNonAdjacentChapterJump, and nearbySectionBreaks", () => {
+  it("skips short cover/copyright/TOC front matter when starting without an explicit chapter", () => {
+    const withFront = [
+      chapter(0, 1, 200, "封面"),
+      chapter(1, 1, 500, "版权信息"),
+      chapter(2, 1, 400, "目录"),
+      chapter(3, 2, 3000, "第一章 导论"),
+    ];
+    expect(firstBodyChapter(withFront)?.index).toBe(3);
+    expect(nextGuideSpan(withFront, null)?.from.entry.index).toBe(3);
+    // Explicit startIndex still honors front matter if picked.
+    expect(nextGuideSpan(withFront, null, 1)?.from.entry.index).toBe(1);
+  });
+
+  it("treats chapters separated only by empty volume headings as adjacent, and skips as non-adjacent", () => {
+    // toc has index 1 with chars = 0 between 0 and 2.
+    expect(isNonAdjacentChapterJump(toc, 0, 2)).toBe(false);
+    expect(isNonAdjacentChapterJump(toc, 0, 3)).toBe(true);
+    expect(isNonAdjacentChapterJump(toc, 3, 0)).toBe(true);
+    expect(isNonAdjacentChapterJump(toc, null, 3)).toBe(false);
+  });
+
+  it("lists nearby section breaks before headings around the default end", () => {
+    const blocks: GuideBlock[] = [
+      { snippet: "Opening", chars: 100, heading: 0, part: 0 },
+      { snippet: "1. First section", chars: 20, heading: 2, part: 0 },
+      { snippet: "Body", chars: 100, heading: 0, part: 0 },
+      { snippet: "2. Second section", chars: 20, heading: 2, part: 0 },
+      { snippet: "More body", chars: 100, heading: 0, part: 0 },
+    ];
+    const breaks = nearbySectionBreaks(blocks, 0, 2);
+    expect(breaks).toEqual([
+      { toBlock: 0, nextHeading: "1. First section" },
+      { toBlock: 2, nextHeading: "2. Second section" },
+    ]);
+    expect(guideReadingState(null, part(0, 0), breaks)).toContain('toBlock 2 (before "2. Second section")');
   });
 });

@@ -46,6 +46,8 @@ self.onmessage = async (event: MessageEvent<WorkerRequest>) => {
     } else if (method === "readImage") {
       const file = readImageFile(book, String(args[0] ?? ""));
       result = await prepareModelImage(file.src, file.bytes, file.mediaType);
+    } else if (method === "readRawImage") {
+      result = readImageFile(book, String(args[0] ?? ""));
     } else if (method === "locateQuote") {
       result = locateQuote(book, Number(args[0]), String(args[1] ?? ""));
     } else {

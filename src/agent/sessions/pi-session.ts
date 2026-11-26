@@ -211,7 +211,7 @@ export function activeBranch(session: DecodedPiSession): PiSessionEntry[] {
  * Tools whose results are Book content the model can fetch again, so Pruning
  * may clear them from the model context.
  */
-export const PRUNABLE_TOOLS: ReadonlySet<string> = new Set(["read_chapter", "search_in_book", "get_toc", "list_guide_blocks", "view_image"]);
+export const PRUNABLE_TOOLS: ReadonlySet<string> = new Set(["read_chapter", "search_in_book", "get_toc", "list_guide_blocks", "view_image", "guide_step"]);
 
 /** A toolResult entry of a prunable tool that the projection has not cleared yet. */
 export function isPrunableEntry(entry: PiSessionEntry): boolean {
@@ -226,6 +226,17 @@ export function isGuideRecapEntry(entry: PiSessionEntry): boolean {
 }
 
 export const GUIDE_RECAP = "guideRecap";
+export const GUIDE_WINDOW_CUT = "guide_window_cut";
+
+/** A sliding-window advance or manual context reset in a Guided session. */
+export function isGuideWindowCutEntry(entry: PiSessionEntry): boolean {
+  return entry.type === GUIDE_WINDOW_CUT;
+}
+
+/** Canonical Guided session for a Book: the newest non-archived Guided session, if any. */
+export function canonicalGuidedSession(sessions: readonly AgentSessionSummary[]): AgentSessionSummary | undefined {
+  return sessions.find((session) => session.kind === "guided" && !session.archived);
+}
 
 /**
  * A recap entry's chapters and reader-facing text, or null when malformed.
@@ -251,7 +262,13 @@ function decodeRecap(entry: PiSessionEntry): Omit<GuideRecapMarker, "role"> | nu
   };
 }
 
-function prunedPlaceholder(toolName: string, args: Record<string, unknown> | undefined): string {
+function prunedPlaceholder(toolName: string, args: Record<string, unknown> | undefined, guide: RecordedGuideStep | null): string {
+  if (toolName === "guide_step" && guide) {
+    const where = "from" in guide
+      ? `chapterIndex ${guide.from.chapterIndex} block ${guide.from.block} through chapterIndex ${guide.to.chapterIndex} block ${guide.to.block}`
+      : `chapterIndex ${guide.chapterIndex} part ${guide.part}`;
+    return `[Guided step source text (${where}) was cleared to save context. Call read_chapter if you need the source text again.]`;
+  }
   const call = `${toolName}(${Object.entries(args ?? {}).map(([key, value]) => `${key}=${JSON.stringify(value)}`).join(", ")})`;
   return `[Result of ${call} was cleared to save context. Call ${toolName} again if you need it.]`;
 }
@@ -259,10 +276,11 @@ function prunedPlaceholder(toolName: string, args: Record<string, unknown> | und
 /**
  * Model-context projection of the active branch: the entries the LLM sees.
  *
- * Applies the branch's latest compaction, replacing everything before its
- * `firstKeptEntryId` with the compaction summary entry, then the latest
- * `context_prune`, replacing prunable tool results up to its `throughEntryId`
- * with placeholders (marked `pruned: true`; the tool call pairing is kept).
+ * Applies the branch's latest compaction or `guide_window_cut` (whichever is
+ * newer), keeping all earlier chapter recaps in context, then applies the
+ * latest `context_prune`, replacing prunable tool results up to its
+ * `throughEntryId` with placeholders (marked `pruned: true`; the tool call
+ * pairing and any `guide` metadata are kept).
  * Use this only for model-facing concerns (context messages, snapshot/model-
  * change bookkeeping, maintenance cut points); UI and session-level logic use
  * `activeBranch`.
@@ -270,18 +288,40 @@ function prunedPlaceholder(toolName: string, args: Record<string, unknown> | und
 export function contextBranch(session: DecodedPiSession): PiSessionEntry[] {
   const path = activeBranch(session);
   const latestCompaction = [...path].reverse().find((entry) => entry.type === "compaction");
-  // A prune before the latest compaction still applies to the entries the
-  // compaction kept.
+  const latestWindowCut = [...path].reverse().find(isGuideWindowCutEntry);
+  // A prune before the latest compaction/cut still applies to the entries kept.
   const latestPrune = [...path].reverse().find((entry) => entry.type === "context_prune");
+  const compactIndex = latestCompaction ? path.indexOf(latestCompaction) : -1;
+  const cutIndex = latestWindowCut ? path.indexOf(latestWindowCut) : -1;
   let projected = path;
-  if (latestCompaction) {
-    const compactIndex = path.indexOf(latestCompaction);
+  if (cutIndex > compactIndex && latestWindowCut) {
+    const firstKeptId = string(latestWindowCut.firstKeptEntryId);
+    const keptIndex = firstKeptId ? path.findIndex((entry) => entry.id === firstKeptId) : -1;
+    const beforeCut = keptIndex >= 0 ? keptIndex : cutIndex;
+    const earlier = path.slice(0, beforeCut);
+    const snapshot = [...earlier].reverse().find((entry) => entry.type === "custom_message" && entry.customType === "bookSnapshot");
+    const recaps = earlier.filter(isGuideRecapEntry);
+    const keptBefore = keptIndex >= 0 ? path.slice(keptIndex, cutIndex) : [];
+    const keptAfter = path.slice(cutIndex + 1);
+    const hasSnapshotAfter = [...keptBefore, ...keptAfter].some((entry) => entry.type === "custom_message" && entry.customType === "bookSnapshot");
+    projected = [
+      ...(!hasSnapshotAfter && snapshot ? [snapshot] : []),
+      ...recaps,
+      ...keptBefore.filter((entry) => !isGuideWindowCutEntry(entry)),
+      ...keptAfter.filter((entry) => !isGuideWindowCutEntry(entry)),
+    ];
+  } else if (latestCompaction) {
     const firstKeptId = string(latestCompaction.firstKeptEntryId);
     const keptIndex = firstKeptId ? path.findIndex((entry) => entry.id === firstKeptId) : -1;
     // Chapter recaps outlive the turns they followed: the model keeps every
     // one, right after the summary, which leaves them out.
     const recaps = path.slice(0, keptIndex >= 0 ? keptIndex : compactIndex).filter(isGuideRecapEntry);
-    projected = [latestCompaction, ...recaps, ...(keptIndex >= 0 ? path.slice(keptIndex, compactIndex) : []), ...path.slice(compactIndex + 1)];
+    projected = [
+      latestCompaction,
+      ...recaps,
+      ...(keptIndex >= 0 ? path.slice(keptIndex, compactIndex) : []),
+      ...path.slice(compactIndex + 1),
+    ].filter((entry) => !isGuideWindowCutEntry(entry));
   }
   const throughIndex = latestPrune ? path.findIndex((entry) => entry.id === latestPrune.throughEntryId) : -1;
   if (throughIndex < 0) return projected;
@@ -299,7 +339,7 @@ export function contextBranch(session: DecodedPiSession): PiSessionEntry[] {
   return projected.map((entry) => {
     if (!prunedIds.has(entry.id)) return entry;
     const message = object(entry.message)!;
-    const text = prunedPlaceholder(string(message.toolName) ?? "tool", callArgs.get(string(message.toolCallId) ?? ""));
+    const text = prunedPlaceholder(string(message.toolName) ?? "tool", callArgs.get(string(message.toolCallId) ?? ""), decodeGuide(entry.guide));
     return { ...entry, pruned: true, message: { ...message, content: [{ type: "text", text }] } };
   });
 }
@@ -395,8 +435,8 @@ function visibleMessageAnchors(session: DecodedPiSession): PiSessionEntry[] {
       if (typeof entry.summary === "string") anchors.push(entry);
       continue;
     }
-    // So does a chapter recap.
-    if (decodeRecap(entry)) {
+    // Manual context resets in Guided sessions appear as a subtle divider.
+    if (isGuideWindowCutEntry(entry) && entry.reason === "manual") {
       anchors.push(entry);
       continue;
     }
@@ -430,9 +470,8 @@ export function visibleMessages(session: DecodedPiSession): UiAgentMessage[] {
       output.push({ role: "notice", summary: entry.summary, tokensBefore: typeof entry.tokensBefore === "number" ? entry.tokensBefore : 0 });
       continue;
     }
-    const recap = decodeRecap(entry);
-    if (recap) {
-      output.push({ role: "recap", ...recap });
+    if (isGuideWindowCutEntry(entry) && entry.reason === "manual") {
+      output.push({ role: "guide_cut", reason: "manual" });
       continue;
     }
     if (entry.type !== "message") continue;
@@ -672,6 +711,7 @@ export function sessionSummary(value: unknown): AgentSessionSummary {
     const guide = decodeGuide(item.guide);
     if (guide) summary.guide = guide;
   }
+  if (item.archived === true) summary.archived = true;
   return summary;
 }
 
@@ -698,14 +738,17 @@ export function guidedTurns(session: DecodedPiSession): Array<{ step: RecordedGu
   return turns;
 }
 
-/** The chapters of each recap on the active branch. */
-export function guideRecapChapters(session: DecodedPiSession): Array<Omit<GuideRecapMarker, "role" | "text">> {
+/** All decoded chapter recaps (with text) on the active branch, oldest first. */
+export function guideRecaps(session: DecodedPiSession): Array<Omit<GuideRecapMarker, "role">> {
   return activeBranch(session).flatMap((entry) => {
     const recap = decodeRecap(entry);
-    if (!recap) return [];
-    const { text: _text, ...chapters } = recap;
-    return [chapters];
+    return recap ? [recap] : [];
   });
+}
+
+/** The chapters of each recap on the active branch. */
+export function guideRecapChapters(session: DecodedPiSession): Array<Omit<GuideRecapMarker, "role" | "text">> {
+  return guideRecaps(session).map(({ text: _text, ...chapters }) => chapters);
 }
 
 export function newEntry(type: string, parentId: string | null, fields: Record<string, unknown>): PiSessionEntry {

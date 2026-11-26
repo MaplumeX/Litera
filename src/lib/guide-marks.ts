@@ -11,6 +11,8 @@ export interface GuideFileMarks {
   read: string[];
   skimmed: string[];
   cursor?: string;
+  /** Opening key -> latest step index (0-based) covering that paragraph. */
+  steps?: Record<string, number>;
 }
 
 /** Marks per file of the Book (href without fragment). */
@@ -26,7 +28,25 @@ export function guideMarkKey(text: string): string {
 /** Paragraph-like elements; a div only when no such element is inside it. */
 const PARAGRAPHS = "p, li, ul, ol, h1, h2, h3, h4, h5, h6, blockquote, pre, dd, dt, figcaption, div";
 const MARK = "data-litera-guide";
+const STEP_ATTR = "data-litera-guide-step";
 const CURSOR = "data-litera-guide-cursor";
+
+/** Read the guided step index attached to a marked paragraph (or an ancestor of `node`). */
+export function guidedStepIndexAt(node: Node | null): number | null {
+  let element: Element | null = node?.nodeType === Node.ELEMENT_NODE ? (node as Element) : node?.parentElement ?? null;
+  element = element?.closest?.(`[${STEP_ATTR}]`) ?? null;
+  if (!element) return null;
+  const raw = element.getAttribute(STEP_ATTR);
+  if (raw === null) return null;
+  const parsed = Number(raw);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : null;
+}
+
+/** Find the marked paragraph element holding `node`, if any. */
+export function guidedStepElementAt(node: Node | null): Element | null {
+  const element: Element | null = node?.nodeType === Node.ELEMENT_NODE ? (node as Element) : node?.parentElement ?? null;
+  return element?.closest?.(`[${STEP_ATTR}]`) ?? null;
+}
 /** A marked paragraph's own text color before fading. */
 const INK_VAR = "--litera-guide-ink";
 const STYLE_ID = "litera-guide-marks";
@@ -85,9 +105,10 @@ function keepInk(element: HTMLElement): void {
  * stays as it was, and only colors change, so nothing moves.
  */
 export function applyGuideMarks(doc: Document, marks: GuideFileMarks | null, cursorLabel: string): void {
-  for (const element of doc.querySelectorAll(`[${MARK}], [${CURSOR}]`)) {
+  for (const element of doc.querySelectorAll(`[${MARK}], [${CURSOR}], [${STEP_ATTR}]`)) {
     element.removeAttribute(MARK);
     element.removeAttribute(CURSOR);
+    element.removeAttribute(STEP_ATTR);
     (element as HTMLElement).style?.removeProperty(INK_VAR);
     if ((element as HTMLElement).getAttribute("style") === "") element.removeAttribute("style");
   }
@@ -110,6 +131,8 @@ export function applyGuideMarks(doc: Document, marks: GuideFileMarks | null, cur
     if (state) {
       keepInk(element as HTMLElement);
       element.setAttribute(MARK, state);
+      const stepIndex = marks.steps?.[key];
+      if (stepIndex !== undefined) element.setAttribute(STEP_ATTR, String(stepIndex));
     }
     if (!cursorMarked && key === marks.cursor) {
       element.setAttribute(CURSOR, "");

@@ -8,14 +8,14 @@ const RECAP_MAX_TOKENS = 1_500;
 
 const RECAP_SYSTEM_PROMPT = "You write chapter recaps for a reading assistant that takes a reader through a book chapter by chapter. Output only the recap.";
 
-const RECAP_PROMPT = `The text in <retelling> is how the assistant took the reader through one chapter of the book, part by part, or through several chapters read in one step (<chapter> names them). Write one recap of it. The assistant keeps it in mind for the rest of the book, after the retelling itself is gone; the reader can look at it to review the chapter.
+const RECAP_PROMPT = `The text in <retelling> is how the assistant took the reader through one chapter of the book, part by part, or through several chapters read in one step (<chapter> names them). Write one recap of it. The assistant keeps it in mind as long-term memory for the rest of the book, after the retelling itself has slid out of the active context window.
 
 - Write in the language of the retelling.
-- Start with one sentence on what the chapter (or chapters) does in the book.
-- Then the main line, in order: the key claims, arguments, events or turns, as a short list (at most 8 items).
-- Name the terms, people or concepts the chapter introduces, if any.
+- Start with one sentence on the chapter's thesis and role in the book's overarching argument (or narrative).
+- Then the main line, in order: the core arguments, evidence, turns or rebuttals, as a short list (at most 8 items).
+- Name key author-specific concepts/definitions introduced or refined, and any scholars, schools or mainstream views the author engages or critiques, if present.
 - Keep up to 3 of the author's key sentences exactly as the retelling quotes them, as [quoted text](cite:CHAPTER_INDEX) links.
-- At most about 250 words (500 characters for Chinese or Japanese). No preamble and no heading.`;
+- At most about 280 words (550 characters for Chinese or Japanese). No preamble and no heading.`;
 
 export interface ChapterRecapInput extends RecapChapters {
   bookTitle: string;

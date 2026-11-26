@@ -16,6 +16,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { ReaderView, type SelectionCapture } from "@/components/ReaderView";
+import { PageGuideCard } from "@/components/PageGuideCard";
 import { ReaderFooter } from "@/components/ReaderFooter";
 import type { ChatPanelHandle } from "@/components/chat/ChatPanel";
 import { TocSidebar, TocSidebarActions } from "@/components/TocSidebar";
@@ -29,6 +30,7 @@ import type { SheetSnap } from "@/lib/assistant-sheet";
 import type { ReaderSession } from "@/lib/use-reader-session";
 import { quoteTargetHref } from "@/lib/toc-items";
 import { useGuideBookMarks } from "@/lib/use-guide-book-marks";
+import type { GuideStepCardData } from "@/lib/guide-step-cards";
 import { shortBookTitle } from "@/lib/book-title";
 import { READER_FOOTER_POSITIONS, useReaderFooter } from "@/lib/reader-footer";
 import { useT } from "@/lib/i18n";
@@ -230,6 +232,8 @@ export function MobileReaderPage({
   // In a Guided session, "Guide up to here" on a selection sends the step at
   // once; the sheet comes up to half to show the answer.
   const [guideSteps, setGuideSteps] = useState<RecordedGuideStep[] | null>(null);
+  const [guideCards, setGuideCards] = useState<GuideStepCardData[]>([]);
+  const [openGuideCard, setOpenGuideCard] = useState<{ stepIndex: number; passage?: string } | null>(null);
   const guided = guideSteps !== null;
   const { progress: guideProgress, marks: guideMarks } = useGuideBookMarks(guideSteps, toc);
   const handleGuideTo = useCallback(
@@ -241,6 +245,15 @@ export function MobileReaderPage({
       chatRef.current?.guideTo(selection);
     },
     [onSnapChange, readerRef, snap],
+  );
+
+  const handleGuideChapter = useCallback(
+    (href: string) => {
+      onPanelChange(null);
+      if (snap === "collapsed") onSnapChange("half");
+      chatRef.current?.guideChapter(href);
+    },
+    [onPanelChange, onSnapChange, snap],
   );
 
   useLayoutEffect(() => {
@@ -324,6 +337,7 @@ export function MobileReaderPage({
             onSelectionCapture={handleSelectionCapture}
             onGuideTo={guided ? handleGuideTo : undefined}
             guideMarks={guideMarks}
+            onViewGuideCard={guideCards.length > 0 ? ({ stepIndex, passage }) => setOpenGuideCard({ stepIndex, passage }) : undefined}
             onHighlight={session.handleAddHighlight}
             onUpdateHighlight={session.handleUpdateHighlight}
             onDeleteHighlight={session.handleDeleteHighlight}
@@ -479,6 +493,26 @@ export function MobileReaderPage({
           onOpenQuote={handleOpenQuote}
           peekOffset={chromeVisible ? `calc(${bottomBarHeight}px + var(--safe-bottom) + 0.75rem)` : undefined}
           onGuideStepsChange={setGuideSteps}
+          onGuideCardsChange={setGuideCards}
+        />
+      )}
+
+      {openGuideCard && guideCards[openGuideCard.stepIndex] && (
+        <PageGuideCard
+          card={guideCards[openGuideCard.stepIndex]}
+          passage={openGuideCard.passage}
+          onClose={() => setOpenGuideCard(null)}
+          onOpenInGuide={(messageIndex) => {
+            if (snap === "collapsed") {
+              onSnapChange("half");
+              requestAnimationFrame(() => chatRef.current?.scrollToMessage(messageIndex));
+            } else {
+              chatRef.current?.scrollToMessage(messageIndex);
+            }
+          }}
+          onAskPassage={(passage) => {
+            handleSelectionCapture({ text: passage, chapterHref: progress.chapterHref });
+          }}
         />
       )}
 
@@ -583,6 +617,7 @@ export function MobileReaderPage({
               onPanelChange(null);
             }}
             guideProgress={guideProgress}
+            onGuideChapter={guided ? handleGuideChapter : undefined}
           />
         ) : (
           <AnnotationsSidebar

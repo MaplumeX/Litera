@@ -1,4 +1,4 @@
-import { chapterForHref, guideParagraphsBefore, isGuideParagraph, type BookTocEntry, type GuideBlock } from "@/agent/book/book-content";
+import { chapterForHref, guideParagraphsBefore, isGuideParagraph, type BookTocEntry, type GuideBlock, type GuideBlockImage } from "@/agent/book/book-content";
 import { isLegacyGuideStep, type GuidePosition, type GuideStep, type LegacyGuideStep, type RecordedGuideStep } from "@/types/agent";
 
 /**
@@ -8,14 +8,15 @@ import { isLegacyGuideStep, type GuidePosition, type GuideStep, type LegacyGuide
  * "structure with full sentences") came out too narrative for the reader.
  */
 export const DEFAULT_GUIDED_STYLE = `Content:
-- Cover the part completely and in the original order: every argument, example, piece of evidence, turn and rebuttal. The reader should miss nothing the author says; drop only true filler such as repetition. This overrides "be concise".
-- Explain where the reader needs it: background, a difficult term, an easy misreading. Keep clear what the author says and what is your explanation.
-- Quote the author's key sentences as citation links.
-- When the author refers back to earlier material, connect it to what you covered before.
-- Stay within this part. If it ends mid-argument, say so.
-- If you left anything out (long footnotes, a repeated example), name it at the end. Never drop content silently.
+- Retell and rewrite this part clearly and faithfully in the author's original order, so the reader experiences the book's own argument directly rather than a meta-commentary about it.
+- Do not miss substantive information: carry over every argument, premise, turn, rebuttal, concrete example, and substantive footnote/translator note. This overrides "be concise".
+- Keep the author's own voice where it matters: quote key definitions, pivotal sentences, sharp phrasing, and striking testimonies verbatim as clickable citation links ([exact text](cite:CHAPTER_INDEX)), using short blockquotes for pivotal lines or vivid testimonies and weaving shorter phrases naturally into the prose.
+- Add brief background notes only where a reader would otherwise stumble — a difficult term, historical context, or the scholars/schools the author engages or critiques — keeping clearly separate what the book says and what is your brief note. Avoid lecturer-style signposting or meta-commentary (e.g. announcing foreshadowing or declaring which line is pivotal).
+- When the author refers back to earlier material, connect it briefly.
+- Stay strictly within this part: if it ends mid-argument, say so; do not preview upcoming sections or list topics the author did not discuss.
+- Only if you actually left out secondary material (such as bare bibliographic citations or repetitive testimonies), add one brief note at the end naming it; otherwise add no closing disclaimer.
 
-Form: organize it however makes it clearest and fastest to take in, as you would any well-formatted answer. Use headings, lists, tables, bold and blockquotes freely; prefer them to long paragraphs.`;
+Form: divide the part into clear, numbered bite-sized sections following each move in the text so the logic is easy to scan and retain. Combine brief, natural paragraphs (2–4 sentences) with structured bullet points using bold lead-ins (and crisp causal chains like A → B when helpful) for definitions, mechanisms, contrasting cases, and examples/footnotes; use formulas ($...$ / $$...$$) and compact tables for arithmetic or comparisons. Keep nesting shallow (at most two levels) so it stays readable rather than turning into a dry skeleton that drops concrete detail.`;
 
 /** Upper bound on a custom guided style, matching a Session's own prompt. */
 export const GUIDED_STYLE_MAX_CHARS = 16 * 1024;
@@ -29,7 +30,7 @@ export function guidedPrompt(style: string = DEFAULT_GUIDED_STYLE): string {
   return `<guided_reading>
 This is a Guided session. The reader does not read the book themselves; they rely on you to take them through it in the book's order, one guided step at a time, explaining each step in the style below.
 
-guide_step is how the guide moves on: call it whenever you take the reader on through the book, then read the step it gives you and explain it in the same reply. Anything else you answer as usual, and the guide stays where it is. Each message comes with the reading state: where the guide is and what the next step would be.
+guide_step is how the guide moves on: call it whenever you take the reader on through the book. guide_step returns the step's text directly (only call read_chapter if the result lists remaining parts that were not inlined); explain the step in the same reply. Anything else you answer as usual, and the guide stays where it is. Each message comes with the reading state: where the guide is, what the next step would be, and any nearby section breaks.
 
 <style>
 ${style.trim() || DEFAULT_GUIDED_STYLE}
@@ -39,7 +40,7 @@ A skim step is the exception to completeness: the reader chose to move fast, so 
 
 Start each step's explanation directly, with no preamble, and do not ask whether to continue; the reader has a Continue button. Write in the reader's language.
 
-When the guide finishes a chapter, a chapter recap of it is added to the conversation. Recaps stay with you for the rest of the book, after the explanations themselves are gone: use them to connect back to earlier chapters.
+When the guide finishes a chapter, a chapter recap of it is added to the conversation. Recaps stay with you for the rest of the book, after earlier explanations slide out of the active window: use them to connect back to earlier chapters, and call search_guide_history if you need a specific detail or reader question from an earlier discussion that a recap leaves out.
 </guided_reading>`;
 }
 
@@ -115,6 +116,42 @@ export function guideChapterEntry(
 /** Chapters with no text of their own (e.g. a volume heading) are not retold. */
 function firstChapterFrom(toc: readonly BookTocEntry[], startIndex: number): BookTocEntry | undefined {
   return toc.find((entry) => entry.index >= startIndex && entry.chars > 0);
+}
+
+/** Short front-matter entries skipped by default when starting a guide with no chapter chosen. */
+const FRONT_MATTER_LABEL = /^(?:cover|title\s*page|half\s*title|copyright|colophon|table\s+of\s+contents|contents|toc|dedication|epigraph|front\s*matter|封面|版权页?|版权信息|扉页|书名页|半书名页|目录|目\s*录|献词|题献|题记|文前)$/i;
+const FRONT_MATTER_MAX_CHARS = 1_200;
+
+/**
+ * First body chapter of the Book when starting a fresh guide without a chosen
+ * chapter: skips short cover/copyright/TOC front matter, falling back to the
+ * first chapter with text if every chapter matches.
+ */
+export function firstBodyChapter(toc: readonly BookTocEntry[]): BookTocEntry | undefined {
+  const nonEmpty = toc.filter((entry) => entry.chars > 0);
+  for (const entry of nonEmpty) {
+    const label = entry.label.trim();
+    if (entry.chars < FRONT_MATTER_MAX_CHARS && FRONT_MATTER_LABEL.test(label)) continue;
+    return entry;
+  }
+  return nonEmpty[0];
+}
+
+/**
+ * Whether jumping from `prevChapterIndex` to `nextChapterIndex` skips at least
+ * one non-empty chapter (or jumps backward past an adjacent chapter).
+ */
+export function isNonAdjacentChapterJump(
+  toc: readonly BookTocEntry[],
+  prevChapterIndex: number | null | undefined,
+  nextChapterIndex: number,
+): boolean {
+  if (prevChapterIndex === null || prevChapterIndex === undefined) return false;
+  const nonEmpty = toc.filter((entry) => entry.chars > 0).map((entry) => entry.index);
+  const prevPos = nonEmpty.indexOf(prevChapterIndex);
+  const nextPos = nonEmpty.indexOf(nextChapterIndex);
+  if (prevPos < 0 || nextPos < 0) return Math.abs(nextChapterIndex - prevChapterIndex) > 1;
+  return Math.abs(nextPos - prevPos) > 1;
 }
 
 /**
@@ -221,7 +258,7 @@ export function guideCursor(spans: readonly (GuideSpan | null)[]): GuidePoint | 
  */
 export function nextGuideSpan(toc: readonly BookTocEntry[], cursor: GuidePoint | null, startIndex?: number): GuideSpan | null {
   if (!cursor) {
-    const start = firstChapterFrom(toc, startIndex ?? 0);
+    const start = startIndex !== undefined ? firstChapterFrom(toc, startIndex) : firstBodyChapter(toc);
     return start ? partSpan(start, 0) : null;
   }
   const block = cursor.block + 1;
@@ -341,17 +378,30 @@ function chapterName(entry: BookTocEntry): string {
   return title ? `chapterIndex ${entry.index} ("${title}")` : `chapterIndex ${entry.index}`;
 }
 
-/** The read_chapter calls covering a step: the blocks of each chapter, cut at part ends so no read runs past one part. */
-function spanReads(toc: readonly BookTocEntry[], span: GuideSpan): string[] {
+/** Maximum read_chapter chunks `guide_step` inlines directly to avoid an extra round-trip. */
+export const GUIDE_INLINE_MAX_PARTS = 2;
+
+export interface GuideReadRange {
+  chapterIndex: number;
+  fromBlock: number;
+  toBlock: number;
+}
+
+/** The block-range chunks covering a step, cut at part boundaries so no read runs past one part. */
+export function spanReadRanges(toc: readonly BookTocEntry[], span: GuideSpan): GuideReadRange[] {
   return spanChapters(toc, span).flatMap(({ entry, first, last }) => {
-    const reads: string[] = [];
+    const reads: GuideReadRange[] = [];
     for (let part = partOf(entry, first); part <= partOf(entry, last); part += 1) {
-      const from = Math.max(first, partStart(entry, part));
-      const to = Math.min(last, partEnd(entry, part));
-      reads.push(`chapterIndex ${entry.index}, fromBlock ${from}, toBlock ${to}`);
+      const fromBlock = Math.max(first, partStart(entry, part));
+      const toBlock = Math.min(last, partEnd(entry, part));
+      reads.push({ chapterIndex: entry.index, fromBlock, toBlock });
     }
     return reads;
   });
+}
+
+function formatReadRange(range: GuideReadRange): string {
+  return `chapterIndex ${range.chapterIndex}, fromBlock ${range.fromBlock}, toBlock ${range.toBlock}`;
 }
 
 /** Where a step reads, for the model. */
@@ -366,23 +416,122 @@ function spanWhere(span: GuideSpan): string {
     : `${chapterName(from.entry)}, part ${part.index} of 0 to ${part.total - 1} (${blocks})`;
 }
 
-/** What the model reads for a guided step it took: `guide_step`'s result. */
-export function guideStepContext(toc: readonly BookTocEntry[], span: GuideSpan): string {
+export interface InlinedStepChunk {
+  range: GuideReadRange;
+  chapterTitle?: string;
+  text: string;
+}
+
+/** Substantive images inside `span` (deduplicated by `src`, in reading order). */
+export async function collectStepImages(
+  toc: readonly BookTocEntry[],
+  blocksOf: GuideBlocksOf,
+  span: GuideSpan,
+): Promise<GuideBlockImage[]> {
+  const seen = new Set<string>();
+  const images: GuideBlockImage[] = [];
+  for (const { entry, first, last } of spanChapters(toc, span)) {
+    const blocks = await blocksOf(entry.index);
+    for (let index = first; index <= Math.min(last, blocks.length - 1); index += 1) {
+      for (const image of blocks[index]?.images ?? []) {
+        if (seen.has(image.src)) continue;
+        seen.add(image.src);
+        images.push(image);
+      }
+    }
+  }
+  return images;
+}
+
+/**
+ * What the model receives from `guide_step`. When `inlined` chunks are given,
+ * their text is included directly so the model can explain without a separate
+ * `read_chapter` round-trip; any remaining chunks beyond the inline cap are
+ * listed for follow-up `read_chapter` calls.
+ */
+export function guideStepContext(
+  toc: readonly BookTocEntry[],
+  span: GuideSpan,
+  inlined?: readonly InlinedStepChunk[],
+  images?: readonly GuideBlockImage[],
+  vision = false,
+): string {
   const where = spanWhere(span);
   const task = span.skim ? `Guided step (skim): give a compressed pass over ${where}` : `Guided step: explain ${where}`;
-  return `${task} (blocks are a chapter's paragraphs, numbered from 0). Call read_chapter with each of these in the same turn: ${spanReads(toc, span).join("; ")}. Cover exactly this step.`;
+  const ranges = spanReadRanges(toc, span);
+  const figureNote = images && images.length > 0
+    ? vision
+      ? `\n\nFigures in this step (${images.length}): ${images.map((img) => `${img.src}${img.caption || img.alt ? ` ("${img.caption || img.alt}")` : ""}`).join("; ")}. Call view_image for any figure whose visual details matter to your explanation.`
+      : `\n\nFigures in this step (${images.length}): ${images.map((img) => `${img.src}${img.caption || img.alt ? ` ("${img.caption || img.alt}")` : ""}`).join("; ")}. You cannot inspect images directly; rely on captions and text without guessing visual details.`
+    : "";
+  if (!inlined?.length) {
+    return `${task} (blocks are a chapter's paragraphs, numbered from 0). Call read_chapter with each of these in the same turn: ${ranges.map(formatReadRange).join("; ")}. Cover exactly this step.${figureNote}`;
+  }
+  const remaining = ranges.slice(inlined.length);
+  const header = remaining.length
+    ? `${task}. The first ${inlined.length} part(s) are below; call read_chapter ONLY for the remaining part(s): ${remaining.map(formatReadRange).join("; ")}. Cover exactly this step.${figureNote}`
+    : `${task}. The complete text for this step is below — do NOT call read_chapter for it; explain it directly. Cover exactly this step.${figureNote}`;
+  const body = inlined.map(({ range, chapterTitle, text }) => {
+    const label = chapterTitle
+      ? `chapterIndex ${range.chapterIndex} ("${chapterTitle}"), blocks ${range.fromBlock}–${range.toBlock}`
+      : `chapterIndex ${range.chapterIndex}, blocks ${range.fromBlock}–${range.toBlock}`;
+    return `--- ${label} ---\n${text}`;
+  }).join("\n\n");
+  return `${header}\n\n${body}`;
+}
+
+/** A natural section boundary near the default step end (the block right before a heading). */
+export interface NearbySectionBreak {
+  toBlock: number;
+  nextHeading: string;
+}
+
+/**
+ * Find heading boundaries near `defaultTo` (within the chapter of `blocks`)
+ * so Continue can stop cleanly right before a new section without calling
+ * `list_guide_blocks`.
+ */
+export function nearbySectionBreaks(
+  blocks: readonly GuideBlock[],
+  defaultFrom: number,
+  defaultTo: number,
+  limit = 6,
+): NearbySectionBreak[] {
+  const minHeading = Math.max(defaultFrom + 1, defaultTo - 20);
+  const maxHeading = Math.min(blocks.length - 1, defaultTo + 25);
+  const candidates: NearbySectionBreak[] = [];
+  for (let index = minHeading; index <= maxHeading; index += 1) {
+    const block = blocks[index];
+    if (!block || block.heading <= 0) continue;
+    const toBlock = index - 1;
+    if (toBlock < defaultFrom) continue;
+    candidates.push({ toBlock, nextHeading: block.snippet });
+  }
+  if (candidates.length <= limit) return candidates;
+  return candidates
+    .sort((left, right) => Math.abs(left.toBlock - defaultTo) - Math.abs(right.toBlock - defaultTo))
+    .slice(0, limit)
+    .sort((left, right) => left.toBlock - right.toBlock);
 }
 
 /**
  * Where a Guided session stands, sent with every message in it: the furthest
- * block the guide has reached and the step Continue would take by default.
+ * block the guide has reached, the step Continue would take by default, and
+ * nearby section breaks around that default end.
  */
-export function guideReadingState(cursor: GuidePoint | null, next: GuideSpan | null): string {
+export function guideReadingState(
+  cursor: GuidePoint | null,
+  next: GuideSpan | null,
+  breaks: readonly NearbySectionBreak[] = [],
+): string {
   const reached = cursor
     ? `The guide has reached ${chapterName(cursor.entry)}, block ${cursor.block} of 0 to ${blockCount(cursor.entry) - 1} (the furthest it has been).`
     : "The guide has not started yet.";
   const ahead = next ? `The default next step: ${spanWhere(next)}.` : "The guide has reached the end of the book.";
-  return `Guided reading state: ${reached} ${ahead}`;
+  const hints = breaks.length
+    ? ` Nearby section breaks (pass as toBlock to stop cleanly before a heading): ${breaks.map((item) => `toBlock ${item.toBlock} (before "${item.nextHeading}")`).join("; ")}.`
+    : "";
+  return `Guided reading state: ${reached} ${ahead}${hints}`;
 }
 
 /** What the model's `guide_step` asks for. */
@@ -563,7 +712,7 @@ export function guideTocProgress(
   return progress;
 }
 
-/** What the Book pane marks of one chapter: its blocks read in full or only skimmed, and the Guide cursor's block. */
+/** What the Book pane marks of one chapter: its blocks read in full or only skimmed, the Guide cursor's block, and which step last covered each block. */
 export interface GuidePageMarkChapter {
   chapterIndex: number;
   /** The chapter's files, without fragments. */
@@ -571,27 +720,86 @@ export interface GuidePageMarkChapter {
   read: number[];
   skimmed: number[];
   cursor?: number;
+  /** Block index -> latest step index (in the `spans` array) that covered it. */
+  stepByBlock?: Record<number, number>;
 }
 
 /**
  * Per chapter the guided steps (oldest first) reached: the blocks read in
- * full, those only skimmed, and the block the Guide cursor is on.
+ * full, those only skimmed, the block the Guide cursor is on, and the latest
+ * step index that covered each block.
  */
 export function guidePageMarkPlan(toc: readonly BookTocEntry[], spans: readonly (GuideSpan | null)[]): GuidePageMarkChapter[] {
   const { chapters } = chapterCoverage(toc, spans);
+  const stepByChapter = new Map<number, Record<number, number>>();
+  spans.forEach((span, stepIndex) => {
+    if (!span) return;
+    for (const { entry, first, last } of spanChapters(toc, span)) {
+      const map = stepByChapter.get(entry.index) ?? {};
+      for (let block = first; block <= last; block += 1) map[block] = stepIndex;
+      stepByChapter.set(entry.index, map);
+    }
+  });
   const cursor = guideCursor(spans);
   return toc.flatMap((entry) => {
     const chapter = chapters.get(entry.index);
     if (!chapter) return [];
     const sorted = (blocks: Iterable<number>) => [...blocks].sort((left, right) => left - right);
+    const stepByBlock = stepByChapter.get(entry.index);
     return [{
       chapterIndex: entry.index,
       files: [...new Set(entry.hrefs.map((href) => href.split("#")[0]))],
       read: sorted(chapter.full),
       skimmed: sorted([...chapter.blocks].filter((block) => !chapter.full.has(block))),
       ...(cursor?.entry.index === entry.index ? { cursor: cursor.block } : {}),
+      ...(stepByBlock && Object.keys(stepByBlock).length > 0 ? { stepByBlock } : {}),
     }];
   });
+}
+
+export interface GuideHistoryHit {
+  source: "explanation" | "recap" | "question";
+  chapterTitle?: string;
+  chapterIndex?: number;
+  snippet: string;
+}
+
+/**
+ * Search earlier guided explanations, chapter recaps, and reader side questions
+ * on the active branch (used when earlier turns have slid out of model context).
+ */
+export function searchGuideHistoryRecords(
+  records: ReadonlyArray<{ source: "explanation" | "recap" | "question"; chapterTitle?: string; chapterIndex?: number; text: string }>,
+  queries: readonly string[],
+  limit = 8,
+): GuideHistoryHit[] {
+  const clean = [...new Set(queries.map((q) => q.trim().toLowerCase()).filter(Boolean))].slice(0, 8);
+  if (!clean.length) return [];
+  const hits: GuideHistoryHit[] = [];
+  const seen = new Set<string>();
+  for (const query of clean) {
+    for (const record of records) {
+      const lower = record.text.toLowerCase();
+      const offset = lower.indexOf(query);
+      if (offset < 0) continue;
+      const start = Math.max(0, offset - 120);
+      const end = Math.min(record.text.length, offset + query.length + 180);
+      const prefix = start > 0 ? "…" : "";
+      const suffix = end < record.text.length ? "…" : "";
+      const snippet = `${prefix}${record.text.slice(start, end).replace(/\s+/g, " ").trim()}${suffix}`;
+      const dedupeKey = `${record.source}:${record.chapterIndex ?? ""}:${snippet.slice(0, 60)}`;
+      if (seen.has(dedupeKey)) continue;
+      seen.add(dedupeKey);
+      hits.push({
+        source: record.source,
+        ...(record.chapterIndex !== undefined ? { chapterIndex: record.chapterIndex } : {}),
+        ...(record.chapterTitle ? { chapterTitle: record.chapterTitle } : {}),
+        snippet,
+      });
+      if (hits.length >= limit) return hits;
+    }
+  }
+  return hits;
 }
 
 /** One page of a chapter's blocks for the model's `list_guide_blocks`. */

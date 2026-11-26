@@ -26,9 +26,11 @@ import {
   Volume2,
 } from "lucide-react";
 import { ReaderView, type SelectionCapture } from "@/components/ReaderView";
+import { PageGuideCard } from "@/components/PageGuideCard";
 import { ChatPanel, type ChatPanelHandle } from "@/components/chat/ChatPanel";
 import { embeddedAgentRuntime } from "@/agent/runtime/embedded-runtime";
 import { useGuideBookMarks } from "@/lib/use-guide-book-marks";
+import type { GuideStepCardData } from "@/lib/guide-step-cards";
 import type { GuideSelection, RecordedGuideStep } from "@/types/agent";
 import type { QuoteLocation } from "@/agent/book/book-content";
 import type { GuideBlockTarget } from "@/lib/guide-marks";
@@ -102,8 +104,15 @@ function App() {
   // Contents and Annotations share one side panel, switched by tab.
   const [sidePanelOpen, setSidePanelOpen] = useState(false);
   const [sidePanelTab, setSidePanelTab] = useState<ReaderSidePanelTab>("toc");
-  // Agent mode in a Guided session: its steps, and the TOC progress they make.
+  // Agent mode in a Guided session: its steps, cards, and the TOC progress they make.
   const [guideSteps, setGuideSteps] = useState<RecordedGuideStep[] | null>(null);
+  const [guideCards, setGuideCards] = useState<GuideStepCardData[]>([]);
+  const [openGuideCard, setOpenGuideCard] = useState<{
+    stepIndex: number;
+    x: number;
+    y: number;
+    passage?: string;
+  } | null>(null);
   const [tocWidth, setTocWidth] = useState(loadTocWidth);
   // Bumped by Ctrl/⌘+F so the search field takes focus even when already open.
   const [searchFocusToken, setSearchFocusToken] = useState(0);
@@ -331,6 +340,16 @@ function App() {
       schedulePersistLayout({ chatCollapsed: false, bookCollapsed, sessionRailOpen });
     }
     chatRef.current?.guideTo(selection);
+  }, [bookCollapsed, chatCollapsed, readerMode, schedulePersistLayout, sessionRailOpen]);
+
+  // In a Guided session: start or jump guided reading directly to a chapter picked from the TOC.
+  const handleGuideChapter = useCallback((href: string) => {
+    setSidePanelOpen(false);
+    if (readerMode === "reader" && chatCollapsed) {
+      setChatCollapsed(false);
+      schedulePersistLayout({ chatCollapsed: false, bookCollapsed, sessionRailOpen });
+    }
+    chatRef.current?.guideChapter(href);
   }, [bookCollapsed, chatCollapsed, readerMode, schedulePersistLayout, sessionRailOpen]);
 
   const handleReaderModeChange = useCallback(
@@ -620,6 +639,7 @@ function App() {
               onToggle={session.handleTocToggle}
               onGoTo={handleTocGoTo}
               guideProgress={guideProgress}
+              onGuideChapter={guideSteps ? handleGuideChapter : undefined}
             />
           ) : sidePanelTab === "search" ? (
             <BookSearchPanel
@@ -944,6 +964,7 @@ function App() {
                 onSelectionCapture={handleSelectionCapture}
                 onGuideTo={guideSteps ? handleGuideTo : undefined}
                 guideMarks={guideMarks}
+                onViewGuideCard={guideCards.length > 0 ? setOpenGuideCard : undefined}
                 onHighlight={session.handleAddHighlight}
                 onUpdateHighlight={session.handleUpdateHighlight}
                 onDeleteHighlight={session.handleDeleteHighlight}
@@ -971,6 +992,27 @@ function App() {
               <FinishBookPrompt
                 onMarkFinished={() => void readingStatus.markFinished()}
                 onDismiss={readingStatus.dismissFinishPrompt}
+              />
+            )}
+            {openGuideCard && guideCards[openGuideCard.stepIndex] && (
+              <PageGuideCard
+                card={guideCards[openGuideCard.stepIndex]}
+                x={openGuideCard.x}
+                y={openGuideCard.y}
+                passage={openGuideCard.passage}
+                onClose={() => setOpenGuideCard(null)}
+                onOpenInGuide={(messageIndex) => {
+                  if (readerMode === "reader" && chatCollapsed) {
+                    setChatCollapsed(false);
+                    schedulePersistLayout({ chatCollapsed: false, bookCollapsed, sessionRailOpen });
+                    requestAnimationFrame(() => chatRef.current?.scrollToMessage(messageIndex));
+                  } else {
+                    chatRef.current?.scrollToMessage(messageIndex);
+                  }
+                }}
+                onAskPassage={(passage) => {
+                  handleSelectionCapture({ text: passage, chapterHref: progress.chapterHref });
+                }}
               />
             )}
             {readerMode === "reader" && sidePanel}
@@ -1046,6 +1088,7 @@ function App() {
               sessionRailOpen={sessionRailOpen}
               preferGuidedSession={readerMode === "agent"}
               onGuideStepsChange={setGuideSteps}
+              onGuideCardsChange={setGuideCards}
             />
           </div>
         </div>

@@ -73,7 +73,8 @@ function renderWorkspace() {
 describe("ChatPanel regenerate", () => {
   it("resends the last user message through editPrompt with its context", async () => {
     const view = renderWorkspace();
-    fireEvent.click(view.getByRole("button", { name: "重新生成" }));
+    const buttons = view.getAllByRole("button", { name: "重新生成" });
+    fireEvent.click(buttons[buttons.length - 1]);
     await act(async () => {
       await Promise.resolve();
     });
@@ -92,6 +93,28 @@ describe("ChatPanel regenerate", () => {
     );
   });
 
+  it("regenerates an earlier assistant message by forking its own preceding user message", async () => {
+    const view = renderWorkspace();
+    const buttons = view.getAllByRole("button", { name: "重新生成" });
+    fireEvent.click(buttons[0]);
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(editPrompt).toHaveBeenCalledTimes(1);
+    expect(editPrompt).toHaveBeenCalledWith(
+      0,
+      "第一问",
+      { selection: undefined, chapterHref: undefined },
+      {
+        role: "user",
+        content: "第一问",
+        selection: undefined,
+        chapterHref: undefined,
+      },
+    );
+  });
+
   it("anchors on the last user message even when a compaction notice trails the reply", async () => {
     bridgeState = readyState({
       messages: [
@@ -101,7 +124,8 @@ describe("ChatPanel regenerate", () => {
       ],
     });
     const view = renderWorkspace();
-    fireEvent.click(view.getByRole("button", { name: "重新生成" }));
+    const buttons = view.getAllByRole("button", { name: "重新生成" });
+    fireEvent.click(buttons[buttons.length - 1]);
     await act(async () => {
       await Promise.resolve();
     });
@@ -128,7 +152,8 @@ describe("ChatPanel regenerate", () => {
       ],
     });
     const view = renderWorkspace();
-    fireEvent.click(view.getByRole("button", { name: "重新生成" }));
+    const buttons = view.getAllByRole("button", { name: "重新生成" });
+    fireEvent.click(buttons[buttons.length - 1]);
     await act(async () => {
       await Promise.resolve();
     });
@@ -158,19 +183,18 @@ describe("ChatPanel regenerate", () => {
     expect(view.queryByRole("button", { name: "重新生成" })).toBeNull();
   });
 
-  it("renders the button inside the last assistant message only", () => {
+  it("renders the button inside every assistant message that follows a user message", () => {
     const view = renderWorkspace();
     const buttons = view.getAllByRole("button", { name: "重新生成" });
-    expect(buttons).toHaveLength(1);
-    // 位于最后一条 assistant 消息气泡内（与复制按钮同一按钮行）
-    const copyButton = view.getAllByRole("button", { name: "复制" });
-    expect(copyButton.length).toBeGreaterThan(0);
-    expect(buttons[0].closest("div")).toBeTruthy();
-    const copyRow = copyButton[copyButton.length - 1].parentElement;
-    expect(buttons[0].parentElement).toBe(copyRow);
+    expect(buttons).toHaveLength(2);
+    // 位于每条 assistant 消息气泡内（与复制按钮同一按钮行）
+    const copyButtons = view.getAllByRole("button", { name: "复制" });
+    expect(copyButtons).toHaveLength(2);
+    expect(buttons[0].parentElement).toBe(copyButtons[0].parentElement);
+    expect(buttons[1].parentElement).toBe(copyButtons[1].parentElement);
   });
 
-  it("does not render the button for mid-conversation assistant messages", () => {
+  it("renders regenerate buttons for all mid-conversation assistant messages", () => {
     bridgeState = readyState({
       messages: [
         { role: "user", content: "第一问" },
@@ -182,10 +206,10 @@ describe("ChatPanel regenerate", () => {
       ],
     });
     const view = renderWorkspace();
-    expect(view.getAllByRole("button", { name: "重新生成" })).toHaveLength(1);
+    expect(view.getAllByRole("button", { name: "重新生成" })).toHaveLength(3);
   });
 
-  it("keeps the button available when the last message is a user message", async () => {
+  it("keeps the fallback button available when the last message is a user message", async () => {
     bridgeState = readyState({
       messages: [
         { role: "user", content: "第一问" },
@@ -194,9 +218,9 @@ describe("ChatPanel regenerate", () => {
       ],
     });
     const view = renderWorkspace();
-    const button = view.getByRole("button", { name: "重新生成" });
-    expect(button).toBeTruthy();
-    fireEvent.click(button);
+    const buttons = view.getAllByRole("button", { name: "重新生成" });
+    expect(buttons).toHaveLength(2);
+    fireEvent.click(buttons[buttons.length - 1]);
     await act(async () => {
       await Promise.resolve();
     });
@@ -270,7 +294,8 @@ describe("ChatPanel regenerate", () => {
     fireEvent.click(view.getAllByRole("button", { name: "编辑" })[1]);
     expect(view.getByRole("button", { name: "保存" })).toBeTruthy();
 
-    fireEvent.click(view.getByRole("button", { name: "重新生成" }));
+    const buttons = view.getAllByRole("button", { name: "重新生成" });
+    fireEvent.click(buttons[buttons.length - 1]);
     await act(async () => {
       await Promise.resolve();
     });

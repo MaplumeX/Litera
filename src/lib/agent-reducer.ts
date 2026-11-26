@@ -147,7 +147,7 @@ function applyNavigation(
 function withLandedMarker(
   base: AgentState,
   event: { messages: AgentMessage[]; anchors: string[]; navigation: Record<string, AnchorBranchInfo> },
-  role: "notice" | "recap",
+  role: "notice" | "recap" | "guide_cut",
 ): AgentState {
   if (!base.promptId) return applyNavigation({ ...base, messages: event.messages }, event);
   const markerIndex = event.messages.length - 1;
@@ -243,6 +243,15 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
       return matchesSession(base, event) ? withLandedMarker({ ...base, compaction: null }, event, "notice") : base;
     case "guide_recap_added":
       return matchesSession(base, event) ? withLandedMarker(base, event, "recap") : base;
+    case "guide_window_updated":
+      return matchesSession(base, event) ? applyNavigation({ ...base, messages: event.messages }, event) : base;
+    case "session_archived":
+      if (!matchesBook(base, event.bookId)) return base;
+      return {
+        ...base,
+        sessions: base.sessions.map((session) =>
+          session.id === event.sessionId ? { ...session, archived: true } : session),
+      };
     case "compaction_failed":
       return matchesSession(base, event) ? { ...base, compaction: event.aborted ? null : { status: "failed" } } : base;
     case "retry_scheduled":

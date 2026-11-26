@@ -6,6 +6,8 @@ import { createChatOutlineHoverIntent } from "./hover-intent";
 export interface ChatOutlineItem {
   messageIndex: number;
   preview: string;
+  /** Optional guided-timeline classification: recap milestone, taken step, or side question. */
+  kind?: "step" | "recap" | "question";
 }
 
 interface ChatOutlineRailProps {
@@ -95,17 +97,19 @@ export function ChatOutlineRail({
           reducedMotion || attentionIndex === null
             ? 0
             : tickMagnification(index - attentionIndex);
-        const restingWidth = isActive ? ACTIVE_PILL_WIDTH : RESTING_PILL_WIDTH;
+        const baseWidth = item.kind === "recap" ? RESTING_PILL_WIDTH + 4 : item.kind === "question" ? RESTING_PILL_WIDTH - 3 : RESTING_PILL_WIDTH;
+        const restingWidth = isActive ? ACTIVE_PILL_WIDTH : baseWidth;
         const pillWidth =
           restingWidth + magnification * (MAGNIFIED_PILL_WIDTH - restingWidth);
         const pillHeight =
-          RESTING_PILL_HEIGHT +
+          (item.kind === "recap" ? RESTING_PILL_HEIGHT + 1 : RESTING_PILL_HEIGHT) +
           magnification * (MAGNIFIED_PILL_HEIGHT - RESTING_PILL_HEIGHT);
 
         return (
           <div
-            key={item.messageIndex}
+            key={`${item.kind ?? "q"}-${item.messageIndex}`}
             data-testid={`chat-outline-slot-${item.messageIndex}`}
+            data-outline-kind={item.kind}
             className="relative flex min-h-0 w-full basis-2 grow-0 shrink items-center justify-center"
             onPointerEnter={() => hoverIntent.pointAt(index)}
           >
@@ -129,9 +133,11 @@ export function ChatOutlineRail({
                   "block rounded-full transition-[width,height,background-color] duration-150 ease-out motion-reduce:transition-none",
                   hasAttention
                     ? "bg-foreground"
-                    : isActive
-                      ? "bg-muted-foreground"
-                      : "bg-border",
+                    : item.kind === "recap"
+                      ? "bg-primary/80"
+                      : isActive
+                        ? "bg-muted-foreground"
+                        : "bg-border",
                 )}
                 style={{ width: pillWidth, height: pillHeight }}
               />

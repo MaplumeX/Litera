@@ -9,13 +9,27 @@ export interface BookMetadata { title: string; author: string; language: string;
  * of each part.
  */
 export interface BookTocEntry { index: number; label: string; ancestors: string[]; depth: number; hrefs: string[]; chars: number; parts: number; blocks: number; partStarts: number[] }
+/** An image embedded in a chapter block. */
+export interface GuideBlockImage {
+  src: string;
+  alt: string;
+  caption?: string;
+}
+
+/** Raw original image bytes read from the EPUB archive for crisp UI display. */
+export interface RawBookImage {
+  src: string;
+  mediaType: string;
+  bytes: Uint8Array;
+}
+
 /**
  * One block of a chapter. `snippet`: its opening plain text, whitespace
  * collapsed (an image block: its alt text); `heading`: the heading level, 0
  * for none; `part`: the read_chapter part holding it; `kind`: an image-only
  * or blank block, absent for text.
  */
-export interface GuideBlock { snippet: string; chars: number; heading: number; part: number; kind?: "image" | "blank" }
+export interface GuideBlock { snippet: string; chars: number; heading: number; part: number; kind?: "image" | "blank"; images?: GuideBlockImage[] }
 
 /** Whether a block is a paragraph as the reader counts them: text, not a heading, image or blank. */
 export function isGuideParagraph(block: GuideBlock): boolean {
@@ -67,6 +81,8 @@ export interface BookContentPort {
   locateQuote(chapterIndex: number, quote: string): Promise<QuoteLocation>;
   /** A packaged image by its read_chapter placeholder `src`, fitted for vision models. */
   readImage(src: string): Promise<ModelImage>;
+  /** Full-resolution original bytes for a packaged image, for UI display. */
+  readRawImage?(src: string): Promise<RawBookImage>;
   close(): void;
 }
 
@@ -133,7 +149,7 @@ export function formatBookSnapshot(metadata: BookMetadata, toc: readonly BookToc
   return parts.join("\n");
 }
 
-type Request = { id: string; method: "open" | "metadata" | "toc" | "readChapter" | "guideBlocks" | "locateGuideBlock" | "search" | "locateQuote" | "readImage"; args: unknown[] };
+type Request = { id: string; method: "open" | "metadata" | "toc" | "readChapter" | "guideBlocks" | "locateGuideBlock" | "search" | "locateQuote" | "readImage" | "readRawImage"; args: unknown[] };
 type Response = { id: string; result?: unknown; error?: string };
 
 export class BookWorkerClient implements BookContentPort {
@@ -190,6 +206,7 @@ export class BookWorkerClient implements BookContentPort {
   search(queries: string[]): Promise<SearchHit[]> { return this.call("search", [queries]); }
   locateQuote(chapterIndex: number, quote: string): Promise<QuoteLocation> { return this.call("locateQuote", [chapterIndex, quote]); }
   readImage(src: string): Promise<ModelImage> { return this.call("readImage", [src]); }
+  readRawImage(src: string): Promise<RawBookImage> { return this.call("readRawImage", [src]); }
   close(): void { this.generation += 1; this.worker?.terminate(); this.worker = null; this.failAll("电子书上下文已切换"); }
   private failAll(message: string) { for (const pending of this.pending.values()) pending.reject(new Error(message)); this.pending.clear(); }
 }

@@ -301,4 +301,29 @@ describe("TocSidebar guide progress", () => {
     expect(view.getByLabelText("已带读 37%, 当前带读位置").textContent).toBe("37%");
     expect(view.queryAllByLabelText(/已带读|已略读/)).toHaveLength(3);
   });
+
+  it("lets the reader jump guided reading straight to any chapter from the TOC", () => {
+    const onGoTo = vi.fn();
+    const onGuideChapter = vi.fn();
+    const view = render(
+      <TocSidebar
+        toc={[...toc, { href: "c3", label: "第三章" }]}
+        expanded={["0"]}
+        onToggle={() => {}}
+        onGoTo={onGoTo}
+        guideProgress={{
+          c1: { coveredBlocks: 6, totalBlocks: 6, skimmed: false, current: false },
+          c2: { coveredBlocks: 9, totalBlocks: 9, skimmed: true, current: false },
+        }}
+        onGuideChapter={onGuideChapter}
+      />,
+    );
+    fireEvent.click(view.getByRole("button", { name: "带读「第三章」" }));
+    expect(onGuideChapter).toHaveBeenCalledWith("c3");
+    expect(onGoTo).not.toHaveBeenCalled();
+
+    fireEvent.click(view.getByRole("button", { name: "重读「第一章」" }));
+    expect(onGuideChapter).toHaveBeenCalledWith("c1");
+    expect(view.getByRole("button", { name: "重读「第二章」" })).toBeTruthy();
+  });
 });
