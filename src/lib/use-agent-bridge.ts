@@ -43,8 +43,13 @@ export function useAgentBridge(bookId: string) {
         pendingEditRef.current = null;
       }
       if (event.type === "prompt_end" || event.type === "prompt_aborted") {
-        void embeddedAgentRuntime.switchSession(event.sessionId).catch((error) =>
-          console.error("restore session history error:", error));
+        // `prompt_end` / `prompt_aborted` already carry the persisted transcript
+        // and branch navigation; calling `switchSession` here would reload the
+        // session and cancel background maintenance (Chapter recaps & sliding window).
+        if (event.messages === undefined) {
+          void embeddedAgentRuntime.switchSession(event.sessionId).catch((error) =>
+            console.error("restore session history error:", error));
+        }
         void listSessions().catch((error) => console.error("refresh sessions error:", error));
       } else if (event.type === "book_ready") {
         void listSessions().catch((error) => console.error("book ready sessions error:", error));
@@ -134,6 +139,10 @@ export function useAgentBridge(bookId: string) {
     (step: GuideStep) => embeddedAgentRuntime.guideStepAfterChapter(step),
     [],
   );
+  const guideStepAtHref = useCallback(
+    (href: string) => embeddedAgentRuntime.guideStepAtHref(href),
+    [],
+  );
   const guideSkimStep = useCallback(
     (step: GuideStep) => embeddedAgentRuntime.guideSkimStep(step),
     [],
@@ -151,8 +160,17 @@ export function useAgentBridge(bookId: string) {
     [],
   );
   const guideStepAnchor = useCallback((step: RecordedGuideStep) => embeddedAgentRuntime.guideStepAnchor(step), []);
+  const guideStepImages = useCallback((step: RecordedGuideStep) => embeddedAgentRuntime.guideStepImages(step), []);
+  const readStepImageUrl = useCallback((src: string) => embeddedAgentRuntime.readStepImageUrl(src), []);
   const deleteSession = useCallback(async (sessionId: string) => {
     if (bookIdRef.current) await embeddedAgentRuntime.deleteSession(sessionId, id("delete-session"));
+  }, []);
+  const restartGuidedSession = useCallback(async (sessionId: string) => {
+    if (bookIdRef.current) await embeddedAgentRuntime.restartGuidedSession(sessionId, id("restart-guided"));
+  }, []);
+  const guideContextStats = useCallback(() => embeddedAgentRuntime.guideContextStats(), []);
+  const resetGuideContext = useCallback(async () => {
+    if (bookIdRef.current) await embeddedAgentRuntime.resetGuideContext();
   }, []);
   const renameSession = useCallback(async (sessionId: string, title: string) => {
     if (bookIdRef.current) await embeddedAgentRuntime.renameSession(sessionId, title, id("rename-session"));
@@ -168,5 +186,5 @@ export function useAgentBridge(bookId: string) {
     [],
   );
 
-  return { state, prompt, editPrompt, abort, listSessions, newSession, nextGuideStep, guideStepAfterChapter, guideSkimStep, guideOutline, guideStepTo, guideStepToSelection, guideStepAnchor, switchSession, deleteSession, renameSession, updateSessionConfig, switchBranchAtAnchor, locateQuote };
+  return { state, prompt, editPrompt, abort, listSessions, newSession, restartGuidedSession, guideContextStats, resetGuideContext, nextGuideStep, guideStepAfterChapter, guideStepAtHref, guideSkimStep, guideOutline, guideStepTo, guideStepToSelection, guideStepAnchor, guideStepImages, readStepImageUrl, switchSession, deleteSession, renameSession, updateSessionConfig, switchBranchAtAnchor, locateQuote };
 }

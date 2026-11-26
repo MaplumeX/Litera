@@ -50,7 +50,8 @@ import {
 import { SelectionToolbar } from "@/components/SelectionToolbar";
 import { selectionParagraph } from "@/lib/selection-paragraph";
 import { latexSelectionText } from "@/lib/selection-copy";
-import { applyGuideMarks, findGuideParagraph, type GuideBlockTarget, type GuidePageMarks } from "@/lib/guide-marks";
+import { BookOpen } from "lucide-react";
+import { applyGuideMarks, findGuideParagraph, guidedStepElementAt, guidedStepIndexAt, type GuideBlockTarget, type GuidePageMarks } from "@/lib/guide-marks";
 import { hrefMatches } from "@/agent/book/book-content";
 import { t as translate } from "@/lib/i18n";
 import type { GuideSelection } from "@/types/agent";
@@ -226,6 +227,8 @@ interface ReaderViewProps {
   stylesCss?: string;
   /** A Guided session's marks: paragraphs read, skimmed, and at the Guide cursor. */
   guideMarks?: GuidePageMarks | null;
+  /** Open a floating PageGuideCard for an already-guided paragraph in the Book pane. */
+  onViewGuideCard?: (request: { stepIndex: number; x: number; y: number; passage?: string }) => void;
   /** A blank tap in the middle third of the page (the mobile shell toggles its chrome). */
   onMiddleTap?: () => void;
 }
@@ -384,6 +387,7 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       onReaderActivity,
       stylesCss,
       guideMarks,
+      onViewGuideCard,
       onMiddleTap,
     },
     ref,
@@ -447,6 +451,15 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
     // Latest reader CSS for footnote inner views (read inside the mount effect).
     const guideMarksRef = useRef(guideMarks);
     guideMarksRef.current = guideMarks;
+    const onViewGuideCardRef = useRef(onViewGuideCard);
+    onViewGuideCardRef.current = onViewGuideCard;
+    const [guideHoverChip, setGuideHoverChip] = useState<{
+      stepIndex: number;
+      x: number;
+      y: number;
+      passage?: string;
+    } | null>(null);
+    const guideHoverHideTimerRef = useRef<number | null>(null);
     const stylesCssRef = useRef(stylesCss);
     stylesCssRef.current = stylesCss;
     const onMiddleTapRef = useRef(onMiddleTap);
@@ -531,6 +544,8 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       text: string;
       /** The page paragraph the selection ends in, for "Guide up to here". */
       paragraph: string;
+      /** Non-null when the selection lies inside an already-guided paragraph. */
+      guidedStepIndex: number | null;
     } | null>(null);
     const [editor, setEditor] = useState<{
       id: string;
@@ -817,11 +832,13 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         }
         lastSelectionDocRef.current = doc;
         closeHighlightEditorRef.current();
+        setGuideHoverChip(null);
         setSelectionPos({
           x: pos.x,
           y: pos.y,
           text,
           paragraph: selectionParagraph(range),
+          guidedStepIndex: guidedStepIndexAt(range.commonAncestorContainer),
         });
       };
       const handleLoad = (e: Event) => {
@@ -889,15 +906,51 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         };
         const onDocPointerDown = () => {
           lastScrollArea = null;
+          setGuideHoverChip(null);
           // Selections here get the SelectionToolbar instead.
           platformBridge.setSelectionMenuHidden(true);
         };
+        // Host-layer hover chip for desktop: never injects positioned elements into Foliate's iframe DOM.
+        const clearGuideHoverSoon = () => {
+          if (guideHoverHideTimerRef.current !== null) window.clearTimeout(guideHoverHideTimerRef.current);
+          guideHoverHideTimerRef.current = window.setTimeout(() => {
+            guideHoverHideTimerRef.current = null;
+            setGuideHoverChip(null);
+          }, 180);
+        };
+        const onDocPointerMove = (event: PointerEvent) => {
+          if (event.pointerType !== "mouse" || !onViewGuideCardRef.current || selectionOpenRef.current) return;
+          const targetEl = guidedStepElementAt(event.target as Node | null);
+          const stepIndex = targetEl ? guidedStepIndexAt(targetEl) : null;
+          if (!targetEl || stepIndex === null) {
+            clearGuideHoverSoon();
+            return;
+          }
+          const frameRect = doc.defaultView?.frameElement?.getBoundingClientRect();
+          if (!frameRect) return;
+          if (guideHoverHideTimerRef.current !== null) {
+            window.clearTimeout(guideHoverHideTimerRef.current);
+            guideHoverHideTimerRef.current = null;
+          }
+          const rect = targetEl.getBoundingClientRect();
+          const x = Math.min(window.innerWidth - 64, Math.max(24, frameRect.left + rect.right - 8));
+          const y = Math.min(window.innerHeight - 36, Math.max(12, frameRect.top + rect.top + 2));
+          const passage = (targetEl.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 240) || undefined;
+          setGuideHoverChip((prev) =>
+            prev && prev.stepIndex === stepIndex && Math.abs(prev.x - x) < 12 && Math.abs(prev.y - y) < 12
+              ? prev
+              : { stepIndex, x, y, passage },
+          );
+        };
+        const onDocPointerLeave = () => clearGuideHoverSoon();
         const onDocActivity = () => onReaderActivityRef.current?.();
         const activityOptions = { capture: true, passive: true };
         doc.addEventListener("pointerdown", onDocActivity, activityOptions);
         doc.addEventListener("keydown", onDocActivity, activityOptions);
         doc.addEventListener("wheel", onDocActivity, activityOptions);
         doc.addEventListener("pointerdown", onDocPointerDown);
+        doc.addEventListener("pointermove", onDocPointerMove, { passive: true });
+        doc.addEventListener("pointerleave", onDocPointerLeave);
         doc.addEventListener("keydown", handleDocKeyDown);
         doc.addEventListener("wheel", handleWheel, { passive: false });
         doc.addEventListener("selectionchange", onSelectionChange);
@@ -905,11 +958,18 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
         unbindDoc = () => {
           unbindPointer();
           unbindTouchGuard?.();
+          if (guideHoverHideTimerRef.current !== null) {
+            window.clearTimeout(guideHoverHideTimerRef.current);
+            guideHoverHideTimerRef.current = null;
+          }
+          setGuideHoverChip(null);
           doc.removeEventListener("pointerdown", onDocActivity, activityOptions);
           doc.removeEventListener("keydown", onDocActivity, activityOptions);
           doc.removeEventListener("wheel", onDocActivity, activityOptions);
           doc.removeEventListener("keydown", handleDocKeyDown);
           doc.removeEventListener("pointerdown", onDocPointerDown);
+          doc.removeEventListener("pointermove", onDocPointerMove);
+          doc.removeEventListener("pointerleave", onDocPointerLeave);
           doc.removeEventListener("wheel", handleWheel);
           doc.removeEventListener("selectionchange", onSelectionChange);
           doc.removeEventListener("copy", handleDocCopy);
@@ -1275,6 +1335,17 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
       onGuideTo?.({ text: selectionPos.text, paragraph: selectionPos.paragraph, chapterHref: currentChapterHrefRef.current });
       clearIframeSelection();
     }, [selectionPos, onGuideTo, clearIframeSelection]);
+
+    const handleViewGuideCard = useCallback(() => {
+      if (!selectionPos || selectionPos.guidedStepIndex === null) return;
+      onViewGuideCard?.({
+        stepIndex: selectionPos.guidedStepIndex,
+        x: selectionPos.x,
+        y: selectionPos.y,
+        passage: selectionPos.text,
+      });
+      clearIframeSelection();
+    }, [selectionPos, onViewGuideCard, clearIframeSelection]);
 
     const handleCopySelection = useCallback(() => {
       if (!selectionPos) return;
@@ -1723,7 +1794,37 @@ export const ReaderView = forwardRef<ReaderViewHandle, ReaderViewProps>(
             onCopy={handleCopySelection}
             onAskAgent={handleAskAgent}
             onGuideTo={onGuideTo ? handleGuideTo : undefined}
+            onViewGuideCard={
+              selectionPos.guidedStepIndex !== null && onViewGuideCard
+                ? handleViewGuideCard
+                : undefined
+            }
           />
+        )}
+
+        {guideHoverChip && !selectionPos && !editor && onViewGuideCard && (
+          <button
+            type="button"
+            data-testid="guide-hover-chip"
+            aria-label={translate("reader.viewGuideCard")}
+            className="fixed z-40 flex items-center gap-1 rounded-full border bg-popover/95 px-2 py-0.5 text-2xs font-medium text-muted-foreground shadow-soft backdrop-blur-sm transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            style={{ left: `${guideHoverChip.x}px`, top: `${guideHoverChip.y}px` }}
+            onPointerEnter={() => {
+              if (guideHoverHideTimerRef.current !== null) {
+                window.clearTimeout(guideHoverHideTimerRef.current);
+                guideHoverHideTimerRef.current = null;
+              }
+            }}
+            onPointerLeave={() => setGuideHoverChip(null)}
+            onClick={() => {
+              const chip = guideHoverChip;
+              setGuideHoverChip(null);
+              onViewGuideCard(chip);
+            }}
+          >
+            <BookOpen className="h-3 w-3 text-primary" aria-hidden />
+            <span>{translate("reader.guideHoverChip")}</span>
+          </button>
         )}
 
         {editor && (

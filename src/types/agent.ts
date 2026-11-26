@@ -99,6 +99,15 @@ export interface AgentSessionSummary {
   kind?: SessionKind;
   /** Guided sessions: the step that reached the Guide cursor, absent before the first step. */
   guide?: RecordedGuideStep;
+  /** True when the session was archived (e.g. a superseded Guided session). */
+  archived?: boolean;
+}
+
+/** Snapshot of what a Guided session currently holds in model context. */
+export interface GuideContextStats {
+  recapCount: number;
+  activeTokens: number;
+  windowTarget: number;
 }
 
 export interface BranchOption {
@@ -178,14 +187,23 @@ export interface GuideRecapMarker {
 }
 
 /**
- * One visible item in the transcript, index-aligned with `branchAnchors`.
- * `notice` and `recap` items are transcript markers, not chat turns.
+ * Inline transcript marker for a manual context reset in a Guided session:
+ * earlier turns were collapsed out of model context while keeping chapter recaps.
  */
-export type AgentMessage = UserMessage | AssistantChatMessage | CompactionNotice | GuideRecapMarker;
+export interface GuideContextCutMarker {
+  role: "guide_cut";
+  reason: "manual";
+}
+
+/**
+ * One visible item in the transcript, index-aligned with `branchAnchors`.
+ * `notice`, `recap` and `guide_cut` items are transcript markers, not chat turns.
+ */
+export type AgentMessage = UserMessage | AssistantChatMessage | CompactionNotice | GuideRecapMarker | GuideContextCutMarker;
 
 /** Transcript markers are not chat turns. */
-export function isTranscriptMarker(message: AgentMessage): message is CompactionNotice | GuideRecapMarker {
-  return message.role === "notice" || message.role === "recap";
+export function isTranscriptMarker(message: AgentMessage): message is CompactionNotice | GuideRecapMarker | GuideContextCutMarker {
+  return message.role === "notice" || message.role === "recap" || message.role === "guide_cut";
 }
 
 /** The guided steps taken in a transcript, oldest first: by `guide_step` calls, or sent as user messages in older Sessions. */
@@ -227,6 +245,9 @@ export type AgentEvent = EventEnvelope & (
   // A chapter recap was written after a guided turn, in the same background
   // task as context maintenance.
   | ({ type: "guide_recap_added"; messages: AgentMessage[]; anchors: string[]; navigation: Record<string, AnchorBranchInfo> } & SessionCorrelation)
+  // A Guided session's sliding window advanced or was manually reset.
+  | ({ type: "guide_window_updated"; messages: AgentMessage[]; anchors: string[]; navigation: Record<string, AnchorBranchInfo> } & SessionCorrelation)
+  | ({ type: "session_archived" } & BookCorrelation & { sessionId: string } & RequestCorrelation)
   | ({ type: "retry_scheduled"; attempt: number; maxAttempts: number; delayMs: number } & PromptCorrelation)
   | ({ type: "prompt_end"; messages?: AgentMessage[]; anchors?: string[]; navigation?: Record<string, AnchorBranchInfo>} & PromptCorrelation)
   | ({ type: "prompt_aborted"; messages?: AgentMessage[]; anchors?: string[]; navigation?: Record<string, AnchorBranchInfo> } & PromptCorrelation & RequestCorrelation)

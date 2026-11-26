@@ -13,6 +13,7 @@ import { ChatPanel, type ChatPanelHandle } from "@/components/chat/ChatPanel";
 import type { RecordedGuideStep } from "@/types/agent";
 import type { QuoteLocation } from "@/agent/book/book-content";
 import type { GuideBlockTarget } from "@/lib/guide-marks";
+import type { GuideStepCardData } from "@/lib/guide-step-cards";
 import { readerModeForSnap, snapAfterDrag, type SheetSnap } from "@/lib/assistant-sheet";
 import type { ChatActivity } from "@/lib/chat-activity";
 import { useT } from "@/lib/i18n";
@@ -28,6 +29,8 @@ interface AssistantSheetProps {
   peekOffset?: string;
   /** A Guided session's steps on the active branch, oldest first; null outside one. */
   onGuideStepsChange?: (steps: RecordedGuideStep[] | null) => void;
+  /** Cards for every taken guided step, for Book pane guide cards. */
+  onGuideCardsChange?: (cards: GuideStepCardData[]) => void;
 }
 
 const NO_ACTIVITY: ChatActivity = { answering: false, preview: "", failed: false };
@@ -47,7 +50,7 @@ function sheetHeight(snap: SheetSnap, dragOffset: number) {
  */
 export const AssistantSheet = forwardRef<ChatPanelHandle, AssistantSheetProps>(
   function AssistantSheet(
-    { snap, onSnapChange, bookId, currentChapterHref, onOpenQuote, peekOffset = "var(--safe-bottom)", onGuideStepsChange },
+    { snap, onSnapChange, bookId, currentChapterHref, onOpenQuote, peekOffset = "var(--safe-bottom)", onGuideStepsChange, onGuideCardsChange },
     ref,
   ) {
     const { t } = useT();
@@ -119,9 +122,10 @@ export const AssistantSheet = forwardRef<ChatPanelHandle, AssistantSheetProps>(
           preferGuidedSession={preferGuidedSession}
           onActivityChange={handleActivity}
           onGuideStepsChange={onGuideStepsChange}
+          onGuideCardsChange={onGuideCardsChange}
         />
       ),
-      [ref, bookId, currentChapterHref, onOpenQuote, preferGuidedSession, handleActivity, onGuideStepsChange],
+      [ref, bookId, currentChapterHref, onOpenQuote, preferGuidedSession, handleActivity, onGuideStepsChange, onGuideCardsChange],
     );
 
     const collapsed = snap === "collapsed";

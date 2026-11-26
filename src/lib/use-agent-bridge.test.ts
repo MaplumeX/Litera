@@ -130,4 +130,20 @@ describe("useAgentBridge", () => {
     await waitFor(() =>
       expect(result.current.state.sessions.map((session) => session.id)).toContain("remote"));
   });
+
+  it("does not reload the session on prompt_end when messages are already delivered, preserving background recaps", async () => {
+    renderHook(() => useAgentBridge("book-a"));
+    act(() => runtime.emit(event({
+      type: "prompt_end",
+      bookId: "book-a",
+      sessionId: "guided-1",
+      promptId: "p1",
+      messages: [{ role: "user", content: "继续带读" }],
+      anchors: ["u1"],
+      navigation: {},
+      version: 2,
+    })));
+    await waitFor(() => expect(runtime.listSessions).toHaveBeenCalled());
+    expect(runtime.switchSession).not.toHaveBeenCalled();
+  });
 });

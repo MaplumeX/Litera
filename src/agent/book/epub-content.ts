@@ -1843,23 +1843,48 @@ function blockPlainText(text: string): string {
   return plainBlock(finalMarkdown(text)).replace(/\s+/g, " ").trim();
 }
 
+/** Filenames / alts typical of decorative rules, ornaments or icons rather than substantive figures. */
+const DECORATIVE_IMAGE = /(?:^|[/_\-.])(?:ornament|separator|divider|spacer|flourish|dingbat|bullet|rule|line|bar|dot|star|icon|logo|dropcap|border)(?:[/_\-.]|$)/i;
+const FIGURE_CAPTION_PREFIX = /^(?:图|表|插图|示意图|附图|fig(?:ure)?\.?|table|map|chart|plate|diagram)\s*[\d一二三四五六七八九十]/i;
+const MAX_CAPTION_CHARS = 140;
+
+function isSubstantiveImage(src: string, alt: string): boolean {
+  const filename = src.split("/").pop() ?? src;
+  return !DECORATIVE_IMAGE.test(filename) && !DECORATIVE_IMAGE.test(alt);
+}
+
 /** The blocks of a chapter, as a Guided session picks and finds them. */
 export function guideBlocks(book: ParsedBook, chapterIndex: number): GuideBlock[] {
   const chapter = book.chapters[chapterIndex];
   if (!chapter) throw new Error("Chapter index is out of range");
   const { blocks, partStarts } = layoutOf(chapter);
-  return blocks.map((text, index) => {
+  const prepared = blocks.map((text, index) => {
     const markdown = finalMarkdown(text);
     const heading = HEADING.exec(markdown.trimStart());
     const plain = blockPlainText(text);
-    const alts = [...markdown.matchAll(IMAGE_PLACEHOLDER)].map((match) => match[1].trim()).filter(Boolean);
-    const image = !plain && markdown.match(IMAGE_PLACEHOLDER) !== null;
+    const matches = [...markdown.matchAll(IMAGE_PLACEHOLDER)];
+    const alts = matches.map((match) => match[1].trim()).filter(Boolean);
+    const image = !plain && matches.length > 0;
+    const images = matches
+      .map((match) => ({ alt: match[1].trim(), src: match[2].trim() }))
+      .filter(({ src, alt }) => !!src && isSubstantiveImage(src, alt));
+    return { markdown, heading: heading ? heading[1].length : 0, plain, alts, image, images, part: partOfBlock(partStarts, index) };
+  });
+  return prepared.map((item, index) => {
+    let images = item.images;
+    if (item.image && images.length > 0) {
+      const next = prepared[index + 1];
+      if (next && !next.image && next.heading === 0 && next.plain.length > 0 && next.plain.length <= MAX_CAPTION_CHARS && FIGURE_CAPTION_PREFIX.test(next.plain)) {
+        images = images.map((img, i) => (i === images.length - 1 ? { ...img, caption: next.plain } : img));
+      }
+    }
     return {
-      snippet: (image ? alts.join(" ") : plain).slice(0, GUIDE_SNIPPET_CHARS),
-      chars: markdown.length,
-      heading: heading ? heading[1].length : 0,
-      part: partOfBlock(partStarts, index),
-      ...(image ? { kind: "image" as const } : !plain ? { kind: "blank" as const } : {}),
+      snippet: (item.image ? item.alts.join(" ") : item.plain).slice(0, GUIDE_SNIPPET_CHARS),
+      chars: item.markdown.length,
+      heading: item.heading,
+      part: item.part,
+      ...(item.image ? { kind: "image" as const } : !item.plain ? { kind: "blank" as const } : {}),
+      ...(images.length > 0 ? { images } : {}),
     };
   });
 }

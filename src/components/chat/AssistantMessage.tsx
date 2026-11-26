@@ -1,4 +1,4 @@
-import { isValidElement, memo, useMemo, type ReactNode } from "react";
+import { isValidElement, memo, useCallback, useMemo, type ReactNode } from "react";
 import ReactMarkdown, { defaultUrlTransform, type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
@@ -137,20 +137,27 @@ function messageBlocks(message: AssistantChatMessage): AssistantBlock[] {
 
 interface AssistantMessageProps {
   message: AssistantChatMessage;
+  /** Visible message index in the transcript, forwarded to `onRegenerate`. */
+  messageIndex?: number;
   streaming?: boolean;
   /** Whether the caller allows regeneration at all (e.g. not while streaming). */
   canRegenerate?: boolean;
   /** Stable callback: inline arrows would defeat memoization of the whole list. */
-  onRegenerate?: () => void;
+  onRegenerate?: (messageIndex?: number) => void;
 }
 
 export const AssistantMessage = memo(function AssistantMessage({
   message,
+  messageIndex,
   streaming = false,
   canRegenerate = true,
   onRegenerate,
 }: AssistantMessageProps) {
   const { t } = useT();
+  const handleRegenerate = useCallback(
+    () => onRegenerate?.(messageIndex),
+    [messageIndex, onRegenerate],
+  );
   const blocks = messageBlocks(message);
   const { process, answer } = useMemo(() => layoutAnswer(blocks), [blocks]);
   const sources = useMemo(() => summarizeSources(blocks), [blocks]);
@@ -174,7 +181,9 @@ export const AssistantMessage = memo(function AssistantMessage({
               text={block.text}
               streaming={streaming && index === lastTextIndex}
               onRegenerate={
-                canRegenerate && !streaming && index === lastTextIndex ? onRegenerate : undefined
+                canRegenerate && !streaming && index === lastTextIndex && onRegenerate
+                  ? handleRegenerate
+                  : undefined
               }
             />
           ) : null,
@@ -183,7 +192,7 @@ export const AssistantMessage = memo(function AssistantMessage({
           <div className="message-actions -ml-1 flex h-6 items-center gap-0.5">
             <button
               type="button"
-              onClick={onRegenerate}
+              onClick={handleRegenerate}
               className={MESSAGE_ACTION_CLASS}
               aria-label={t("chat.regenerate")}
             >

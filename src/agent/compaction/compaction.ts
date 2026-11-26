@@ -1,6 +1,6 @@
 import type { AgentMessage, StreamFn } from "@earendil-works/pi-agent-core";
 import { normalizeContext, type Api, type Model, type SimpleStreamOptions } from "@earendil-works/pi-ai";
-import { GUIDE_RECAP, isPrunableEntry, type PiSessionEntry } from "@/agent/sessions/pi-session";
+import { GUIDE_RECAP, GUIDE_WINDOW_CUT, decodeGuide, isGuideRecapEntry, isPrunableEntry, type PiSessionEntry } from "@/agent/sessions/pi-session";
 import { imageRefSource } from "@/agent/sessions/image-refs";
 
 /**
@@ -15,6 +15,33 @@ export interface ContextBudget {
   summaryMaxTokens: number;
 }
 
+/** Coherence-leaning target ceiling for a Guided session's short-term working window. */
+export const GUIDE_WINDOW_TARGET_TOKENS = 35_000;
+/** Minimum guided turns kept in the short-term window for smooth cross-chapter handoff. */
+export const GUIDE_WINDOW_MIN_KEEP_STEPS = 2;
+/** Preferred guided turns kept when they fit comfortably under the target ceiling. */
+export const GUIDE_WINDOW_MAX_KEEP_STEPS = 3;
+
+/** Guided sliding-window target scaled cleanly for smaller model context windows. */
+export function guideWindowTarget(contextWindow: number): number {
+  if (!(contextWindow > 0)) return GUIDE_WINDOW_TARGET_TOKENS;
+  return Math.max(8_000, Math.min(GUIDE_WINDOW_TARGET_TOKENS, Math.floor(contextWindow * 0.45)));
+}
+
+/** Snapshot of recaps and active working-window tokens for a Guided session's `contextBranch`. */
+export function guideContextTokens(context: PiSessionEntry[]): { recapCount: number; activeTokens: number } {
+  let recapCount = 0;
+  let activeTokens = 0;
+  for (const entry of context) {
+    if (isGuideRecapEntry(entry)) {
+      recapCount += 1;
+      continue;
+    }
+    if (entry.type === "custom_message" && entry.customType === "bookSnapshot") continue;
+    activeTokens += entryTokens(entry);
+  }
+  return { recapCount, activeTokens };
+}
 /** Budget scaled to the model's context window; undefined disables maintenance. */
 export function contextBudget(contextWindow: number): ContextBudget | undefined {
   if (!(contextWindow > 0)) return undefined;
@@ -183,7 +210,7 @@ export function entryTokens(entry: PiSessionEntry): number {
 export function estimateBranchTokens(path: PiSessionEntry[], context: PiSessionEntry[]): number {
   for (let index = path.length - 1; index >= 0; index -= 1) {
     const entry = path[index];
-    if (entry.type === "compaction" || entry.type === "context_prune") {
+    if (entry.type === "compaction" || entry.type === "context_prune" || entry.type === GUIDE_WINDOW_CUT) {
       return context.reduce((sum, item) => sum + entryTokens(item), 0);
     }
     const message = entry.type === "message" ? entry.message as AgentMessage : undefined;
@@ -263,6 +290,68 @@ export interface PrunePreparation {
 const PRUNED_PLACEHOLDER_TOKENS = 40;
 
 /**
+ * Prepare a batch advance of a Guided session's sliding context window
+ * (`contextBranch` entries). Fires only once active working-window tokens
+ * exceed `windowTarget`, keeping the latest 2–3 guided turns intact so chapter
+ * transitions stay coherent while dropping older turns that are already
+ * backed by a `Chapter recap` (or checked safe by `isTurnSafeToDrop`).
+ *
+ * Zero LLM calls: Prompt Cache prefix remains untouched between batch advances.
+ */
+export function prepareGuideWindowAdvance(
+  entries: PiSessionEntry[],
+  options: {
+    windowTarget: number;
+    minKeepSteps?: number;
+    maxKeepSteps?: number;
+    isStepSafeToDrop?: (entry: PiSessionEntry) => boolean;
+  },
+): { firstKeptEntryId: string; tokensSaved: number } | undefined {
+  const { activeTokens } = guideContextTokens(entries);
+  if (activeTokens <= options.windowTarget) return undefined;
+  const points = cutPoints(entries, 0, entries.length);
+  if (points.length < 2) return undefined;
+  // Identify turns (ranges [points[i].cut, points[i+1].cut)) that contain a taken guided step.
+  const turns = points.map((point, index) => {
+    const end = index + 1 < points.length ? points[index + 1].cut : entries.length;
+    const slice = entries.slice(point.cut, end);
+    const stepEntries = slice.filter((entry) => entry.type === "message" && decodeGuide(entry.guide) !== null);
+    const tokens = slice.reduce((sum, entry) => (
+      isGuideRecapEntry(entry) || (entry.type === "custom_message" && entry.customType === "bookSnapshot")
+        ? sum
+        : sum + entryTokens(entry)
+    ), 0);
+    return { cut: point.cut, end, stepEntries, hasStep: stepEntries.length > 0, tokens };
+  });
+  const guidedIndices = turns.flatMap((turn, index) => (turn.hasStep ? [index] : []));
+  const minKeep = Math.max(1, options.minKeepSteps ?? GUIDE_WINDOW_MIN_KEEP_STEPS);
+  const maxKeep = Math.max(minKeep, options.maxKeepSteps ?? GUIDE_WINDOW_MAX_KEEP_STEPS);
+  if (guidedIndices.length <= minKeep) return undefined;
+  // Prefer keeping maxKeep guided turns if they fit comfortably under 75% of target; otherwise keep minKeep.
+  let keepTurnIndex = guidedIndices[guidedIndices.length - minKeep];
+  if (guidedIndices.length > maxKeep) {
+    const candidate = guidedIndices[guidedIndices.length - maxKeep];
+    const keptTokens = turns.slice(candidate).reduce((sum, turn) => sum + turn.tokens, 0);
+    if (keptTokens <= options.windowTarget * 0.75) keepTurnIndex = candidate;
+  }
+  // Never drop turns carrying a guided step whose chapter is still unfinished / un-recapped.
+  if (options.isStepSafeToDrop) {
+    for (let index = 0; index < keepTurnIndex; index += 1) {
+      if (turns[index].stepEntries.some((entry) => !options.isStepSafeToDrop!(entry))) {
+        keepTurnIndex = index;
+        break;
+      }
+    }
+  }
+  if (keepTurnIndex <= 0) return undefined;
+  const firstKept = entries[turns[keepTurnIndex].cut];
+  if (!firstKept?.id) return undefined;
+  const tokensSaved = turns.slice(0, keepTurnIndex).reduce((sum, turn) => sum + turn.tokens, 0);
+  if (tokensSaved <= 0) return undefined;
+  return { firstKeptEntryId: firstKept.id, tokensSaved };
+}
+
+/**
  * Prepare a Pruning of the model context (`contextBranch` entries): clear every
  * not-yet-pruned Book tool result older than the latest turns that fit in
  * `keepRecent`. One batch per trigger keeps the provider's prompt-cache prefix
@@ -270,8 +359,8 @@ const PRUNED_PLACEHOLDER_TOKENS = 40;
  *
  * Returns undefined when nothing older than the kept turns can be pruned.
  */
-export function preparePrune(entries: PiSessionEntry[], budget: ContextBudget): PrunePreparation | undefined {
-  const cutIndex = findCutPoint(entries, 0, entries.length, budget.keepRecent);
+export function preparePrune(entries: PiSessionEntry[], budget: ContextBudget, keepRecent = budget.keepRecent): PrunePreparation | undefined {
+  const cutIndex = findCutPoint(entries, 0, entries.length, keepRecent);
   let tokensSaved = 0;
   let found = false;
   for (let index = 0; index < cutIndex; index += 1) {

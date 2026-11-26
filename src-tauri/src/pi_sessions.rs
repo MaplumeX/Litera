@@ -36,6 +36,9 @@ pub struct PiSessionSummary {
     kind: Option<String>,
     /// The latest guided step on the active branch (the guide cursor).
     guide: Option<Value>,
+    /// True when the session has been archived (e.g. superseded Guided session).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    archived: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]
@@ -261,13 +264,24 @@ impl PiSessionStore {
             let title = entries
                 .iter()
                 .rev()
-                .find(|entry| entry.get("type").and_then(Value::as_str) == Some("session_info"))
-                .and_then(|entry| entry.get("name"))
-                .and_then(Value::as_str)
-                .filter(|name| !name.trim().is_empty())
-                .map(str::to_string)
+                .find_map(|entry| {
+                    (entry.get("type").and_then(Value::as_str) == Some("session_info"))
+                        .then(|| entry.get("name").and_then(Value::as_str))
+                        .flatten()
+                        .filter(|name| !name.trim().is_empty())
+                        .map(str::to_string)
+                })
                 .or_else(|| first_user_text(&entries))
                 .unwrap_or_else(|| "新会话".to_string());
+            let archived = entries
+                .iter()
+                .rev()
+                .find_map(|entry| {
+                    (entry.get("type").and_then(Value::as_str) == Some("session_info"))
+                        .then(|| entry.get("archived").and_then(Value::as_bool))
+                        .flatten()
+                })
+                .filter(|value| *value);
             // The runtime applies the latest session_config on the active
             // branch only, so the summary must resolve it the same way.
             let leaf_id = stored_leaf_id(&path, &entries)
@@ -294,6 +308,7 @@ impl PiSessionStore {
                 system_prompt,
                 kind,
                 guide,
+                archived,
             });
         }
         summaries.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));

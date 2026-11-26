@@ -1,8 +1,10 @@
-import { BookOpen, FastForward, ListEnd, Play, SkipForward } from "lucide-react";
+import { useState } from "react";
+import { BookOpen, FastForward, Layers, ListEnd, Play, SkipForward } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tip } from "@/components/ui/tooltip";
 import { t as translate, useT } from "@/lib/i18n";
-import { isLegacyGuideStep, type GuidePosition, type GuideStep, type RecordedGuideStep } from "@/types/agent";
+import { isLegacyGuideStep, type GuideContextStats, type GuidePosition, type GuideStep, type RecordedGuideStep } from "@/types/agent";
 import type { MessageKey } from "@/locales/zh-CN";
 
 export function positionTitle(position: { chapterIndex: number; chapterTitle?: string }): string {
@@ -83,18 +85,69 @@ interface GuideBarProps {
   onSkip: () => void;
   /** Open the "Read to…" picker. */
   onPick: () => void;
+  /** Current sliding-window context stats, when available. */
+  contextStats?: GuideContextStats | null;
+  /** Manually collapse active context while keeping chapter recaps. */
+  onResetContext?: () => void;
+}
+
+function formatCompactTokens(tokens: number): string {
+  if (tokens < 1000) return `${tokens}`;
+  return `${(tokens / 1000).toFixed(tokens >= 10_000 ? 0 : 1)}k`;
 }
 
 /** Above the input of a Guided session: the one-tap ways to read on. */
-export function GuideBar({ nextStep, started, disabled, onContinue, onSkim, onSkip, onPick }: GuideBarProps) {
+export function GuideBar({ nextStep, started, disabled, onContinue, onSkim, onSkip, onPick, contextStats, onResetContext }: GuideBarProps) {
   const { t } = useT();
+  const [contextOpen, setContextOpen] = useState(false);
   if (nextStep === undefined) return null;
+  const contextControl = started && contextStats && onResetContext ? (
+    <Popover open={contextOpen} onOpenChange={setContextOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          className="shrink-0 rounded-full text-muted-foreground"
+          disabled={disabled}
+          aria-label={t("chat.guide.contextTitle")}
+          title={t("chat.guide.contextTitle")}
+        >
+          <Layers className="h-3.5 w-3.5" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent side="top" align="end" className="w-60 space-y-2 p-3 text-xs">
+        <p className="font-medium text-foreground">{t("chat.guide.contextTitle")}</p>
+        <div className="space-y-1 text-muted-foreground">
+          <p>{t("chat.guide.contextRecaps", { count: contextStats.recapCount })}</p>
+          <p className="tabular-nums">
+            {t("chat.guide.contextWindow", {
+              tokens: formatCompactTokens(contextStats.activeTokens),
+              target: formatCompactTokens(contextStats.windowTarget),
+            })}
+          </p>
+        </div>
+        <Button
+          size="xs"
+          variant="outline"
+          className="w-full"
+          disabled={disabled || contextStats.activeTokens === 0}
+          onClick={() => {
+            setContextOpen(false);
+            onResetContext();
+          }}
+        >
+          {t("chat.guide.contextReset")}
+        </Button>
+      </PopoverContent>
+    </Popover>
+  ) : null;
   if (nextStep === null) {
     return (
-      <p className="flex items-center justify-center gap-1.5 px-3 pt-1 text-xs text-muted-foreground" role="status">
+      <div className="flex items-center justify-center gap-1.5 px-3 pt-1 text-xs text-muted-foreground" role="status">
         <BookOpen className="h-3.5 w-3.5" />
-        {t("chat.guide.end")}
-      </p>
+        <span>{t("chat.guide.end")}</span>
+        {contextControl}
+      </div>
     );
   }
   const title = positionTitle(nextStep.from);
@@ -156,6 +209,7 @@ export function GuideBar({ nextStep, started, disabled, onContinue, onSkim, onSk
           <SkipForward />
         </Button>
       </Tip>
+      {contextControl}
     </div>
   );
 }

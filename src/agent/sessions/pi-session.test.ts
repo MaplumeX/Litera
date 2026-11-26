@@ -665,10 +665,10 @@ describe("guided sessions", () => {
     ]);
   });
 
-  it("shows a chapter recap as a transcript marker, anchored in step with the messages", () => {
+  it("keeps chapter recaps silent in visibleMessages while exposing them via guideRecapChapters and contextBranch", () => {
     const session = makeSession([step("u1", null, 2), entry("a1", "u1", "assistant", "retelling"), recap("r1", "a1", 4, "The gist.")], "r1");
-    expect(visibleMessages(session)[2]).toEqual({ role: "recap", chapterIndex: 4, chapterTitle: "Chapter 5", text: "The gist." });
-    expect(visibleMessageEntries(session).map((item) => item.id)).toEqual(["u1", "a1", "r1"]);
+    expect(visibleMessages(session)).toHaveLength(2);
+    expect(visibleMessageEntries(session).map((item) => item.id)).toEqual(["u1", "a1"]);
     expect(guideRecapChapters(session)).toEqual([{ chapterIndex: 4, chapterTitle: "Chapter 5" }]);
     expect(guideRecapChapters(makeSession([step("u1", null, 2), entry("a1", "u1", "assistant", "retelling")], "a1"))).toEqual([]);
   });
@@ -676,7 +676,7 @@ describe("guided sessions", () => {
   it("decodes a recap of several chapters, dropping a malformed range end", () => {
     const grouped = { ...recap("r1", "a1", 4, "The gist."), details: { chapterIndex: 4, chapterTitle: "Chapter 5", throughChapterIndex: 6, throughChapterTitle: "Chapter 7", text: "The gist." } };
     const session = makeSession([step("u1", null, 2), entry("a1", "u1", "assistant", "retelling"), grouped], "r1");
-    expect(visibleMessages(session)[2]).toEqual({ role: "recap", chapterIndex: 4, chapterTitle: "Chapter 5", throughChapterIndex: 6, throughChapterTitle: "Chapter 7", text: "The gist." });
+    expect(visibleMessages(session)).toHaveLength(2);
     expect(guideRecapChapters(session)).toEqual([{ chapterIndex: 4, chapterTitle: "Chapter 5", throughChapterIndex: 6, throughChapterTitle: "Chapter 7" }]);
     const malformed = { ...grouped, details: { chapterIndex: 4, throughChapterIndex: 3, text: "The gist." } };
     expect(guideRecapChapters(makeSession([step("u1", null, 2), entry("a1", "u1", "assistant", "retelling"), malformed], "r1"))).toEqual([{ chapterIndex: 4 }]);
