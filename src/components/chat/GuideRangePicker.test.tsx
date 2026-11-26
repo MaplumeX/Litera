@@ -52,7 +52,7 @@ describe("GuideRangePicker", () => {
     fireEvent.click(row(view, "乙段"));
     expect(view.getByText("读到：第三章（第 4 段），约 310 字")).toBeTruthy();
     fireEvent.click(read);
-    expect(onPick).toHaveBeenCalledWith({ chapterIndex: 2, block: 5 }, false);
+    expect(onPick).toHaveBeenCalledWith({ chapterIndex: 2, block: 5 });
   });
 
   it("leaves out the headings that only repeat the chapter's title", async () => {
@@ -73,12 +73,12 @@ describe("GuideRangePicker", () => {
     expect(view.queryByText("第一章　火车站")).toBeNull();
   });
 
-  it("reads to the end of a section when its heading is picked, and can skim it", async () => {
+  it("reads to the end of a section when its heading is picked", async () => {
     const view = renderPicker();
     fireEvent.click(row(view, await view.findByText("小节一").then((node) => node.textContent!)));
     expect(view.getByText("读到：第三章（第 4 段），约 310 字")).toBeTruthy();
-    fireEvent.click(view.getByRole("button", { name: "略读" }));
-    expect(onPick).toHaveBeenCalledWith({ chapterIndex: 2, block: 5 }, true);
+    fireEvent.click(view.getByRole("button", { name: "带读" }));
+    expect(onPick).toHaveBeenCalledWith({ chapterIndex: 2, block: 5 });
   });
 
   it("reads to the end of a chapter when its title is picked", async () => {
@@ -86,7 +86,7 @@ describe("GuideRangePicker", () => {
     await view.findByText("甲段");
     fireEvent.click(view.getByRole("button", { name: /^第三章/ }));
     fireEvent.click(view.getByRole("button", { name: "带读" }));
-    expect(onPick).toHaveBeenCalledWith({ chapterIndex: 2, block: 7 }, false);
+    expect(onPick).toHaveBeenCalledWith({ chapterIndex: 2, block: 7 });
   });
 
   it("loads later chapters and warns about a long step", async () => {
@@ -97,7 +97,7 @@ describe("GuideRangePicker", () => {
     expect(view.getByText("这一步约 30,620 字，比平时长不少，讲解可能会比较概括。")).toBeTruthy();
     expect(view.queryByRole("button", { name: "显示后面的章节" })).toBeNull();
     fireEvent.click(view.getByRole("button", { name: "带读" }));
-    expect(onPick).toHaveBeenCalledWith({ chapterIndex: 4, block: 0 }, false);
+    expect(onPick).toHaveBeenCalledWith({ chapterIndex: 4, block: 0 });
   });
 
   it("shows images by their alt text, hides blank blocks and a heading that repeats the chapter title", async () => {

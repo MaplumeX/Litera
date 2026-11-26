@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { BookOpen, ChevronRight, FastForward, MessageSquare, X } from "lucide-react";
+import { BookOpen, ChevronRight, MessageSquare, X } from "lucide-react";
 import { placeFootnotePopup } from "@/components/FootnotePopup";
 import { MarkdownText } from "@/components/chat/AssistantMessage";
 import { Button } from "@/components/ui/button";
@@ -68,8 +68,6 @@ export function PageGuideCard({
     setPos((prev) => (prev && prev.left === placed.left && prev.top === placed.top ? prev : placed));
   }, [floating, x, y, qaOpen, card.stepIndex]);
 
-  const Icon = card.skim ? FastForward : BookOpen;
-
   return (
     <div className="fixed inset-0 z-50" role="presentation">
       <button
@@ -97,13 +95,8 @@ export function PageGuideCard({
       >
         <div className="flex items-center justify-between gap-2 border-b px-3.5 py-2.5">
           <div className="flex min-w-0 items-center gap-1.5 text-xs font-medium">
-            <Icon className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden />
+            <BookOpen className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden />
             <span className="truncate">{card.label}</span>
-            {card.skim && (
-              <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-2xs text-muted-foreground">
-                {t("toc.guide.skimmed")}
-              </span>
-            )}
           </div>
           <Button
             type="button"

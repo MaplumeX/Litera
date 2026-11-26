@@ -1,10 +1,14 @@
-export type ReaderMode = "reader" | "agent";
+export type ReaderMode = "reader" | "guide" | "agent";
 
 export const DEFAULT_READER_MODE_KEY = "litera.defaultReaderMode";
 export const DEFAULT_READER_MODE: ReaderMode = "reader";
 
 export function isReaderMode(value: unknown): value is ReaderMode {
-  return value === "reader" || value === "agent";
+  return value === "reader" || value === "guide" || value === "agent";
+}
+
+export function isAssistantWorkspaceMode(mode: ReaderMode): boolean {
+  return mode === "guide" || mode === "agent";
 }
 
 export function parseReaderMode(value: unknown): ReaderMode {

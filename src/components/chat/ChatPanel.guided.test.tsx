@@ -14,9 +14,8 @@ const switchSession = vi.fn(async (_id: string) => {});
 let afterChapter: GuideStep | null = null;
 const guideStepAfterChapter = vi.fn(async (_step: GuideStep) => afterChapter);
 const guideStepAtHref = vi.fn(async (_href: string): Promise<GuideStep | null> => afterChapter);
-const guideSkimStep = vi.fn(async (step: GuideStep): Promise<GuideStep | null> => ({ ...step, skim: true }));
 const guideOutline = vi.fn(async (_step: GuideStep, _after?: number) => ({
-  chapters: [{ chapterIndex: 2, chapterTitle: "第三章", firstBlock: 0, blocks: [{ snippet: "开头一段", chars: 40, heading: 0, part: 0 }, { snippet: "第二段", chars: 60, heading: 0, part: 0 }] }],
+  chapters: [{ chapterIndex: 2, chapterTitle: "第三章", firstBlock: 0, paragraphsBefore: 0, blocks: [{ snippet: "开头一段", chars: 40, heading: 0, part: 0 }, { snippet: "第二段", chars: 60, heading: 0, part: 0 }] }],
   more: null,
 }));
 const three = { chapterIndex: 2, chapterTitle: "第三章" };
@@ -25,7 +24,7 @@ const partStep = (index: number): GuideStep => ({ from: { ...three, block: index
 const picked: GuideStep = { from: { ...three, block: 0 }, to: { ...three, block: 1 } };
 let selectionResult: { step: GuideStep } | { error: "before" | "notFound" } = { step: picked };
 const guideStepToSelection = vi.fn(async (_step: GuideStep, _selection: GuideSelection) => selectionResult);
-const guideStepTo = vi.fn(async (_step: GuideStep, _to: { chapterIndex: number; block: number }, _skim?: boolean): Promise<GuideStep | null> => picked);
+const guideStepTo = vi.fn(async (_step: GuideStep, _to: { chapterIndex: number; block: number }): Promise<GuideStep | null> => picked);
 const seventh = { chapterIndex: 6, chapterTitle: "第七章" };
 const guideStepAnchor = vi.fn(async (step: RecordedGuideStep) => {
   const part = isLegacyGuideStep(step) ? step.part : step.part?.index ?? 0;
@@ -43,7 +42,6 @@ vi.mock("@/lib/use-agent-bridge", () => ({
     nextGuideStep,
     guideStepAfterChapter,
     guideStepAtHref,
-    guideSkimStep,
     guideOutline,
     guideStepTo,
     guideStepToSelection,
@@ -88,7 +86,6 @@ beforeEach(() => {
   switchSession.mockClear();
   guideStepAfterChapter.mockClear();
   guideStepAtHref.mockClear();
-  guideSkimStep.mockClear();
   guideOutline.mockClear();
   guideStepTo.mockClear();
   guideStepToSelection.mockClear();
@@ -233,15 +230,6 @@ describe("ChatPanel in a Guided session", () => {
     expect(editPrompt.mock.calls[0][2]).toEqual({ guideRequest: {} });
   });
 
-  it("skims the rest of the chapter in one step", async () => {
-    const view = renderPanel();
-    fireEvent.click(await view.findByRole("button", { name: "略读本章" }));
-    await waitFor(() => expect(prompt).toHaveBeenCalled());
-    expect(guideSkimStep).toHaveBeenCalledWith(stepOne);
-    const skim = { ...stepOne, skim: true };
-    expect(prompt).toHaveBeenCalledWith("略读：第三章", { guideRequest: { step: skim } }, { role: "user", content: "略读：第三章", guideRequest: { step: skim } });
-  });
-
   it("reads up to the paragraph the reader picks", async () => {
     const view = renderPanel();
     fireEvent.click(await view.findByRole("button", { name: "读到…" }));
@@ -249,7 +237,7 @@ describe("ChatPanel in a Guided session", () => {
     fireEvent.click(view.getByRole("button", { name: "带读" }));
     await waitFor(() => expect(prompt).toHaveBeenCalled());
     expect(guideOutline).toHaveBeenCalledWith(stepOne, undefined);
-    expect(guideStepTo).toHaveBeenCalledWith(stepOne, { chapterIndex: 2, block: 1 }, false);
+    expect(guideStepTo).toHaveBeenCalledWith(stepOne, { chapterIndex: 2, block: 1 });
     expect(prompt).toHaveBeenCalledWith("带读：第三章（第 1–2 段）", { guideRequest: { step: picked } }, { role: "user", content: "带读：第三章（第 1–2 段）", guideRequest: { step: picked } });
   });
 
@@ -354,25 +342,6 @@ describe("ChatPanel on open", () => {
 });
 
 describe("ChatPanel and the TOC in a Guided session", () => {
-  it("reports the steps on the active branch, and null outside a Guided session", async () => {
-    const onGuideStepsChange = vi.fn();
-    bridgeState = guidedState({
-      messages: [
-        { role: "user", content: "带读", guide: stepOne },
-        { role: "assistant", content: "讲述" },
-        { role: "user", content: "插话" },
-        { role: "assistant", content: "回答" },
-        { role: "user", content: "继续带读", guideRequest: {} },
-        { role: "assistant", content: "讲述", blocks: [{ type: "toolCall", toolCall: { toolCallId: "c1", tool: "guide_step", params: {}, done: true, guide: partStep(1) } }] },
-      ],
-    });
-    const view = render(<ChatPanel bookId="book-1" onGuideStepsChange={onGuideStepsChange} />);
-    expect(onGuideStepsChange).toHaveBeenLastCalledWith([stepOne, partStep(1)]);
-    bridgeState = guidedState({ sessions: [{ id: "guided-1", title: "t", createdAt: "1", updatedAt: "1" }] });
-    view.rerender(<ChatPanel bookId="book-1" onGuideStepsChange={onGuideStepsChange} />);
-    await waitFor(() => expect(onGuideStepsChange).toHaveBeenLastCalledWith(null));
-  });
-
   it("jumps guided reading directly to a chapter picked from the TOC via guideChapter", async () => {
     const ref = createRef<ChatPanelHandle>();
     bridgeState = guidedState({

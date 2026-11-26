@@ -1033,6 +1033,7 @@ export function SettingsDialog({
                       value={defaultReaderMode}
                       options={[
                         { value: "reader" as ReaderMode, label: t("settings.defaultMode.reader") },
+                        { value: "guide" as ReaderMode, label: t("settings.defaultMode.guide") },
                         { value: "agent" as ReaderMode, label: t("settings.defaultMode.agent") },
                       ]}
                       onChange={(next) => {

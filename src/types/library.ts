@@ -57,7 +57,7 @@ export interface BookRecord {
   statusUpdatedAt?: string;
   starred?: boolean;
   contentHash?: string;
-  lastReaderMode?: "reader" | "agent";
+  lastReaderMode?: "reader" | "guide" | "agent";
   lastLayout?: ReaderLayout;
   /** Derived: false when the EPUB is not on this device (sync placeholder). */
   cached?: boolean;
@@ -83,7 +83,7 @@ export interface BookOpenContext {
   lastFraction?: number;
   lastCfi?: string;
   settings?: ReadingSettings;
-  lastReaderMode?: "reader" | "agent";
+  lastReaderMode?: "reader" | "guide" | "agent";
   lastLayout?: ReaderLayout;
   readingStatus: ReadingStatus;
 }

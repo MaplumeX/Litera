@@ -71,12 +71,21 @@ function decodeGuidePosition(value: unknown): GuidePosition | null {
   };
 }
 
-/** A persisted guide request (an object, with an optional step), or null when absent or malformed. */
+/** A persisted guide request (an object, with optional step and step options), or null when absent or malformed. */
 function decodeGuideRequest(value: unknown): GuideRequest | null {
   const request = object(value);
   if (!request) return null;
   const step = decodeGuide(request.step);
-  return step ? { step } : {};
+  const pace =
+    request.pace === "standard" || request.pace === "compact" || request.pace === "deep"
+      ? request.pace
+      : undefined;
+  const styleOverride = string(request.styleOverride) ?? undefined;
+  return {
+    ...(step ? { step } : {}),
+    ...(pace ? { pace } : {}),
+    ...(styleOverride ? { styleOverride } : {}),
+  };
 }
 
 /**
@@ -87,7 +96,6 @@ function decodeGuideRequest(value: unknown): GuideRequest | null {
 export function decodeGuide(value: unknown): RecordedGuideStep | null {
   const guide = object(value);
   if (!guide) return null;
-  const skim = guide.skim === true ? { skim: true as const } : {};
   const ends = guide.from !== undefined || guide.to !== undefined ? guide : object(guide.range);
   if (ends) {
     const from = decodeGuidePosition(ends.from);
@@ -97,17 +105,18 @@ export function decodeGuide(value: unknown): RecordedGuideStep | null {
     const labelPart = part && nonNegativeInteger(part.index) && nonNegativeInteger(part.total) && part.index < part.total
       ? { part: { index: part.index, total: part.total } }
       : {};
-    return { from, to, ...skim, ...labelPart };
+    return { from, to, ...labelPart };
   }
   if (!nonNegativeInteger(guide.chapterIndex) || !nonNegativeInteger(guide.part)
     || !nonNegativeInteger(guide.totalParts) || guide.part >= guide.totalParts) return null;
   const chapterTitle = string(guide.chapterTitle);
+  const legacySkim = guide.skim === true ? { skim: true as const } : {};
   return {
     chapterIndex: guide.chapterIndex,
     part: guide.part,
     totalParts: guide.totalParts,
     ...(chapterTitle ? { chapterTitle } : {}),
-    ...skim,
+    ...legacySkim,
   };
 }
 

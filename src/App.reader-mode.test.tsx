@@ -152,8 +152,8 @@ let bridgeState: AgentState;
 const promptMock = vi.fn(async () => {});
 const locateQuoteMock = vi.fn();
 
-vi.mock("@/lib/use-agent-bridge", () => ({
-  useAgentBridge: () => ({
+vi.mock("@/lib/use-chat-bridge", () => ({
+  useChatBridge: () => ({
     state: bridgeState,
     abort: vi.fn(),
     deleteSession: vi.fn(),
@@ -163,6 +163,37 @@ vi.mock("@/lib/use-agent-bridge", () => ({
     editPrompt: vi.fn(),
     renameSession: vi.fn(),
     switchSession: vi.fn(),
+    updateSessionConfig: vi.fn(),
+    switchBranchAtAnchor: vi.fn(),
+    listSessions: vi.fn(),
+  }),
+}));
+
+vi.mock("@/lib/use-guide-bridge", () => ({
+  useGuideBridge: () => ({
+    state: bridgeState,
+    ensureCanonicalGuide: vi.fn(),
+    switchSession: vi.fn(),
+    newGuidedSession: vi.fn(),
+    takeStep: promptMock,
+    askSideQuestion: promptMock,
+    editTurn: vi.fn(),
+    abort: vi.fn(),
+    switchBranchAtAnchor: vi.fn(),
+    restartGuide: vi.fn(),
+    updateConfig: vi.fn(),
+    resetContext: vi.fn(),
+    contextStats: vi.fn(() => null),
+    nextStep: vi.fn(async () => null),
+    stepAfterChapter: vi.fn(async () => null),
+    stepAtHref: vi.fn(async () => null),
+    outline: vi.fn(async () => ({ chapters: [], more: null })),
+    stepTo: vi.fn(async () => null),
+    stepToSelection: vi.fn(async () => ({ error: "notFound" as const })),
+    stepAnchor: vi.fn(async () => null),
+    stepImages: vi.fn(async () => []),
+    readStepImageUrl: vi.fn(async () => ""),
+    locateQuote: locateQuoteMock,
   }),
 }));
 

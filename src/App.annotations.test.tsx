@@ -220,14 +220,33 @@ vi.mock("@/components/ReaderView", async () => {
   };
 });
 
-vi.mock("@/components/chat/ChatPanel", async () => {
+vi.mock("@/components/chat/ChatWorkspace", async () => {
   const React = await import("react");
   return {
-    ChatPanel: React.forwardRef(function MockChat(
+    ChatWorkspace: React.forwardRef(function MockChat(
       _props: unknown,
-      ref: React.ForwardedRef<{ fillInput: (text: string, chapterHref?: string) => void }>,
+      ref: React.ForwardedRef<{ fillInput: (text: string, chapterHref?: string) => void; scrollToMessage: (index: number) => void }>,
     ) {
-      React.useImperativeHandle(ref, () => ({ fillInput }));
+      React.useImperativeHandle(ref, () => ({ fillInput, scrollToMessage: vi.fn() }));
+      return <div />;
+    }),
+  };
+});
+
+vi.mock("@/components/guide/GuideWorkspace", async () => {
+  const React = await import("react");
+  return {
+    GuideWorkspace: React.forwardRef(function MockGuide(_props: unknown, ref: React.ForwardedRef<unknown>) {
+      React.useImperativeHandle(ref, () => ({
+        fillInput,
+        guideTo: vi.fn(),
+        guideChapter: vi.fn(),
+        scrollToMessage: vi.fn(),
+        scrollToStep: vi.fn(),
+        scrollToChapter: vi.fn(),
+        scrollToQuestion: vi.fn(),
+        openSettings: vi.fn(),
+      }));
       return <div />;
     }),
   };

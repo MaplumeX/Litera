@@ -586,7 +586,7 @@ describe("guided sessions", () => {
   it("decodes a guided step's block range and label part, rejecting a malformed one", () => {
     const from = { chapterIndex: 1, chapterTitle: "One", block: 4, snippet: "It was", paragraph: 3 };
     const to = { chapterIndex: 3, block: 0 };
-    expect(decodeGuide({ from, to, skim: true, part: { index: 1, total: 2 } })).toEqual({ from, to, skim: true, part: { index: 1, total: 2 } });
+    expect(decodeGuide({ from, to, skim: true, part: { index: 1, total: 2 } })).toEqual({ from, to, part: { index: 1, total: 2 } });
     expect(decodeGuide({ from, to, part: { index: 2, total: 2 } })).toEqual({ from, to });
     expect(decodeGuide({ from: { chapterIndex: 1, block: 4, snippet: 7, paragraph: 0.5 }, to: { chapterIndex: 1, block: 5 } }))
       .toEqual({ from: { chapterIndex: 1, block: 4 }, to: { chapterIndex: 1, block: 5 } });
@@ -596,7 +596,7 @@ describe("guided sessions", () => {
 
   it("reads a range recorded with its ends under `range` as a block range", () => {
     const range = { from: { chapterIndex: 1, block: 4 }, to: { chapterIndex: 3, block: 0 } };
-    expect(decodeGuide({ chapterIndex: 1, part: 1, totalParts: 2, range, skim: true })).toEqual({ ...range, skim: true });
+    expect(decodeGuide({ chapterIndex: 1, part: 1, totalParts: 2, range, skim: true })).toEqual(range);
     expect(decodeGuide({ chapterIndex: 1, part: 1, totalParts: 2, range: { from: range.from } })).toBeNull();
   });
 

@@ -592,7 +592,7 @@ export function useReaderSession(options: UseReaderSessionOptions = {}) {
   );
 
   const handleAddHighlight = useCallback(
-    (selection: SelectionCfi) => {
+    (selection: SelectionCfi & { color?: HighlightColor; note?: string }) => {
       const current = annotationsRef.current;
       const next = appendHighlight(current, createHighlight(selection));
       if (next === current) return;

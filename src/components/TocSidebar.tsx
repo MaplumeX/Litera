@@ -26,11 +26,7 @@ function GuideMark({ progress }: { progress: GuideChapterProgress }) {
   const done = progress.coveredBlocks >= progress.totalBlocks;
   // Rounded down, so a chapter shows 100% only once it is done.
   const percent = Math.floor((progress.coveredBlocks * 100) / Math.max(1, progress.totalBlocks));
-  const label = progress.skimmed
-    ? t("toc.guide.skimmed")
-    : done
-      ? t("toc.guide.done")
-      : t("toc.guide.partial", { percent });
+  const label = done ? t("toc.guide.done") : t("toc.guide.partial", { percent });
   return (
     <Tip label={progress.current ? `${label} · ${t("toc.guide.current")}` : label}>
       <span
@@ -39,11 +35,7 @@ function GuideMark({ progress }: { progress: GuideChapterProgress }) {
       >
         {progress.current && <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-primary" />}
         <span aria-hidden>
-          {progress.skimmed
-            ? t("toc.guide.skimmedShort")
-            : done
-              ? <Check className="h-3.5 w-3.5" />
-              : `${percent}%`}
+          {done ? <Check className="h-3.5 w-3.5" /> : `${percent}%`}
         </span>
       </span>
     </Tip>
@@ -72,7 +64,7 @@ function TocNode({
   onGuideChapter?: (href: string) => void;
 }) {
   const progress = item.href ? guideProgress?.[item.href] : undefined;
-  const completed = Boolean(progress && (progress.skimmed || progress.coveredBlocks >= progress.totalBlocks));
+  const completed = Boolean(progress && progress.coveredBlocks >= progress.totalBlocks);
   const { t } = useT();
   const isCurrent = Boolean(currentHref) && item.href === currentHref;
   const rowRef = useRef<HTMLDivElement>(null);

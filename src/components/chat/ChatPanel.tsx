@@ -37,7 +37,6 @@ import { GuideStepImages } from "./GuideStepImages";
 import { GuideStepMarker, GuideStepMarkerPlaceholder } from "./GuideStepMarker";
 import { HoldHeight } from "./HoldHeight";
 import { ChatOutlineRail, userMessagePreview, type ChatOutlineItem } from "./ChatOutlineRail";
-import { extractGuideStepCards, type GuideStepCardData } from "@/lib/guide-step-cards";
 import { useT } from "@/lib/i18n";
 import {
   clampSessionRailWidth,
@@ -68,15 +67,10 @@ export interface ChatPanelHandle {
 
 interface ChatPanelProps {
   currentChapterHref?: string;
-  /** Reveal a Citation's passage in the Book pane. */
   /** Reveal a quote in the Book pane; `block`, a guided step's start, to count to rather than search. */
   onOpenQuote?: (location: QuoteLocation, quote: string, block?: GuideBlockTarget) => void;
   bookId: string;
   variant?: "docked" | "workspace";
-  /** A Guided session's steps on the active branch, oldest first; null outside one. */
-  onGuideStepsChange?: (steps: RecordedGuideStep[] | null) => void;
-  /** Cards for every taken guided step (index-aligned with `steps`), for Book pane guide cards. */
-  onGuideCardsChange?: (cards: GuideStepCardData[]) => void;
   /** Agent mode: on open, resume the latest Guided session if there is one. */
   preferGuidedSession?: boolean;
   /** Workspace variant: whether the session rail shows. The host owns the
@@ -95,8 +89,6 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       variant = "docked",
       sessionRailOpen,
       preferGuidedSession = false,
-      onGuideStepsChange,
-      onGuideCardsChange,
       onActivityChange,
     },
     ref,
@@ -114,7 +106,6 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       nextGuideStep,
       guideStepAfterChapter,
       guideStepAtHref,
-      guideSkimStep,
       guideOutline,
       guideStepTo,
       guideStepToSelection,
@@ -208,10 +199,6 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
     const isGuided = state.sessions.find((session) => session.id === state.sessionId)?.kind === "guided";
     const guideSteps = isGuided ? takenGuideSteps(state.messages) : null;
     const guideStarted = !!guideSteps?.length;
-    const guideCards = useMemo<GuideStepCardData[]>(
-      () => (isGuided ? extractGuideStepCards(state.messages) : []),
-      [isGuided, state.messages],
-    );
     const firstUserIndex = state.messages.findIndex((message) => message.role === "user");
     const hasUserMessage = firstUserIndex !== -1;
     const userMessageTocItems = useMemo<ChatOutlineItem[]>(() => {
@@ -434,17 +421,6 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       setPickedStep(undefined);
     }, [bookId, state.sessionId]);
 
-    const guideStepsKey = guideSteps ? JSON.stringify(guideSteps) : null;
-    useEffect(() => {
-      onGuideStepsChange?.(guideStepsKey === null ? null : JSON.parse(guideStepsKey) as RecordedGuideStep[]);
-    }, [guideStepsKey, onGuideStepsChange]);
-    useEffect(() => () => onGuideStepsChange?.(null), [onGuideStepsChange]);
-    useEffect(() => {
-      if (isStreaming) return;
-      onGuideCardsChange?.(guideCards);
-    }, [guideCards, isStreaming, onGuideCardsChange]);
-    useEffect(() => () => onGuideCardsChange?.([]), [onGuideCardsChange]);
-
     // Continue or a picked step goes out as a message; the assistant takes the step.
     const sendGuideRequest = useCallback(async (label: string, guideRequest: GuideRequest) => {
       if (isStreaming || !bookId) return;
@@ -483,28 +459,17 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       }
     }, [guideStepAfterChapter, isStreaming, nextStep]);
 
-    const handleGuideSkim = useCallback(async () => {
-      if (!nextStep || isStreaming) return;
-      setInvokeError(null);
-      try {
-        const skim = await guideSkimStep(nextStep);
-        if (skim) await sendGuideStep(skim);
-      } catch (error) {
-        setInvokeError(String(error));
-      }
-    }, [guideSkimStep, isStreaming, nextStep, sendGuideStep]);
-
     const loadGuideOutline = useCallback(
       (after?: number) => (nextStep ? guideOutline(nextStep, after) : Promise.resolve({ chapters: [], more: null })),
       [guideOutline, nextStep],
     );
 
-    const handleGuideRangePick = useCallback(async (to: { chapterIndex: number; block: number }, skim: boolean) => {
+    const handleGuideRangePick = useCallback(async (to: { chapterIndex: number; block: number }) => {
       if (!nextStep || isStreaming) return;
       setRangePickerOpen(false);
       setInvokeError(null);
       try {
-        const step = await guideStepTo(nextStep, to, skim);
+        const step = await guideStepTo(nextStep, to);
         if (step) await sendGuideStep(step);
       } catch (error) {
         setInvokeError(String(error));
@@ -930,7 +895,6 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                       <>
                         <GuideStepMarker
                           label={message.content}
-                          skim={!!step.skim}
                           branchSwitcher={branchSwitcher}
                           onOpen={canOpenGuideStep ? () => openGuideStep(step) : undefined}
                         />
@@ -963,7 +927,6 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                         <div key={call.toolCallId}>
                           <GuideStepMarker
                             label={guideStepLabel(step)}
-                            skim={!!step.skim}
                             onOpen={canOpenGuideStep ? () => openGuideStep(step) : undefined}
                           />
                           {bookReady && guideStepImages && readStepImageUrl && (
@@ -1046,7 +1009,6 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
               started={guideStarted}
               disabled={isStreaming}
               onContinue={handleGuideContinue}
-              onSkim={() => void handleGuideSkim()}
               onSkip={() => void handleGuideSkip()}
               onPick={() => setRangePickerOpen(true)}
               contextStats={guideContextStats ? guideContextStats() : null}
@@ -1062,7 +1024,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
               onOpenChange={setRangePickerOpen}
               step={nextStep}
               loadOutline={loadGuideOutline}
-              onPick={(to, skim) => void handleGuideRangePick(to, skim)}
+              onPick={(to) => void handleGuideRangePick(to)}
             />
           )}
           <ChatInput

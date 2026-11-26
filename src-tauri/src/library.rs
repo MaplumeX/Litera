@@ -186,7 +186,7 @@ pub(crate) fn is_valid_font_family(value: &str) -> bool {
 }
 
 fn is_valid_reader_mode(value: &str) -> bool {
-    value == "reader" || value == "agent"
+    value == "reader" || value == "guide" || value == "agent"
 }
 
 fn validate_reader_mode(value: &str) -> AppResult<()> {
@@ -194,7 +194,7 @@ fn validate_reader_mode(value: &str) -> AppResult<()> {
         Ok(())
     } else {
         Err(AppError::invalid_input(
-            "lastReaderMode must be \"reader\" or \"agent\"",
+            "lastReaderMode must be \"reader\", \"guide\", or \"agent\"",
         ))
     }
 }
@@ -6493,6 +6493,14 @@ mod tests {
 
         let context = store.get_book_open_context(&id).expect("open context");
         assert_eq!(context.last_reader_mode.as_deref(), Some("agent"));
+
+        store
+            .update_reading_state(&id, None, None, Some("guide".to_string()), None, None)
+            .expect("write guide mode");
+        let stored_guide = store.list_books().expect("after guide write").remove(0);
+        assert_eq!(stored_guide.last_reader_mode.as_deref(), Some("guide"));
+        let guide_context = store.get_book_open_context(&id).expect("guide open context");
+        assert_eq!(guide_context.last_reader_mode.as_deref(), Some("guide"));
     }
 
     #[test]

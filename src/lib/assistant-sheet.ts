@@ -5,6 +5,7 @@ import type { ReaderMode } from "@/lib/reader-mode";
  * above it; full is the conversation alone.
  */
 export type SheetSnap = "collapsed" | "half" | "full";
+export type AssistantSheetTab = "guide" | "ask";
 
 const SNAP_FRACTION: Record<SheetSnap, number> = { collapsed: 0, half: 0.5, full: 1 };
 
@@ -13,14 +14,19 @@ const DRAG_SLOP_PX = 32;
 
 /**
  * One stored per-Book preference serves both shells: full screen is the
- * phone's Agent mode, and a Book reopens collapsed when last used in Reading.
+ * phone's Guide or Agent mode, and a Book reopens collapsed when last used in Reading.
  */
 export function snapForReaderMode(mode: ReaderMode): SheetSnap {
-  return mode === "agent" ? "full" : "collapsed";
+  return mode === "reader" ? "collapsed" : "full";
 }
 
-export function readerModeForSnap(snap: SheetSnap): ReaderMode {
-  return snap === "full" ? "agent" : "reader";
+export function sheetTabForReaderMode(mode: ReaderMode): AssistantSheetTab {
+  return mode === "guide" ? "guide" : "ask";
+}
+
+export function readerModeForSnap(snap: SheetSnap, tab: AssistantSheetTab = "ask"): ReaderMode {
+  if (snap !== "full") return "reader";
+  return tab === "guide" ? "guide" : "agent";
 }
 
 /** Where the sheet settles after its handle was dragged `dragDownPx` (negative: up). */

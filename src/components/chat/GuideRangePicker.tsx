@@ -32,7 +32,7 @@ interface GuideRangePickerProps {
   step: GuideStep;
   /** The blocks from the step's start, or after chapter `after`. */
   loadOutline: (after?: number) => Promise<GuideOutline>;
-  onPick: (to: PickedEnd, skim: boolean) => void;
+  onPick: (to: PickedEnd) => void;
 }
 
 /** The last block of the section a heading at `index` (of `chapter.blocks`) opens. */
@@ -86,7 +86,7 @@ function upTo(end: PickedEnd | null, chapterIndex: number, block: number): boole
 /**
  * The "Read to…" picker of a Guided session: the blocks after the Guide
  * cursor, grouped by chapter and heading. The reader picks where the next
- * step ends, then reads or skims up to there.
+ * step ends, then reads up to there.
  */
 export function GuideRangePicker({ open, onOpenChange, step, loadOutline, onPick }: GuideRangePickerProps) {
   const { t, locale } = useT();
@@ -235,10 +235,7 @@ export function GuideRangePicker({ open, onOpenChange, step, loadOutline, onPick
         </div>
 
         <DialogFooter className="flex-row justify-end gap-2">
-          <Button variant="outline" size="sm" disabled={!end} onClick={() => end && onPick(end, true)}>
-            {t("chat.guide.pickSkim")}
-          </Button>
-          <Button size="sm" disabled={!end} onClick={() => end && onPick(end, false)}>
+          <Button size="sm" disabled={!end} onClick={() => end && onPick(end)}>
             {t("chat.guide.pickRead")}
           </Button>
         </DialogFooter>

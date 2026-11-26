@@ -92,13 +92,17 @@ export function createBookmark(location: {
 export function createHighlight(selection: {
   cfi: string;
   excerpt: string;
+  color?: HighlightColor;
+  note?: string;
 }): HighlightRecord {
+  const note = selection.note?.trim();
   return {
     id: crypto.randomUUID(),
     cfi: selection.cfi,
     excerpt: truncateUtf8Bytes(selection.excerpt, MAX_EXCERPT_BYTES),
     createdAt: new Date().toISOString(),
-    color: getLastUsedHighlightColor(),
+    color: selection.color ?? getLastUsedHighlightColor(),
+    ...(note ? { note: truncateUtf8Bytes(note, MAX_NOTE_BYTES) } : {}),
   };
 }
 

@@ -143,16 +143,12 @@ export function useAgentBridge(bookId: string) {
     (href: string) => embeddedAgentRuntime.guideStepAtHref(href),
     [],
   );
-  const guideSkimStep = useCallback(
-    (step: GuideStep) => embeddedAgentRuntime.guideSkimStep(step),
-    [],
-  );
   const guideOutline = useCallback(
     (step: GuideStep, after?: number) => embeddedAgentRuntime.guideOutline(step, after),
     [],
   );
   const guideStepTo = useCallback(
-    (step: GuideStep, to: { chapterIndex: number; block: number }, skim?: boolean) => embeddedAgentRuntime.guideStepTo(step, to, skim),
+    (step: GuideStep, to: { chapterIndex: number; block: number }) => embeddedAgentRuntime.guideStepTo(step, to),
     [],
   );
   const guideStepToSelection = useCallback(
@@ -186,5 +182,5 @@ export function useAgentBridge(bookId: string) {
     [],
   );
 
-  return { state, prompt, editPrompt, abort, listSessions, newSession, restartGuidedSession, guideContextStats, resetGuideContext, nextGuideStep, guideStepAfterChapter, guideStepAtHref, guideSkimStep, guideOutline, guideStepTo, guideStepToSelection, guideStepAnchor, guideStepImages, readStepImageUrl, switchSession, deleteSession, renameSession, updateSessionConfig, switchBranchAtAnchor, locateQuote };
+  return { state, prompt, editPrompt, abort, listSessions, newSession, restartGuidedSession, guideContextStats, resetGuideContext, nextGuideStep, guideStepAfterChapter, guideStepAtHref, guideOutline, guideStepTo, guideStepToSelection, guideStepAnchor, guideStepImages, readStepImageUrl, switchSession, deleteSession, renameSession, updateSessionConfig, switchBranchAtAnchor, locateQuote };
 }

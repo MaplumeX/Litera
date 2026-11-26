@@ -29,7 +29,7 @@ One assistant conversation about a book. A book has many sessions; a session can
 _Avoid_: Chat, conversation (too generic)
 
 **Guided session**:
-A Session in which the assistant takes the reader through the Book part by part, in order, explaining each part in full. Fixed at creation; each Book has one canonical Guided session alongside ordinary Sessions (archived or legacy Guided sessions remain readable). Its model context stays lean via a coherence-leaning sliding window relayed by Chapter recaps (with automatic clearing on non-adjacent chapter jumps and a manual reset divider). Only a Guided step the assistant takes moves the reading on; other questions in it do not.
+A Session in which the assistant takes the reader through the Book part by part, in order, explaining each part in full. Fixed at creation; each Book has one canonical Guided session presented in its own top-level Guide workspace (archived or legacy Guided sessions remain readable). Its model context stays lean via a coherence-leaning sliding window relayed by Chapter recaps (with automatic clearing on non-adjacent chapter jumps and a manual reset divider). Only a Guided step the assistant takes moves the reading on; other questions in it do not.
 _Avoid_: Tutor mode, read-along, guided mode
 
 **Guided step**:
@@ -41,7 +41,7 @@ The furthest block a Guided session has reached: the furthest end of the guided 
 _Avoid_: Bookmark, reading position (that is the Book's), latest step
 
 **Chapter recap**:
-A short account of one chapter, written by the assistant in the background when a Guided session finishes the chapter (every part retold or skimmed) and recorded on the Session's branch. Chapters that one Guided step finishes together share one recap. Kept silently in the model's context for the rest of the Session, past sliding-window advances and Compaction, without cluttering the reader's transcript. Belongs to the Session, not the Book.
+A short account of one chapter, written by the assistant in the background when a Guided session finishes the chapter (every part retold) and recorded on the Session's branch. Chapters that one Guided step finishes together share one recap. Kept silently in the model's context for the rest of the Session, past sliding-window advances and Compaction, without cluttering the reader's transcript. Belongs to the Session, not the Book.
 _Avoid_: Chapter summary, notes
 
 **Compaction**:
@@ -81,7 +81,7 @@ A visual outline rendered inside a Session's message flow, derived from a single
 _Avoid_: Note, diagram, knowledge graph
 
 **Sitting**:
-One continuous stretch of reading one Book on one device, with its active time and how far the reading position moved. Time counts while the Book is open, the window is visible and there is recent activity, in Reading and Agent mode alike.
+One continuous stretch of reading one Book on one device, with its active time and how far the reading position moved. Time counts while the Book is open, the window is visible and there is recent activity, in Reading, Guide, and Agent modes alike.
 _Avoid_: Session (that is an assistant conversation), reading session
 
 **Reading log**:

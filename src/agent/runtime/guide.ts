@@ -1,5 +1,5 @@
 import { chapterForHref, guideParagraphsBefore, isGuideParagraph, type BookTocEntry, type GuideBlock, type GuideBlockImage } from "@/agent/book/book-content";
-import { isLegacyGuideStep, type GuidePosition, type GuideStep, type LegacyGuideStep, type RecordedGuideStep } from "@/types/agent";
+import { isLegacyGuideStep, type GuidePosition, type GuideStep, type GuideStepOptions, type LegacyGuideStep, type RecordedGuideStep } from "@/types/agent";
 
 /**
  * The default style of a guided step, editable in settings. It asks for
@@ -36,8 +36,6 @@ guide_step is how the guide moves on: call it whenever you take the reader on th
 ${style.trim() || DEFAULT_GUIDED_STYLE}
 </style>
 
-A skim step is the exception to completeness: the reader chose to move fast, so give a compressed pass over what it names (the main line and key points) and say at the start that it is a skim.
-
 Start each step's explanation directly, with no preamble, and do not ask whether to continue; the reader has a Continue button. Write in the reader's language.
 
 When the guide finishes a chapter, a chapter recap of it is added to the conversation. Recaps stay with you for the rest of the book, after earlier explanations slide out of the active window: use them to connect back to earlier chapters, and call search_guide_history if you need a specific detail or reader question from an earlier discussion that a recap leaves out.
@@ -60,7 +58,6 @@ export interface GuidePoint {
 export interface GuideSpan {
   from: GuidePoint;
   to: GuidePoint;
-  skim?: true;
 }
 
 /** What `locateGuideStep` and `recordGuideSpan` read a chapter's blocks with. */
@@ -183,7 +180,7 @@ function legacySpan(toc: readonly BookTocEntry[], step: LegacyGuideStep): GuideS
   const from = partStart(entry, Math.min(parts - 1, Math.floor(step.part * scale)));
   const endPart = step.skim ? parts : Math.floor((step.part + 1) * scale);
   const to = endPart >= parts ? blockCount(entry) - 1 : Math.max(from, partStart(entry, endPart) - 1);
-  return { from: { entry, block: from }, to: { entry, block: to }, ...(step.skim ? { skim: true as const } : {}) };
+  return { from: { entry, block: from }, to: { entry, block: to } };
 }
 
 /** Where `position` is in the open Book: its chapter by title, its block by snippet, clamped to the chapter. */
@@ -204,16 +201,16 @@ export async function locateGuideStep(
   const from = await locatePosition(toc, blocksOf, step.from);
   const to = await locatePosition(toc, blocksOf, step.to);
   if (!from || !to || compare(from, to) > 0) return null;
-  return { from, to, ...(step.skim ? { skim: true as const } : {}) };
+  return { from, to };
 }
 
-/** The part a span is, for its label: one whole part of its chapter (a skim: that part to the chapter's end). */
+/** The part a span is, for its label: one whole part of its chapter; null for any other range. */
 function wholePart(span: GuideSpan): { index: number; total: number } | null {
   const { entry } = span.from;
   if (span.to.entry.index !== entry.index) return null;
   const index = partOf(entry, span.from.block);
   if (span.from.block !== partStart(entry, index)) return null;
-  const end = span.skim ? blockCount(entry) - 1 : partEnd(entry, index);
+  const end = partEnd(entry, index);
   return span.to.block === end ? { index, total: Math.max(1, entry.parts) } : null;
 }
 
@@ -235,7 +232,6 @@ export async function recordGuideSpan(blocksOf: GuideBlocksOf, span: GuideSpan):
   return {
     from: await position(span.from, "from"),
     to: await position(span.to, "to"),
-    ...(span.skim ? { skim: true as const } : {}),
     ...(part ? { part } : {}),
   };
 }
@@ -269,11 +265,6 @@ export function nextGuideSpan(toc: readonly BookTocEntry[], cursor: GuidePoint |
   return next ? partSpan(next, 0) : null;
 }
 
-/** `span` as a skim from where it starts to the end of that chapter. */
-export function skimGuideSpan(span: GuideSpan): GuideSpan {
-  return { from: span.from, to: lastPoint(span.from.entry), skim: true };
-}
-
 /** The first step of the chapter after the one `span` starts in, skipping the rest of it. */
 export function skipChapterSpan(toc: readonly BookTocEntry[], span: GuideSpan): GuideSpan | null {
   return nextGuideSpan(toc, lastPoint(span.from.entry));
@@ -288,13 +279,12 @@ export function guideSpanTo(
   toc: readonly BookTocEntry[],
   span: GuideSpan,
   to: { chapterIndex: number; block: number },
-  skim?: boolean,
 ): GuideSpan | null {
   const entry = toc.find((candidate) => candidate.index === to.chapterIndex);
   if (!entry || !Number.isInteger(to.block) || to.block < 0 || to.block >= blockCount(entry)) return null;
   const end = { entry, block: to.block };
   if (compare(span.from, end) > 0) return null;
-  return { from: span.from, to: end, ...(skim ? { skim: true as const } : {}) };
+  return { from: span.from, to: end };
 }
 
 /** The shortest snippet the Book pane can find a block by. */
@@ -411,9 +401,7 @@ function spanWhere(span: GuideSpan): string {
   const blocks = `blocks ${from.block} to ${to.block}`;
   const part = wholePart(span);
   if (!part || part.total === 1) return `${chapterName(from.entry)}, ${part && from.block === 0 ? `the whole chapter (${blocks})` : blocks}`;
-  return span.skim
-    ? `${chapterName(from.entry)}, parts ${part.index} to ${part.total - 1} of 0 to ${part.total - 1} (${blocks})`
-    : `${chapterName(from.entry)}, part ${part.index} of 0 to ${part.total - 1} (${blocks})`;
+  return `${chapterName(from.entry)}, part ${part.index} of 0 to ${part.total - 1} (${blocks})`;
 }
 
 export interface InlinedStepChunk {
@@ -457,7 +445,7 @@ export function guideStepContext(
   vision = false,
 ): string {
   const where = spanWhere(span);
-  const task = span.skim ? `Guided step (skim): give a compressed pass over ${where}` : `Guided step: explain ${where}`;
+  const task = `Guided step: explain ${where}`;
   const ranges = spanReadRanges(toc, span);
   const figureNote = images && images.length > 0
     ? vision
@@ -541,7 +529,6 @@ export interface GuideStepRequest {
   /** End in this chapter: at `toBlock`, or at its last block. Defaults to the start's chapter. */
   toChapterIndex?: number;
   toBlock?: number;
-  skim?: boolean;
 }
 
 /**
@@ -559,8 +546,7 @@ export function guideStepRequestFor(toc: readonly BookTocEntry[], cursor: GuideP
     start = nextGuideSpan(toc, null, span.from.entry.index);
     if (!start || compare(start.from, span.from) !== 0) return null;
   }
-  if (span.skim) request.skim = true;
-  const defaultEnd = span.skim ? skimGuideSpan(start).to : start.to;
+  const defaultEnd = start.to;
   if (compare(defaultEnd, span.to) !== 0) {
     request.toChapterIndex = span.to.entry.index;
     request.toBlock = span.to.block;
@@ -568,18 +554,39 @@ export function guideStepRequestFor(toc: readonly BookTocEntry[], cursor: GuideP
   return request;
 }
 
+function guideStepOptionsNote(options?: GuideStepOptions): string {
+  if (!options) return "";
+  const notes: string[] = [];
+  if (options.pace === "compact") {
+    notes.push("Explanation pace for this step: compact — stay faithful to every key argument, but tighten phrasing and keep examples brief.");
+  } else if (options.pace === "deep") {
+    notes.push("Explanation pace for this step: deep — unpack underlying premises, logical transitions, conceptual nuances, and context more thoroughly.");
+  }
+  const style = options.styleOverride?.trim();
+  if (style) {
+    notes.push(`Additional style guidance for this step: ${style}`);
+  }
+  return notes.length ? ` ${notes.join(" ")}` : "";
+}
+
 /**
  * What the reader asked for with a message: Continue (no step), leaving the
- * step's end to the model, or a step they picked. Null when the picked step
- * cannot be taken from the cursor.
+ * step's end to the model, or a step they picked, plus optional per-step pace/style overrides.
+ * Null when the picked step cannot be taken from the cursor.
  */
-export function guideRequestContext(toc: readonly BookTocEntry[], cursor: GuidePoint | null, picked?: GuideSpan): string | null {
+export function guideRequestContext(
+  toc: readonly BookTocEntry[],
+  cursor: GuidePoint | null,
+  picked?: GuideSpan,
+  options?: GuideStepOptions,
+): string | null {
+  const suffix = guideStepOptionsNote(options);
   if (!picked) {
-    return "The reader pressed Continue: take the next guided step with guide_step, without chapterIndex. Leave the end out for the default step, or end it at a natural break near the default end (such as the end of a section), then explain it.";
+    return `The reader pressed Continue: take the next guided step with guide_step, without chapterIndex. Leave the end out for the default step, or end it at a natural break near the default end (such as the end of a section), then explain it.${suffix}`;
   }
   const request = guideStepRequestFor(toc, cursor, picked);
   if (!request) return null;
-  return `The reader picked the next guided step: ${spanWhere(picked)}${picked.skim ? ", as a skim" : ""}. Take it with guide_step ${JSON.stringify(request)}, then explain it.`;
+  return `The reader picked the next guided step: ${spanWhere(picked)}. Take it with guide_step ${JSON.stringify(request)}, then explain it.${suffix}`;
 }
 
 /**
@@ -597,12 +604,12 @@ export function requestedGuideSpan(
   if (request.chapterIndex !== undefined && !chapter(request.chapterIndex)) return { error: `No chapter with chapterIndex ${request.chapterIndex}` };
   const start = request.chapterIndex !== undefined ? nextGuideSpan(toc, null, request.chapterIndex) : nextGuideSpan(toc, cursor);
   if (!start) return { error: request.chapterIndex !== undefined ? `No text from chapterIndex ${request.chapterIndex} to the end of the book` : "The guide has reached the end of the book" };
-  if (request.toBlock === undefined && request.toChapterIndex === undefined) return { span: request.skim ? skimGuideSpan(start) : start };
+  if (request.toBlock === undefined && request.toChapterIndex === undefined) return { span: start };
   const end = chapter(request.toChapterIndex ?? start.from.entry.index);
   if (!end) return { error: `No chapter with chapterIndex ${request.toChapterIndex}` };
   const toBlock = request.toBlock ?? blockCount(end) - 1;
   if (!Number.isInteger(toBlock) || toBlock < 0 || toBlock >= blockCount(end)) return { error: `chapterIndex ${end.index} has blocks 0 to ${blockCount(end) - 1}; toBlock ${toBlock} is not one of them` };
-  const span = guideSpanTo(toc, start, { chapterIndex: end.index, block: toBlock }, request.skim);
+  const span = guideSpanTo(toc, start, { chapterIndex: end.index, block: toBlock });
   return span
     ? { span }
     : { error: `The step would start at chapterIndex ${start.from.entry.index}, block ${start.from.block}, after the end you asked for (chapterIndex ${end.index}, block ${toBlock}). A step starts right after the guide or at a chapter's first block, never mid-chapter.` };
@@ -610,10 +617,9 @@ export function requestedGuideSpan(
 
 /** How far the guide has got through one chapter, for the TOC. */
 export interface GuideChapterProgress {
-  /** Blocks covered, by full steps or a skim. */
+  /** Blocks covered by guided steps. */
   coveredBlocks: number;
   totalBlocks: number;
-  skimmed: boolean;
   /** The chapter the Guide cursor is in. */
   current: boolean;
 }
@@ -624,18 +630,15 @@ export interface GuideChapterProgress {
  * finished them, each with the index of the step that did.
  */
 function chapterCoverage(toc: readonly BookTocEntry[], spans: readonly (GuideSpan | null)[]) {
-  // `blocks`: covered at all; `full`: covered by a full (not skim) step.
-  const chapters = new Map<number, { blocks: Set<number>; full: Set<number>; skimmed: boolean }>();
+  const chapters = new Map<number, { blocks: Set<number> }>();
   const finished: Array<{ index: number; step: number }> = [];
   spans.forEach((span, stepIndex) => {
     if (!span) return;
     for (const { entry, first, last } of spanChapters(toc, span)) {
-      const chapter = chapters.get(entry.index) ?? { blocks: new Set<number>(), full: new Set<number>(), skimmed: false };
+      const chapter = chapters.get(entry.index) ?? { blocks: new Set<number>() };
       for (let block = first; block <= last; block += 1) {
         chapter.blocks.add(block);
-        if (!span.skim) chapter.full.add(block);
       }
-      if (span.skim) chapter.skimmed = true;
       chapters.set(entry.index, chapter);
       if (chapter.blocks.size >= blockCount(entry) && !finished.some(({ index }) => index === entry.index)) {
         finished.push({ index: entry.index, step: stepIndex });
@@ -647,7 +650,7 @@ function chapterCoverage(toc: readonly BookTocEntry[], spans: readonly (GuideSpa
 
 /**
  * The chapters due for one recap: the first chapter the guided steps (oldest
- * first) finished, every block retold or skimmed, that has no recap yet,
+ * first) finished, every block retold, that has no recap yet,
  * together with the other chapters without a recap that the same step
  * finished. Null when none is due.
  */
@@ -705,29 +708,26 @@ export function guideTocProgress(
     progress[href] = {
       coveredBlocks: chapter.blocks.size,
       totalBlocks: blockCount(entry),
-      skimmed: chapter.skimmed,
       current: entry.index === currentIndex,
     };
   }
   return progress;
 }
 
-/** What the Book pane marks of one chapter: its blocks read in full or only skimmed, the Guide cursor's block, and which step last covered each block. */
+/** What the Book pane marks of one chapter: its read blocks, the Guide cursor's block, and which step last covered each block. */
 export interface GuidePageMarkChapter {
   chapterIndex: number;
   /** The chapter's files, without fragments. */
   files: string[];
   read: number[];
-  skimmed: number[];
   cursor?: number;
   /** Block index -> latest step index (in the `spans` array) that covered it. */
   stepByBlock?: Record<number, number>;
 }
 
 /**
- * Per chapter the guided steps (oldest first) reached: the blocks read in
- * full, those only skimmed, the block the Guide cursor is on, and the latest
- * step index that covered each block.
+ * Per chapter the guided steps (oldest first) reached: the blocks read,
+ * the block the Guide cursor is on, and the latest step index that covered each block.
  */
 export function guidePageMarkPlan(toc: readonly BookTocEntry[], spans: readonly (GuideSpan | null)[]): GuidePageMarkChapter[] {
   const { chapters } = chapterCoverage(toc, spans);
@@ -749,8 +749,7 @@ export function guidePageMarkPlan(toc: readonly BookTocEntry[], spans: readonly 
     return [{
       chapterIndex: entry.index,
       files: [...new Set(entry.hrefs.map((href) => href.split("#")[0]))],
-      read: sorted(chapter.full),
-      skimmed: sorted([...chapter.blocks].filter((block) => !chapter.full.has(block))),
+      read: sorted(chapter.blocks),
       ...(cursor?.entry.index === entry.index ? { cursor: cursor.block } : {}),
       ...(stepByBlock && Object.keys(stepByBlock).length > 0 ? { stepByBlock } : {}),
     }];
