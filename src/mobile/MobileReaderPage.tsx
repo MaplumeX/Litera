@@ -18,7 +18,6 @@ import {
 import { ReaderView, type SelectionCapture } from "@/components/ReaderView";
 import { PageGuideCard } from "@/components/PageGuideCard";
 import { ReaderFooter } from "@/components/ReaderFooter";
-import type { ChatPanelHandle } from "@/components/chat/ChatPanel";
 import { TocSidebar, TocSidebarActions } from "@/components/TocSidebar";
 import { AnnotationsSidebar } from "@/components/AnnotationsSidebar";
 import { BookSearchPanel } from "@/components/BookSearchPanel";
@@ -26,18 +25,17 @@ import { FinishBookPrompt } from "@/components/FinishBookPrompt";
 import { KosyncPrompt } from "@/components/KosyncPrompt";
 import type { QuoteLocation } from "@/agent/book/book-content";
 import type { GuideBlockTarget } from "@/lib/guide-marks";
-import type { SheetSnap } from "@/lib/assistant-sheet";
+import type { AssistantSheetTab, SheetSnap } from "@/lib/assistant-sheet";
 import type { ReaderSession } from "@/lib/use-reader-session";
 import { quoteTargetHref } from "@/lib/toc-items";
-import { useGuideBookMarks } from "@/lib/use-guide-book-marks";
-import type { GuideStepCardData } from "@/lib/guide-step-cards";
+import { useGuideDocument } from "@/lib/use-guide-document";
 import { shortBookTitle } from "@/lib/book-title";
 import { READER_FOOTER_POSITIONS, useReaderFooter } from "@/lib/reader-footer";
 import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { APP_BAR_HEIGHT, AppBarIconButton, MobileAppBar } from "@/mobile/MobileAppBar";
-import { AssistantSheet } from "@/mobile/AssistantSheet";
-import type { GuideSelection, RecordedGuideStep } from "@/types/agent";
+import { AssistantSheet, type AssistantSheetHandle } from "@/mobile/AssistantSheet";
+import type { GuideSelection } from "@/types/agent";
 import { MobileDrawer } from "@/mobile/MobileDrawer";
 import { ReaderQuickSettings } from "@/mobile/ReaderQuickSettings";
 
@@ -163,6 +161,8 @@ interface MobileReaderPageProps {
   onToggleChrome: () => void;
   snap: SheetSnap;
   onSnapChange: (snap: SheetSnap) => void;
+  sheetTab: AssistantSheetTab;
+  onSheetTabChange: (tab: AssistantSheetTab) => void;
   panel: ReaderPanel | null;
   onPanelChange: (panel: ReaderPanel | null) => void;
   onBack: () => void;
@@ -184,6 +184,8 @@ export function MobileReaderPage({
   onToggleChrome,
   snap,
   onSnapChange,
+  sheetTab,
+  onSheetTabChange,
   panel,
   onPanelChange,
   onBack,
@@ -191,7 +193,7 @@ export function MobileReaderPage({
 }: MobileReaderPageProps) {
   const { t } = useT();
   const { readerRef, fileData, currentBook, progress, toc, annotations, bookSearch } = session;
-  const chatRef = useRef<ChatPanelHandle>(null);
+  const chatRef = useRef<AssistantSheetHandle>(null);
   const pendingCaptureRef = useRef<SelectionCapture | null>(null);
   const pendingQuoteRef = useRef<{ href: string; quote: string; block?: GuideBlockTarget } | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -229,31 +231,33 @@ export function MobileReaderPage({
     [onSnapChange, readerRef, snap],
   );
 
-  // In a Guided session, "Guide up to here" on a selection sends the step at
-  // once; the sheet comes up to half to show the answer.
-  const [guideSteps, setGuideSteps] = useState<RecordedGuideStep[] | null>(null);
-  const [guideCards, setGuideCards] = useState<GuideStepCardData[]>([]);
   const [openGuideCard, setOpenGuideCard] = useState<{ stepIndex: number; passage?: string } | null>(null);
-  const guided = guideSteps !== null;
-  const { progress: guideProgress, marks: guideMarks } = useGuideBookMarks(guideSteps, toc);
+  const {
+    tocProgress: guideProgress,
+    pageMarks: guideMarks,
+    cards: guideCards,
+    hasGuide: guided,
+  } = useGuideDocument(fileData?.bookId ?? "", toc);
   const handleGuideTo = useCallback(
     (selection: GuideSelection) => {
+      onSheetTabChange("guide");
       if (snap === "collapsed") {
         readerRef.current?.anchorToSelection();
         onSnapChange("half");
       }
       chatRef.current?.guideTo(selection);
     },
-    [onSnapChange, readerRef, snap],
+    [onSheetTabChange, onSnapChange, readerRef, snap],
   );
 
   const handleGuideChapter = useCallback(
     (href: string) => {
       onPanelChange(null);
+      onSheetTabChange("guide");
       if (snap === "collapsed") onSnapChange("half");
       chatRef.current?.guideChapter(href);
     },
-    [onPanelChange, onSnapChange, snap],
+    [onPanelChange, onSheetTabChange, onSnapChange, snap],
   );
 
   useLayoutEffect(() => {
@@ -488,12 +492,12 @@ export function MobileReaderPage({
           ref={chatRef}
           snap={snap}
           onSnapChange={onSnapChange}
+          tab={sheetTab}
+          onTabChange={onSheetTabChange}
           bookId={fileData.bookId}
           currentChapterHref={progress.chapterHref}
           onOpenQuote={handleOpenQuote}
           peekOffset={chromeVisible ? `calc(${bottomBarHeight}px + var(--safe-bottom) + 0.75rem)` : undefined}
-          onGuideStepsChange={setGuideSteps}
-          onGuideCardsChange={setGuideCards}
         />
       )}
 
@@ -503,6 +507,7 @@ export function MobileReaderPage({
           passage={openGuideCard.passage}
           onClose={() => setOpenGuideCard(null)}
           onOpenInGuide={(messageIndex) => {
+            onSheetTabChange("guide");
             if (snap === "collapsed") {
               onSnapChange("half");
               requestAnimationFrame(() => chatRef.current?.scrollToMessage(messageIndex));

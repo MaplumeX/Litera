@@ -14,7 +14,6 @@ const across: GuideStep = { from: { ...three, block: 4 }, to: { ...five, block: 
 describe("guided step labels", () => {
   it("name the paragraphs of a range within one chapter", () => {
     expect(guideStepLabel(within)).toBe("带读：第三章（第 5–7 段）");
-    expect(guideStepLabel({ ...within, skim: true })).toBe("略读：第三章（第 5–7 段）");
     expect(guideStepLabel({ ...within, to: { ...three, block: 4 } })).toBe("带读：第三章（第 5 段）");
   });
 
@@ -28,12 +27,10 @@ describe("guided step labels", () => {
 
   it("name both chapters of a range across chapters", () => {
     expect(guideStepLabel(across)).toBe("带读：第三章 → 第五章");
-    expect(guideStepLabel({ ...across, skim: true })).toBe("略读：第三章 → 第五章");
   });
 
   it("place the Session where a range ended", () => {
     expect(guidePositionLabel(across)).toBe("第五章 · 第 1 段");
-    expect(guidePositionLabel({ ...across, skim: true })).toBe("第五章 · 已略读");
   });
 
   it("fall back to the chapter number without a title", () => {
@@ -44,7 +41,6 @@ describe("guided step labels", () => {
     const part: GuideStep = { from: { ...three, block: 3 }, to: { ...three, block: 5 }, part: { index: 1, total: 3 } };
     expect(guideStepLabel(part)).toBe("带读：第三章（第 2/3 部分）");
     expect(guidePositionLabel(part)).toBe("第三章 · 2/3");
-    expect(guideStepLabel({ ...part, to: { ...three, block: 8 }, skim: true })).toBe(guideStepLabel({ ...three, part: 1, totalParts: 3, skim: true }));
   });
 
   it("keep the part steps of older Sessions as they were", () => {
@@ -54,7 +50,7 @@ describe("guided step labels", () => {
 });
 
 describe("GuideBar", () => {
-  const props = { started: true, disabled: false, onContinue: vi.fn(), onSkim: vi.fn(), onSkip: vi.fn(), onPick: vi.fn() };
+  const props = { started: true, disabled: false, onContinue: vi.fn(), onSkip: vi.fn(), onPick: vi.fn() };
 
   it("labels Continue with a range's paragraphs", () => {
     const view = render(<GuideBar {...props} nextStep={within} />);

@@ -6,7 +6,9 @@ import { Notice } from "@/components/Notice";
 import { SettingsDialog, type SettingsSection } from "@/components/settings/SettingsDialog";
 import {
   readerModeForSnap,
+  sheetTabForReaderMode,
   snapForReaderMode,
+  type AssistantSheetTab,
   type SheetSnap,
 } from "@/lib/assistant-sheet";
 import { useT } from "@/lib/i18n";
@@ -153,6 +155,7 @@ export default function MobileApp() {
   const [settingsSection, setSettingsSection] = useState<SettingsSection | undefined>(undefined);
   const [chromeVisible, setChromeVisible] = useState(false);
   const [snap, setSnap] = useState<SheetSnap>("collapsed");
+  const [sheetTab, setSheetTab] = useState<AssistantSheetTab>("ask");
   const [panel, setPanel] = useState<ReaderPanel | null>(null);
   const shelfRef = useRef<LibraryShelf | null>(null);
 
@@ -186,7 +189,9 @@ export default function MobileApp() {
     // The Book grows out of the cover that was tapped, when it's on screen.
     onOpened: (context) => {
       const commit = () => {
-        setSnap(snapForReaderMode(resolveReaderMode(context.lastReaderMode)));
+        const mode = resolveReaderMode(context.lastReaderMode);
+        setSnap(snapForReaderMode(mode));
+        setSheetTab(sheetTabForReaderMode(mode));
         setChromeVisible(false);
         setPanel(null);
         setPage("reader");
@@ -225,13 +230,29 @@ export default function MobileApp() {
 
   const snapRef = useRef(snap);
   snapRef.current = snap;
+  const sheetTabRef = useRef(sheetTab);
+  sheetTabRef.current = sheetTab;
   const handleSnapChange = useCallback(
     (next: SheetSnap) => {
-      if (readerModeForSnap(next) !== readerModeForSnap(snapRef.current)) {
-        session.rememberReaderMode(readerModeForSnap(next));
+      const nextMode = readerModeForSnap(next, sheetTabRef.current);
+      const prevMode = readerModeForSnap(snapRef.current, sheetTabRef.current);
+      if (nextMode !== prevMode) {
+        session.rememberReaderMode(nextMode);
       }
       snapRef.current = next;
       setSnap(next);
+    },
+    [session.rememberReaderMode],
+  );
+  const handleSheetTabChange = useCallback(
+    (next: AssistantSheetTab) => {
+      const prevMode = readerModeForSnap(snapRef.current, sheetTabRef.current);
+      const nextMode = readerModeForSnap(snapRef.current, next);
+      if (nextMode !== prevMode) {
+        session.rememberReaderMode(nextMode);
+      }
+      sheetTabRef.current = next;
+      setSheetTab(next);
     },
     [session.rememberReaderMode],
   );
@@ -449,6 +470,8 @@ export default function MobileApp() {
             onToggleChrome={() => setChromeVisible((visible) => !visible)}
             snap={snap}
             onSnapChange={handleSnapChange}
+            sheetTab={sheetTab}
+            onSheetTabChange={handleSheetTabChange}
             panel={panel}
             onPanelChange={setPanel}
             onBack={() => void closeReader()}

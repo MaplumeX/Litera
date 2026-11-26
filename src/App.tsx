@@ -6,6 +6,7 @@ import {
   useState,
   type PointerEvent as ReactPointerEvent,
 } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { Button } from "@/components/ui/button";
 import { Tip } from "@/components/ui/tooltip";
@@ -20,6 +21,7 @@ import {
   List,
   Loader2,
   MessageSquare,
+  NotebookPen,
   PanelLeft,
   Pause,
   Type,
@@ -27,11 +29,18 @@ import {
 } from "lucide-react";
 import { ReaderView, type SelectionCapture } from "@/components/ReaderView";
 import { PageGuideCard } from "@/components/PageGuideCard";
-import { ChatPanel, type ChatPanelHandle } from "@/components/chat/ChatPanel";
+import { ChatWorkspace, type ChatWorkspaceHandle } from "@/components/chat/ChatWorkspace";
+import { GuideWorkspace, type GuideWorkspaceHandle } from "@/components/guide/GuideWorkspace";
+import { GuideNavRail } from "@/components/guide/GuideNavRail";
 import { embeddedAgentRuntime } from "@/agent/runtime/embedded-runtime";
-import { useGuideBookMarks } from "@/lib/use-guide-book-marks";
-import type { GuideStepCardData } from "@/lib/guide-step-cards";
-import type { GuideSelection, RecordedGuideStep } from "@/types/agent";
+import { useGuideDocument } from "@/lib/use-guide-document";
+import type { GuideDocument, GuideStepNode } from "@/lib/guide-document";
+import {
+  defaultGuideExportFileName,
+  formatGuideExportMarkdown,
+  markdownToPlainProse,
+} from "@/lib/guide-export";
+import type { GuideSelection } from "@/types/agent";
 import type { QuoteLocation } from "@/agent/book/book-content";
 import type { GuideBlockTarget } from "@/lib/guide-marks";
 import { LibraryView } from "@/components/LibraryView";
@@ -70,7 +79,11 @@ import {
   loadChatPanelWidth,
   saveChatPanelWidth,
 } from "@/lib/chat-panel-width";
-import { resolveReaderMode, type ReaderMode } from "@/lib/reader-mode";
+import {
+  isAssistantWorkspaceMode,
+  resolveReaderMode,
+  type ReaderMode,
+} from "@/lib/reader-mode";
 import { resolveReaderLayout } from "@/lib/reader-layout";
 import { quoteTargetHref } from "@/lib/toc-items";
 import { useReaderTts } from "@/lib/use-reader-tts";
@@ -104,15 +117,13 @@ function App() {
   // Contents and Annotations share one side panel, switched by tab.
   const [sidePanelOpen, setSidePanelOpen] = useState(false);
   const [sidePanelTab, setSidePanelTab] = useState<ReaderSidePanelTab>("toc");
-  // Agent mode in a Guided session: its steps, cards, and the TOC progress they make.
-  const [guideSteps, setGuideSteps] = useState<RecordedGuideStep[] | null>(null);
-  const [guideCards, setGuideCards] = useState<GuideStepCardData[]>([]);
   const [openGuideCard, setOpenGuideCard] = useState<{
     stepIndex: number;
     x: number;
     y: number;
     passage?: string;
   } | null>(null);
+  const [guideNotice, setGuideNotice] = useState<{ tone?: "error"; message: string } | null>(null);
   const [tocWidth, setTocWidth] = useState(loadTocWidth);
   // Bumped by Ctrl/⌘+F so the search field takes focus even when already open.
   const [searchFocusToken, setSearchFocusToken] = useState(0);
@@ -150,7 +161,8 @@ function App() {
     kosync,
   } = session;
   const bookImport = useBookImport();
-  const bookHidden = readerMode === "agent" && bookCollapsed;
+  const isWorkspaceMode = isAssistantWorkspaceMode(readerMode);
+  const bookHidden = isWorkspaceMode && bookCollapsed;
   const tts = useReaderTts({
     readerRef,
     bookHidden,
@@ -159,7 +171,14 @@ function App() {
   useEffect(() => {
     session.readingTracker.setTtsPlaying(tts.status === "playing");
   }, [session.readingTracker, tts.status]);
-  const chatRef = useRef<ChatPanelHandle>(null);
+  const chatRef = useRef<ChatWorkspaceHandle>(null);
+  const guideRef = useRef<GuideWorkspaceHandle>(null);
+  const pendingGuideActionRef = useRef<
+    | { kind: "guideTo"; selection: GuideSelection }
+    | { kind: "guideChapter"; href: string }
+    | { kind: "scrollToMessage"; messageIndex: number }
+    | null
+  >(null);
   const shellRef = useRef<HTMLDivElement>(null);
   const sidePanelRef = useRef<HTMLDivElement>(null);
   const tocResizeRef = useRef<{ startX: number; startWidth: number; maxWidth: number } | null>(
@@ -311,6 +330,11 @@ function App() {
   }, [session.closeBook, tts.stop]);
 
   const handleSelectionCapture = useCallback((capture: SelectionCapture) => {
+    if (readerMode === "guide") {
+      if (bookCollapsed) return;
+      guideRef.current?.fillInput(capture.text, capture.chapterHref);
+      return;
+    }
     if (readerMode === "agent") {
       if (bookCollapsed) return;
       chatRef.current?.fillInput(capture.text, capture.chapterHref);
@@ -333,25 +357,6 @@ function App() {
     }
   }, [bookCollapsed, chatCollapsed, readerMode, schedulePersistLayout, sessionRailOpen]);
 
-  // In a Guided session: read up to a selection, showing the chat for the answer.
-  const handleGuideTo = useCallback((selection: GuideSelection) => {
-    if (readerMode === "reader" && chatCollapsed) {
-      setChatCollapsed(false);
-      schedulePersistLayout({ chatCollapsed: false, bookCollapsed, sessionRailOpen });
-    }
-    chatRef.current?.guideTo(selection);
-  }, [bookCollapsed, chatCollapsed, readerMode, schedulePersistLayout, sessionRailOpen]);
-
-  // In a Guided session: start or jump guided reading directly to a chapter picked from the TOC.
-  const handleGuideChapter = useCallback((href: string) => {
-    setSidePanelOpen(false);
-    if (readerMode === "reader" && chatCollapsed) {
-      setChatCollapsed(false);
-      schedulePersistLayout({ chatCollapsed: false, bookCollapsed, sessionRailOpen });
-    }
-    chatRef.current?.guideChapter(href);
-  }, [bookCollapsed, chatCollapsed, readerMode, schedulePersistLayout, sessionRailOpen]);
-
   const handleReaderModeChange = useCallback(
     (mode: ReaderMode) => {
       setReaderMode(mode);
@@ -359,6 +364,40 @@ function App() {
     },
     [session.rememberReaderMode],
   );
+
+  // Read up to a selection in Guide mode (switching into Guide mode if needed).
+  const handleGuideTo = useCallback((selection: GuideSelection) => {
+    if (readerMode !== "guide") {
+      pendingGuideActionRef.current = { kind: "guideTo", selection };
+      handleReaderModeChange("guide");
+      return;
+    }
+    guideRef.current?.guideTo(selection);
+  }, [handleReaderModeChange, readerMode]);
+
+  // Start or jump guided reading directly to a chapter picked from the TOC.
+  const handleGuideChapter = useCallback((href: string) => {
+    setSidePanelOpen(false);
+    if (readerMode !== "guide") {
+      pendingGuideActionRef.current = { kind: "guideChapter", href };
+      handleReaderModeChange("guide");
+      return;
+    }
+    guideRef.current?.guideChapter(href);
+  }, [handleReaderModeChange, readerMode]);
+
+  useEffect(() => {
+    if (readerMode !== "guide") return;
+    const action = pendingGuideActionRef.current;
+    if (!action) return;
+    pendingGuideActionRef.current = null;
+    const frame = requestAnimationFrame(() => {
+      if (action.kind === "guideTo") guideRef.current?.guideTo(action.selection);
+      else if (action.kind === "guideChapter") guideRef.current?.guideChapter(action.href);
+      else if (action.kind === "scrollToMessage") guideRef.current?.scrollToMessage(action.messageIndex);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [readerMode]);
 
   useLayoutEffect(() => {
     if (chatCollapsed) return;
@@ -377,18 +416,18 @@ function App() {
     setSettingsOpen(false);
   }, [flushReadingState]);
 
-  // Agent mode: a chapter picked from the TOC reveals a collapsed Book pane
+  // Workspace modes: a chapter picked from the TOC reveals a collapsed Book pane
   // first, then jumps once it is visible.
   const handleTocGoTo = useCallback((href: string) => {
     setSidePanelOpen(false);
-    if (readerMode === "agent" && bookCollapsed) {
+    if (isWorkspaceMode && bookCollapsed) {
       pendingChapterRef.current = href;
       setBookCollapsed(false);
       schedulePersistLayout({ chatCollapsed, bookCollapsed: false, sessionRailOpen });
       return;
     }
     goToChapterHref(href);
-  }, [bookCollapsed, chatCollapsed, goToChapterHref, readerMode, schedulePersistLayout, sessionRailOpen]);
+  }, [bookCollapsed, chatCollapsed, goToChapterHref, isWorkspaceMode, schedulePersistLayout, sessionRailOpen]);
 
   useEffect(() => {
     if (bookCollapsed) return;
@@ -400,7 +439,53 @@ function App() {
     return () => cancelAnimationFrame(frame);
   }, [bookCollapsed, goToChapterHref]);
 
-  const { progress: guideProgress, marks: guideMarks } = useGuideBookMarks(guideSteps, toc);
+  const handleSaveGuideStepNote = useCallback(
+    (step: GuideStepNode) => {
+      const cfi = readerRef.current?.getLocation()?.cfi ?? currentBook?.lastCfi;
+      if (!cfi) {
+        setGuideNotice({
+          tone: "error",
+          message: t("guide.stepSaveNoteFailed", { message: "No reading location available" }),
+        });
+        return;
+      }
+      const note = markdownToPlainProse(step.explanation).slice(0, 3500);
+      session.handleAddHighlight({
+        cfi,
+        excerpt: step.label,
+        note,
+        color: "blue",
+      });
+      setGuideNotice({ message: t("guide.stepSavedNote") });
+    },
+    [currentBook?.lastCfi, readerRef, session, t],
+  );
+
+  const handleExportGuideMarkdown = useCallback(
+    async (doc: GuideDocument) => {
+      try {
+        const contents = formatGuideExportMarkdown(doc, {
+          bookTitle: bookTitle || currentBook?.title || "Litera",
+          includeSideQuestions: true,
+        });
+        const defaultName = defaultGuideExportFileName(bookTitle || currentBook?.title || "litera");
+        await invoke("save_text_file", { defaultName, contents });
+        setGuideNotice({ message: t("guide.navExportSuccess") });
+      } catch (error) {
+        const msg = invokeErrorMessage(error);
+        if (/cancelled|No file selected/i.test(msg)) return;
+        setGuideNotice({ tone: "error", message: t("guide.navExportFailed", { message: msg }) });
+      }
+    },
+    [bookTitle, currentBook?.title, t],
+  );
+
+  const {
+    tocProgress: guideProgress,
+    pageMarks: guideMarks,
+    cards: guideCards,
+    hasGuide,
+  } = useGuideDocument(fileData?.bookId ?? "", toc);
 
   // A Citation's "Open in Book": reveal a collapsed Agent-mode Book pane
   // first, then jump once it is visible.
@@ -409,7 +494,7 @@ function App() {
       const target = location.href;
       if (!target) return;
       const href = quoteTargetHref(toc, target);
-      if (readerMode === "agent" && bookCollapsed) {
+      if (isWorkspaceMode && bookCollapsed) {
         pendingQuoteRef.current = { href, quote, block };
         setBookCollapsed(false);
         schedulePersistLayout({ chatCollapsed, bookCollapsed: false, sessionRailOpen });
@@ -417,7 +502,7 @@ function App() {
       }
       void readerRef.current?.goToQuote(href, quote, block);
     },
-    [bookCollapsed, chatCollapsed, readerMode, readerRef, schedulePersistLayout, sessionRailOpen, toc],
+    [bookCollapsed, chatCollapsed, isWorkspaceMode, readerRef, schedulePersistLayout, sessionRailOpen, toc],
   );
 
   useEffect(() => {
@@ -639,7 +724,7 @@ function App() {
               onToggle={session.handleTocToggle}
               onGoTo={handleTocGoTo}
               guideProgress={guideProgress}
-              onGuideChapter={guideSteps ? handleGuideChapter : undefined}
+              onGuideChapter={hasGuide ? handleGuideChapter : undefined}
             />
           ) : sidePanelTab === "search" ? (
             <BookSearchPanel
@@ -785,6 +870,13 @@ function App() {
     >
       <NoticeStack>
         {appNotices}
+        {guideNotice && (
+          <Notice
+            tone={guideNotice.tone}
+            message={guideNotice.message}
+            onDismiss={() => setGuideNotice(null)}
+          />
+        )}
         {/* Cleared by the next read-aloud action, so there is nothing to dismiss. */}
         {tts.error && <Notice tone="error" message={tts.error} />}
       </NoticeStack>
@@ -807,7 +899,7 @@ function App() {
           <ChevronLeft />
         </Button>
         {readerMode === "reader" ? sidePanelButton : null}
-        {readerMode === "agent" && (
+        {isWorkspaceMode && (
           <Button
             size="icon-sm"
             variant={sessionRailOpen ? "secondary" : "ghost"}
@@ -820,7 +912,7 @@ function App() {
                 sessionRailOpen: next,
               });
             }}
-            aria-label={t("chat.sessions")}
+            aria-label={readerMode === "guide" ? t("guide.navTitle") : t("chat.sessions")}
             aria-pressed={sessionRailOpen}
           >
             <PanelLeft />
@@ -842,9 +934,9 @@ function App() {
           {...titlebarDrag}
         />
         <div className={READER_PILL_CLASS}>
-          {/* Read-aloud reads the Book pane; with the pane hidden in Agent
-              mode it has nothing to read, so it steps aside. */}
-          {!(readerMode === "agent" && bookHidden) && (
+          {/* Read-aloud reads the Book pane; with the pane hidden in workspace
+              modes it has nothing to read, so it steps aside. */}
+          {!(isWorkspaceMode && bookHidden) && (
             <Button
               size="icon-sm"
               variant="ghost"
@@ -865,14 +957,14 @@ function App() {
           >
             <Type />
           </Button>
-          {readerMode === "agent" ? sidePanelButton : null}
+          {isWorkspaceMode ? sidePanelButton : null}
           <span aria-hidden className="mx-1 h-4 w-px bg-border" />
           <div
             role="group"
             aria-label={t("reader.mode")}
             className="flex items-center gap-0.5"
           >
-            {(["reader", "agent"] as const).map((mode) => (
+            {(["reader", "guide", "agent"] as const).map((mode) => (
               <button
                 key={mode}
                 type="button"
@@ -887,7 +979,13 @@ function App() {
                     : "text-muted-foreground hover:text-foreground",
                 )}
               >
-                {t(mode === "reader" ? "settings.defaultMode.reader" : "settings.defaultMode.agent")}
+                {t(
+                  mode === "reader"
+                    ? "settings.defaultMode.reader"
+                    : mode === "guide"
+                      ? "settings.defaultMode.guide"
+                      : "settings.defaultMode.agent",
+                )}
               </button>
             ))}
           </div>
@@ -946,8 +1044,8 @@ function App() {
           className={
             bookHidden
               ? "min-h-0 min-w-0 flex-col overflow-hidden"
-              : readerMode === "agent"
-                ? // Mirrors the docked chat in reading mode: beside the Session
+              : isWorkspaceMode
+                ? // Mirrors the docked chat in reading mode: beside the assistant
                   // workspace, the Book floats as a card instead of a ruled pane.
                   "relative my-2 mr-2 ml-1 flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl bg-page shadow-soft"
                 : "relative flex min-h-0 min-w-0 flex-col overflow-hidden"
@@ -962,7 +1060,7 @@ function App() {
                 onRelocate={session.handleRelocate}
                 onReaderActivity={session.readingTracker.activity}
                 onSelectionCapture={handleSelectionCapture}
-                onGuideTo={guideSteps ? handleGuideTo : undefined}
+                onGuideTo={hasGuide ? handleGuideTo : undefined}
                 guideMarks={guideMarks}
                 onViewGuideCard={guideCards.length > 0 ? setOpenGuideCard : undefined}
                 onHighlight={session.handleAddHighlight}
@@ -1002,12 +1100,11 @@ function App() {
                 passage={openGuideCard.passage}
                 onClose={() => setOpenGuideCard(null)}
                 onOpenInGuide={(messageIndex) => {
-                  if (readerMode === "reader" && chatCollapsed) {
-                    setChatCollapsed(false);
-                    schedulePersistLayout({ chatCollapsed: false, bookCollapsed, sessionRailOpen });
-                    requestAnimationFrame(() => chatRef.current?.scrollToMessage(messageIndex));
+                  if (readerMode !== "guide") {
+                    pendingGuideActionRef.current = { kind: "scrollToMessage", messageIndex };
+                    handleReaderModeChange("guide");
                   } else {
-                    chatRef.current?.scrollToMessage(messageIndex);
+                    guideRef.current?.scrollToMessage(messageIndex);
                   }
                 }}
                 onAskPassage={(passage) => {
@@ -1068,9 +1165,9 @@ function App() {
           }
           style={{ gridArea: "chat" }}
         >
-          {readerMode === "agent" && sidePanel}
+          {isWorkspaceMode && sidePanel}
           {/* Docked beside the book, the assistant floats as a card; as the
-              Agent-mode workspace it fills its cell edge to edge. */}
+              Guide or Agent workspace it fills its cell edge to edge. */}
           <div
             data-testid="reader-chat-card"
             className={
@@ -1079,17 +1176,58 @@ function App() {
                 : "h-full"
             }
           >
-            <ChatPanel
-              ref={chatRef}
-              currentChapterHref={progress.chapterHref}
-              onOpenQuote={handleOpenQuote}
-              bookId={fileData?.bookId ?? ""}
-              variant={readerMode === "agent" ? "workspace" : "docked"}
-              sessionRailOpen={sessionRailOpen}
-              preferGuidedSession={readerMode === "agent"}
-              onGuideStepsChange={setGuideSteps}
-              onGuideCardsChange={setGuideCards}
-            />
+            {readerMode === "guide" ? (
+              <GuideWorkspace
+                ref={guideRef}
+                currentChapterHref={progress.chapterHref}
+                onOpenQuote={handleOpenQuote}
+                bookId={fileData?.bookId ?? ""}
+                variant="workspace"
+                navRailOpen={sessionRailOpen}
+                extraStepActions={(step) =>
+                  step.explanation.trim()
+                    ? [
+                        {
+                          id: "save-note",
+                          label: t("guide.stepSaveNote"),
+                          icon: <NotebookPen className="h-3 w-3" />,
+                          onClick: handleSaveGuideStepNote,
+                        },
+                      ]
+                    : []
+                }
+                renderNavRail={(ctx) => (
+                  <GuideNavRail
+                    toc={toc}
+                    tocProgress={guideProgress}
+                    document={ctx.document}
+                    activeChapterIndex={ctx.activeChapterIndex}
+                    archivedSessions={ctx.archivedSessions}
+                    viewingArchivedId={ctx.viewingArchivedId}
+                    isStreaming={ctx.isStreaming}
+                    onScrollToChapter={ctx.onScrollToChapter}
+                    onScrollToStep={ctx.onScrollToStep}
+                    onScrollToQuestion={ctx.onScrollToQuestion}
+                    onGuideChapter={ctx.onGuideChapter}
+                    onOpenSettings={ctx.onOpenSettings}
+                    onViewArchived={ctx.onViewArchived}
+                    onReturnToCanonical={ctx.onReturnToCanonical}
+                    onExportMarkdown={() => void handleExportGuideMarkdown(ctx.document)}
+                  />
+                )}
+              />
+            ) : (
+              <ChatWorkspace
+                ref={chatRef}
+                currentChapterHref={progress.chapterHref}
+                onOpenQuote={handleOpenQuote}
+                bookId={fileData?.bookId ?? ""}
+                variant={readerMode === "agent" ? "workspace" : "docked"}
+                sessionRailOpen={sessionRailOpen}
+                ordinarySessionsOnly
+                onOpenGuideMode={() => handleReaderModeChange("guide")}
+              />
+            )}
           </div>
         </div>
         {!sideCollapsed && (

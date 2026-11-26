@@ -225,7 +225,7 @@ interface ReaderViewProps {
   onReaderActivity?: () => void;
   /** Reader CSS (font/theme) to inject into footnote popup inner views. */
   stylesCss?: string;
-  /** A Guided session's marks: paragraphs read, skimmed, and at the Guide cursor. */
+  /** A Guided session's marks: paragraphs read and at the Guide cursor. */
   guideMarks?: GuidePageMarks | null;
   /** Open a floating PageGuideCard for an already-guided paragraph in the Book pane. */
   onViewGuideCard?: (request: { stepIndex: number; x: number; y: number; passage?: string }) => void;

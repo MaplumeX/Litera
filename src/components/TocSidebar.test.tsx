@@ -282,7 +282,7 @@ describe("TocSidebar", () => {
 });
 
 describe("TocSidebar guide progress", () => {
-  it("marks chapters the guide has covered, skimmed, partly read, and where it is", () => {
+  it("marks chapters the guide has covered, partly read, and where it is", () => {
     const view = render(
       <TocSidebar
         toc={[...toc, { href: "c3", label: "第三章" }, { href: "c4", label: "第四章" }]}
@@ -290,16 +290,15 @@ describe("TocSidebar guide progress", () => {
         onToggle={() => {}}
         onGoTo={() => {}}
         guideProgress={{
-          c1: { coveredBlocks: 6, totalBlocks: 6, skimmed: false, current: false },
-          c2: { coveredBlocks: 9, totalBlocks: 9, skimmed: true, current: false },
-          c3: { coveredBlocks: 3, totalBlocks: 8, skimmed: false, current: true },
+          c1: { coveredBlocks: 6, totalBlocks: 6, current: false },
+          c2: { coveredBlocks: 9, totalBlocks: 9, current: false },
+          c3: { coveredBlocks: 3, totalBlocks: 8, current: true },
         }}
       />,
     );
-    expect(view.getByLabelText("已带读")).toBeTruthy();
-    expect(view.getByLabelText("已略读")).toBeTruthy();
+    expect(view.getAllByLabelText("已带读")).toHaveLength(2);
     expect(view.getByLabelText("已带读 37%, 当前带读位置").textContent).toBe("37%");
-    expect(view.queryAllByLabelText(/已带读|已略读/)).toHaveLength(3);
+    expect(view.queryAllByLabelText(/已带读/)).toHaveLength(3);
   });
 
   it("lets the reader jump guided reading straight to any chapter from the TOC", () => {
@@ -312,8 +311,8 @@ describe("TocSidebar guide progress", () => {
         onToggle={() => {}}
         onGoTo={onGoTo}
         guideProgress={{
-          c1: { coveredBlocks: 6, totalBlocks: 6, skimmed: false, current: false },
-          c2: { coveredBlocks: 9, totalBlocks: 9, skimmed: true, current: false },
+          c1: { coveredBlocks: 6, totalBlocks: 6, current: false },
+          c2: { coveredBlocks: 9, totalBlocks: 9, current: false },
         }}
         onGuideChapter={onGuideChapter}
       />,

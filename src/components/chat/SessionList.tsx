@@ -38,6 +38,8 @@ interface SessionListProps {
   editingSessionId: string | null;
   editingTitle: string;
   layout?: "popover" | "rail";
+  /** When true (Agent mode in three-mode shell), omit the pinned Guide entry. */
+  hideGuidedEntry?: boolean;
   onNewSession: () => void;
   onNewGuided: () => void;
   onSwitchSession: (id: string) => void;
@@ -72,6 +74,7 @@ export function SessionList({
   editingSessionId,
   editingTitle,
   layout = "popover",
+  hideGuidedEntry = false,
   onNewSession,
   onNewGuided,
   onSwitchSession,
@@ -84,7 +87,7 @@ export function SessionList({
 }: SessionListProps) {
   const { t, locale } = useT();
   const isRail = layout === "rail";
-  const canonicalGuide = canonicalGuidedSession(sessions);
+  const canonicalGuide = hideGuidedEntry ? undefined : canonicalGuidedSession(sessions);
   const listedSessions = canonicalGuide
     ? sessions.filter((session) => session.id !== canonicalGuide.id)
     : sessions;
@@ -250,37 +253,40 @@ export function SessionList({
             <Plus />
             {t("chat.newSession")}
           </Button>
-          {canonicalGuide ? (
-            renderSessionRow(canonicalGuide, true)
-          ) : (
-            <Button
-              size="sm"
-              variant="ghost"
-              className="w-full justify-start rounded-lg font-normal text-muted-foreground hover:bg-foreground/5 hover:text-foreground dark:hover:bg-foreground/5"
-              onClick={onNewGuided}
-              disabled={isStreaming}
-            >
-              <BookOpen />
-              {t("chat.guide.open")}
-            </Button>
-          )}
+          {!hideGuidedEntry &&
+            (canonicalGuide ? (
+              renderSessionRow(canonicalGuide, true)
+            ) : (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="w-full justify-start rounded-lg font-normal text-muted-foreground hover:bg-foreground/5 hover:text-foreground dark:hover:bg-foreground/5"
+                onClick={onNewGuided}
+                disabled={isStreaming}
+              >
+                <BookOpen />
+                {t("chat.guide.open")}
+              </Button>
+            ))}
         </div>
       ) : (
         <div className="flex items-center justify-between border-b py-1.5 pr-1.5 pl-3">
           <span className="text-xs font-medium text-muted-foreground">{t("chat.sessions")}</span>
           <div className="flex items-center">
-            <Tip label={t("chat.guide.open")}>
-              <Button
-                size="icon-xs"
-                variant="ghost"
-                className="text-muted-foreground hover:text-foreground"
-                onClick={onNewGuided}
-                disabled={isStreaming}
-                aria-label={t("chat.guide.open")}
-              >
-                <BookOpen />
-              </Button>
-            </Tip>
+            {!hideGuidedEntry && (
+              <Tip label={t("chat.guide.open")}>
+                <Button
+                  size="icon-xs"
+                  variant="ghost"
+                  className="text-muted-foreground hover:text-foreground"
+                  onClick={onNewGuided}
+                  disabled={isStreaming}
+                  aria-label={t("chat.guide.open")}
+                >
+                  <BookOpen />
+                </Button>
+              </Tip>
+            )}
             <Tip label={t("chat.newSession")}>
               <Button
                 size="icon-xs"

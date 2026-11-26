@@ -27,6 +27,8 @@ interface ChatInputProps {
   onThinkingLevelChange: (level: string) => void;
   /** Optional left-most controls on the toolbar row (e.g. the model switcher). */
   leadingControls?: React.ReactNode;
+  /** Optional custom placeholder (e.g. "Ask about this section…" in Guide mode). */
+  placeholder?: string;
 }
 
 export function ChatInput({
@@ -42,6 +44,7 @@ export function ChatInput({
   thinkingLevel,
   onThinkingLevelChange,
   leadingControls,
+  placeholder,
 }: ChatInputProps) {
   const { t } = useT();
   const handleKeyDown = (event: React.KeyboardEvent) => {
@@ -93,7 +96,7 @@ export function ChatInput({
             "placeholder:text-muted-foreground outline-none ring-0 focus:outline-none focus:ring-0",
           )}
           rows={1}
-          placeholder={t("chat.placeholder")}
+          placeholder={placeholder ?? t("chat.placeholder")}
           value={value}
           onChange={(event) => onChange(event.target.value)}
           onKeyDown={handleKeyDown}

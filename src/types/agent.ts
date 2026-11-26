@@ -51,12 +51,10 @@ export interface GuideSelection {
 export interface GuideStep {
   from: GuidePosition;
   to: GuidePosition;
-  /** A compressed pass instead of a full retelling. */
-  skim?: true;
   /**
    * For the step's label only, never to find it: the step is part `index` of
-   * `from`'s chapter cut into `total` parts (a skim: that part to the
-   * chapter's end), as the chapter was cut when the step was taken.
+   * `from`'s chapter cut into `total` parts, as the chapter was cut when the
+   * step was taken.
    */
   part?: { index: number; total: number };
 }
@@ -81,6 +79,15 @@ export function isLegacyGuideStep(step: RecordedGuideStep): step is LegacyGuideS
   return !("from" in step);
 }
 
+/** Optional explanation depth/pace override for a single Guided step. */
+export type GuideStepPace = "standard" | "compact" | "deep";
+
+/** First-class per-step options injected cleanly by `GuideController`. */
+export interface GuideStepOptions {
+  pace?: GuideStepPace;
+  styleOverride?: string;
+}
+
 /**
  * What a reader's message in a Guided session asks of the guide: Continue
  * (no `step`; the assistant picks where the step ends) or a step the reader
@@ -88,6 +95,8 @@ export function isLegacyGuideStep(step: RecordedGuideStep): step is LegacyGuideS
  */
 export interface GuideRequest {
   step?: RecordedGuideStep;
+  pace?: GuideStepPace;
+  styleOverride?: string;
 }
 
 export interface AgentSessionSummary {

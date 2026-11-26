@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { BookTocEntry, GuideBlock } from "@/agent/book/book-content";
 import type { GuideStep, LegacyGuideStep } from "@/types/agent";
-import { dueRecap, findGuideBlock, findableGuideBlock, firstBodyChapter, guideBlockPage, guideCursor, guidedPrompt, guideOutlinePlan, guidePageMarkPlan, guideReadingState, guideRequestContext, guideSpanTo, guideStepContext, guideStepRequestFor, guideTocProgress, isNonAdjacentChapterJump, locateGuideStep, nearbySectionBreaks, nextGuideSpan, recappedChapters, recordGuideSpan, requestedGuideSpan, skimGuideSpan, skipChapterSpan, stepChapters, type GuidePoint, type GuideSpan } from "./guide";
+import { dueRecap, findGuideBlock, findableGuideBlock, firstBodyChapter, guideBlockPage, guideCursor, guidedPrompt, guideOutlinePlan, guidePageMarkPlan, guideReadingState, guideRequestContext, guideSpanTo, guideStepContext, guideStepRequestFor, guideTocProgress, isNonAdjacentChapterJump, locateGuideStep, nearbySectionBreaks, nextGuideSpan, recappedChapters, recordGuideSpan, requestedGuideSpan, skipChapterSpan, stepChapters, type GuidePoint, type GuideSpan } from "./guide";
 
 // Every part holds three blocks.
 const chapter = (index: number, parts: number, chars = 1000, label = `Chapter ${index + 1}`): BookTocEntry => ({
@@ -13,13 +13,10 @@ const chapter = (index: number, parts: number, chars = 1000, label = `Chapter ${
 const toc = [chapter(0, 2), chapter(1, 1, 0, "Part One"), chapter(2, 3), chapter(3, 1)];
 
 const at = (chapterIndex: number, block: number) => ({ entry: toc.find((entry) => entry.index === chapterIndex)!, block });
-const span = (from: [number, number], to: [number, number], skim?: true): GuideSpan => ({ from: at(...from), to: at(...to), ...(skim ? { skim } : {}) });
+const span = (from: [number, number], to: [number, number]): GuideSpan => ({ from: at(...from), to: at(...to) });
 /** The whole of part `part` of chapter `chapterIndex`. */
-const part = (chapterIndex: number, index: number, skim?: true): GuideSpan => {
-  const entry = toc.find((candidate) => candidate.index === chapterIndex)!;
-  return span([chapterIndex, index * 3], [chapterIndex, skim ? entry.blocks - 1 : index * 3 + 2], skim);
-};
-const ends = (value: GuideSpan | null) => value && { from: [value.from.entry.index, value.from.block], to: [value.to.entry.index, value.to.block], ...(value.skim ? { skim: true } : {}) };
+const part = (chapterIndex: number, index: number): GuideSpan => span([chapterIndex, index * 3], [chapterIndex, index * 3 + 2]);
+const ends = (value: GuideSpan | null) => value && { from: [value.from.entry.index, value.from.block], to: [value.to.entry.index, value.to.block] };
 
 // Block n of chapter c opens with "c.n"; every block is a paragraph.
 const blocksOf = async (chapterIndex: number): Promise<GuideBlock[]> => {
@@ -71,7 +68,7 @@ describe("locateGuideStep", () => {
   });
 
   it("finds a step's blocks by their snippets when the blocks shifted", async () => {
-    expect(ends(await locateGuideStep(toc, blocksOf, step([2, 0, "2.3"], [2, 1, "2.5"], { skim: true })))).toEqual({ from: [2, 3], to: [2, 5], skim: true });
+    expect(ends(await locateGuideStep(toc, blocksOf, step([2, 0, "2.3"], [2, 1, "2.5"])))).toEqual({ from: [2, 3], to: [2, 5] });
   });
 
   it("finds its chapter by title when the indices shifted, and clamps blocks to the chapter", async () => {
@@ -89,7 +86,7 @@ describe("locateGuideStep", () => {
 
     it("cover their part", async () => {
       expect(ends(await locateGuideStep(toc, blocksOf, legacy(2, 1, 3)))).toEqual({ from: [2, 3], to: [2, 5] });
-      expect(ends(await locateGuideStep(toc, blocksOf, legacy(2, 1, 3, { skim: true })))).toEqual({ from: [2, 3], to: [2, 8], skim: true });
+      expect(ends(await locateGuideStep(toc, blocksOf, legacy(2, 1, 3, { skim: true })))).toEqual({ from: [2, 3], to: [2, 8] });
       expect(ends(await locateGuideStep(toc, blocksOf, legacy(3, 0, 3, { chapterTitle: "Chapter 3" })))).toEqual({ from: [2, 0], to: [2, 2] });
     });
 
@@ -115,7 +112,6 @@ describe("recordGuideSpan", () => {
       to: { chapterIndex: 2, chapterTitle: "Chapter 3", block: 5, snippet: "2.5", paragraph: 6 },
       part: { index: 1, total: 3 },
     });
-    expect(await recordGuideSpan(blocksOf, part(2, 1, true))).toMatchObject({ skim: true, part: { index: 1, total: 3 } });
   });
 
   it("leaves the part out of any other range", async () => {
@@ -124,26 +120,21 @@ describe("recordGuideSpan", () => {
   });
 
   it("is found again as the same span", async () => {
-    for (const value of [part(0, 1), span([0, 4], [3, 1], true)]) {
+    for (const value of [part(0, 1), span([0, 4], [3, 1])]) {
       expect(ends(await locateGuideStep(toc, blocksOf, await recordGuideSpan(blocksOf, value)))).toEqual(ends(value));
     }
   });
 });
 
-describe("skims, skips and picks", () => {
-  it("skim from where the step starts to the chapter's end", () => {
-    expect(ends(skimGuideSpan(span([2, 4], [2, 5])))).toEqual({ from: [2, 4], to: [2, 8], skim: true });
-    expect(ends(nextGuideSpan(toc, guideCursor([skimGuideSpan(span([2, 4], [2, 5]))])))).toEqual({ from: [3, 0], to: [3, 2] });
-  });
-
+describe("skips and picks", () => {
   it("skip to the next chapter with text, or to the end", () => {
     expect(ends(skipChapterSpan(toc, part(0, 0)))).toEqual({ from: [2, 0], to: [2, 2] });
     expect(skipChapterSpan(toc, part(3, 0))).toBeNull();
   });
 
-  it("run from where the step starts to the picked block, keeping a skim", () => {
+  it("run from where the step starts to the picked block", () => {
     expect(ends(guideSpanTo(toc, part(2, 1), { chapterIndex: 2, block: 4 }))).toEqual({ from: [2, 3], to: [2, 4] });
-    expect(ends(guideSpanTo(toc, part(2, 1), { chapterIndex: 3, block: 0 }, true))).toEqual({ from: [2, 3], to: [3, 0], skim: true });
+    expect(ends(guideSpanTo(toc, part(2, 1), { chapterIndex: 3, block: 0 }))).toEqual({ from: [2, 3], to: [3, 0] });
   });
 
   it("refuse a pick before the step's start or outside the Book", () => {
@@ -167,36 +158,29 @@ describe("guideStepContext", () => {
     expect(text).toContain("chapterIndex 0, fromBlock 2, toBlock 2; chapterIndex 0, fromBlock 3, toBlock 5; chapterIndex 2, fromBlock 0, toBlock 2; chapterIndex 2, fromBlock 3, toBlock 4");
     expect(text).not.toContain("chapterIndex 1,");
   });
-
-  it("asks for a compressed pass over a skim", () => {
-    const text = guideStepContext(toc, part(2, 1, true));
-    expect(text).toContain("skim");
-    expect(text).toContain("parts 1 to 2");
-    expect(text).toContain("chapterIndex 2, fromBlock 3, toBlock 5; chapterIndex 2, fromBlock 6, toBlock 8");
-  });
 });
 
 describe("guideTocProgress", () => {
-  it("reports covered blocks, skims and the cursor's chapter per href", () => {
-    const spans = [part(0, 0), part(0, 1), part(2, 0), part(2, 1, true), part(3, 0)];
+  it("reports covered blocks and the cursor's chapter per href", () => {
+    const spans = [part(0, 0), part(0, 1), part(2, 0), span([2, 3], [2, 8]), part(3, 0)];
     expect(guideTocProgress(toc, spans, ["c0.xhtml", "c1.xhtml", "c2.xhtml", "c3.xhtml", "missing.xhtml"])).toEqual({
-      "c0.xhtml": { coveredBlocks: 6, totalBlocks: 6, skimmed: false, current: false },
-      "c2.xhtml": { coveredBlocks: 9, totalBlocks: 9, skimmed: true, current: false },
-      "c3.xhtml": { coveredBlocks: 3, totalBlocks: 3, skimmed: false, current: true },
+      "c0.xhtml": { coveredBlocks: 6, totalBlocks: 6, current: false },
+      "c2.xhtml": { coveredBlocks: 9, totalBlocks: 9, current: false },
+      "c3.xhtml": { coveredBlocks: 3, totalBlocks: 3, current: true },
     });
   });
 
   it("counts blocks read twice once, across chapters, and keeps the furthest chapter current after going back", () => {
     const spans = [part(0, 0), span([0, 3], [2, 4]), part(0, 0)];
     expect(guideTocProgress(toc, spans, ["c0.xhtml", "c2.xhtml"])).toEqual({
-      "c0.xhtml": { coveredBlocks: 6, totalBlocks: 6, skimmed: false, current: false },
-      "c2.xhtml": { coveredBlocks: 5, totalBlocks: 9, skimmed: false, current: true },
+      "c0.xhtml": { coveredBlocks: 6, totalBlocks: 6, current: false },
+      "c2.xhtml": { coveredBlocks: 5, totalBlocks: 9, current: true },
     });
   });
 });
 
 describe("dueRecap", () => {
-  const spans = [part(0, 0), part(0, 1), part(2, 0, true), part(3, 0)];
+  const spans = [part(0, 0), part(0, 1), span([2, 0], [2, 8]), part(3, 0)];
 
   it("is the first chapter the guide finished without a recap", () => {
     expect(dueRecap(toc, spans, new Set())).toEqual([0]);
@@ -213,7 +197,7 @@ describe("dueRecap", () => {
   it("groups the chapters one step finished, and keeps those of different steps apart", () => {
     expect(dueRecap(toc, [part(0, 0), span([0, 3], [3, 2])], new Set())).toEqual([0, 2, 3]);
     expect(dueRecap(toc, [part(0, 0), span([0, 3], [3, 2])], new Set([0]))).toEqual([2, 3]);
-    const apart = [span([0, 0], [2, 2]), part(2, 1, true), part(3, 0)];
+    const apart = [span([0, 0], [2, 2]), span([2, 3], [2, 8]), part(3, 0)];
     expect(dueRecap(toc, apart, new Set())).toEqual([0]);
     expect(dueRecap(toc, apart, new Set([0]))).toEqual([2]);
     expect(dueRecap(toc, apart, new Set([0, 2]))).toEqual([3]);
@@ -256,10 +240,10 @@ describe("guideOutlinePlan", () => {
 });
 
 describe("guidePageMarkPlan", () => {
-  it("lists read and skimmed blocks per chapter, its files, step index mapping, and the Guide cursor", () => {
-    expect(guidePageMarkPlan(toc, [part(0, 0), span([0, 3], [2, 1]), part(2, 0, true), part(0, 0)])).toEqual([
-      { chapterIndex: 0, files: ["c0.xhtml"], read: [0, 1, 2, 3, 4, 5], skimmed: [], stepByBlock: { 0: 3, 1: 3, 2: 3, 3: 1, 4: 1, 5: 1 } },
-      { chapterIndex: 2, files: ["c2.xhtml"], read: [0, 1], skimmed: [2, 3, 4, 5, 6, 7, 8], cursor: 8, stepByBlock: { 0: 2, 1: 2, 2: 2, 3: 2, 4: 2, 5: 2, 6: 2, 7: 2, 8: 2 } },
+  it("lists read blocks per chapter, its files, step index mapping, and the Guide cursor", () => {
+    expect(guidePageMarkPlan(toc, [part(0, 0), span([0, 3], [2, 1]), span([2, 0], [2, 8]), part(0, 0)])).toEqual([
+      { chapterIndex: 0, files: ["c0.xhtml"], read: [0, 1, 2, 3, 4, 5], stepByBlock: { 0: 3, 1: 3, 2: 3, 3: 1, 4: 1, 5: 1 } },
+      { chapterIndex: 2, files: ["c2.xhtml"], read: [0, 1, 2, 3, 4, 5, 6, 7, 8], cursor: 8, stepByBlock: { 0: 2, 1: 2, 2: 2, 3: 2, 4: 2, 5: 2, 6: 2, 7: 2, 8: 2 } },
     ]);
   });
 
@@ -367,11 +351,6 @@ describe("requestedGuideSpan", () => {
     expect(taken({ chapterIndex: 2, toChapterIndex: 2 }, null)).toEqual({ from: [2, 0], to: [2, 8] });
   });
 
-  it("skims the default range or the asked one", () => {
-    expect(taken({ chapterIndex: 2, skim: true }, null)).toEqual({ from: [2, 0], to: [2, 8], skim: true });
-    expect(taken({ chapterIndex: 2, toBlock: 4, skim: true }, null)).toEqual({ from: [2, 0], to: [2, 4], skim: true });
-  });
-
   it("refuses unknown chapters, blocks outside the chapter, ends before the start, and the end of the book", () => {
     expect(taken({ chapterIndex: 9 })).toEqual({ error: "No chapter with chapterIndex 9" });
     expect(taken({ toChapterIndex: 9, toBlock: 0 })).toEqual({ error: "No chapter with chapterIndex 9" });
@@ -426,7 +405,6 @@ describe("guideStepRequestFor", () => {
   it("leaves the start out when the step goes on from the cursor", () => {
     const next = nextGuideSpan(toc, cursor)!;
     expect(roundTrip(next)).toEqual({});
-    expect(roundTrip(skimGuideSpan(next))).toEqual({ skim: true });
     expect(roundTrip(guideSpanTo(toc, next, { chapterIndex: 3, block: 1 })!)).toEqual({ toChapterIndex: 3, toBlock: 1 });
   });
 

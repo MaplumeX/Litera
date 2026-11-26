@@ -8,9 +8,8 @@ function page(html: string): Document {
   return doc;
 }
 
-const marks = (read: string[], skimmed: string[] = [], cursor?: string) => ({
+const marks = (read: string[], cursor?: string) => ({
   read: read.map(guideMarkKey),
-  skimmed: skimmed.map(guideMarkKey),
   ...(cursor ? { cursor: guideMarkKey(cursor) } : {}),
 });
 
@@ -22,14 +21,14 @@ describe("guideMarkKey", () => {
 });
 
 describe("applyGuideMarks", () => {
-  it("marks read, skimmed and cursor paragraphs, leaving wrappers and the rest alone", () => {
-    const doc = page('<div class="wrap"><h2>Later</h2><p>Read <em>this</em> one.</p><p>Skimmed one.</p><p>Untouched.</p><ul><li>first item</li><li>second item</li></ul></div>');
-    applyGuideMarks(doc, marks(["Later", "Read this one.", "first item second item"], ["Skimmed one."], "Skimmed one."), "带读到这里");
+  it("marks read and cursor paragraphs, leaving wrappers and the rest alone", () => {
+    const doc = page('<div class="wrap"><h2>Later</h2><p>Read <em>this</em> one.</p><p>Another read one.</p><p>Untouched.</p><ul><li>first item</li><li>second item</li></ul></div>');
+    applyGuideMarks(doc, marks(["Later", "Read this one.", "Another read one.", "first item second item"], "Another read one."), "带读到这里");
     const state = (selector: string) => doc.querySelector(selector)!.getAttribute("data-litera-guide");
     expect(doc.querySelector(".wrap")!.hasAttribute("data-litera-guide")).toBe(false);
     expect(state("h2")).toBe("read");
     expect(state("p:nth-of-type(1)")).toBe("read");
-    expect(state("p:nth-of-type(2)")).toBe("skim");
+    expect(state("p:nth-of-type(2)")).toBe("read");
     expect(state("p:nth-of-type(3)")).toBeNull();
     expect(state("ul")).toBe("read");
     expect(state("li")).toBeNull();
@@ -42,7 +41,7 @@ describe("applyGuideMarks", () => {
     // The window's own document: computed styles need a view.
     const doc = document;
     doc.body.innerHTML = '<p style="color: rgb(10, 20, 30)">Colored one.</p><p>Plain one.</p><p>Unread one.</p>';
-    applyGuideMarks(doc, marks(["Colored one.", "Plain one."], [], "Plain one."), "");
+    applyGuideMarks(doc, marks(["Colored one.", "Plain one."], "Plain one."), "");
     const [colored, plain, unread] = [...doc.body.children] as HTMLElement[];
     expect(colored.style.getPropertyValue("--litera-guide-ink")).toBe("rgb(10, 20, 30)");
     expect(plain.style.getPropertyValue("--litera-guide-ink")).not.toBe("");
@@ -61,7 +60,7 @@ describe("applyGuideMarks", () => {
 
   it("clears its marks when there are none any more", () => {
     const doc = page("<p>Read one.</p>");
-    applyGuideMarks(doc, marks(["Read one."], [], "Read one."), "");
+    applyGuideMarks(doc, marks(["Read one."], "Read one."), "");
     applyGuideMarks(doc, null, "");
     expect(doc.querySelector("[data-litera-guide]")).toBeNull();
     expect(doc.querySelector("[data-litera-guide-cursor]")).toBeNull();

@@ -2,35 +2,45 @@ import {
   forwardRef,
   useCallback,
   useEffect,
+  useImperativeHandle,
   useMemo,
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { AlertCircle, ChevronDown, Loader2, Maximize2, Minimize2, Sparkles, X } from "lucide-react";
+import { AlertCircle, BookOpen, ChevronDown, Loader2, Maximize2, MessageSquare, Minimize2, Sparkles, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { ChatPanel, type ChatPanelHandle } from "@/components/chat/ChatPanel";
-import type { RecordedGuideStep } from "@/types/agent";
+import { ChatWorkspace, type ChatWorkspaceHandle } from "@/components/chat/ChatWorkspace";
+import { GuideWorkspace, type GuideWorkspaceHandle } from "@/components/guide/GuideWorkspace";
 import type { QuoteLocation } from "@/agent/book/book-content";
 import type { GuideBlockTarget } from "@/lib/guide-marks";
-import type { GuideStepCardData } from "@/lib/guide-step-cards";
-import { readerModeForSnap, snapAfterDrag, type SheetSnap } from "@/lib/assistant-sheet";
+import {
+  snapAfterDrag,
+  type AssistantSheetTab,
+  type SheetSnap,
+} from "@/lib/assistant-sheet";
 import type { ChatActivity } from "@/lib/chat-activity";
+import type { GuideSelection } from "@/types/agent";
 import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
+
+export interface AssistantSheetHandle {
+  fillInput: (text: string, chapterHref?: string) => void;
+  guideTo: (selection: GuideSelection) => void;
+  guideChapter: (href: string) => void;
+  scrollToMessage: (messageIndex: number) => void;
+}
 
 interface AssistantSheetProps {
   snap: SheetSnap;
   onSnapChange: (snap: SheetSnap) => void;
+  tab?: AssistantSheetTab;
+  onTabChange?: (tab: AssistantSheetTab) => void;
   bookId: string;
   currentChapterHref?: string;
   onOpenQuote: (location: QuoteLocation, quote: string, block?: GuideBlockTarget) => void;
   /** How far above the bottom edge the peek bar sits (a CSS length): clear of the toolbar while it shows. */
   peekOffset?: string;
-  /** A Guided session's steps on the active branch, oldest first; null outside one. */
-  onGuideStepsChange?: (steps: RecordedGuideStep[] | null) => void;
-  /** Cards for every taken guided step, for Book pane guide cards. */
-  onGuideCardsChange?: (cards: GuideStepCardData[]) => void;
 }
 
 const NO_ACTIVITY: ChatActivity = { answering: false, preview: "", failed: false };
@@ -40,48 +50,75 @@ function sheetHeight(snap: SheetSnap, dragOffset: number) {
 }
 
 /**
- * The reading assistant over the Book: half height keeps the page visible
- * above it, full screen is the conversation alone. Dragging the handle moves
- * between them (and down to collapsed). The panel stays mounted while
- * collapsed so a draft and the open Session survive.
- *
- * Collapsed while an answer is coming, or with one that came in unseen, a
- * peek bar over the page says so; tapping it brings the sheet back to half.
+ * The phone's reading assistant sheet over the Book with explicit Guide / Ask
+ * tabs, mounting `GuideWorkspace` and `ChatWorkspace` independently.
  */
-export const AssistantSheet = forwardRef<ChatPanelHandle, AssistantSheetProps>(
+export const AssistantSheet = forwardRef<AssistantSheetHandle, AssistantSheetProps>(
   function AssistantSheet(
-    { snap, onSnapChange, bookId, currentChapterHref, onOpenQuote, peekOffset = "var(--safe-bottom)", onGuideStepsChange, onGuideCardsChange },
+    { snap, onSnapChange, tab: controlledTab, onTabChange: controlledOnTabChange, bookId, currentChapterHref, onOpenQuote, peekOffset = "var(--safe-bottom)" },
     ref,
   ) {
     const { t } = useT();
+    const [uncontrolledTab, setUncontrolledTab] = useState<AssistantSheetTab>("ask");
+    const tab = controlledTab ?? uncontrolledTab;
+    const onTabChange = useCallback(
+      (next: AssistantSheetTab) => {
+        if (controlledOnTabChange) controlledOnTabChange(next);
+        else setUncontrolledTab(next);
+      },
+      [controlledOnTabChange],
+    );
     const sheetRef = useRef<HTMLElement>(null);
+    const chatRef = useRef<ChatWorkspaceHandle>(null);
+    const guideRef = useRef<GuideWorkspaceHandle>(null);
     const dragRef = useRef<{ pointerId: number; startY: number } | null>(null);
 
     const [activity, setActivity] = useState(NO_ACTIVITY);
-    // An answer that finished while the sheet was collapsed.
     const [unseen, setUnseen] = useState(false);
     const [peekDismissed, setPeekDismissed] = useState(false);
     const activityRef = useRef(NO_ACTIVITY);
     const snapRef = useRef(snap);
     snapRef.current = snap;
+
     const handleActivity = useCallback((next: ChatActivity) => {
       const previous = activityRef.current;
       activityRef.current = next;
-      // A new answer brings a dismissed peek back.
       if (next.answering && !previous.answering) setPeekDismissed(false);
       if (previous.answering && !next.answering && snapRef.current === "collapsed") setUnseen(true);
       setActivity(next);
     }, []);
+
     useEffect(() => {
       if (snap === "collapsed") return;
       setUnseen(false);
       setPeekDismissed(false);
     }, [snap]);
 
+    useImperativeHandle(
+      ref,
+      () => ({
+        fillInput: (text, chapterHref) => {
+          if (tab === "guide") guideRef.current?.fillInput(text, chapterHref);
+          else chatRef.current?.fillInput(text, chapterHref);
+        },
+        guideTo: (selection) => {
+          if (tab !== "guide") onTabChange("guide");
+          requestAnimationFrame(() => guideRef.current?.guideTo(selection));
+        },
+        guideChapter: (href) => {
+          if (tab !== "guide") onTabChange("guide");
+          requestAnimationFrame(() => guideRef.current?.guideChapter(href));
+        },
+        scrollToMessage: (messageIndex) => {
+          if (tab !== "guide") onTabChange("guide");
+          requestAnimationFrame(() => guideRef.current?.scrollToMessage(messageIndex));
+        },
+      }),
+      [onTabChange, tab],
+    );
+
     const containerHeight = () => sheetRef.current?.parentElement?.getBoundingClientRect().height ?? 0;
 
-    // The drag writes the sheet's height straight to the DOM: a state update
-    // per pointer move would re-render the whole conversation every frame.
     const settle = (next: SheetSnap) => {
       const sheet = sheetRef.current;
       if (!sheet) return;
@@ -109,23 +146,30 @@ export const AssistantSheet = forwardRef<ChatPanelHandle, AssistantSheetProps>(
       if (next !== snap) onSnapChange(next);
     };
 
-    const preferGuidedSession = readerModeForSnap(snap) === "agent";
-    // The peek's state changes stay out of the conversation's renders.
-    const chatPanel = useMemo(
-      () => (
-        <ChatPanel
-          ref={ref}
-          bookId={bookId}
-          currentChapterHref={currentChapterHref}
-          onOpenQuote={onOpenQuote}
-          variant="docked"
-          preferGuidedSession={preferGuidedSession}
-          onActivityChange={handleActivity}
-          onGuideStepsChange={onGuideStepsChange}
-          onGuideCardsChange={onGuideCardsChange}
-        />
-      ),
-      [ref, bookId, currentChapterHref, onOpenQuote, preferGuidedSession, handleActivity, onGuideStepsChange, onGuideCardsChange],
+    const body = useMemo(
+      () =>
+        tab === "guide" ? (
+          <GuideWorkspace
+            ref={guideRef}
+            bookId={bookId}
+            currentChapterHref={currentChapterHref}
+            onOpenQuote={onOpenQuote}
+            variant="docked"
+            onActivityChange={handleActivity}
+          />
+        ) : (
+          <ChatWorkspace
+            ref={chatRef}
+            bookId={bookId}
+            currentChapterHref={currentChapterHref}
+            onOpenQuote={onOpenQuote}
+            variant="docked"
+            ordinarySessionsOnly
+            onOpenGuideMode={() => onTabChange("guide")}
+            onActivityChange={handleActivity}
+          />
+        ),
+      [bookId, currentChapterHref, handleActivity, onOpenQuote, onTabChange, tab],
     );
 
     const collapsed = snap === "collapsed";
@@ -135,13 +179,14 @@ export const AssistantSheet = forwardRef<ChatPanelHandle, AssistantSheetProps>(
       : activity.failed
         ? t("mobile.peekFailed")
         : t("mobile.peekAnswered");
+
     return (
       <>
         <section
           ref={sheetRef}
           aria-label={t("mobile.assistantSheet")}
           data-snap={snap}
-          // Collapsed, it slides below the edge and goes inert, still mounted.
+          data-tab={tab}
           aria-hidden={collapsed}
           inert={collapsed}
           className={cn(
@@ -153,18 +198,51 @@ export const AssistantSheet = forwardRef<ChatPanelHandle, AssistantSheetProps>(
           style={{
             height: sheetHeight(snap, 0),
             bottom: "var(--keyboard-inset)",
-            maxHeight: snap === "full"
-              ? "calc(100% - var(--keyboard-inset))"
-              : "calc(100% - var(--keyboard-inset) - var(--safe-top))",
+            maxHeight:
+              snap === "full"
+                ? "calc(100% - var(--keyboard-inset))"
+                : "calc(100% - var(--keyboard-inset) - var(--safe-top))",
             paddingBottom: "var(--keyboard-safe-bottom)",
           }}
         >
           <div className="relative flex shrink-0 items-center gap-1 px-2">
+            <div role="tablist" className="z-10 flex items-center gap-0.5 rounded-lg bg-foreground/5 p-0.5">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={tab === "guide"}
+                onClick={() => onTabChange("guide")}
+                className={cn(
+                  "flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors",
+                  tab === "guide"
+                    ? "bg-background text-foreground shadow-xs"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <BookOpen className="h-3 w-3" aria-hidden />
+                {t("mobile.sheetTabGuide")}
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={tab === "ask"}
+                onClick={() => onTabChange("ask")}
+                className={cn(
+                  "flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors",
+                  tab === "ask"
+                    ? "bg-background text-foreground shadow-xs"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                <MessageSquare className="h-3 w-3" aria-hidden />
+                {t("mobile.sheetTabAsk")}
+              </button>
+            </div>
             <div
               role="separator"
               aria-orientation="horizontal"
               aria-label={t("mobile.sheetHandle")}
-              className="h-8 flex-1 touch-none"
+              className="h-9 flex-1 touch-none"
               onPointerDown={onPointerDown}
               onPointerMove={onPointerMove}
               onPointerUp={endDrag}
@@ -173,7 +251,6 @@ export const AssistantSheet = forwardRef<ChatPanelHandle, AssistantSheetProps>(
                 settle(snap);
               }}
             >
-              {/* Centered on the whole sheet, not the space left of the buttons. */}
               <span
                 aria-hidden
                 className="pointer-events-none absolute top-1/2 left-1/2 h-1 w-10 -translate-1/2 rounded-full bg-muted-foreground/30"
@@ -196,7 +273,7 @@ export const AssistantSheet = forwardRef<ChatPanelHandle, AssistantSheetProps>(
               <ChevronDown />
             </Button>
           </div>
-          <div className="assistant-sheet-body min-h-0 flex-1">{chatPanel}</div>
+          <div className="assistant-sheet-body min-h-0 flex-1">{body}</div>
         </section>
         {peekShown && (
           <div

@@ -229,14 +229,6 @@ describe("Guided sessions in the runtime",()=>{
     expect(await runtime.nextGuideStep()).toMatchObject({from:{chapterIndex:0,block:2,snippet:"b"},to:{chapterIndex:0,block:3}});
   });
 
-  it("skims a range step from where it starts to its chapter's end",async()=>{
-    const {runtime}=setup();
-    await runtime.openBook("book",new ArrayBuffer(1));
-    await runtime.newSession(undefined,"guided");
-    expect(await runtime.guideSkimStep({from:{chapterIndex:0,block:1},to:{chapterIndex:0,block:1}}))
-      .toMatchObject({skim:true,from:{block:1},to:{chapterIndex:0,block:3}});
-  });
-
   it("lists the blocks after a step's start for the picker, and builds the picked step",async()=>{
     const {runtime}=setup();
     await runtime.openBook("book",new ArrayBuffer(1));
@@ -249,7 +241,7 @@ describe("Guided sessions in the runtime",()=>{
       ],
       more:null,
     });
-    expect(await runtime.guideStepTo(step,{chapterIndex:1,block:0},true)).toEqual({skim:true,from:{chapterIndex:0,chapterTitle:"One",block:2,snippet:"c",paragraph:3},to:{chapterIndex:1,chapterTitle:"Two",block:0,snippet:"e",paragraph:1}});
+    expect(await runtime.guideStepTo(step,{chapterIndex:1,block:0})).toEqual({from:{chapterIndex:0,chapterTitle:"One",block:2,snippet:"c",paragraph:3},to:{chapterIndex:1,chapterTitle:"Two",block:0,snippet:"e",paragraph:1}});
     expect(await runtime.guideStepTo(step,{chapterIndex:0,block:1})).toBeNull();
   });
 
@@ -270,11 +262,11 @@ describe("Guided sessions in the runtime",()=>{
     const {runtime}=setup(undefined,null,undefined,{0:["a a","b","c","d"],1:["e","f"]});
     await runtime.openBook("book",new ArrayBuffer(1));
     expect(await runtime.guidePageMarks([])).toEqual({});
-    // An older Session's part steps, then a block range.
+    // An older Session's part steps (including legacy skim), then a block range.
     const steps=[{chapterIndex:0,part:0,totalParts:2},{chapterIndex:0,part:1,totalParts:2,skim:true as const},{from:{chapterIndex:1,block:0},to:{chapterIndex:1,block:0}}];
     expect(await runtime.guidePageMarks(steps)).toEqual({
-      "one.xhtml":{read:["aa","b"],skimmed:["c","d"],steps:{aa:0,b:0,c:1,d:1}},
-      "two.xhtml":{read:["e"],skimmed:[],cursor:"e",steps:{e:2}},
+      "one.xhtml":{read:["aa","b","c","d"],steps:{aa:0,b:0,c:1,d:1}},
+      "two.xhtml":{read:["e"],cursor:"e",steps:{e:2}},
     });
   });
 

@@ -7,11 +7,19 @@ import type { ChatActivity } from "@/lib/chat-activity";
 
 let chatPanelRenders = 0;
 let reportActivity: ((activity: ChatActivity) => void) | undefined;
-vi.mock("@/components/chat/ChatPanel", () => ({
-  ChatPanel: ({ onActivityChange }: { onActivityChange?: (activity: ChatActivity) => void }) => {
+vi.mock("@/components/chat/ChatWorkspace", () => ({
+  ChatWorkspace: ({ onActivityChange }: { onActivityChange?: (activity: ChatActivity) => void }) => {
     chatPanelRenders += 1;
     reportActivity = onActivityChange;
     return <div data-testid="chat-panel" />;
+  },
+}));
+
+vi.mock("@/components/guide/GuideWorkspace", () => ({
+  GuideWorkspace: ({ onActivityChange }: { onActivityChange?: (activity: ChatActivity) => void }) => {
+    chatPanelRenders += 1;
+    reportActivity = onActivityChange;
+    return <div data-testid="guide-workspace" />;
   },
 }));
 

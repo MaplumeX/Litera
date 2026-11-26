@@ -1,15 +1,13 @@
 /**
  * Marks in the Book pane for a Guided session: the paragraphs the guide has
- * read are faded (more where it only skimmed), and a "read up to here"
- * divider follows the Guide cursor's paragraph.
- * Paragraphs are matched by their opening text, the same on the page and in
- * the chapter's blocks.
+ * read are faded, and a "read up to here" divider follows the Guide cursor's
+ * paragraph. Paragraphs are matched by their opening text, the same on the
+ * page and in the chapter's blocks.
  */
 
 /** A Guided session's marks for one file of the Book, as `guideMarkKey`s. */
 export interface GuideFileMarks {
   read: string[];
-  skimmed: string[];
   cursor?: string;
   /** Opening key -> latest step index (0-based) covering that paragraph. */
   steps?: Record<string, number>;
@@ -76,20 +74,17 @@ function elementKey(element: Element): string {
   return text.slice(0, KEY_CHARS);
 }
 
-/** How much of its own color a paragraph keeps once read, and once only skimmed. */
+/** How much of its own color a paragraph keeps once read. */
 const READ_INK = 62;
-const SKIM_INK = 48;
 
 /**
  * Read paragraphs fade from their own color (kept in `INK_VAR`, so a dimmed
- * blockquote stays dimmer than the text around it), skimmed ones more. The
- * Guide cursor's divider is drawn from the unfaded ink, so it stays as clear
- * as on an unread page.
+ * blockquote stays dimmer than the text around it). The Guide cursor's divider
+ * is drawn from the unfaded ink, so it stays as clear as on an unread page.
  */
 function styles(cursorLabel: string): string {
   const ink = (percent: number) => `color-mix(in srgb, var(${INK_VAR}, currentColor) ${percent}%, transparent)`;
   return `[${MARK}="read"] { color: ${ink(READ_INK)}; }
-[${MARK}="skim"] { color: ${ink(SKIM_INK)}; }
 [${CURSOR}]::after { content: ${JSON.stringify(cursorLabel)}; display: block; margin: 1.4em 0 1.2em; font-size: 12px; font-style: normal; font-weight: normal; line-height: 1; letter-spacing: 0.12em; text-indent: 0; text-align: center; color: ${ink(45)}; background: linear-gradient(${ink(14)}, ${ink(14)}) left center / calc(50% - 4.5em) 1px no-repeat, linear-gradient(${ink(14)}, ${ink(14)}) right center / calc(50% - 4.5em) 1px no-repeat; }`;
 }
 
@@ -115,8 +110,7 @@ export function applyGuideMarks(doc: Document, marks: GuideFileMarks | null, cur
   doc.getElementById(STYLE_ID)?.remove();
   if (!marks || !doc.body) return;
   const read = new Set(marks.read);
-  const skimmed = new Set(marks.skimmed);
-  if (!read.size && !skimmed.size && !marks.cursor) return;
+  if (!read.size && !marks.cursor) return;
   const style = doc.createElement("style");
   style.id = STYLE_ID;
   style.textContent = styles(cursorLabel);
@@ -127,10 +121,9 @@ export function applyGuideMarks(doc: Document, marks: GuideFileMarks | null, cur
     if (element.tagName.toUpperCase() === "DIV" && element.querySelector(PARAGRAPHS)) continue;
     const key = elementKey(element);
     if (!key) continue;
-    const state = read.has(key) ? "read" : skimmed.has(key) ? "skim" : null;
-    if (state) {
+    if (read.has(key)) {
       keepInk(element as HTMLElement);
-      element.setAttribute(MARK, state);
+      element.setAttribute(MARK, "read");
       const stepIndex = marks.steps?.[key];
       if (stepIndex !== undefined) element.setAttribute(STEP_ATTR, String(stepIndex));
     }
