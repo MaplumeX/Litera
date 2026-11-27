@@ -226,4 +226,95 @@ describe("GuideWorkspace", () => {
     await waitFor(() => expect(guideStepAtHref).toHaveBeenCalledWith("ch2.xhtml"));
     expect(prompt).toHaveBeenCalledTimes(1);
   });
+
+  it("renders an aborted guided step as an incomplete step card (not a follow-up question) and retries from its request", async () => {
+    mockState = makeGuidedState({
+      messages: [
+        { role: "user", content: "继续带读", guideRequest: {} },
+        {
+          role: "assistant",
+          content: "第一章讲解。",
+          blocks: [
+            { type: "toolCall", toolCall: { toolCallId: "t1", tool: "guide_step", params: {}, done: true, guide: step0 } },
+            { type: "text", text: "第一章讲解。" },
+          ],
+        },
+        { role: "user", content: "继续带读", guideRequest: {} },
+        {
+          role: "assistant",
+          content: "第二章刚讲了一半",
+          stopReason: "aborted",
+          blocks: [
+            { type: "toolCall", toolCall: { toolCallId: "t2", tool: "guide_step", params: {}, done: true } },
+            { type: "text", text: "第二章刚讲了一半" },
+          ],
+        },
+      ],
+    });
+
+    render(<GuideWorkspace bookId="book-1" />);
+
+    expect(screen.queryByTestId("guide-side-thread")).toBeNull();
+    const incomplete = screen.getByTestId("guide-incomplete-step");
+    expect(incomplete.getAttribute("data-status")).toBe("aborted");
+    expect(screen.getByText("已中断")).toBeTruthy();
+    expect(screen.getByText("第二章刚讲了一半")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "重试" }));
+    await waitFor(() => expect(editPrompt).toHaveBeenCalledTimes(1));
+    expect(editPrompt.mock.calls[0][0]).toBe(2);
+    expect(editPrompt.mock.calls[0][2]).toEqual({
+      selection: undefined,
+      chapterHref: undefined,
+      guideRequest: {},
+    });
+  });
+
+  it("auto-collapses an older aborted guided step once a newer committed step succeeds", () => {
+    mockState = makeGuidedState({
+      messages: [
+        { role: "user", content: "继续带读", guideRequest: {} },
+        {
+          role: "assistant",
+          content: "第一章讲解。",
+          blocks: [
+            { type: "toolCall", toolCall: { toolCallId: "t1", tool: "guide_step", params: {}, done: true, guide: step0 } },
+            { type: "text", text: "第一章讲解。" },
+          ],
+        },
+        { role: "user", content: "继续带读", guideRequest: {} },
+        {
+          role: "assistant",
+          content: "旧的中断半截内容",
+          stopReason: "aborted",
+          blocks: [
+            { type: "toolCall", toolCall: { toolCallId: "t-abort", tool: "guide_step", params: {}, done: true } },
+            { type: "text", text: "旧的中断半截内容" },
+          ],
+        },
+        { role: "user", content: "继续带读", guideRequest: {} },
+        {
+          role: "assistant",
+          content: "第二章完整讲解。",
+          blocks: [
+            { type: "toolCall", toolCall: { toolCallId: "t2", tool: "guide_step", params: {}, done: true, guide: step1 } },
+            { type: "text", text: "第二章完整讲解。" },
+          ],
+        },
+      ],
+    });
+
+    render(<GuideWorkspace bookId="book-1" />);
+
+    expect(screen.queryByTestId("guide-side-thread")).toBeNull();
+    expect(screen.getAllByTestId("guide-step-section")).toHaveLength(2);
+    expect(screen.getByText("第二章完整讲解。")).toBeTruthy();
+
+    // Superseded interrupted step collapses by default so the continuous reading flow stays clean.
+    expect(screen.queryByText("旧的中断半截内容")).toBeNull();
+
+    // Expanding it reveals the preserved aborted partial output.
+    fireEvent.click(screen.getByRole("button", { name: "展开未完成的带读" }));
+    expect(screen.getByText("旧的中断半截内容")).toBeTruthy();
+  });
 });
