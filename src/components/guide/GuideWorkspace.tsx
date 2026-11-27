@@ -22,6 +22,7 @@ import { GuideStepMarkerPlaceholder } from "@/components/chat/GuideStepMarker";
 import { ModelSwitcher } from "@/components/chat/ModelSwitcher";
 import { SessionConfigDialog, type SessionConfigTarget } from "@/components/chat/SessionConfigDialog";
 import { TypingIndicator } from "@/components/chat/TypingIndicator";
+import { GuideChapterBar, GuideChapterFooter } from "./GuideChapterBar";
 import { GuideChapterGroup, GuideTimelineDivider } from "./GuideChapterGroup";
 import { GuideControlDock } from "./GuideControlDock";
 import { GuideIncompleteStepCard } from "./GuideIncompleteStepCard";
@@ -31,9 +32,15 @@ import type { QuoteLocation } from "@/agent/book/book-content";
 import { canonicalGuidedSession } from "@/agent/sessions/pi-session";
 import type { GuideBlockTarget } from "@/lib/guide-marks";
 import {
+  findRunIdForChapter,
+  findRunIdForMessage,
+  findRunIdForStep,
+  findSideQuestionUserIndex,
   projectGuideDocument,
+  resolveActiveGuideRun,
   type GuideDocument,
   type GuideIncompleteStepNode,
+  type GuideSearchHit,
   type GuideStepNode,
   type GuideTimelineMarker,
 } from "@/lib/guide-document";
@@ -172,6 +179,7 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
     const [editingIndex, setEditingIndex] = useState<number | null>(null);
     const [editDraft, setEditDraft] = useState("");
     const [expandedQuestionIndex, setExpandedQuestionIndex] = useState<number | null>(null);
+    const [focusedRunId, setFocusedRunId] = useState<string | null>(null);
     const [viewingArchivedId, setViewingArchivedId] = useState<string | null>(null);
     const [computedStep, setComputedStep] = useState<GuideStep | null | undefined>(undefined);
     const [pickedStep, setPickedStep] = useState<GuideStep | null | undefined>(undefined);
@@ -181,7 +189,12 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
       null,
     );
     const inputRef = useRef<HTMLTextAreaElement>(null);
-    const chapterRefs = useRef(new Map<number, HTMLElement>());
+    const pendingJumpRef = useRef<
+      | { kind: "top" }
+      | { kind: "bottom"; smooth: boolean }
+      | { kind: "item"; messageIndex: number }
+      | null
+    >(null);
     const autoInitRef = useRef<string | null>(null);
 
     const {
@@ -296,22 +309,22 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
       });
     }, [onActivityChange, activity.answering, activity.preview, activity.failed]);
 
+    const { activeRun, activeRunIndex, latestRun, isViewingHistory } = useMemo(
+      () => resolveActiveGuideRun(document, focusedRunId),
+      [document, focusedRunId],
+    );
+    const isFirstRun = activeRunIndex === 0;
+    const isLatestRun = !isViewingHistory;
+    const prevRun = activeRunIndex > 0 ? document.runs[activeRunIndex - 1] : null;
+    const nextRun =
+      activeRunIndex >= 0 && activeRunIndex + 1 < document.runs.length
+        ? document.runs[activeRunIndex + 1]
+        : null;
+
     const outlineItems = useMemo<ChatOutlineItem[]>(() => {
       const items: ChatOutlineItem[] = [];
-      for (const qa of document.orphanSideThreads) {
-        items.push({
-          messageIndex: qa.userMessageIndex,
-          preview: userMessagePreview(qa.question),
-          kind: "question",
-        });
-      }
-      for (const step of document.steps) {
-        items.push({
-          messageIndex: step.messageIndex,
-          preview: step.label,
-          kind: "step",
-        });
-        for (const qa of step.sideThreads) {
+      if (!activeRun || isFirstRun) {
+        for (const qa of document.orphanSideThreads) {
           items.push({
             messageIndex: qa.userMessageIndex,
             preview: userMessagePreview(qa.question),
@@ -319,8 +332,24 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
           });
         }
       }
+      if (activeRun) {
+        for (const step of activeRun.steps) {
+          items.push({
+            messageIndex: step.messageIndex,
+            preview: step.label,
+            kind: "step",
+          });
+          for (const qa of step.sideThreads) {
+            items.push({
+              messageIndex: qa.userMessageIndex,
+              preview: userMessagePreview(qa.question),
+              kind: "question",
+            });
+          }
+        }
+      }
       return items;
-    }, [document]);
+    }, [activeRun, document.orphanSideThreads, isFirstRun]);
 
     const trackedIndices = useMemo(
       () => outlineItems.map((item) => item.messageIndex),
@@ -335,15 +364,7 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
       trackedIndices,
     });
 
-    const activeChapterIndex = useMemo(() => {
-      if (scroll.activeIndex === null) return document.runs[document.runs.length - 1]?.chapterIndex ?? null;
-      const step = document.steps.find(
-        (s) =>
-          s.messageIndex === scroll.activeIndex ||
-          s.sideThreads.some((q) => q.userMessageIndex === scroll.activeIndex),
-      );
-      return step?.chapterIndex ?? null;
-    }, [document.runs, document.steps, scroll.activeIndex]);
+    const activeChapterIndex = activeRun?.chapterIndex ?? null;
 
     const markersByAfterStep = useMemo(() => {
       const map = new Map<number, GuideTimelineMarker[]>();
@@ -389,7 +410,9 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
       setEditingIndex(null);
       setEditDraft("");
       setExpandedQuestionIndex(null);
+      setFocusedRunId(null);
       setViewingArchivedId(null);
+      pendingJumpRef.current = null;
       autoInitRef.current = null;
     }, [bookId]);
 
@@ -397,7 +420,57 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
       setEditingIndex(null);
       setEditDraft("");
       setPickedStep(undefined);
+      setFocusedRunId(null);
+      pendingJumpRef.current = null;
     }, [state.sessionId]);
+
+    const executeJump = useCallback(
+      (
+        jump:
+          | { kind: "top" }
+          | { kind: "bottom"; smooth: boolean }
+          | { kind: "item"; messageIndex: number },
+      ) => {
+        if (jump.kind === "top") {
+          const container = scroll.scrollContainerRef.current;
+          if (container) container.scrollTop = 0;
+        } else if (jump.kind === "bottom") {
+          scroll.scrollToBottom(jump.smooth);
+        } else {
+          requestAnimationFrame(() => scroll.scrollToItem(jump.messageIndex));
+        }
+      },
+      [scroll],
+    );
+
+    const focusRun = useCallback(
+      (
+        runId: string | null,
+        jump:
+          | { kind: "top" }
+          | { kind: "bottom"; smooth: boolean }
+          | { kind: "item"; messageIndex: number },
+      ) => {
+        const targetRunId = runId ?? latestRun?.id ?? null;
+        const normalizedFocus =
+          targetRunId && latestRun && targetRunId === latestRun.id ? null : targetRunId;
+        if (!targetRunId || targetRunId === activeRun?.id) {
+          setFocusedRunId(normalizedFocus);
+          executeJump(jump);
+          return;
+        }
+        pendingJumpRef.current = jump;
+        setFocusedRunId(normalizedFocus);
+      },
+      [activeRun?.id, executeJump, latestRun],
+    );
+
+    useEffect(() => {
+      const jump = pendingJumpRef.current;
+      if (!jump) return;
+      pendingJumpRef.current = null;
+      executeJump(jump);
+    }, [activeRun?.id, executeJump]);
 
     useEffect(() => {
       if (state.promptId || state.error) setSubmitting(false);
@@ -455,7 +528,7 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
         setEditDraft("");
         setInvokeError(null);
         setSubmitting(true);
-        scroll.scrollToBottom();
+        focusRun(null, { kind: "bottom", smooth: true });
         try {
           await takeStep(label, guideRequest, { pace });
         } catch (err) {
@@ -463,7 +536,7 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
           setSubmitting(false);
         }
       },
-      [bookId, isStreaming, isViewingArchived, pace, scroll, takeStep, transformGuideRequest],
+      [bookId, focusRun, isStreaming, isViewingArchived, pace, takeStep, transformGuideRequest],
     );
 
     const sendGuideStep = useCallback(
@@ -519,7 +592,7 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
       setPendingSelection(null);
       setInvokeError(null);
       setSubmitting(true);
-      scroll.scrollToBottom();
+      focusRun(null, { kind: "bottom", smooth: true });
       try {
         await askSideQuestion(text, { selection, chapterHref });
       } catch (err) {
@@ -530,7 +603,7 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
         setInvokeError(String(err));
         setSubmitting(false);
       }
-    }, [askSideQuestion, bookId, currentChapterHref, input, isStreaming, isViewingArchived, pendingSelection, scroll]);
+    }, [askSideQuestion, bookId, currentChapterHref, focusRun, input, isStreaming, isViewingArchived, pendingSelection]);
 
     const handleAbort = useCallback(async () => {
       setInvokeError(null);
@@ -568,7 +641,7 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
       setEditingIndex(null);
       setInvokeError(null);
       setSubmitting(true);
-      scroll.scrollToBottom();
+      focusRun(null, { kind: "bottom", smooth: true });
       try {
         await editPrompt(
           index,
@@ -582,7 +655,7 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
         setSubmitting(false);
         setEditingIndex(index);
       }
-    }, [bookId, editDraft, editPrompt, editingIndex, isStreaming, isViewingArchived, scroll, state.messages]);
+    }, [bookId, editDraft, editPrompt, editingIndex, focusRun, isStreaming, isViewingArchived, state.messages]);
 
     const handleRegenerate = useCallback(
       async (atIndex?: number) => {
@@ -609,7 +682,7 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
         setEditDraft("");
         setInvokeError(null);
         setSubmitting(true);
-        scroll.scrollToBottom();
+        focusRun(null, { kind: "bottom", smooth: true });
         try {
           const legacyGuide = Boolean(original.guide && !original.guideRequest);
           const requestChanged =
@@ -636,7 +709,7 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
           setSubmitting(false);
         }
       },
-      [bookId, editPrompt, isStreaming, isViewingArchived, regenerateTurn, scroll, state.messages, transformGuideRequest],
+      [bookId, editPrompt, focusRun, isStreaming, isViewingArchived, regenerateTurn, state.messages, transformGuideRequest],
     );
 
     const handleSwitchBranch = useCallback(
@@ -722,25 +795,60 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
       [bookReady, guideStepAtHref, isGuided, isStreaming, isViewingArchived, sendGuideStep, t],
     );
 
+    const handleSelectRun = useCallback(
+      (runId: string) => {
+        focusRun(runId, { kind: "top" });
+      },
+      [focusRun],
+    );
+
+    const handleJumpLatest = useCallback(() => {
+      focusRun(null, { kind: "bottom", smooth: false });
+    }, [focusRun]);
+
+    const handleJumpToHit = useCallback(
+      (hit: GuideSearchHit) => {
+        if (hit.kind === "question") setExpandedQuestionIndex(hit.messageIndex);
+        focusRun(hit.runId, { kind: "item", messageIndex: hit.messageIndex });
+      },
+      [focusRun],
+    );
+
     const scrollToStep = useCallback(
       (stepIndex: number) => {
         const step = document.steps[stepIndex];
-        if (step) scroll.scrollToItem(step.messageIndex);
+        if (!step) return;
+        const runId = findRunIdForStep(document, stepIndex);
+        focusRun(runId, { kind: "item", messageIndex: step.messageIndex });
       },
-      [document.steps, scroll],
+      [document, focusRun],
     );
 
-    const scrollToChapter = useCallback((chapterIndex: number) => {
-      const target = chapterRefs.current.get(chapterIndex);
-      if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
-    }, []);
+    const scrollToChapter = useCallback(
+      (chapterIndex: number) => {
+        const runId = findRunIdForChapter(document, chapterIndex);
+        if (runId) focusRun(runId, { kind: "top" });
+      },
+      [document, focusRun],
+    );
 
     const scrollToQuestion = useCallback(
       (userMessageIndex: number) => {
         setExpandedQuestionIndex(userMessageIndex);
-        requestAnimationFrame(() => scroll.scrollToItem(userMessageIndex));
+        const runId = findRunIdForMessage(document, userMessageIndex);
+        focusRun(runId, { kind: "item", messageIndex: userMessageIndex });
       },
-      [scroll],
+      [document, focusRun],
+    );
+
+    const scrollToMessage = useCallback(
+      (messageIndex: number) => {
+        const questionUserIndex = findSideQuestionUserIndex(document, messageIndex);
+        if (questionUserIndex !== null) setExpandedQuestionIndex(questionUserIndex);
+        const runId = findRunIdForMessage(document, messageIndex);
+        focusRun(runId, { kind: "item", messageIndex });
+      },
+      [document, focusRun],
     );
 
     const openSettings = useCallback(() => {
@@ -754,7 +862,7 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
         fillInput,
         guideTo: (selection) => void guideTo(selection),
         guideChapter: (href) => void guideChapter(href),
-        scrollToMessage: (messageIndex) => scroll.scrollToItem(messageIndex),
+        scrollToMessage,
         scrollToStep,
         scrollToChapter,
         scrollToQuestion,
@@ -765,8 +873,8 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
         guideChapter,
         guideTo,
         openSettings,
-        scroll,
         scrollToChapter,
+        scrollToMessage,
         scrollToQuestion,
         scrollToStep,
       ],
@@ -812,12 +920,11 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
     }, []);
 
     const hasNavRail = isWorkspace && Boolean(renderNavRail);
+    const showChapterBar = Boolean(
+      activeRun && (document.runs.length >= 2 || !(hasNavRail && navRailOpen)),
+    );
     const showOutlineRail = isWorkspace && outlineItems.length >= 2;
     const latestStepIndex = document.steps.length - 1;
-    const registerChapter = useCallback((chapterIndex: number, element: HTMLElement | null) => {
-      if (element) chapterRefs.current.set(chapterIndex, element);
-      else chapterRefs.current.delete(chapterIndex);
-    }, []);
 
     const navRailContent = hasNavRail
       ? renderNavRail!({
@@ -924,6 +1031,19 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
               </div>
             )}
 
+            {showChapterBar && activeRun && (
+              <GuideChapterBar
+                document={document}
+                activeRun={activeRun}
+                activeRunIndex={activeRunIndex}
+                isViewingHistory={isViewingHistory}
+                compact={!isWorkspace}
+                onSelectRun={handleSelectRun}
+                onJumpLatest={handleJumpLatest}
+                onJumpToHit={handleJumpToHit}
+              />
+            )}
+
             <div className="relative min-h-0 flex-1">
               <div
                 ref={scroll.scrollContainerRef}
@@ -964,11 +1084,12 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
                   />
                 )}
 
-                {leadingMarkers.map((marker) => (
-                  <GuideTimelineDivider key={`lead-${marker.messageIndex}`} marker={marker} />
-                ))}
+                {(!activeRun || isFirstRun) &&
+                  leadingMarkers.map((marker) => (
+                    <GuideTimelineDivider key={`lead-${marker.messageIndex}`} marker={marker} />
+                  ))}
 
-                {document.orphanSideThreads.length > 0 && (
+                {(!activeRun || isFirstRun) && document.orphanSideThreads.length > 0 && (
                   <GuideSideThread
                     threads={document.orphanSideThreads}
                     defaultExpanded
@@ -988,24 +1109,25 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
                   />
                 )}
 
-                {leadingIncompleteSteps.map((attempt) => (
-                  <GuideIncompleteStepCard
-                    key={attempt.id}
-                    node={attempt}
-                    defaultExpanded={attempt.id === activeTailIncompleteId}
-                    bookReady={bookReady}
-                    isStreaming={isStreaming}
-                    readOnly={isViewingArchived}
-                    onRegenerate={(idx) => void handleRegenerate(idx)}
-                    onSwitchBranch={(anchorId, dir) => void handleSwitchBranch(anchorId, dir)}
-                    registerItem={scroll.registerItem}
-                  />
-                ))}
+                {(!activeRun || isFirstRun) &&
+                  leadingIncompleteSteps.map((attempt) => (
+                    <GuideIncompleteStepCard
+                      key={attempt.id}
+                      node={attempt}
+                      defaultExpanded={attempt.id === activeTailIncompleteId}
+                      bookReady={bookReady}
+                      isStreaming={isStreaming}
+                      readOnly={isViewingArchived}
+                      onRegenerate={(idx) => void handleRegenerate(idx)}
+                      onSwitchBranch={(anchorId, dir) => void handleSwitchBranch(anchorId, dir)}
+                      registerItem={scroll.registerItem}
+                    />
+                  ))}
 
-                {document.runs.map((run) => (
+                {activeRun && (
                   <GuideChapterGroup
-                    key={run.id}
-                    run={run}
+                    key={activeRun.id}
+                    run={activeRun}
                     latestStepIndex={latestStepIndex}
                     markersByAfterStep={markersByAfterStep}
                     incompleteStepsByAfterStep={incompleteStepsByAfterStep}
@@ -1027,20 +1149,22 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
                     onSaveEdit={() => void handleSaveEdit()}
                     onCancelEdit={handleCancelEdit}
                     registerItem={scroll.registerItem}
-                    registerChapter={registerChapter}
                     extraActions={extraStepActions}
                   />
-                ))}
-
-                {document.pendingSteps.map((pending) => (
-                  <GuideStepMarkerPlaceholder key={pending.id} />
-                ))}
-
-                {isStreaming && (!lastChatMessage || lastChatMessage.role === "user") && (
-                  <div className="flex gap-2">
-                    <TypingIndicator />
-                  </div>
                 )}
+
+                {(!activeRun || isLatestRun) &&
+                  document.pendingSteps.map((pending) => (
+                    <GuideStepMarkerPlaceholder key={pending.id} />
+                  ))}
+
+                {(!activeRun || isLatestRun) &&
+                  isStreaming &&
+                  (!lastChatMessage || lastChatMessage.role === "user") && (
+                    <div className="flex gap-2">
+                      <TypingIndicator />
+                    </div>
+                  )}
 
                 {error && (
                   <div className="flex items-center gap-2 rounded-lg border border-destructive/50 bg-destructive/10 px-2 py-1 text-xs text-destructive">
@@ -1049,9 +1173,13 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
                   </div>
                 )}
 
-                {state.compaction && <CompactionStatus status={state.compaction.status} />}
+                {(!activeRun || isLatestRun) && state.compaction && (
+                  <CompactionStatus status={state.compaction.status} />
+                )}
 
-                {(!lastChatMessage || (lastChatMessage.role === "user" && !lastChatMessage.guideRequest)) &&
+                {(!activeRun || isLatestRun) &&
+                  (!lastChatMessage ||
+                    (lastChatMessage.role === "user" && !lastChatMessage.guideRequest)) &&
                   !isStreaming &&
                   bookReady &&
                   !isViewingArchived &&
@@ -1067,6 +1195,14 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
                       </button>
                     </div>
                   )}
+
+                {activeRun && document.runs.length >= 2 && (
+                  <GuideChapterFooter
+                    prevRun={prevRun}
+                    nextRun={nextRun}
+                    onSelectRun={handleSelectRun}
+                  />
+                )}
 
                 <div ref={scroll.endRef} />
               </div>

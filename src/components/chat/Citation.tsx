@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { BookOpen, TriangleAlert } from "lucide-react";
 import type { QuoteLocation } from "@/agent/book/book-content";
 import { Button } from "@/components/ui/button";
@@ -47,10 +47,29 @@ export function Citation({
   const { t } = useT();
   const { locate, openInBook } = useContext(CitationContext);
   const settled = useContext(CitationSettledContext);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const [inView, setInView] = useState(() => typeof IntersectionObserver === "undefined");
   const [location, setLocation] = useState<QuoteLocation | null>(null);
 
   useEffect(() => {
-    if (!settled || !locate) return;
+    if (inView || typeof IntersectionObserver === "undefined") return;
+    const node = triggerRef.current;
+    if (!node) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setInView(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "200px 0px" },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [inView]);
+
+  useEffect(() => {
+    if (!settled || !locate || !inView) return;
     let cancelled = false;
     locate(chapterIndex, quote).then(
       (result) => {
@@ -63,13 +82,14 @@ export function Citation({
     return () => {
       cancelled = true;
     };
-  }, [chapterIndex, locate, quote, settled]);
+  }, [chapterIndex, inView, locate, quote, settled]);
 
   const unverified = location?.status === "unverified";
   return (
     <Popover>
       <PopoverTrigger asChild>
         <button
+          ref={triggerRef}
           type="button"
           data-citation={location?.status ?? "pending"}
           className={cn(

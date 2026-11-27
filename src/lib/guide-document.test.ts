@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { projectGuideDocument } from "./guide-document";
+import {
+  findRunIdForChapter,
+  findRunIdForMessage,
+  findRunIdForStep,
+  findSideQuestionUserIndex,
+  projectGuideDocument,
+  resolveActiveGuideRun,
+  searchGuideDocument,
+} from "./guide-document";
 import { extractGuideStepCards } from "./guide-step-cards";
 import type { AgentMessage, AnchorBranchInfo, GuideStep, LegacyGuideStep } from "@/types/agent";
 
@@ -397,5 +405,111 @@ describe("projectGuideDocument", () => {
 
     // extractGuideStepCards never exposes interrupted guide steps as sideQuestions.
     expect(extractGuideStepCards(messages)[0].sideQuestions).toEqual([]);
+  });
+});
+
+describe("guide-document chapter-scoped helpers", () => {
+  const stepCh0: GuideStep = makeStep(0, 0, 4, { title: "第一章 起源" });
+  const stepCh1: GuideStep = makeStep(1, 0, 5, { title: "第二章 演进" });
+
+  function makeMultiRunDoc() {
+    const messages: AgentMessage[] = [
+      { role: "user", content: "开篇前的问题" },
+      { role: "assistant", content: "开篇前的回答" },
+      { role: "user", content: "继续", guideRequest: {} },
+      {
+        role: "assistant",
+        content: "第一章讲述自然选择的早期假说。",
+        blocks: [
+          { type: "toolCall", toolCall: { toolCallId: "t1", tool: "guide_step", params: {}, done: true, guide: stepCh0 } },
+          { type: "text", text: "第一章讲述自然选择的早期假说。" },
+        ],
+      },
+      { role: "user", content: "这里的假说如何验证？" },
+      { role: "assistant", content: "通过化石记录验证。" },
+      { role: "user", content: "继续", guideRequest: {} },
+      {
+        role: "assistant",
+        content: "第二章进入分子生物学阶段。",
+        blocks: [
+          { type: "toolCall", toolCall: { toolCallId: "t2", tool: "guide_step", params: {}, done: true, guide: stepCh1 } },
+          { type: "text", text: "第二章进入分子生物学阶段。" },
+        ],
+      },
+      { role: "user", content: "重读第一章", guideRequest: { step: stepCh0 } },
+      {
+        role: "assistant",
+        content: "重读第一章补充了新的视角。",
+        blocks: [
+          { type: "toolCall", toolCall: { toolCallId: "t3", tool: "guide_step", params: {}, done: true, guide: stepCh0 } },
+          { type: "text", text: "重读第一章补充了新的视角。" },
+        ],
+      },
+    ];
+    return projectGuideDocument({ bookId: "b1", sessionId: "s1", messages });
+  }
+
+  it("resolves active run, falls back to latest on stale id, and flags history viewing", () => {
+    const doc = makeMultiRunDoc();
+    expect(doc.runs).toHaveLength(3);
+    expect(doc.runs[2].isReread).toBe(true);
+
+    const latest = resolveActiveGuideRun(doc, null);
+    expect(latest.activeRun?.id).toBe(doc.runs[2].id);
+    expect(latest.activeRunIndex).toBe(2);
+    expect(latest.isViewingHistory).toBe(false);
+
+    const history = resolveActiveGuideRun(doc, doc.runs[0].id);
+    expect(history.activeRun?.id).toBe(doc.runs[0].id);
+    expect(history.isViewingHistory).toBe(true);
+
+    const fallback = resolveActiveGuideRun(doc, "missing-run-id");
+    expect(fallback.activeRun?.id).toBe(doc.runs[2].id);
+    expect(fallback.isViewingHistory).toBe(false);
+  });
+
+  it("maps chapters, steps, orphan questions, and side questions to owning runs", () => {
+    const doc = makeMultiRunDoc();
+
+    expect(findRunIdForChapter(doc, 0)).toBe(doc.runs[2].id);
+    expect(findRunIdForChapter(doc, 1)).toBe(doc.runs[1].id);
+    expect(findRunIdForChapter(doc, 9)).toBeNull();
+
+    expect(findRunIdForStep(doc, 0)).toBe(doc.runs[0].id);
+    expect(findRunIdForStep(doc, 1)).toBe(doc.runs[1].id);
+    expect(findRunIdForStep(doc, 2)).toBe(doc.runs[2].id);
+
+    expect(findRunIdForMessage(doc, 0)).toBe(doc.runs[0].id);
+    expect(findRunIdForMessage(doc, 1)).toBe(doc.runs[0].id);
+    expect(findSideQuestionUserIndex(doc, 1)).toBe(0);
+
+    expect(findRunIdForMessage(doc, 4)).toBe(doc.runs[0].id);
+    expect(findRunIdForMessage(doc, 5)).toBe(doc.runs[0].id);
+    expect(findSideQuestionUserIndex(doc, 5)).toBe(4);
+
+    expect(findRunIdForMessage(doc, 7)).toBe(doc.runs[1].id);
+    expect(findSideQuestionUserIndex(doc, 7)).toBeNull();
+  });
+
+  it("searches across all steps and side questions with context snippets", () => {
+    const doc = makeMultiRunDoc();
+
+    const hits = searchGuideDocument(doc, "化石记录");
+    expect(hits).toHaveLength(1);
+    expect(hits[0]).toMatchObject({
+      kind: "question",
+      runId: doc.runs[0].id,
+      messageIndex: 4,
+      chapterTitle: "第一章 起源",
+    });
+    expect(hits[0].snippet).toContain("化石记录");
+
+    const stepHits = searchGuideDocument(doc, "分子生物学");
+    expect(stepHits).toHaveLength(1);
+    expect(stepHits[0]).toMatchObject({
+      kind: "step",
+      runId: doc.runs[1].id,
+      messageIndex: 7,
+    });
   });
 });
