@@ -1,9 +1,15 @@
 import { Fragment } from "react";
 import { Layers } from "lucide-react";
 import { CompactionNotice } from "@/components/chat/CompactionNotice";
+import { GuideIncompleteStepCard } from "./GuideIncompleteStepCard";
 import { GuideStepSection, type GuideStepAction } from "./GuideStepSection";
 import type { GuideBlockImage } from "@/agent/book/book-content";
-import type { GuideChapterRun, GuideStepNode, GuideTimelineMarker } from "@/lib/guide-document";
+import type {
+  GuideChapterRun,
+  GuideIncompleteStepNode,
+  GuideStepNode,
+  GuideTimelineMarker,
+} from "@/lib/guide-document";
 import type { RecordedGuideStep } from "@/types/agent";
 import { useT } from "@/lib/i18n";
 
@@ -11,6 +17,8 @@ interface GuideChapterGroupProps {
   run: GuideChapterRun;
   latestStepIndex: number;
   markersByAfterStep: ReadonlyMap<number, GuideTimelineMarker[]>;
+  incompleteStepsByAfterStep?: ReadonlyMap<number, GuideIncompleteStepNode[]>;
+  activeTailIncompleteId?: string | null;
   expandedQuestionIndex?: number | null;
   bookReady: boolean;
   isStreaming: boolean;
@@ -60,6 +68,8 @@ export function GuideChapterGroup({
   run,
   latestStepIndex,
   markersByAfterStep,
+  incompleteStepsByAfterStep,
+  activeTailIncompleteId = null,
   expandedQuestionIndex,
   bookReady,
   isStreaming,
@@ -103,6 +113,20 @@ export function GuideChapterGroup({
       <div className="space-y-6">
         {run.steps.map((node) => {
           const trailingMarkers = markersByAfterStep.get(node.stepIndex) ?? [];
+          const trailingIncomplete = incompleteStepsByAfterStep?.get(node.stepIndex) ?? [];
+          const trailingItems = [
+            ...trailingMarkers.map((marker) => ({
+              kind: "marker" as const,
+              sortKey: marker.messageIndex,
+              marker,
+            })),
+            ...trailingIncomplete.map((attempt) => ({
+              kind: "incomplete" as const,
+              sortKey: attempt.requestMessageIndex,
+              attempt,
+            })),
+          ].sort((a, b) => a.sortKey - b.sortKey);
+
           return (
             <Fragment key={node.id}>
               <GuideStepSection
@@ -127,9 +151,23 @@ export function GuideChapterGroup({
                 registerItem={registerItem}
                 extraActions={extraActions}
               />
-              {trailingMarkers.map((marker) => (
-                <GuideTimelineDivider key={`marker-${marker.messageIndex}`} marker={marker} />
-              ))}
+              {trailingItems.map((item) =>
+                item.kind === "marker" ? (
+                  <GuideTimelineDivider key={`marker-${item.marker.messageIndex}`} marker={item.marker} />
+                ) : (
+                  <GuideIncompleteStepCard
+                    key={item.attempt.id}
+                    node={item.attempt}
+                    defaultExpanded={item.attempt.id === activeTailIncompleteId}
+                    bookReady={bookReady}
+                    isStreaming={isStreaming}
+                    readOnly={readOnly}
+                    onRegenerate={onRegenerateMessage}
+                    onSwitchBranch={onSwitchBranch}
+                    registerItem={registerItem}
+                  />
+                ),
+              )}
             </Fragment>
           );
         })}

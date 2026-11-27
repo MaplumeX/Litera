@@ -58,6 +58,31 @@ export interface GuidePendingStepNode {
   toolCallId: string;
 }
 
+export type GuideIncompleteStepStatus = "streaming" | "aborted" | "error" | "replied";
+
+/**
+ * A guided step request that has not committed a `Guided step` (aborted,
+ * errored, pre-tool streaming, or replied without calling `guide_step`).
+ * Kept off `sideThreads` so it never pollutes follow-up Q&A lists or exports.
+ */
+export interface GuideIncompleteStepNode {
+  id: string;
+  /** Timeline anchor: null before the first committed step, otherwise after this stepIndex. */
+  afterStepIndex: number | null;
+  requestMessageIndex: number;
+  assistantMessageIndex?: number;
+  label: string;
+  isGuideRequest: boolean;
+  status: GuideIncompleteStepStatus;
+  content: string;
+  blocks?: AssistantBlock[];
+  streaming: boolean;
+  stopReason?: "aborted" | "error";
+  errorMessage?: string;
+  branchAnchorId?: string;
+  branchInfo?: AnchorBranchInfo;
+}
+
 export type GuideTimelineMarker =
   | {
       kind: "guide_cut";
@@ -108,6 +133,7 @@ export interface GuideDocument {
   sessionId: string | null;
   steps: GuideStepNode[];
   pendingSteps: GuidePendingStepNode[];
+  incompleteSteps: GuideIncompleteStepNode[];
   runs: GuideChapterRun[];
   chapters: GuideChapterNode[];
   orphanSideThreads: GuideSideQaNode[];
@@ -172,6 +198,7 @@ export function projectGuideDocument({
 }: ProjectGuideDocumentInput): GuideDocument {
   const steps: GuideStepNode[] = [];
   const pendingSteps: GuidePendingStepNode[] = [];
+  const incompleteSteps: GuideIncompleteStepNode[] = [];
   const orphanSideThreads: GuideSideQaNode[] = [];
   const markers: GuideTimelineMarker[] = [];
 
@@ -191,10 +218,39 @@ export function projectGuideDocument({
     selection?: string;
     chapterHref?: string;
     isGuideRequest: boolean;
+    guideStep?: RecordedGuideStep;
   } | null = null;
 
-  const flushPendingUserAsSideQuestion = () => {
-    if (!pendingUser || pendingUser.isGuideRequest) {
+  const incompleteLabel = (user: NonNullable<typeof pendingUser>): string =>
+    user.guideStep ? guideStepLabel(user.guideStep) : user.content;
+
+  const flushPendingUser = (atEnd = false) => {
+    if (!pendingUser) return;
+    if (pendingUser.isGuideRequest) {
+      // While streaming before the first assistant event arrives, GuideWorkspace
+      // renders TypingIndicator directly; only materialize an unanswered request
+      // once it is no longer awaiting a live response.
+      if (atEnd && isStreaming && pendingUser.index === lastChatIndex) {
+        pendingUser = null;
+        return;
+      }
+      const { branchAnchorId, branchInfo } = branchForIndex(
+        pendingUser.index,
+        branchAnchors,
+        branchNavigation,
+      );
+      incompleteSteps.push({
+        id: `incomplete-${pendingUser.index}`,
+        afterStepIndex: currentStep ? currentStep.stepIndex : null,
+        requestMessageIndex: pendingUser.index,
+        label: incompleteLabel(pendingUser),
+        isGuideRequest: true,
+        status: "aborted",
+        content: "",
+        streaming: false,
+        branchAnchorId,
+        branchInfo,
+      });
       pendingUser = null;
       return;
     }
@@ -223,7 +279,7 @@ export function projectGuideDocument({
     const message = messages[index];
 
     if (message.role === "guide_cut") {
-      flushPendingUserAsSideQuestion();
+      flushPendingUser();
       markers.push({
         kind: "guide_cut",
         messageIndex: index,
@@ -234,7 +290,7 @@ export function projectGuideDocument({
     }
 
     if (message.role === "notice") {
-      flushPendingUserAsSideQuestion();
+      flushPendingUser();
       markers.push({
         kind: "compaction",
         messageIndex: index,
@@ -250,8 +306,8 @@ export function projectGuideDocument({
     }
 
     if (message.role === "user") {
-      // Flush any earlier unanswered user question before starting a new one.
-      flushPendingUserAsSideQuestion();
+      // Flush any earlier unanswered user message before starting a new one.
+      flushPendingUser();
 
       if (message.guide) {
         const start = stepChapterStart(message.guide);
@@ -281,6 +337,7 @@ export function projectGuideDocument({
           selection: message.selection,
           chapterHref: message.chapterHref,
           isGuideRequest: !!message.guideRequest,
+          guideStep: message.guideRequest?.step,
         };
       }
       continue;
@@ -295,6 +352,7 @@ export function projectGuideDocument({
       const inFlightGuideCalls = streamingThis
         ? toolCalls.filter((call) => !call.guide && call.tool === "guide_step" && !call.done)
         : [];
+      const hasGuideStepCall = toolCalls.some((call) => call.tool === "guide_step");
 
       if (takenCalls.length > 0) {
         const reqIndex = pendingUser?.index;
@@ -342,7 +400,39 @@ export function projectGuideDocument({
             toolCallId: call.toolCallId,
           });
         }
-      } else if (pendingUser && !pendingUser.isGuideRequest) {
+      } else if (pendingUser && (pendingUser.isGuideRequest || hasGuideStepCall)) {
+        // An uncommitted guided-step turn (aborted, errored, pre-tool streaming,
+        // or replied without calling guide_step): never demote to a side question.
+        const { branchAnchorId, branchInfo } = branchForIndex(
+          pendingUser.index,
+          branchAnchors,
+          branchNavigation,
+        );
+        const status: GuideIncompleteStepStatus = streamingThis
+          ? "streaming"
+          : message.stopReason === "aborted"
+            ? "aborted"
+            : message.stopReason === "error"
+              ? "error"
+              : "replied";
+        incompleteSteps.push({
+          id: `incomplete-${pendingUser.index}`,
+          afterStepIndex: currentStep ? currentStep.stepIndex : null,
+          requestMessageIndex: pendingUser.index,
+          assistantMessageIndex: index,
+          label: incompleteLabel(pendingUser),
+          isGuideRequest: pendingUser.isGuideRequest,
+          status,
+          content: message.content,
+          blocks: message.blocks,
+          streaming: streamingThis,
+          stopReason: message.stopReason,
+          errorMessage: message.errorMessage,
+          branchAnchorId,
+          branchInfo,
+        });
+        pendingUser = null;
+      } else if (pendingUser) {
         const { branchAnchorId, branchInfo } = branchForIndex(
           pendingUser.index,
           branchAnchors,
@@ -366,29 +456,6 @@ export function projectGuideDocument({
         if (currentStep) currentStep.sideThreads.push(qa);
         else orphanSideThreads.push(qa);
         pendingUser = null;
-      } else if (pendingUser && pendingUser.isGuideRequest) {
-        // A guideRequest whose assistant reply failed/aborted or replied without calling guide_step.
-        const { branchAnchorId, branchInfo } = branchForIndex(
-          pendingUser.index,
-          branchAnchors,
-          branchNavigation,
-        );
-        const qa: GuideSideQaNode = {
-          id: `qa-${pendingUser.index}`,
-          userMessageIndex: pendingUser.index,
-          assistantMessageIndex: index,
-          question: pendingUser.content,
-          answer: message.content,
-          blocks: message.blocks,
-          streaming: streamingThis,
-          stopReason: message.stopReason,
-          errorMessage: message.errorMessage,
-          branchAnchorId,
-          branchInfo,
-        };
-        if (currentStep) currentStep.sideThreads.push(qa);
-        else orphanSideThreads.push(qa);
-        pendingUser = null;
       } else if (currentStep && !currentStep.explanation && !currentStep.blocks) {
         // Legacy user-message step whose assistant explanation sits in the next message.
         currentStep.explanation = message.content;
@@ -400,8 +467,8 @@ export function projectGuideDocument({
     }
   }
 
-  // Trailing unanswered user question (e.g., optimistic message right before assistant starts).
-  flushPendingUserAsSideQuestion();
+  // Trailing unanswered user message (e.g., optimistic message right before assistant starts).
+  flushPendingUser(true);
 
   // Build chronological chapter runs for document-flow rendering.
   const runs: GuideChapterRun[] = [];
@@ -479,6 +546,7 @@ export function projectGuideDocument({
     sessionId,
     steps,
     pendingSteps,
+    incompleteSteps,
     runs,
     chapters,
     orphanSideThreads,

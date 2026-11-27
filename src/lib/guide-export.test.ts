@@ -48,6 +48,36 @@ describe("guide-export", () => {
     expect(mdNoQa).not.toContain("**Q:**");
   });
 
+  it("excludes interrupted guided step attempts from exported Markdown", () => {
+    const messages: AgentMessage[] = [
+      { role: "user", content: "继续带读", guideRequest: {} },
+      {
+        role: "assistant",
+        content: "第一章正文讲解。",
+        blocks: [
+          { type: "toolCall", toolCall: { toolCallId: "t1", tool: "guide_step", params: {}, done: true, guide: step0 } },
+          { type: "text", text: "第一章正文讲解。" },
+        ],
+      },
+      { role: "user", content: "继续带读", guideRequest: {} },
+      {
+        role: "assistant",
+        content: "被中断的半截讲解",
+        stopReason: "aborted",
+        blocks: [
+          { type: "toolCall", toolCall: { toolCallId: "t2", tool: "guide_step", params: {}, done: true } },
+          { type: "text", text: "被中断的半截讲解" },
+        ],
+      },
+    ];
+
+    const doc = projectGuideDocument({ bookId: "b1", sessionId: "g1", messages });
+    const md = formatGuideExportMarkdown(doc, { bookTitle: "大转型", includeSideQuestions: true });
+    expect(md).toContain("第一章正文讲解。");
+    expect(md).not.toContain("继续带读");
+    expect(md).not.toContain("被中断的半截讲解");
+  });
+
   it("sanitizes filenames safely for save_text_file", () => {
     expect(defaultGuideExportFileName("A/B:C*D")).toBe("A B C D-guide.md");
     expect(defaultGuideExportFileName("   ")).toBe("litera-guide-guide.md");

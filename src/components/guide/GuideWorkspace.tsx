@@ -24,12 +24,19 @@ import { SessionConfigDialog, type SessionConfigTarget } from "@/components/chat
 import { TypingIndicator } from "@/components/chat/TypingIndicator";
 import { GuideChapterGroup, GuideTimelineDivider } from "./GuideChapterGroup";
 import { GuideControlDock } from "./GuideControlDock";
+import { GuideIncompleteStepCard } from "./GuideIncompleteStepCard";
 import { GuideSideThread } from "./GuideSideThread";
 import type { GuideStepAction } from "./GuideStepSection";
 import type { QuoteLocation } from "@/agent/book/book-content";
 import { canonicalGuidedSession } from "@/agent/sessions/pi-session";
 import type { GuideBlockTarget } from "@/lib/guide-marks";
-import { projectGuideDocument, type GuideDocument, type GuideStepNode, type GuideTimelineMarker } from "@/lib/guide-document";
+import {
+  projectGuideDocument,
+  type GuideDocument,
+  type GuideIncompleteStepNode,
+  type GuideStepNode,
+  type GuideTimelineMarker,
+} from "@/lib/guide-document";
 import { useGuideBridge } from "@/lib/use-guide-bridge";
 import { useAssistantModelControls } from "@/lib/use-assistant-model-controls";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -352,6 +359,28 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
       () => document.markers.filter((marker) => marker.afterStepIndex === null),
       [document.markers],
     );
+
+    const incompleteStepsByAfterStep = useMemo(() => {
+      const map = new Map<number, GuideIncompleteStepNode[]>();
+      for (const attempt of document.incompleteSteps) {
+        if (attempt.afterStepIndex === null) continue;
+        const list = map.get(attempt.afterStepIndex) ?? [];
+        list.push(attempt);
+        map.set(attempt.afterStepIndex, list);
+      }
+      return map;
+    }, [document.incompleteSteps]);
+
+    const leadingIncompleteSteps = useMemo(
+      () => document.incompleteSteps.filter((attempt) => attempt.afterStepIndex === null),
+      [document.incompleteSteps],
+    );
+
+    const activeTailIncompleteId = useMemo(() => {
+      const last = document.incompleteSteps[document.incompleteSteps.length - 1];
+      if (!last) return null;
+      return (last.afterStepIndex ?? -1) === document.steps.length - 1 ? last.id : null;
+    }, [document.incompleteSteps, document.steps.length]);
 
     useEffect(() => {
       setInvokeError(null);
@@ -806,6 +835,7 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
       !document.hasStarted &&
       document.orphanSideThreads.length === 0 &&
       document.pendingSteps.length === 0 &&
+      document.incompleteSteps.length === 0 &&
       !error;
 
     return (
@@ -945,12 +975,28 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
                   />
                 )}
 
+                {leadingIncompleteSteps.map((attempt) => (
+                  <GuideIncompleteStepCard
+                    key={attempt.id}
+                    node={attempt}
+                    defaultExpanded={attempt.id === activeTailIncompleteId}
+                    bookReady={bookReady}
+                    isStreaming={isStreaming}
+                    readOnly={isViewingArchived}
+                    onRegenerate={(idx) => void handleRegenerate(idx)}
+                    onSwitchBranch={(anchorId, dir) => void handleSwitchBranch(anchorId, dir)}
+                    registerItem={scroll.registerItem}
+                  />
+                ))}
+
                 {document.runs.map((run) => (
                   <GuideChapterGroup
                     key={run.id}
                     run={run}
                     latestStepIndex={latestStepIndex}
                     markersByAfterStep={markersByAfterStep}
+                    incompleteStepsByAfterStep={incompleteStepsByAfterStep}
+                    activeTailIncompleteId={activeTailIncompleteId}
                     expandedQuestionIndex={expandedQuestionIndex}
                     bookReady={bookReady}
                     isStreaming={isStreaming}
@@ -992,7 +1038,7 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
 
                 {state.compaction && <CompactionStatus status={state.compaction.status} />}
 
-                {(!lastChatMessage || lastChatMessage.role === "user") &&
+                {(!lastChatMessage || (lastChatMessage.role === "user" && !lastChatMessage.guideRequest)) &&
                   !isStreaming &&
                   bookReady &&
                   !isViewingArchived &&

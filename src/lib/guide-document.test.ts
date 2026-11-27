@@ -34,6 +34,7 @@ describe("projectGuideDocument", () => {
     });
     expect(doc.hasStarted).toBe(false);
     expect(doc.steps).toEqual([]);
+    expect(doc.incompleteSteps).toEqual([]);
     expect(doc.runs).toEqual([]);
     expect(doc.orphanSideThreads).toEqual([]);
     expect(doc.totalQuestions).toBe(0);
@@ -257,5 +258,144 @@ describe("projectGuideDocument", () => {
         questionCount: 0,
       },
     ]);
+  });
+
+  it("projects aborted, errored, pre-tool streaming, and natural-language interrupted guide steps into incompleteSteps instead of sideThreads", () => {
+    const step0 = makeStep(0, 0, 5, { title: "第一章" });
+    const pickedStep1 = makeStep(1, 0, 5, { title: "第二章" });
+    const branchInfo: AnchorBranchInfo = {
+      activeIndex: 0,
+      options: [
+        { anchorId: "aborted-req", preview: "继续带读" },
+        { anchorId: "retried-req", preview: "继续带读" },
+      ],
+    };
+
+    const messages: AgentMessage[] = [
+      // First step aborted before any committed step exists (orphan position).
+      { role: "user", content: "开始带读：第一章", guideRequest: { step: step0 } },
+      {
+        role: "assistant",
+        content: "刚讲了一半",
+        stopReason: "aborted",
+        blocks: [
+          { type: "toolCall", toolCall: { toolCallId: "tc-abort-0", tool: "guide_step", params: {}, done: true } },
+          { type: "text", text: "刚讲了一半" },
+        ],
+      },
+      // Committed step 0.
+      { role: "user", content: "继续带读", guideRequest: {} },
+      {
+        role: "assistant",
+        content: "第一章完整讲解",
+        blocks: [
+          { type: "toolCall", toolCall: { toolCallId: "tc-ok-0", tool: "guide_step", params: {}, done: true, guide: step0 } },
+          { type: "text", text: "第一章完整讲解" },
+        ],
+      },
+      // Continue aborted after guide_step without persisted `guide`.
+      { role: "user", content: "继续带读", guideRequest: {} },
+      {
+        role: "assistant",
+        content: "第二章讲到一半停了",
+        stopReason: "aborted",
+        blocks: [
+          { type: "toolCall", toolCall: { toolCallId: "tc-abort-1", tool: "guide_step", params: {}, done: true } },
+          { type: "text", text: "第二章讲到一半停了" },
+        ],
+      },
+      // Picked step errored before calling guide_step.
+      { role: "user", content: "带读：第二章", guideRequest: { step: pickedStep1 } },
+      {
+        role: "assistant",
+        content: "",
+        stopReason: "error",
+        errorMessage: "网络超时",
+        blocks: [],
+      },
+      // Natural-language guide request aborted after guide_step ran.
+      { role: "user", content: "带读第三章" },
+      {
+        role: "assistant",
+        content: "第三章开头……",
+        stopReason: "aborted",
+        blocks: [
+          { type: "toolCall", toolCall: { toolCallId: "tc-nl-abort", tool: "guide_step", params: { chapterIndex: 2 }, done: true } },
+          { type: "text", text: "第三章开头……" },
+        ],
+      },
+      // Pre-tool streaming thinking for a new guideRequest must not flash as a side question.
+      { role: "user", content: "继续带读", guideRequest: {} },
+      {
+        role: "assistant",
+        content: "",
+        blocks: [{ type: "thinking", text: "先看看目录位置……" }],
+      },
+    ];
+
+    const doc = projectGuideDocument({
+      bookId: "b1",
+      sessionId: "s1",
+      messages,
+      branchAnchors: ["", "", "", "", "aborted-req", "", "", "", "", "", "", ""],
+      branchNavigation: { "aborted-req": branchInfo },
+      isStreaming: true,
+    });
+
+    expect(doc.steps).toHaveLength(1);
+    expect(doc.orphanSideThreads).toEqual([]);
+    expect(doc.steps[0].sideThreads).toEqual([]);
+    expect(doc.totalQuestions).toBe(0);
+    expect(doc.incompleteSteps).toHaveLength(5);
+
+    expect(doc.incompleteSteps[0]).toMatchObject({
+      afterStepIndex: null,
+      requestMessageIndex: 0,
+      assistantMessageIndex: 1,
+      isGuideRequest: true,
+      status: "aborted",
+      content: "刚讲了一半",
+      stopReason: "aborted",
+    });
+    expect(doc.incompleteSteps[1]).toMatchObject({
+      afterStepIndex: 0,
+      requestMessageIndex: 4,
+      assistantMessageIndex: 5,
+      label: "继续带读",
+      isGuideRequest: true,
+      status: "aborted",
+      content: "第二章讲到一半停了",
+      branchAnchorId: "aborted-req",
+      branchInfo,
+    });
+    expect(doc.incompleteSteps[2]).toMatchObject({
+      afterStepIndex: 0,
+      requestMessageIndex: 6,
+      assistantMessageIndex: 7,
+      isGuideRequest: true,
+      status: "error",
+      errorMessage: "网络超时",
+    });
+    expect(doc.incompleteSteps[3]).toMatchObject({
+      afterStepIndex: 0,
+      requestMessageIndex: 8,
+      assistantMessageIndex: 9,
+      label: "带读第三章",
+      isGuideRequest: false,
+      status: "aborted",
+      content: "第三章开头……",
+    });
+    expect(doc.incompleteSteps[4]).toMatchObject({
+      afterStepIndex: 0,
+      requestMessageIndex: 10,
+      assistantMessageIndex: 11,
+      label: "继续带读",
+      isGuideRequest: true,
+      status: "streaming",
+      streaming: true,
+    });
+
+    // extractGuideStepCards never exposes interrupted guide steps as sideQuestions.
+    expect(extractGuideStepCards(messages)[0].sideQuestions).toEqual([]);
   });
 });
