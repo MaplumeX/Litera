@@ -195,8 +195,9 @@ export function GuideNavRail({
                   ? Math.floor((progress.coveredBlocks * 100) / Math.max(1, progress.totalBlocks))
                   : 0;
                 const isActive =
-                  (progress?.current ?? false) ||
-                  (matchedChapterIndex !== undefined && matchedChapterIndex === activeChapterIndex);
+                  activeChapterIndex !== null
+                    ? matchedChapterIndex !== undefined && matchedChapterIndex === activeChapterIndex
+                    : (progress?.current ?? false);
 
                 return (
                   <div

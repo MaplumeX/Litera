@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { GuideBlockImage } from "@/agent/book/book-content";
 import { ImageViewer } from "@/components/ImageViewer";
 import { useT } from "@/lib/i18n";
@@ -30,11 +30,31 @@ interface GuideStepImagesProps {
  */
 export function GuideStepImages({ step, loadImages, loadImageUrl }: GuideStepImagesProps) {
   const { t } = useT();
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const [inView, setInView] = useState(() => typeof IntersectionObserver === "undefined");
   const [figures, setFigures] = useState<LoadedFigure[]>([]);
   const [viewing, setViewing] = useState<ReaderImage | null>(null);
   const stepKey = JSON.stringify(step);
 
   useEffect(() => {
+    if (inView || typeof IntersectionObserver === "undefined") return;
+    const node = sentinelRef.current;
+    if (!node) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setInView(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "240px 0px" },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [inView]);
+
+  useEffect(() => {
+    if (!inView) return;
     let cancelled = false;
     setFigures([]);
     void loadImages(step).then(async (items) => {
@@ -59,7 +79,9 @@ export function GuideStepImages({ step, loadImages, loadImageUrl }: GuideStepIma
     }).catch(() => {});
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stepKey, loadImages, loadImageUrl]);
+  }, [inView, stepKey, loadImages, loadImageUrl]);
+
+  if (!inView) return <div ref={sentinelRef} aria-hidden className="h-0 w-0" />;
 
   const visible = figures.filter((figure) => !figure.hidden);
   if (visible.length === 0) return null;

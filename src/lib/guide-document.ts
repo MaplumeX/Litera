@@ -587,3 +587,216 @@ function resolveChapterStatus(
   }
   return chapterSteps.length > 0 ? "in_progress" : "unread";
 }
+
+export interface ActiveGuideRunState {
+  activeRun: GuideChapterRun | null;
+  activeRunIndex: number;
+  latestRun: GuideChapterRun | null;
+  isViewingHistory: boolean;
+}
+
+/**
+ * Resolve which single `GuideChapterRun` is focused in chapter-scoped view.
+ * `focusedRunId === null` follows the latest run; a stale id safely falls back
+ * to the latest run.
+ */
+export function resolveActiveGuideRun(
+  doc: GuideDocument,
+  focusedRunId: string | null,
+): ActiveGuideRunState {
+  if (doc.runs.length === 0) {
+    return { activeRun: null, activeRunIndex: -1, latestRun: null, isViewingHistory: false };
+  }
+  const latestIndex = doc.runs.length - 1;
+  const latestRun = doc.runs[latestIndex];
+  const foundIndex = focusedRunId
+    ? doc.runs.findIndex((run) => run.id === focusedRunId)
+    : -1;
+  const activeRunIndex = foundIndex >= 0 ? foundIndex : latestIndex;
+  const activeRun = doc.runs[activeRunIndex];
+  return {
+    activeRun,
+    activeRunIndex,
+    latestRun,
+    isViewingHistory: activeRunIndex < latestIndex,
+  };
+}
+
+/** Find the most recent run covering `chapterIndex`, or null if none exists. */
+export function findRunIdForChapter(doc: GuideDocument, chapterIndex: number): string | null {
+  for (let i = doc.runs.length - 1; i >= 0; i -= 1) {
+    if (doc.runs[i].chapterIndex === chapterIndex) return doc.runs[i].id;
+  }
+  return null;
+}
+
+/** Find the run containing `stepIndex`, or null if not found. */
+export function findRunIdForStep(doc: GuideDocument, stepIndex: number): string | null {
+  for (const run of doc.runs) {
+    if (run.steps.some((step) => step.stepIndex === stepIndex)) return run.id;
+  }
+  return null;
+}
+
+/** Find the run owning a visible transcript `messageIndex` (step, question, marker, or incomplete attempt). */
+export function findRunIdForMessage(doc: GuideDocument, messageIndex: number): string | null {
+  if (
+    doc.orphanSideThreads.some(
+      (qa) => qa.userMessageIndex === messageIndex || qa.assistantMessageIndex === messageIndex,
+    )
+  ) {
+    return doc.runs[0]?.id ?? null;
+  }
+  for (const run of doc.runs) {
+    for (const step of run.steps) {
+      if (step.messageIndex === messageIndex || step.requestMessageIndex === messageIndex) {
+        return run.id;
+      }
+      if (
+        step.sideThreads.some(
+          (qa) => qa.userMessageIndex === messageIndex || qa.assistantMessageIndex === messageIndex,
+        )
+      ) {
+        return run.id;
+      }
+    }
+  }
+  const incomplete = doc.incompleteSteps.find(
+    (attempt) =>
+      attempt.requestMessageIndex === messageIndex ||
+      attempt.assistantMessageIndex === messageIndex,
+  );
+  if (incomplete) {
+    return incomplete.afterStepIndex === null
+      ? (doc.runs[0]?.id ?? null)
+      : findRunIdForStep(doc, incomplete.afterStepIndex);
+  }
+  const marker = doc.markers.find((item) => item.messageIndex === messageIndex);
+  if (marker) {
+    return marker.afterStepIndex === null
+      ? (doc.runs[0]?.id ?? null)
+      : findRunIdForStep(doc, marker.afterStepIndex);
+  }
+  if (
+    doc.pendingSteps.some(
+      (pending) =>
+        pending.messageIndex === messageIndex || pending.requestMessageIndex === messageIndex,
+    )
+  ) {
+    return doc.runs[doc.runs.length - 1]?.id ?? null;
+  }
+  return null;
+}
+
+/** Whether `messageIndex` belongs to a follow-up side question (user or assistant bubble). */
+export function findSideQuestionUserIndex(doc: GuideDocument, messageIndex: number): number | null {
+  for (const qa of doc.orphanSideThreads) {
+    if (qa.userMessageIndex === messageIndex || qa.assistantMessageIndex === messageIndex) {
+      return qa.userMessageIndex;
+    }
+  }
+  for (const step of doc.steps) {
+    for (const qa of step.sideThreads) {
+      if (qa.userMessageIndex === messageIndex || qa.assistantMessageIndex === messageIndex) {
+        return qa.userMessageIndex;
+      }
+    }
+  }
+  return null;
+}
+
+export interface GuideSearchHit {
+  id: string;
+  kind: "step" | "question";
+  runId: string;
+  chapterIndex: number;
+  chapterTitle: string;
+  label: string;
+  messageIndex: number;
+  snippet: string;
+}
+
+function makeSnippet(text: string, lowerQuery: string): string | null {
+  const collapsed = text.replace(/\s+/g, " ").trim();
+  if (!collapsed) return null;
+  const offset = collapsed.toLowerCase().indexOf(lowerQuery);
+  if (offset < 0) return null;
+  const start = Math.max(0, offset - 28);
+  const end = Math.min(collapsed.length, offset + lowerQuery.length + 64);
+  const prefix = start > 0 ? "…" : "";
+  const suffix = end < collapsed.length ? "…" : "";
+  return `${prefix}${collapsed.slice(start, end).trim()}${suffix}`;
+}
+
+/**
+ * Instant client-side search across all covered steps and side questions in a
+ * `GuideDocument`, used by the chapter switcher popover so single-chapter
+ * mounting never sacrifices whole-book findability.
+ */
+export function searchGuideDocument(
+  doc: GuideDocument,
+  rawQuery: string,
+  limit = 24,
+): GuideSearchHit[] {
+  const query = rawQuery.trim().toLowerCase();
+  if (!query || limit <= 0) return [];
+  const hits: GuideSearchHit[] = [];
+
+  if (doc.runs.length > 0) {
+    const firstRun = doc.runs[0];
+    for (const qa of doc.orphanSideThreads) {
+      const snippet = makeSnippet(qa.question, query) ?? makeSnippet(qa.answer, query);
+      if (!snippet) continue;
+      hits.push({
+        id: `hit-${qa.id}`,
+        kind: "question",
+        runId: firstRun.id,
+        chapterIndex: firstRun.chapterIndex,
+        chapterTitle: firstRun.chapterTitle,
+        label: qa.question,
+        messageIndex: qa.userMessageIndex,
+        snippet,
+      });
+      if (hits.length >= limit) return hits;
+    }
+  }
+
+  for (const run of doc.runs) {
+    for (const step of run.steps) {
+      const stepSnippet =
+        makeSnippet(step.explanation, query) ??
+        makeSnippet(step.label, query) ??
+        makeSnippet(step.chapterTitle, query);
+      if (stepSnippet) {
+        hits.push({
+          id: `hit-${step.id}`,
+          kind: "step",
+          runId: run.id,
+          chapterIndex: run.chapterIndex,
+          chapterTitle: run.chapterTitle,
+          label: step.label,
+          messageIndex: step.messageIndex,
+          snippet: stepSnippet,
+        });
+        if (hits.length >= limit) return hits;
+      }
+      for (const qa of step.sideThreads) {
+        const qaSnippet = makeSnippet(qa.question, query) ?? makeSnippet(qa.answer, query);
+        if (!qaSnippet) continue;
+        hits.push({
+          id: `hit-${qa.id}`,
+          kind: "question",
+          runId: run.id,
+          chapterIndex: run.chapterIndex,
+          chapterTitle: run.chapterTitle,
+          label: qa.question,
+          messageIndex: qa.userMessageIndex,
+          snippet: qaSnippet,
+        });
+        if (hits.length >= limit) return hits;
+      }
+    }
+  }
+
+  return hits;
+}

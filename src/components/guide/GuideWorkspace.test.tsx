@@ -123,7 +123,7 @@ describe("GuideWorkspace", () => {
     mockState = makeGuidedState();
   });
 
-  it("renders chapter-grouped step sections without mechanical guideRequest bubbles, and collapses older side threads", async () => {
+  it("focuses the latest chapter by default, mounts only one chapter at a time, and switches chapters via the chapter bar", async () => {
     mockState = makeGuidedState({
       messages: [
         { role: "user", content: "继续带读", guideRequest: {} },
@@ -153,22 +153,161 @@ describe("GuideWorkspace", () => {
 
     render(<GuideWorkspace bookId="book-1" />);
 
-    expect(screen.getAllByTestId("guide-chapter-group")).toHaveLength(2);
-    expect(screen.getAllByTestId("guide-step-section")).toHaveLength(2);
+    // Only the latest chapter run is mounted initially.
+    expect(screen.getAllByTestId("guide-chapter-group")).toHaveLength(1);
+    expect(screen.getAllByTestId("guide-step-section")).toHaveLength(1);
     // Mechanical "继续带读" user bubbles must NOT appear in the document body.
     expect(screen.queryByText("继续带读")).toBeNull();
-    expect(screen.getByText("第一章的核心论述。")).toBeTruthy();
+    expect(screen.queryByText("第一章的核心论述。")).toBeNull();
     expect(screen.getByText("第二章的展开。")).toBeTruthy();
-
-    // Older step's side thread is collapsed by default; latest step's side thread is expanded.
-    expect(screen.queryByText("为什么作者这样定义？")).toBeNull();
+    // Latest step's side thread is expanded by default.
     expect(screen.getByText("第二章和第一章怎么呼应？")).toBeTruthy();
+    expect(screen.queryByTestId("guide-jump-latest")).toBeNull();
 
-    // Expanding older step's side thread reveals its Q&A.
-    const toggles = screen.getAllByRole("button", { name: /追问/ });
-    fireEvent.click(toggles[0]);
+    // Switch back to Chapter 1 via the previous-chapter button.
+    fireEvent.click(screen.getByRole("button", { name: "上一章" }));
+
+    expect(screen.getAllByTestId("guide-chapter-group")).toHaveLength(1);
+    expect(screen.getByText("第一章的核心论述。")).toBeTruthy();
+    expect(screen.queryByText("第二章的展开。")).toBeNull();
+    expect(screen.getByTestId("guide-jump-latest")).toBeTruthy();
+
+    // Older step's side thread is collapsed by default and expands on click.
+    expect(screen.queryByText("为什么作者这样定义？")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /追问/ }));
     expect(screen.getByText("为什么作者这样定义？")).toBeTruthy();
     expect(screen.getByText("因为作者基于历史脉络。")).toBeTruthy();
+
+    // Clicking "回到最新" returns to Chapter 2.
+    fireEvent.click(screen.getByTestId("guide-jump-latest"));
+    expect(screen.getByText("第二章的展开。")).toBeTruthy();
+    expect(screen.queryByTestId("guide-jump-latest")).toBeNull();
+  });
+
+  it("hides the chapter bar on desktop with nav rail open when only one chapter run exists, and shows it when rail is closed or docked", () => {
+    mockState = makeGuidedState({
+      messages: [
+        { role: "user", content: "带读：第一章", guideRequest: { step: step0 } },
+        {
+          role: "assistant",
+          content: "第一章讲解。",
+          blocks: [
+            { type: "toolCall", toolCall: { toolCallId: "t1", tool: "guide_step", params: {}, done: true, guide: step0 } },
+            { type: "text", text: "第一章讲解。" },
+          ],
+        },
+      ],
+    });
+
+    const { rerender } = render(
+      <GuideWorkspace
+        bookId="book-1"
+        variant="workspace"
+        navRailOpen
+        renderNavRail={() => <aside data-testid="mock-rail" />}
+      />,
+    );
+    expect(screen.queryByTestId("guide-chapter-bar")).toBeNull();
+
+    rerender(
+      <GuideWorkspace
+        bookId="book-1"
+        variant="workspace"
+        navRailOpen={false}
+        renderNavRail={() => <aside data-testid="mock-rail" />}
+      />,
+    );
+    expect(screen.getByTestId("guide-chapter-bar")).toBeTruthy();
+
+    rerender(<GuideWorkspace bookId="book-1" variant="docked" />);
+    expect(screen.getByTestId("guide-chapter-bar")).toBeTruthy();
+  });
+
+  it("searches across unmounted chapters in the chapter switcher and jumps directly to the matching question", async () => {
+    mockState = makeGuidedState({
+      messages: [
+        { role: "user", content: "继续带读", guideRequest: {} },
+        {
+          role: "assistant",
+          content: "第一章讨论制度变迁。",
+          blocks: [
+            { type: "toolCall", toolCall: { toolCallId: "t1", tool: "guide_step", params: {}, done: true, guide: step0 } },
+            { type: "text", text: "第一章讨论制度变迁。" },
+          ],
+        },
+        { role: "user", content: "什么是路径依赖？" },
+        { role: "assistant", content: "历史选择会锁定后续演进方向。" },
+        { role: "user", content: "继续带读", guideRequest: {} },
+        {
+          role: "assistant",
+          content: "第二章讨论现代转型。",
+          blocks: [
+            { type: "toolCall", toolCall: { toolCallId: "t2", tool: "guide_step", params: {}, done: true, guide: step1 } },
+            { type: "text", text: "第二章讨论现代转型。" },
+          ],
+        },
+      ],
+    });
+
+    render(<GuideWorkspace bookId="book-1" />);
+    expect(screen.getByText("第二章讨论现代转型。")).toBeTruthy();
+    expect(screen.queryByText("什么是路径依赖？")).toBeNull();
+
+    fireEvent.click(screen.getByTestId("guide-chapter-switcher"));
+    const searchInput = await screen.findByTestId("guide-chapter-search");
+    fireEvent.change(searchInput, { target: { value: "路径依赖" } });
+
+    const hit = await screen.findByTestId("guide-search-hit");
+    fireEvent.click(hit);
+
+    expect(screen.getByText("第一章讨论制度变迁。")).toBeTruthy();
+    expect(screen.getByText("什么是路径依赖？")).toBeTruthy();
+    expect(screen.getByText("历史选择会锁定后续演进方向。")).toBeTruthy();
+  });
+
+  it("supports imperative cross-chapter scrollToMessage and snaps back to latest when continuing from history", async () => {
+    mockState = makeGuidedState({
+      messages: [
+        { role: "user", content: "继续带读", guideRequest: {} },
+        {
+          role: "assistant",
+          content: "第一章讲解。",
+          blocks: [
+            { type: "toolCall", toolCall: { toolCallId: "t1", tool: "guide_step", params: {}, done: true, guide: step0 } },
+            { type: "text", text: "第一章讲解。" },
+          ],
+        },
+        { role: "user", content: "第一章的追问" },
+        { role: "assistant", content: "第一章的回答" },
+        { role: "user", content: "继续带读", guideRequest: {} },
+        {
+          role: "assistant",
+          content: "第二章讲解。",
+          blocks: [
+            { type: "toolCall", toolCall: { toolCallId: "t2", tool: "guide_step", params: {}, done: true, guide: step1 } },
+            { type: "text", text: "第二章讲解。" },
+          ],
+        },
+      ],
+    });
+
+    const ref = createRef<GuideWorkspaceHandle>();
+    render(<GuideWorkspace ref={ref} bookId="book-1" />);
+
+    expect(screen.getByText("第二章讲解。")).toBeTruthy();
+
+    // Imperatively jump to the side question in Chapter 1 (messageIndex 2).
+    act(() => {
+      ref.current?.scrollToMessage(2);
+    });
+    expect(screen.getByText("第一章讲解。")).toBeTruthy();
+    expect(screen.getByText("第一章的追问")).toBeTruthy();
+
+    // Pressing Continue while viewing Chapter 1 snaps back to the latest chapter.
+    await waitFor(() => expect(screen.getByRole("button", { name: /继续/ })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: /继续/ }));
+    expect(screen.getByText("第二章讲解。")).toBeTruthy();
+    expect(prompt).toHaveBeenCalledTimes(1);
   });
 
   it("regenerates a step from its section header and supports extraStepActions slot", async () => {
@@ -306,8 +445,11 @@ describe("GuideWorkspace", () => {
     render(<GuideWorkspace bookId="book-1" />);
 
     expect(screen.queryByTestId("guide-side-thread")).toBeNull();
-    expect(screen.getAllByTestId("guide-step-section")).toHaveLength(2);
+    expect(screen.getAllByTestId("guide-step-section")).toHaveLength(1);
     expect(screen.getByText("第二章完整讲解。")).toBeTruthy();
+
+    // Navigate back to Chapter 1 where the superseded interrupted step sits.
+    fireEvent.click(screen.getByRole("button", { name: "上一章" }));
 
     // Superseded interrupted step collapses by default so the continuous reading flow stays clean.
     expect(screen.queryByText("旧的中断半截内容")).toBeNull();
