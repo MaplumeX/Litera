@@ -365,6 +365,24 @@ describe("AssistantMessage", () => {
     expect(normal.queryByRole("alert")).toBeNull();
   });
 
+  it("renders an inline retry button inside the error alert instead of a hidden regenerate row above it", () => {
+    const onRegenerate = vi.fn();
+    const view = render(
+      <AssistantMessage
+        message={{ role: "assistant", content: "", blocks: [], stopReason: "error", errorMessage: "模型服务暂时不可用，请稍后重试" }}
+        messageIndex={1}
+        canRegenerate
+        onRegenerate={onRegenerate}
+      />,
+    );
+    const alert = view.getByRole("alert");
+    const retry = view.getByRole("button", { name: "重试" });
+    expect(alert.contains(retry)).toBe(true);
+    expect(view.queryByRole("button", { name: "重新生成" })).toBeNull();
+    fireEvent.click(retry);
+    expect(onRegenerate).toHaveBeenCalledWith(1);
+  });
+
   it("does not render the stopped marker while streaming", () => {
     const view = render(
       <AssistantMessage

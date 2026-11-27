@@ -89,6 +89,7 @@ export const ChatWorkspace = forwardRef<ChatWorkspaceHandle, ChatWorkspaceProps>
       newSession,
       prompt,
       editPrompt,
+      regeneratePrompt,
       renameSession,
       switchSession,
       updateSessionConfig,
@@ -263,6 +264,10 @@ export const ChatWorkspace = forwardRef<ChatWorkspaceHandle, ChatWorkspaceProps>
           { role: "user", content: text, selection, chapterHref },
         );
       } catch (err) {
+        setInput((current) => (current ? current : text));
+        if (selection) {
+          setPendingSelection((current) => current ?? { text: selection, chapterHref });
+        }
         setInvokeError(String(err));
         setSubmitting(false);
       }
@@ -347,23 +352,13 @@ export const ChatWorkspace = forwardRef<ChatWorkspaceHandle, ChatWorkspaceProps>
         setSubmitting(true);
         scroll.scrollToBottom();
         try {
-          await editPrompt(
-            targetIndex,
-            original.content,
-            { selection: original.selection, chapterHref: original.chapterHref },
-            {
-              role: "user",
-              content: original.content,
-              selection: original.selection,
-              chapterHref: original.chapterHref,
-            },
-          );
+          await regeneratePrompt(targetIndex);
         } catch (err) {
           setInvokeError(String(err));
           setSubmitting(false);
         }
       },
-      [bookId, editPrompt, isStreaming, scroll, state.messages],
+      [bookId, isStreaming, regeneratePrompt, scroll, state.messages],
     );
 
     const handleSwitchBranch = useCallback(
@@ -655,22 +650,49 @@ export const ChatWorkspace = forwardRef<ChatWorkspaceHandle, ChatWorkspaceProps>
                           />
                         );
                       })()}
-                    {message.role === "assistant" && (
-                      <HoldHeight active={isStreaming && index === lastChatIndex}>
-                        <AssistantMessage
-                          message={message}
-                          messageIndex={index}
-                          streaming={isStreaming && index === lastChatIndex}
-                          canRegenerate={
-                            !isStreaming &&
-                            bookReady &&
-                            firstUserIndex !== -1 &&
-                            index > firstUserIndex
-                          }
-                          onRegenerate={handleRegenerate}
-                        />
-                      </HoldHeight>
-                    )}
+                    {message.role === "assistant" &&
+                      (() => {
+                        const anchorId = state.branchAnchors[index];
+                        const info =
+                          anchorId !== undefined ? state.branchNavigation[anchorId] : undefined;
+                        const branchSwitcher =
+                          !info || info.options.length <= 1 || info.activeIndex < 0 ? undefined : (
+                            <BranchSwitcher
+                              current={info.activeIndex + 1}
+                              total={info.options.length}
+                              disabled={isStreaming}
+                              onPrev={() =>
+                                void handleSwitchBranch(
+                                  info.options[info.activeIndex - 1].anchorId,
+                                  -1,
+                                )
+                              }
+                              onNext={() =>
+                                void handleSwitchBranch(
+                                  info.options[info.activeIndex + 1].anchorId,
+                                  1,
+                                )
+                              }
+                            />
+                          );
+                        return (
+                          <HoldHeight active={isStreaming && index === lastChatIndex}>
+                            <AssistantMessage
+                              message={message}
+                              messageIndex={index}
+                              streaming={isStreaming && index === lastChatIndex}
+                              canRegenerate={
+                                !isStreaming &&
+                                bookReady &&
+                                firstUserIndex !== -1 &&
+                                index > firstUserIndex
+                              }
+                              onRegenerate={handleRegenerate}
+                              branchSwitcher={branchSwitcher}
+                            />
+                          </HoldHeight>
+                        );
+                      })()}
                     {message.role === "notice" && <CompactionNotice notice={message} />}
                   </div>
                 ))}

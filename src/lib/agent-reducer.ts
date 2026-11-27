@@ -29,6 +29,8 @@ export interface AgentState {
   branchNavigation: Record<string, AnchorBranchInfo>;
   /** Anchor entry ids, index-aligned with `messages` (visibleMessageEntries). */
   branchAnchors: string[];
+  /** True while the trailing user message was optimistically appended before `prompt_started` persisted it. */
+  optimisticUserMessage?: boolean;
 }
 
 export type AgentAction =
@@ -166,17 +168,17 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
   switch (event.type) {
     case "book_loading":
       return matchesBook(base, event.bookId)
-        ? { ...base, status: "loadingBook", sessionId: null, promptId: null, messages: [], sessions: [], error: null, compaction: null, branchNavigation: {}, branchAnchors: [] }
+        ? { ...base, status: "loadingBook", sessionId: null, promptId: null, messages: [], sessions: [], error: null, compaction: null, branchNavigation: {}, branchAnchors: [], optimisticUserMessage: false }
         : base;
     case "book_ready":
       return matchesBook(base, event.bookId) ? { ...base, status: "bookReady", error: null } : base;
     case "book_closed":
       return matchesBook(base, event.bookId)
-        ? { ...base, status: "idle", sessionId: null, promptId: null, messages: [], sessions: [], error: null, compaction: null, branchNavigation: {}, branchAnchors: [] }
+        ? { ...base, status: "idle", sessionId: null, promptId: null, messages: [], sessions: [], error: null, compaction: null, branchNavigation: {}, branchAnchors: [], optimisticUserMessage: false }
         : base;
     case "prompt_started":
       return matchesBook(base, event.bookId)
-        ? { ...base, status: "prompting", sessionId: event.sessionId, promptId: event.promptId, error: null, compaction: null }
+        ? { ...base, status: "prompting", sessionId: event.sessionId, promptId: event.promptId, error: null, compaction: null, optimisticUserMessage: false }
         : base;
     case "text_delta":
       if (!matchesPrompt(base, event)) return base;
@@ -265,7 +267,7 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
       {
         // A compaction during the prompt shows up as a notice item in the
         // projection, so the pending state is cleared.
-        const next = { ...base, status: "bookReady" as const, promptId: null, compaction: null };
+        const next = { ...base, status: "bookReady" as const, promptId: null, compaction: null, optimisticUserMessage: false };
         // Streaming deltas already maintained messages; the runtime's full
         // projection replaces them (equal content) and refreshes navigation.
         if (event.messages !== undefined) next.messages = event.messages;
@@ -291,7 +293,7 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
         : base;
     case "session_switched":
       return matchesBook(base, event.bookId)
-        ? applyNavigation({ ...base, sessionId: event.sessionId, promptId: null, messages: event.messages, status: "bookReady", error: null, compaction: null }, event)
+        ? applyNavigation({ ...base, sessionId: event.sessionId, promptId: null, messages: event.messages, status: "bookReady", error: null, compaction: null, optimisticUserMessage: false }, event)
         : base;
     case "branch_switched":
       if (!matchesBook(base, event.bookId)) return base;
@@ -304,10 +306,11 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
         compaction: null,
         branchNavigation: event.navigation,
         branchAnchors: event.anchors,
+        optimisticUserMessage: false,
       };
     case "session_rewound":
       return matchesBook(base, event.bookId)
-        ? { ...base, sessionId: event.sessionId, messages: event.messages, error: null, compaction: null }
+        ? { ...base, sessionId: event.sessionId, messages: event.messages, error: null, compaction: null, optimisticUserMessage: false }
         : base;
     case "session_deleted":
       if (!matchesBook(base, event.bookId)) return base;
@@ -317,6 +320,7 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
         messages: base.sessionId === event.sessionId ? [] : base.messages,
         branchNavigation: base.sessionId === event.sessionId ? {} : base.branchNavigation,
         branchAnchors: base.sessionId === event.sessionId ? [] : base.branchAnchors,
+        optimisticUserMessage: base.sessionId === event.sessionId ? false : base.optimisticUserMessage,
         sessions: base.sessions.filter((session) => session.id !== event.sessionId),
       };
     case "session_renamed":
@@ -357,11 +361,16 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
         || (!!event.sessionId && event.sessionId !== base.sessionId)
       )) return base;
       const matchesActivePrompt = !!event.promptId && event.promptId === base.promptId;
+      const rollbackOptimistic = matchesActivePrompt
+        && base.optimisticUserMessage
+        && base.messages[base.messages.length - 1]?.role === "user";
       return {
         ...base,
+        messages: rollbackOptimistic ? base.messages.slice(0, -1) : base.messages,
         status: matchesActivePrompt ? "bookReady" : event.scope === "book" ? "error" : base.status,
         promptId: matchesActivePrompt ? null : base.promptId,
         compaction: matchesActivePrompt ? null : base.compaction,
+        optimisticUserMessage: matchesActivePrompt ? false : base.optimisticUserMessage,
         error: {
           scope: event.scope,
           message: event.message,
@@ -396,13 +405,18 @@ export function agentReducer(state: AgentState, action: AgentAction): AgentState
         promptId: action.promptId,
         error: null,
         compaction: state.compaction?.status === "failed" ? null : state.compaction,
+        optimisticUserMessage: false,
       };
-    case "prompt_queue_failed":
+    case "prompt_queue_failed": {
       if (state.promptId !== action.promptId) return state;
+      const rollbackOptimistic =
+        state.optimisticUserMessage && state.messages[state.messages.length - 1]?.role === "user";
       return {
         ...state,
+        messages: rollbackOptimistic ? state.messages.slice(0, -1) : state.messages,
         status: state.activeBookId ? "bookReady" : "idle",
         promptId: null,
+        optimisticUserMessage: false,
         error: {
           scope: "prompt",
           message: action.message,
@@ -411,8 +425,14 @@ export function agentReducer(state: AgentState, action: AgentAction): AgentState
           promptId: action.promptId,
         },
       };
+    }
     case "user_message":
-      return { ...state, messages: [...state.messages, action.message], error: null };
+      return {
+        ...state,
+        messages: [...state.messages, action.message],
+        error: null,
+        optimisticUserMessage: state.promptId !== null,
+      };
     case "clear_error":
       return { ...state, error: null };
   }

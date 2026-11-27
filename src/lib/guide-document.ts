@@ -23,6 +23,8 @@ export interface GuideSideQaNode {
   errorMessage?: string;
   branchAnchorId?: string;
   branchInfo?: AnchorBranchInfo;
+  assistantBranchAnchorId?: string;
+  assistantBranchInfo?: AnchorBranchInfo;
 }
 
 export interface GuideStepNode {
@@ -81,6 +83,8 @@ export interface GuideIncompleteStepNode {
   errorMessage?: string;
   branchAnchorId?: string;
   branchInfo?: AnchorBranchInfo;
+  assistantBranchAnchorId?: string;
+  assistantBranchInfo?: AnchorBranchInfo;
 }
 
 export type GuideTimelineMarker =
@@ -179,6 +183,18 @@ function branchForIndex(
     branchAnchorId: anchorId,
     ...(info && info.options.length > 1 && info.activeIndex >= 0 ? { branchInfo: info } : {}),
   };
+}
+
+function preferAssistantBranch(
+  assistantIndex: number,
+  userIndex: number | undefined,
+  anchors: readonly string[] | undefined,
+  navigation: Readonly<Record<string, AnchorBranchInfo>> | undefined,
+): { branchAnchorId?: string; branchInfo?: AnchorBranchInfo } {
+  const assistant = branchForIndex(assistantIndex, anchors, navigation);
+  if (assistant.branchInfo) return assistant;
+  const user = branchForIndex(userIndex, anchors, navigation);
+  return user.branchInfo ? user : assistant;
 }
 
 /**
@@ -357,7 +373,7 @@ export function projectGuideDocument({
       if (takenCalls.length > 0) {
         const reqIndex = pendingUser?.index;
         const reqText = pendingUser && !pendingUser.isGuideRequest ? pendingUser.content : undefined;
-        const { branchAnchorId, branchInfo } = branchForIndex(reqIndex, branchAnchors, branchNavigation);
+        const { branchAnchorId, branchInfo } = preferAssistantBranch(index, reqIndex, branchAnchors, branchNavigation);
         pendingUser = null;
 
         takenCalls.forEach((call, callIdx) => {
@@ -403,7 +419,8 @@ export function projectGuideDocument({
       } else if (pendingUser && (pendingUser.isGuideRequest || hasGuideStepCall)) {
         // An uncommitted guided-step turn (aborted, errored, pre-tool streaming,
         // or replied without calling guide_step): never demote to a side question.
-        const { branchAnchorId, branchInfo } = branchForIndex(
+        const { branchAnchorId, branchInfo } = preferAssistantBranch(
+          index,
           pendingUser.index,
           branchAnchors,
           branchNavigation,
@@ -438,6 +455,7 @@ export function projectGuideDocument({
           branchAnchors,
           branchNavigation,
         );
+        const assistantBranch = branchForIndex(index, branchAnchors, branchNavigation);
         const qa: GuideSideQaNode = {
           id: `qa-${pendingUser.index}`,
           userMessageIndex: pendingUser.index,
@@ -452,6 +470,8 @@ export function projectGuideDocument({
           errorMessage: message.errorMessage,
           branchAnchorId,
           branchInfo,
+          assistantBranchAnchorId: assistantBranch.branchAnchorId,
+          assistantBranchInfo: assistantBranch.branchInfo,
         };
         if (currentStep) currentStep.sideThreads.push(qa);
         else orphanSideThreads.push(qa);

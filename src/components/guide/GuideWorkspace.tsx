@@ -151,6 +151,7 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
       takeStep,
       askSideQuestion,
       editTurn: editPrompt,
+      regenerateTurn,
       switchSession,
       updateConfig: updateSessionConfig,
       switchBranchAtAnchor,
@@ -522,6 +523,10 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
       try {
         await askSideQuestion(text, { selection, chapterHref });
       } catch (err) {
+        setInput((current) => (current ? current : text));
+        if (selection) {
+          setPendingSelection((current) => current ?? { text: selection, chapterHref });
+        }
         setInvokeError(String(err));
         setSubmitting(false);
       }
@@ -606,24 +611,32 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
         setSubmitting(true);
         scroll.scrollToBottom();
         try {
-          await editPrompt(
-            targetIndex,
-            original.content,
-            { selection: original.selection, chapterHref: original.chapterHref, guideRequest },
-            {
-              role: "user",
-              content: original.content,
-              selection: original.selection,
-              chapterHref: original.chapterHref,
-              ...(guideRequest ? { guideRequest } : {}),
-            },
-          );
+          const legacyGuide = Boolean(original.guide && !original.guideRequest);
+          const requestChanged =
+            Boolean(rawReq && transformGuideRequest) &&
+            JSON.stringify(guideRequest) !== JSON.stringify(rawReq);
+          if (legacyGuide || requestChanged) {
+            await editPrompt(
+              targetIndex,
+              original.content,
+              { selection: original.selection, chapterHref: original.chapterHref, guideRequest },
+              {
+                role: "user",
+                content: original.content,
+                selection: original.selection,
+                chapterHref: original.chapterHref,
+                ...(guideRequest ? { guideRequest } : {}),
+              },
+            );
+          } else {
+            await regenerateTurn(targetIndex);
+          }
         } catch (err) {
           setInvokeError(String(err));
           setSubmitting(false);
         }
       },
-      [bookId, editPrompt, isStreaming, isViewingArchived, scroll, state.messages, transformGuideRequest],
+      [bookId, editPrompt, isStreaming, isViewingArchived, regenerateTurn, scroll, state.messages, transformGuideRequest],
     );
 
     const handleSwitchBranch = useCallback(

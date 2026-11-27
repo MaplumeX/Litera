@@ -289,3 +289,140 @@ describe("LiteraAgentRuntime.switchBranchAtAnchor", () => {
     unsubscribe();
   });
 });
+
+describe("LiteraAgentRuntime.regenerate", () => {
+  it("retries an empty-error turn in place under the same user entry without creating a branch", async () => {
+    const current: DecodedPiSession = {
+      header: { type: "session", version: 3, id: "session-1", timestamp: "2026-08-14T00:00:00Z", cwd: "" },
+      entries: [
+        { type: "message", id: "u1", parentId: null, timestamp: "2026-08-14T00:00:01Z", message: { role: "user", content: "hello", timestamp: 1 } },
+        { type: "message", id: "a1", parentId: "u1", timestamp: "2026-08-14T00:00:02Z", message: { role: "assistant", content: [], ...assistantBase, stopReason: "error", errorMessage: "模型服务暂时不可用，请稍后重试", timestamp: 2 } },
+      ],
+      leafId: "a1",
+    };
+    const { runtime, events, appends, unsubscribe } = await harness(current, ["recovered answer", "Hello Title"]);
+
+    await runtime.regenerate(0, "regen-1");
+
+    // No duplicate user entry was written.
+    const appendedMessages = appends.flatMap((batch) => batch.entries).filter((entry) => entry.type === "message");
+    expect(appendedMessages.some((entry) => (entry.message as { role?: string }).role === "user")).toBe(false);
+    // The session still has only one user entry, and the retried answer succeeded with no branch fork.
+    const end = events.find((event) => event.type === "prompt_end");
+    expect(end?.type).toBe("prompt_end");
+    if (end?.type === "prompt_end") {
+      expect(end.messages).toEqual([
+        { role: "user", content: "hello" },
+        expect.objectContaining({ role: "assistant", content: "recovered answer" }),
+      ]);
+      expect(end.navigation).toEqual({});
+    }
+    unsubscribe();
+  });
+
+  it("creates an assistant-level branch (not a user-level branch) when regenerating a successful answer", async () => {
+    const current: DecodedPiSession = {
+      header: { type: "session", version: 3, id: "session-1", timestamp: "2026-08-14T00:00:00Z", cwd: "" },
+      entries: [
+        { type: "message", id: "u1", parentId: null, timestamp: "2026-08-14T00:00:01Z", message: { role: "user", content: "hello", timestamp: 1 } },
+        { type: "message", id: "a1", parentId: "u1", timestamp: "2026-08-14T00:00:02Z", message: { role: "assistant", content: [{ type: "text", text: "first answer" }], ...assistantBase, timestamp: 2 } },
+      ],
+      leafId: "a1",
+    };
+    const { runtime, events, unsubscribe } = await harness(current, ["second answer", "Title"]);
+
+    await runtime.regenerate(0, "regen-2");
+
+    const end = events.find((event) => event.type === "prompt_end");
+    expect(end?.type).toBe("prompt_end");
+    if (end?.type === "prompt_end") {
+      expect(end.anchors).toHaveLength(2);
+      const [userAnchor, assistantAnchor] = end.anchors!;
+      expect(userAnchor).toBe("u1");
+      expect(end.navigation?.[userAnchor]).toBeUndefined();
+      expect(end.navigation?.[assistantAnchor]).toMatchObject({
+        activeIndex: 1,
+        options: [
+          { anchorId: "a1", preview: "first answer" },
+          { anchorId: assistantAnchor, preview: "second answer" },
+        ],
+      });
+
+      // Switching back on the assistant anchor restores "first answer".
+      await runtime.switchBranchAtAnchor("session-1", "a1", -1);
+      const switched = events.filter((event) => event.type === "branch_switched").at(-1);
+      expect(switched?.type === "branch_switched" && switched.messages).toEqual([
+        { role: "user", content: "hello" },
+        expect.objectContaining({ role: "assistant", content: "first answer" }),
+      ]);
+    }
+    unsubscribe();
+  });
+
+  it("restores the previous branch when regenerate fails before persisting anything", async () => {
+    const current: DecodedPiSession = {
+      header: { type: "session", version: 3, id: "session-1", timestamp: "2026-08-14T00:00:00Z", cwd: "" },
+      entries: [
+        { type: "message", id: "u1", parentId: null, timestamp: "2026-08-14T00:00:01Z", message: { role: "user", content: "hello", timestamp: 1 } },
+        { type: "message", id: "a1", parentId: "u1", timestamp: "2026-08-14T00:00:02Z", message: { role: "assistant", content: [{ type: "text", text: "first answer" }], ...assistantBase, timestamp: 2 } },
+      ],
+      leafId: "a1",
+    };
+    const { runtime, events, appends, unsubscribe } = await harness(
+      current,
+      [],
+      async () => { throw new Error("401 unauthorized"); },
+    );
+
+    await expect(runtime.regenerate(0, "regen-fail")).rejects.toThrow();
+    expect(appends).toHaveLength(0);
+    const restored = events.find((event) => event.type === "branch_switched");
+    expect(restored?.type === "branch_switched" && restored.messages).toHaveLength(2);
+    unsubscribe();
+  });
+
+  it("persists an error assistant message even when the stream function throws directly", async () => {
+    const current: DecodedPiSession = {
+      header: { type: "session", version: 3, id: "session-1", timestamp: "2026-08-14T00:00:00Z", cwd: "" },
+      entries: [],
+      leafId: null,
+    };
+    const events: AgentEvent[] = [];
+    const sessions: SessionPort = {
+      create: async () => current,
+      list: async () => [],
+      load: async () => current,
+      delete: async () => {},
+      append: async (_book, _session, _leaf, entries) => entries.at(-1)?.id ?? null,
+    };
+    const book: BookContentPort = {
+      open: async () => {},
+      metadata: async () => ({ title: "T", author: "A", language: "en", totalChapters: 1 }),
+      toc: async () => [],
+      readChapter: async () => ({ chapterIndex: 0, chapterNumber: 1, part: 0, totalParts: 1, text: "chapter" }),
+      search: async () => [],
+      close: () => {},
+    };
+    const config: RuntimeConfig = { provider: "custom-a", model: "model-a", api: "openai-completions", baseUrl: "https://example.test/v1", apiKey: "secret", thinkingLevel: "off" };
+    const runtime = new LiteraAgentRuntime({
+      sessions,
+      book,
+      loadConfig: async () => config,
+      loadStream: async () => () => { throw new Error("404 model not found"); },
+    });
+    const unsubscribe = runtime.subscribe((event) => events.push(event));
+    await runtime.openBook("book", new ArrayBuffer(1));
+    await runtime.prompt("hello", {}, "p-throw");
+
+    const end = events.find((event) => event.type === "prompt_end");
+    expect(end?.type).toBe("prompt_end");
+    if (end?.type === "prompt_end") {
+      expect(end.messages?.at(-1)).toMatchObject({
+        role: "assistant",
+        stopReason: "error",
+        errorMessage: "所选模型不存在或暂不可用，请检查模型名称",
+      });
+    }
+    unsubscribe();
+  });
+});

@@ -8,6 +8,7 @@ import { isLegacyGuideStep, type GuideSelection, type GuideStep, type RecordedGu
 const newSession = vi.fn(async (_kind?: string) => {});
 const prompt = vi.fn(async (..._args: unknown[]) => ({ requestId: "r", promptId: "p" }));
 const editPrompt = vi.fn(async (..._args: unknown[]) => ({ requestId: "r", promptId: "p" }));
+const regeneratePrompt = vi.fn(async (..._args: unknown[]) => ({ requestId: "r", promptId: "p" }));
 let nextStep: GuideStep | null = null;
 const nextGuideStep = vi.fn(async (_startHref?: string) => nextStep);
 const switchSession = vi.fn(async (_id: string) => {});
@@ -48,6 +49,7 @@ vi.mock("@/lib/use-agent-bridge", () => ({
     guideStepAnchor,
     prompt,
     editPrompt,
+    regeneratePrompt,
     renameSession: vi.fn(),
     switchSession,
     updateSessionConfig: vi.fn(),
@@ -82,6 +84,7 @@ beforeEach(() => {
   newSession.mockClear();
   prompt.mockClear();
   editPrompt.mockClear();
+  regeneratePrompt.mockClear();
   nextGuideStep.mockClear();
   switchSession.mockClear();
   guideStepAfterChapter.mockClear();
@@ -217,7 +220,7 @@ describe("ChatPanel in a Guided session", () => {
     expect(editPrompt.mock.calls[0][2]).toEqual({ guideRequest: { step: legacyOne } });
   });
 
-  it("regenerates a Continue with its request", async () => {
+  it("regenerates a Continue in place on its existing request entry", async () => {
     bridgeState = guidedState({
       messages: [
         { role: "user", content: "继续带读", guideRequest: {} },
@@ -226,8 +229,9 @@ describe("ChatPanel in a Guided session", () => {
     });
     const view = renderPanel();
     fireEvent.click(view.getByRole("button", { name: "重新生成" }));
-    await waitFor(() => expect(editPrompt).toHaveBeenCalled());
-    expect(editPrompt.mock.calls[0][2]).toEqual({ guideRequest: {} });
+    await waitFor(() => expect(regeneratePrompt).toHaveBeenCalled());
+    expect(regeneratePrompt).toHaveBeenCalledWith(0);
+    expect(editPrompt).not.toHaveBeenCalled();
   });
 
   it("reads up to the paragraph the reader picks", async () => {
@@ -362,7 +366,7 @@ describe("ChatPanel and the TOC in a Guided session", () => {
     );
   });
 
-  it("regenerates an earlier guided step while preserving its guideRequest", async () => {
+  it("regenerates an earlier guided step in place on its request entry", async () => {
     bridgeState = guidedState({
       messages: [
         { role: "user", content: "带读：第三章（第 1/3 部分）", guideRequest: { step: stepOne } },
@@ -375,18 +379,8 @@ describe("ChatPanel and the TOC in a Guided session", () => {
     const buttons = view.getAllByRole("button", { name: "重新生成" });
     expect(buttons).toHaveLength(2);
     fireEvent.click(buttons[0]);
-    await waitFor(() => expect(editPrompt).toHaveBeenCalledTimes(1));
-    expect(editPrompt).toHaveBeenCalledWith(
-      0,
-      "带读：第三章（第 1/3 部分）",
-      { selection: undefined, chapterHref: undefined, guideRequest: { step: stepOne } },
-      {
-        role: "user",
-        content: "带读：第三章（第 1/3 部分）",
-        selection: undefined,
-        chapterHref: undefined,
-        guideRequest: { step: stepOne },
-      },
-    );
+    await waitFor(() => expect(regeneratePrompt).toHaveBeenCalledTimes(1));
+    expect(regeneratePrompt).toHaveBeenCalledWith(0);
+    expect(editPrompt).not.toHaveBeenCalled();
   });
 });

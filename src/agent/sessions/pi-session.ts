@@ -607,6 +607,92 @@ function isUserMessageEntry(entry: PiSessionEntry | undefined): boolean {
   return !!entry && entry.type === "message" && string(object(entry.message)?.role) === "user";
 }
 
+function hasSubstantiveAssistantOutput(message: Record<string, unknown> | null): boolean {
+  if (!message) return false;
+  const content = message.content;
+  if (typeof content === "string") return content.trim().length > 0;
+  if (!Array.isArray(content)) return false;
+  return content.some((part) => {
+    const block = object(part);
+    if (!block) return false;
+    if (block.type === "text" && typeof block.text === "string" && block.text.trim().length > 0) return true;
+    if (block.type === "toolCall") return true;
+    return false;
+  });
+}
+
+/**
+ * True when an assistant turn starting at `anchorId` ended in `error` or
+ * `aborted` without producing any substantive output (text or tool calls) and
+ * has no subsequent user follow-up on its subtree.
+ */
+function isEmptyFailedAssistantAttempt(
+  anchorId: string,
+  byId: ReadonlyMap<string, PiSessionEntry>,
+  children: ReadonlyMap<string, PiSessionEntry[]>,
+): boolean {
+  const start = byId.get(anchorId);
+  if (!start || messageRole(start) !== "assistant") return false;
+  const stack: PiSessionEntry[] = [start];
+  const visited = new Set<string>();
+  let terminalAssistantCount = 0;
+  let allTerminalFailed = true;
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    if (visited.has(current.id)) continue;
+    visited.add(current.id);
+    const role = messageRole(current);
+    if (role === "user") return false;
+    if (role === "assistant" && hasSubstantiveAssistantOutput(object(current.message))) {
+      return false;
+    }
+    const kids = children.get(current.id) ?? [];
+    if (kids.some((kid) => messageRole(kid) === "user")) return false;
+    if (kids.length === 0) {
+      let cursor: PiSessionEntry | undefined = current;
+      while (cursor && messageRole(cursor) !== "assistant") {
+        cursor = cursor.parentId ? byId.get(cursor.parentId) : undefined;
+      }
+      if (cursor && messageRole(cursor) === "assistant") {
+        terminalAssistantCount += 1;
+        const stop = string(object(cursor.message)?.stopReason);
+        if (stop !== "error" && stop !== "aborted") allTerminalFailed = false;
+      }
+    } else {
+      for (const kid of kids) stack.push(kid);
+    }
+  }
+  return terminalAssistantCount > 0 && allTerminalFailed;
+}
+
+/**
+ * True for a legacy retry-via-edit user branch whose only outcome was an
+ * empty error attempt (no substantive output and no subsequent user turns).
+ */
+function isLegacyEmptyErrorUserBranch(
+  userEntry: PiSessionEntry,
+  byId: ReadonlyMap<string, PiSessionEntry>,
+  children: ReadonlyMap<string, PiSessionEntry[]>,
+): boolean {
+  const stack: PiSessionEntry[] = [...(children.get(userEntry.id) ?? [])];
+  const visited = new Set<string>();
+  const assistantAnchors: string[] = [];
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    if (visited.has(current.id)) continue;
+    visited.add(current.id);
+    const role = messageRole(current);
+    if (role === "user") return false;
+    if (role === "assistant") {
+      assistantAnchors.push(current.id);
+      continue;
+    }
+    for (const kid of children.get(current.id) ?? []) stack.push(kid);
+  }
+  return assistantAnchors.length > 0
+    && assistantAnchors.every((id) => isEmptyFailedAssistantAttempt(id, byId, children));
+}
+
 const BRANCH_PREVIEW_CHARS = 40;
 
 function branchPreview(content: unknown): string {
@@ -615,39 +701,91 @@ function branchPreview(content: unknown): string {
 }
 
 /**
- * Sibling branches under a fork point share the same *previous user message*
- * on their root path ("" when the fork is at the session root): the edit flow
- * repoints `leafId` to the edited message's parent, so every new branch's
- * first user message hangs below that same ancestor. Grouping user-message
- * entries by previous user message therefore enumerates the branches at each
- * fork; only groups with more than one member are forks. Keys of the returned
- * Map are each branch's own first user-message entry id (anchorId); every
- * member of a fork maps to the same AnchorBranchInfo (activeIndex points at
- * the branch the current leaf is on, resolved against the full active branch).
+ * Enumerates both user-message forks (created by editing a user message) and
+ * assistant-response forks (created by regenerating a reply under the same
+ * user message):
+ *
+ * - User forks group user-message entries by their nearest ancestor user
+ *   message ("" at the session root). Legacy identical-text retries whose only
+ *   outcome was an empty error are suppressed when inactive.
+ * - Assistant forks group turn-opening assistant entries (those whose nearest
+ *   user/assistant ancestor is a user message, never an intermediate tool-loop
+ *   continuation) by that parent user message. Inactive empty failed attempts
+ *   (`error` or `aborted` with no text or tool calls and no follow-up) are
+ *   suppressed so retrying a failed turn never creates a dead branch.
+ *
+ * Keys of the returned Map are each branch's own anchor entry id; every member
+ * of a fork maps to the same AnchorBranchInfo.
  */
 export function branchNavigation(session: DecodedPiSession): Map<string, AnchorBranchInfo> {
   const byId = new Map(session.entries.map((entry) => [entry.id, entry]));
-  const groups = new Map<string, PiSessionEntry[]>();
+  const children = new Map<string, PiSessionEntry[]>();
   for (const entry of session.entries) {
-    if (!isUserMessageEntry(entry)) continue;
-    let previousUserId = "";
-    let current = entry.parentId ? byId.get(entry.parentId) : undefined;
-    while (current) {
-      if (isUserMessageEntry(current)) {
-        previousUserId = current.id;
-        break;
-      }
-      current = current.parentId ? byId.get(current.parentId) : undefined;
-    }
-    const group = groups.get(previousUserId) ?? [];
-    group.push(entry);
-    groups.set(previousUserId, group);
+    if (!entry.parentId) continue;
+    const list = children.get(entry.parentId) ?? [];
+    list.push(entry);
+    children.set(entry.parentId, list);
   }
+
+  const userGroups = new Map<string, PiSessionEntry[]>();
+  const assistantGroups = new Map<string, PiSessionEntry[]>();
+  for (const entry of session.entries) {
+    if (isUserMessageEntry(entry)) {
+      let previousUserId = "";
+      let current = entry.parentId ? byId.get(entry.parentId) : undefined;
+      while (current) {
+        if (isUserMessageEntry(current)) {
+          previousUserId = current.id;
+          break;
+        }
+        current = current.parentId ? byId.get(current.parentId) : undefined;
+      }
+      const group = userGroups.get(previousUserId) ?? [];
+      group.push(entry);
+      userGroups.set(previousUserId, group);
+      continue;
+    }
+    if (messageRole(entry) === "assistant") {
+      let parentUserId: string | null = null;
+      let current = entry.parentId ? byId.get(entry.parentId) : undefined;
+      while (current) {
+        const role = messageRole(current);
+        if (role === "assistant") {
+          parentUserId = null;
+          break;
+        }
+        if (role === "user") {
+          parentUserId = current.id;
+          break;
+        }
+        current = current.parentId ? byId.get(current.parentId) : undefined;
+      }
+      if (parentUserId) {
+        const group = assistantGroups.get(parentUserId) ?? [];
+        group.push(entry);
+        assistantGroups.set(parentUserId, group);
+      }
+    }
+  }
+
   const activeIds = new Set(activeBranch(session).map((entry) => entry.id));
   const navigation = new Map<string, AnchorBranchInfo>();
-  for (const group of groups.values()) {
+
+  for (const group of userGroups.values()) {
     if (group.length < 2) continue;
-    const options = [...group]
+    const textCounts = new Map<string, number>();
+    for (const entry of group) {
+      const normalized = contentText(object(entry.message)?.content).trim();
+      textCounts.set(normalized, (textCounts.get(normalized) ?? 0) + 1);
+    }
+    const visible = group.filter((entry) => {
+      if (activeIds.has(entry.id)) return true;
+      const normalized = contentText(object(entry.message)?.content).trim();
+      if ((textCounts.get(normalized) ?? 0) < 2) return true;
+      return !isLegacyEmptyErrorUserBranch(entry, byId, children);
+    });
+    if (visible.length < 2) continue;
+    const options = [...visible]
       .sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp))
       .map((entry) => ({
         anchorId: entry.id,
@@ -659,6 +797,26 @@ export function branchNavigation(session: DecodedPiSession): Map<string, AnchorB
     };
     for (const option of options) navigation.set(option.anchorId, info);
   }
+
+  for (const group of assistantGroups.values()) {
+    if (group.length < 2) continue;
+    const visible = group.filter(
+      (entry) => activeIds.has(entry.id) || !isEmptyFailedAssistantAttempt(entry.id, byId, children),
+    );
+    if (visible.length < 2) continue;
+    const options = [...visible]
+      .sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp))
+      .map((entry) => ({
+        anchorId: entry.id,
+        preview: branchPreview(object(entry.message)?.content),
+      }));
+    const info: AnchorBranchInfo = {
+      options,
+      activeIndex: options.findIndex((option) => activeIds.has(option.anchorId)),
+    };
+    for (const option of options) navigation.set(option.anchorId, info);
+  }
+
   return navigation;
 }
 

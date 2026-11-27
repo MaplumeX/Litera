@@ -155,4 +155,31 @@ describe("ChatPanel branch switcher", () => {
     expect(view.queryByRole("button", { name: "保存" })).toBeNull();
     expect(editPrompt).not.toHaveBeenCalled();
   });
+
+  it("renders the branch switcher on forked assistant messages without showing one on the user message", async () => {
+    const assistantInfo = {
+      options: [
+        { anchorId: "a1", preview: "第一答" },
+        { anchorId: "a1b", preview: "第二答" },
+      ],
+      activeIndex: 1,
+    };
+    bridgeState = forkedState({
+      messages: [
+        { role: "user", content: "同一问" },
+        { role: "assistant", content: "第二答" },
+      ],
+      branchAnchors: ["u1", "a1b"],
+      branchNavigation: { a1b: assistantInfo },
+    });
+    const view = renderWorkspace();
+    expect(view.getAllByTestId("branch-switcher")).toHaveLength(1);
+    expect(view.getByText("2/2")).toBeTruthy();
+
+    fireEvent.click(view.getByRole("button", { name: "切换到上一个分支" }));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(switchBranchAtAnchor).toHaveBeenCalledWith("a1", -1);
+  });
 });

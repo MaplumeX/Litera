@@ -386,9 +386,10 @@ export class LiteraAgentRuntime {
           finalAssistant=await runTurn();
         }
       }
-      // A backoff-sleep abort normalizes to an aborted message that never entered
-      // agent state; push it so the terminal aborted assistant is still persisted.
-      if(finalAssistant.stopReason==="aborted"&&agent.state.messages[agent.state.messages.length-1]!==finalAssistant)agent.state.messages.push(finalAssistant);
+      // A backoff-sleep abort or directly thrown prompt error normalizes to a
+      // terminal assistant message that never entered agent state; push it so
+      // it is still persisted and surfaced on the transcript.
+      if((finalAssistant.stopReason==="aborted"||finalAssistant.stopReason==="error")&&agent.state.messages[agent.state.messages.length-1]!==finalAssistant)agent.state.messages.push(finalAssistant);
       // The loop may insert a system message (tool declarations) ahead of the
       // prompt messages; it is runtime state, never a session entry.
       const completed=agent.state.messages.slice(before).filter((message)=>message.role!=="system").slice(promptMessages.length+1);const entries:PiSessionEntry[]=[];let parent=session.leafId;
@@ -406,16 +407,119 @@ export class LiteraAgentRuntime {
       }
       if(entries.length){session.leafId=await this.sessions.append(promptBookId,session.header.id,session.leafId,entries);session.entries.push(...entries);if(entries.some(isGuideWindowCutEntry)){const system=agent.state.messages[0];agent.state.messages=system?.role==="system"?[system,...piContextMessages(session)]:piContextMessages(session);}}
       const aborted=completed.some((message)=>message.role==="assistant"&&message.stopReason==="aborted");
+      const errored=finalAssistant.stopReason==="error";
       const finalMessages=visibleMessages(session);const finalNavigation=sessionNavigation(session);
       // The answer is complete: unlock the input first, then maintain the context in the background.
       this.emit(aborted?{type:"prompt_aborted",bookId:promptBookId,sessionId:session.header.id,promptId,requestId,messages:finalMessages,...finalNavigation}:{type:"prompt_end",bookId:promptBookId,sessionId:session.header.id,promptId,messages:finalMessages,...finalNavigation});
-      if(!aborted&&configAtStart===this.configRevision)this.startMaintenance(agent,session,promptBookId);
+      if(!aborted&&!errored&&configAtStart===this.configRevision)this.startMaintenance(agent,session,promptBookId);
       const hasManualTitle=session.entries.some((entry)=>entry.type==="session_info"&&entry.auto!==true);
-      if(!aborted&&isFirstTurn&&!hasManualTitle){const leafAtEnd=session.leafId;const assistantText=finalAssistant.content.flatMap((block)=>block.type==="text"&&typeof block.text==="string"?[block.text]:[]).join("");void this.maybeGenerateTitle(promptBookId,session.header.id,leafAtEnd,text.slice(0,2000),assistantText.slice(0,2000),agent);}
+      if(!aborted&&!errored&&isFirstTurn&&!hasManualTitle){const leafAtEnd=session.leafId;const assistantText=finalAssistant.content.flatMap((block)=>block.type==="text"&&typeof block.text==="string"?[block.text]:[]).join("");void this.maybeGenerateTitle(promptBookId,session.header.id,leafAtEnd,text.slice(0,2000),assistantText.slice(0,2000),agent);}
     }catch(error){
       // A failed edit that persisted nothing must not leave the rewound leaf
       // behind: the next prompt would continue a branch the user never saw.
       if(session&&rewoundFrom!==undefined&&!userPersisted){
+        session.leafId=rewoundFrom;
+        if(compactedBeforePrompt&&rewoundFrom)await this.sessions.setLeaf(promptBookId,session.header.id,rewoundFrom).catch(()=>{});
+        if(this.bookId===promptBookId&&this.session===session){this.agent=null;this.emit({type:"branch_switched",bookId:promptBookId,sessionId:session.header.id,requestId,messages:visibleMessages(session),...sessionNavigation(session)});}
+      }
+      const rawMessage=error instanceof Error?error.message:String(error);const safeError=new Error(rawMessage===EDIT_TARGET_ERROR?rawMessage:classifyPromptError(error).message);this.emit({type:"error",scope:"prompt",message:safeError.message,recoverable:true,bookId:promptBookId,sessionId:session?.header.id,promptId});throw safeError;}finally{unsubscribe?.();if(this.promptAbort===promptAbort)this.promptAbort=null;if(this.promptId===promptId){this.promptId=null;this.promptAgent=null;this.turnSteps=[];}}
+  }
+
+  /**
+   * Retry / regenerate the assistant reply for an existing visible user message
+   * without duplicating the user entry. The new attempt hangs directly below
+   * the existing user entry so user-message branches are only created by edits.
+   */
+  async regenerate(userMessageIndex:number,promptId:string=crypto.randomUUID(),requestId?:string){
+    if(!this.bookId)throw new Error("No book is open");if(this.promptId)throw new Error("A prompt is already active");
+    const promptBookId=this.bookId;
+    this.promptId=promptId;this.turnSteps=[];
+    const promptAbort=new AbortController();this.promptAbort=promptAbort;
+    let session:DecodedPiSession|undefined;
+    let unsubscribe:(()=>void)|undefined;
+    let rewoundFrom:string|null|undefined;let carriedConfig:SessionConfig|null=null;let persistedAny=false;let compactedBeforePrompt=false;
+    try{
+      await this.maintenance?.done;if(this.bookId!==promptBookId)throw new Error("Book context changed");
+      session=this.session??undefined;
+      if(!session)throw new Error(EDIT_TARGET_ERROR);
+      const persistedLeaf=session.leafId;
+      const target=visibleMessageEntries(session)[userMessageIndex];
+      const targetMessage=target?.message as {role?:unknown;content?:unknown}|undefined;
+      if(!target||targetMessage?.role!=="user")throw new Error(EDIT_TARGET_ERROR);
+      const configBefore=sessionConfig(session);
+      rewoundFrom=persistedLeaf;session.leafId=target.id;this.agent=null;
+      if(configBefore&&configBefore.systemPrompt!==(sessionConfig(session)?.systemPrompt??""))carriedConfig=configBefore;
+      this.emit({type:"session_rewound",bookId:promptBookId,sessionId:session.header.id,promptId,requestId,messages:visibleMessages({...session,leafId:session.leafId})});
+      const isFirstTurn=activeBranch(session).filter((entry)=>entry.type==="message"&&((entry.message as {role?:unknown})?.role==="user")).length===1;
+      const targetParent=session.entries.find((entry)=>entry.id===target.parentId);
+      const turnStartEntryId=targetParent?.type==="custom_message"&&targetParent.customType==="readingContext"?targetParent.id:target.id;
+      const configAtStart=this.configRevision;const config=await this.loadConfig();if(this.bookId!==promptBookId)throw new Error("Book context changed");
+      const toc=await this.book.toc();
+      let prevStepChapter:number|null=null;
+      if(session.header.kind==="guided"){
+        const priorTurns=guidedTurns(session);
+        const lastTurnStep=priorTurns.length?await this.locateStep(promptBookId,toc,priorTurns[priorTurns.length-1].step):null;
+        prevStepChapter=lastTurnStep?.to.entry.index??null;
+      }
+      const agent=await this.ensureAgent(config,session,promptBookId,carriedConfig??sessionConfig(session));
+      if(this.bookId!==promptBookId)throw new Error("Agent context changed");
+      this.promptAgent=agent;if(configAtStart===this.configRevision)this.agent=agent;
+      compactedBeforePrompt=await this.maintainContext(agent,session,promptBookId,promptAbort.signal);
+      if(this.bookId!==promptBookId)throw new Error("Agent context changed");
+      let before=agent.state.messages.length;
+      const metaEntries:PiSessionEntry[]=[];let pendingParent=session.leafId;
+      if(carriedConfig){const configEntry=newEntry("session_config",pendingParent,{systemPrompt:carriedConfig.systemPrompt});metaEntries.push(configEntry);pendingParent=configEntry.id;}
+      const lastModel=[...contextBranch(session)].reverse().find((entry)=>entry.type==="model_change");
+      if(lastModel?.provider!==config.provider||lastModel?.modelId!==config.model){const change=newEntry("model_change",pendingParent,{provider:config.provider,modelId:config.model});metaEntries.push(change);pendingParent=change.id;}
+      let expectedLeaf=compactedBeforePrompt?session.leafId:persistedLeaf;
+      if(metaEntries.length){
+        const leaf=await this.sessions.append(promptBookId,session.header.id,expectedLeaf,metaEntries);
+        session.entries.push(...metaEntries);session.leafId=leaf;expectedLeaf=leaf;persistedAny=true;
+      }
+      if(this.bookId!==promptBookId)throw new Error("Agent context changed");
+      this.emit({type:"prompt_started",bookId:promptBookId,sessionId:session.header.id,promptId,requestId});
+      unsubscribe=agent.subscribe((event)=>this.onPiEvent(event,promptBookId,promptId,session!.header.id));
+      const runTurn=()=>retryAssistantCall(async()=>{
+        agent.state.messages.length=before;this.turnSteps=[];
+        if(promptAbort.signal.aborted){const{errorMessage:_unused,...rest}=errorAssistant(agent.state.model,new Error("Aborted"));return{...rest,stopReason:"aborted"} as AssistantMessage;}
+        try{await agent.continue();}
+        catch(error){return errorAssistant(agent.state.model,error);}
+        const last=agent.state.messages[agent.state.messages.length-1] as AssistantMessage|undefined;
+        return last?.role==="assistant"?last:errorAssistant(agent.state.model,new Error("模型请求失败"));
+      },RETRY_POLICY,promptAbort.signal,{onRetryScheduled:(attempt,maxAttempts,delayMs)=>this.emit({type:"retry_scheduled",bookId:promptBookId,sessionId:session!.header.id,promptId,attempt,maxAttempts,delayMs})});
+      let finalAssistant=await runTurn();
+      if((finalAssistant.stopReason==="error"||finalAssistant.stopReason==="length")&&isContextOverflow(finalAssistant,agent.state.model.contextWindow??0)){
+        if(await this.maintainContext(agent,session,promptBookId,promptAbort.signal,true)){
+          before=agent.state.messages.length;expectedLeaf=session.leafId;
+          this.emit({type:"retry_scheduled",bookId:promptBookId,sessionId:session.header.id,promptId,attempt:1,maxAttempts:1,delayMs:0});
+          finalAssistant=await runTurn();
+        }
+      }
+      if((finalAssistant.stopReason==="aborted"||finalAssistant.stopReason==="error")&&agent.state.messages[agent.state.messages.length-1]!==finalAssistant)agent.state.messages.push(finalAssistant);
+      const completed=agent.state.messages.slice(before).filter((message)=>message.role!=="system");
+      const entries:PiSessionEntry[]=[];let parent=session.leafId;
+      const stepsTaken=finalAssistant.stopReason!=="error"&&finalAssistant.stopReason!=="aborted"&&finalAssistant.stopReason!=="length";
+      for(const message of completed){const persisted=message.role==="assistant"&&message.stopReason==="error"?{...message,errorMessage:classifyPromptError(message.errorMessage??"").message}:withImageRefs(message);const guide=stepsTaken&&message.role==="toolResult"?this.turnSteps.find((taken)=>taken.toolCallId===message.toolCallId)?.step:undefined;const entry=newEntry("message",parent,{message:persisted,...(guide?{guide}:{})});entries.push(entry);parent=entry.id;}
+      if(stepsTaken&&session.header.kind==="guided"&&this.turnSteps.length>0&&isNonAdjacentChapterJump(toc,prevStepChapter,this.turnSteps[0].span.from.entry.index)){
+        const jumpEntry=newEntry(GUIDE_WINDOW_CUT,parent,{firstKeptEntryId:turnStartEntryId,reason:"jump"});
+        entries.push(jumpEntry);
+        parent=jumpEntry.id;
+      }
+      if(entries.length){session.leafId=await this.sessions.append(promptBookId,session.header.id,expectedLeaf,entries);session.entries.push(...entries);persistedAny=true;if(entries.some(isGuideWindowCutEntry)){const system=agent.state.messages[0];agent.state.messages=system?.role==="system"?[system,...piContextMessages(session)]:piContextMessages(session);}}
+      const aborted=completed.some((message)=>message.role==="assistant"&&message.stopReason==="aborted");
+      const errored=finalAssistant.stopReason==="error";
+      const finalMessages=visibleMessages(session);const finalNavigation=sessionNavigation(session);
+      this.emit(aborted?{type:"prompt_aborted",bookId:promptBookId,sessionId:session.header.id,promptId,requestId,messages:finalMessages,...finalNavigation}:{type:"prompt_end",bookId:promptBookId,sessionId:session.header.id,promptId,messages:finalMessages,...finalNavigation});
+      if(!aborted&&!errored&&configAtStart===this.configRevision)this.startMaintenance(agent,session,promptBookId);
+      const hasManualTitle=session.entries.some((entry)=>entry.type==="session_info"&&entry.auto!==true);
+      if(!aborted&&!errored&&isFirstTurn&&!hasManualTitle){
+        const leafAtEnd=session.leafId;
+        const userText=typeof targetMessage.content==="string"?targetMessage.content:Array.isArray(targetMessage.content)?targetMessage.content.flatMap((block)=>typeof block==="object"&&block!==null&&(block as {type?:unknown}).type==="text"&&typeof (block as {text?:unknown}).text==="string"?[(block as {text:string}).text]:[]).join(""):"";
+        const assistantText=finalAssistant.content.flatMap((block)=>block.type==="text"&&typeof block.text==="string"?[block.text]:[]).join("");
+        void this.maybeGenerateTitle(promptBookId,session.header.id,leafAtEnd,userText.slice(0,2000),assistantText.slice(0,2000),agent);
+      }
+    }catch(error){
+      if(session&&rewoundFrom!==undefined&&!persistedAny){
         session.leafId=rewoundFrom;
         if(compactedBeforePrompt&&rewoundFrom)await this.sessions.setLeaf(promptBookId,session.header.id,rewoundFrom).catch(()=>{});
         if(this.bookId===promptBookId&&this.session===session){this.agent=null;this.emit({type:"branch_switched",bookId:promptBookId,sessionId:session.header.id,requestId,messages:visibleMessages(session),...sessionNavigation(session)});}

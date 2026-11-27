@@ -108,6 +108,28 @@ export function GuideSideThread({
                 />
               );
 
+            const assistantBranchInfo = qa.assistantBranchInfo;
+            const assistantBranchSwitcher =
+              !assistantBranchInfo || readOnly ? undefined : (
+                <BranchSwitcher
+                  current={assistantBranchInfo.activeIndex + 1}
+                  total={assistantBranchInfo.options.length}
+                  disabled={isStreaming}
+                  onPrev={() =>
+                    onSwitchBranch(
+                      assistantBranchInfo.options[assistantBranchInfo.activeIndex - 1].anchorId,
+                      -1,
+                    )
+                  }
+                  onNext={() =>
+                    onSwitchBranch(
+                      assistantBranchInfo.options[assistantBranchInfo.activeIndex + 1].anchorId,
+                      1,
+                    )
+                  }
+                />
+              );
+
             return (
               <div
                 key={qa.id}
@@ -145,6 +167,7 @@ export function GuideSideThread({
                       streaming={qa.streaming}
                       canRegenerate={!isStreaming && bookReady && !readOnly}
                       onRegenerate={() => onRegenerate(qa.assistantMessageIndex!)}
+                      branchSwitcher={assistantBranchSwitcher}
                     />
                   </HoldHeight>
                 ) : qa.streaming ? (
