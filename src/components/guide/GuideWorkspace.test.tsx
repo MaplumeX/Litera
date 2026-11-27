@@ -7,6 +7,7 @@ import type { GuideStep } from "@/types/agent";
 
 const prompt = vi.fn();
 const editPrompt = vi.fn();
+const regenerateTurn = vi.fn();
 const abort = vi.fn();
 const switchSession = vi.fn();
 const newSession = vi.fn();
@@ -37,6 +38,7 @@ vi.mock("@/lib/use-guide-bridge", () => ({
     takeStep: prompt,
     askSideQuestion: prompt,
     editTurn: editPrompt,
+    regenerateTurn,
     abort,
     switchBranchAtAnchor,
     restartGuide: restartGuidedSession,
@@ -199,8 +201,9 @@ describe("GuideWorkspace", () => {
     expect(onSaveNote.mock.calls[0][0].stepIndex).toBe(0);
 
     fireEvent.click(screen.getByRole("button", { name: "重新讲解" }));
-    await waitFor(() => expect(editPrompt).toHaveBeenCalledTimes(1));
-    expect(editPrompt.mock.calls[0][0]).toBe(0);
+    await waitFor(() => expect(regenerateTurn).toHaveBeenCalledTimes(1));
+    expect(regenerateTurn).toHaveBeenCalledWith(0);
+    expect(editPrompt).not.toHaveBeenCalled();
   });
 
   it("supports imperative guideChapter and exposes scrollToStep", async () => {
@@ -261,13 +264,9 @@ describe("GuideWorkspace", () => {
     expect(screen.getByText("第二章刚讲了一半")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "重试" }));
-    await waitFor(() => expect(editPrompt).toHaveBeenCalledTimes(1));
-    expect(editPrompt.mock.calls[0][0]).toBe(2);
-    expect(editPrompt.mock.calls[0][2]).toEqual({
-      selection: undefined,
-      chapterHref: undefined,
-      guideRequest: {},
-    });
+    await waitFor(() => expect(regenerateTurn).toHaveBeenCalledTimes(1));
+    expect(regenerateTurn).toHaveBeenCalledWith(2);
+    expect(editPrompt).not.toHaveBeenCalled();
   });
 
   it("auto-collapses an older aborted guided step once a newer committed step succeeds", () => {

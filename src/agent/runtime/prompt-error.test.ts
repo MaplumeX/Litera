@@ -1,5 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { setLocale } from "@/lib/i18n";
 import { classifyPromptError } from "./prompt-error";
+
+afterEach(() => {
+  setLocale("zh-CN");
+});
 
 describe("classifyPromptError", () => {
   it("classifies auth failures", () => {
@@ -73,6 +78,36 @@ describe("classifyPromptError", () => {
     expect(result.code).toBe("unknown");
     expect(result.message).toBe("模型请求失败，请检查配置后重试");
     expect(result.message).not.toContain(raw);
+  });
+
+  it("classifies missing model and bad request errors", () => {
+    for (const message of [
+      "404: The model `gpt-nope` does not exist",
+      "404 Not Found",
+      "model not found",
+    ]) {
+      expect(classifyPromptError(new Error(message)).code).toBe("model_not_found");
+    }
+    expect(classifyPromptError(new Error("404: model not found")).message).toBe(
+      "所选模型不存在或暂不可用，请检查模型名称",
+    );
+
+    for (const message of ["400 Bad Request", "unsupported parameter: reasoning_effort"]) {
+      expect(classifyPromptError(new Error(message)).code).toBe("bad_request");
+    }
+    expect(classifyPromptError(new Error("400 Bad Request")).message).toBe(
+      "请求参数不被当前模型支持，请检查模型配置",
+    );
+  });
+
+  it("localizes classified messages using the active locale", () => {
+    setLocale("en");
+    expect(classifyPromptError(new Error("401 Unauthorized")).message).toBe(
+      "Invalid or unauthorized API key. Please check your model settings.",
+    );
+    expect(classifyPromptError(new Error("404: model not found")).message).toBe(
+      "Selected model not found or unavailable. Please check the model ID.",
+    );
   });
 
   it("handles non-Error inputs", () => {

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createAgentState, type AgentState } from "@/lib/agent-reducer";
 
 const editPrompt = vi.fn(async () => {});
+const regeneratePrompt = vi.fn(async () => {});
 let bridgeState: AgentState;
 
 vi.mock("@/lib/use-agent-bridge", () => ({
@@ -14,6 +15,7 @@ vi.mock("@/lib/use-agent-bridge", () => ({
     newSession: vi.fn(async () => {}),
     prompt: vi.fn(),
     editPrompt,
+    regeneratePrompt,
     renameSession: vi.fn(async () => {}),
     switchSession: vi.fn(async () => {}),
     updateSessionConfig: vi.fn(async () => {}),
@@ -42,6 +44,7 @@ function readyState(overrides: Partial<AgentState> = {}): AgentState {
 
 beforeEach(() => {
   editPrompt.mockClear();
+  regeneratePrompt.mockClear();
   bridgeState = readyState({
     messages: [
       { role: "user", content: "第一问" },
@@ -71,7 +74,7 @@ function renderWorkspace() {
 }
 
 describe("ChatPanel regenerate", () => {
-  it("resends the last user message through editPrompt with its context", async () => {
+  it("regenerates the last user turn through regeneratePrompt without duplicating the user message", async () => {
     const view = renderWorkspace();
     const buttons = view.getAllByRole("button", { name: "重新生成" });
     fireEvent.click(buttons[buttons.length - 1]);
@@ -79,21 +82,12 @@ describe("ChatPanel regenerate", () => {
       await Promise.resolve();
     });
 
-    expect(editPrompt).toHaveBeenCalledTimes(1);
-    expect(editPrompt).toHaveBeenCalledWith(
-      2,
-      "第二问",
-      { selection: "引用段落", chapterHref: "OEBPS/ch2.xhtml" },
-      {
-        role: "user",
-        content: "第二问",
-        selection: "引用段落",
-        chapterHref: "OEBPS/ch2.xhtml",
-      },
-    );
+    expect(regeneratePrompt).toHaveBeenCalledTimes(1);
+    expect(regeneratePrompt).toHaveBeenCalledWith(2);
+    expect(editPrompt).not.toHaveBeenCalled();
   });
 
-  it("regenerates an earlier assistant message by forking its own preceding user message", async () => {
+  it("regenerates an earlier assistant message anchored to its own preceding user message", async () => {
     const view = renderWorkspace();
     const buttons = view.getAllByRole("button", { name: "重新生成" });
     fireEvent.click(buttons[0]);
@@ -101,18 +95,9 @@ describe("ChatPanel regenerate", () => {
       await Promise.resolve();
     });
 
-    expect(editPrompt).toHaveBeenCalledTimes(1);
-    expect(editPrompt).toHaveBeenCalledWith(
-      0,
-      "第一问",
-      { selection: undefined, chapterHref: undefined },
-      {
-        role: "user",
-        content: "第一问",
-        selection: undefined,
-        chapterHref: undefined,
-      },
-    );
+    expect(regeneratePrompt).toHaveBeenCalledTimes(1);
+    expect(regeneratePrompt).toHaveBeenCalledWith(0);
+    expect(editPrompt).not.toHaveBeenCalled();
   });
 
   it("anchors on the last user message even when a compaction notice trails the reply", async () => {
@@ -130,17 +115,7 @@ describe("ChatPanel regenerate", () => {
       await Promise.resolve();
     });
 
-    expect(editPrompt).toHaveBeenCalledWith(
-      0,
-      "第一问",
-      { selection: undefined, chapterHref: undefined },
-      {
-        role: "user",
-        content: "第一问",
-        selection: undefined,
-        chapterHref: undefined,
-      },
-    );
+    expect(regeneratePrompt).toHaveBeenCalledWith(0);
   });
 
   it("anchors on the last user message even when the assistant reply is missing", async () => {
@@ -158,17 +133,26 @@ describe("ChatPanel regenerate", () => {
       await Promise.resolve();
     });
 
-    expect(editPrompt).toHaveBeenCalledWith(
-      2,
-      "出错前的问题",
-      { selection: undefined, chapterHref: undefined },
-      {
-        role: "user",
-        content: "出错前的问题",
-        selection: undefined,
-        chapterHref: undefined,
-      },
-    );
+    expect(regeneratePrompt).toHaveBeenCalledWith(2);
+  });
+
+  it("retries an empty-output errored assistant message via the inline retry button", async () => {
+    bridgeState = readyState({
+      messages: [
+        { role: "user", content: "第一问" },
+        { role: "assistant", content: "", blocks: [], stopReason: "error", errorMessage: "模型服务暂时不可用，请稍后重试" },
+      ],
+    });
+    const view = renderWorkspace();
+    const retryButton = view.getByRole("button", { name: "重试" });
+    fireEvent.click(retryButton);
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(regeneratePrompt).toHaveBeenCalledTimes(1);
+    expect(regeneratePrompt).toHaveBeenCalledWith(0);
+    expect(editPrompt).not.toHaveBeenCalled();
   });
 
   it("does not render the button while streaming", () => {
@@ -225,17 +209,7 @@ describe("ChatPanel regenerate", () => {
       await Promise.resolve();
     });
 
-    expect(editPrompt).toHaveBeenCalledWith(
-      2,
-      "出错前的问题",
-      { selection: undefined, chapterHref: undefined },
-      {
-        role: "user",
-        content: "出错前的问题",
-        selection: undefined,
-        chapterHref: undefined,
-      },
-    );
+    expect(regeneratePrompt).toHaveBeenCalledWith(2);
   });
 
   it("renders the fallback button when the last assistant message has no text blocks", async () => {
@@ -257,12 +231,7 @@ describe("ChatPanel regenerate", () => {
       await Promise.resolve();
     });
 
-    expect(editPrompt).toHaveBeenCalledWith(
-      0,
-      "第一问",
-      { selection: undefined, chapterHref: undefined },
-      expect.anything(),
-    );
+    expect(regeneratePrompt).toHaveBeenCalledWith(0);
   });
 
   it("does not render the button without user messages or in an empty session", () => {
@@ -300,13 +269,8 @@ describe("ChatPanel regenerate", () => {
       await Promise.resolve();
     });
 
-    // The edit UI is gone and the resend used the last user message, not the draft.
+    // The edit UI is gone and the resend targeted the last user message, not the draft.
     expect(view.queryByRole("button", { name: "保存" })).toBeNull();
-    expect(editPrompt).toHaveBeenCalledWith(
-      2,
-      "第二问",
-      expect.anything(),
-      expect.anything(),
-    );
+    expect(regeneratePrompt).toHaveBeenCalledWith(2);
   });
 });

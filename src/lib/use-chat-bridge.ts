@@ -127,6 +127,22 @@ export function useChatBridge(bookId: string) {
     [],
   );
 
+  const regeneratePrompt = useCallback(async (messageIndex: number) => {
+    const currentBookId = bookIdRef.current;
+    if (!currentBookId) throw new Error("No book is open");
+    if (statusRef.current !== "bookReady") throw new Error("Book is not ready");
+    const requestId = id("regenerate-prompt-request");
+    const promptId = id("prompt");
+    dispatch({ type: "prompt_queued", bookId: currentBookId, promptId });
+    try {
+      await embeddedAgentRuntime.regenerate(messageIndex, promptId, requestId);
+    } catch (error) {
+      dispatch({ type: "prompt_queue_failed", promptId, message: String(error) });
+      throw error;
+    }
+    return { requestId, promptId };
+  }, []);
+
   const abort = useCallback(async () => embeddedAgentRuntime.abort(id("abort")), []);
 
   const switchBranchAtAnchor = useCallback(
@@ -178,6 +194,7 @@ export function useChatBridge(bookId: string) {
     state,
     prompt,
     editPrompt,
+    regeneratePrompt,
     abort,
     listSessions,
     newSession,

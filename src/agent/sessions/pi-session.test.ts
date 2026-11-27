@@ -134,6 +134,106 @@ describe("branchNavigation", () => {
     expect(info.options[0].preview.length).toBeLessThanOrEqual(41);
     expect(info.options[0].preview.endsWith("…")).toBe(true);
   });
+
+  it("exposes assistant-level forks on assistant anchors without forking the user message", () => {
+    const session = makeSession([
+      entry("u1", null, "user", "same question", 1),
+      entry("a1", "u1", "assistant", "first answer", 2),
+      entry("a1b", "u1", "assistant", "second answer", 10),
+    ], "a1b");
+    const nav = branchNavigation(session);
+    expect(nav.has("u1")).toBe(false);
+    const info = nav.get("a1")!;
+    expect(nav.get("a1b")).toBe(info);
+    expect(info.options.map((option) => option.anchorId)).toEqual(["a1", "a1b"]);
+    expect(info.activeIndex).toBe(1);
+  });
+
+  it("suppresses inactive empty failed assistant attempts when retrying", () => {
+    const emptyError = (id: string, parentId: string, time: number) => ({
+      type: "message",
+      id,
+      parentId,
+      timestamp: ts(time),
+      message: { role: "assistant", content: [], stopReason: "error", errorMessage: "模型服务暂时不可用，请稍后重试", timestamp: time },
+    });
+    // Empty error -> retry -> success: no branch switcher at all.
+    const recovered = makeSession([
+      entry("u1", null, "user", "q", 1),
+      emptyError("a1", "u1", 2),
+      entry("a2", "u1", "assistant", "recovered answer", 5),
+    ], "a2");
+    expect(branchNavigation(recovered).size).toBe(0);
+
+    // Empty error -> retry -> empty error again: still no branch switcher.
+    const repeatedError = makeSession([
+      entry("u1", null, "user", "q", 1),
+      emptyError("a1", "u1", 2),
+      emptyError("a2", "u1", 5),
+    ], "a2");
+    expect(branchNavigation(repeatedError).size).toBe(0);
+
+    // Success -> regenerate -> empty error (active): keep both so the user can switch back.
+    const failedRegen = makeSession([
+      entry("u1", null, "user", "q", 1),
+      entry("a1", "u1", "assistant", "good answer", 2),
+      emptyError("a2", "u1", 5),
+    ], "a2");
+    const failedInfo = branchNavigation(failedRegen).get("a2")!;
+    expect(failedInfo.options.map((option) => option.anchorId)).toEqual(["a1", "a2"]);
+    expect(failedInfo.activeIndex).toBe(1);
+
+    // Success -> empty error -> retry -> success: dead error is hidden, showing 2/2 not 3/3.
+    const afterSecondSuccess = makeSession([
+      entry("u1", null, "user", "q", 1),
+      entry("a1", "u1", "assistant", "good answer", 2),
+      emptyError("a2", "u1", 5),
+      entry("a3", "u1", "assistant", "better answer", 8),
+    ], "a3");
+    const info = branchNavigation(afterSecondSuccess).get("a3")!;
+    expect(info.options.map((option) => option.anchorId)).toEqual(["a1", "a3"]);
+    expect(info.activeIndex).toBe(1);
+  });
+
+  it("keeps a failed assistant attempt as a branch when it produced partial text", () => {
+    const session = makeSession([
+      entry("u1", null, "user", "q", 1),
+      { type: "message", id: "a1", parentId: "u1", timestamp: ts(2), message: { role: "assistant", content: [{ type: "text", text: "partial output" }], stopReason: "error", timestamp: 2 } },
+      entry("a2", "u1", "assistant", "full output", 5),
+    ], "a2");
+    const info = branchNavigation(session).get("a2")!;
+    expect(info.options.map((option) => option.anchorId)).toEqual(["a1", "a2"]);
+    expect(info.activeIndex).toBe(1);
+  });
+
+  it("does not treat tool-loop continuation entries as sibling assistant forks", () => {
+    const session = makeSession([
+      entry("u1", null, "user", "q", 1),
+      { type: "message", id: "a1", parentId: "u1", timestamp: ts(2), message: { role: "assistant", content: [{ type: "toolCall", id: "c1", name: "get_toc", arguments: {} }], timestamp: 2 } },
+      { type: "message", id: "r1", parentId: "a1", timestamp: ts(3), message: { role: "toolResult", toolCallId: "c1", toolName: "get_toc", content: [{ type: "text", text: "[]" }], isError: false, timestamp: 3 } },
+      entry("a2", "r1", "assistant", "final answer", 4),
+    ], "a2");
+    expect(branchNavigation(session).size).toBe(0);
+  });
+
+  it("suppresses legacy identical-text user forks whose only outcome was an empty error", () => {
+    const session = makeSession([
+      entry("u1", null, "user", "same question", 1),
+      { type: "message", id: "a1", parentId: "u1", timestamp: ts(2), message: { role: "assistant", content: [], stopReason: "error", timestamp: 2 } },
+      fork("u1b", null, "same question", 5),
+      entry("a1b", "u1b", "assistant", "good answer", 6),
+    ], "a1b");
+    expect(branchNavigation(session).size).toBe(0);
+
+    // Genuinely edited questions are still kept even if the old one errored.
+    const edited = makeSession([
+      entry("u1", null, "user", "original question", 1),
+      { type: "message", id: "a1", parentId: "u1", timestamp: ts(2), message: { role: "assistant", content: [], stopReason: "error", timestamp: 2 } },
+      fork("u1b", null, "edited question", 5),
+      entry("a1b", "u1b", "assistant", "good answer", 6),
+    ], "a1b");
+    expect(branchNavigation(edited).get("u1b")?.options.map((option) => option.anchorId)).toEqual(["u1", "u1b"]);
+  });
 });
 
 describe("branchLeafId", () => {

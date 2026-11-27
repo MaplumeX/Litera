@@ -114,6 +114,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       readStepImageUrl,
       prompt,
       editPrompt,
+      regeneratePrompt,
       renameSession,
       switchSession,
       updateSessionConfig,
@@ -397,6 +398,10 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
           { role: "user", content: text, selection, chapterHref },
         );
       } catch (error) {
+        setInput((current) => (current ? current : text));
+        if (selection) {
+          setPendingSelection((current) => current ?? { text: selection, chapterHref });
+        }
         setInvokeError(String(error));
         setSubmitting(false);
       }
@@ -543,31 +548,35 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
       if (targetIndex < 0 || isStreaming || !bookId) return;
       const original = state.messages[targetIndex];
       if (!original || original.role !== "user") return;
-      // A step sent as the message in older Sessions is asked for again.
-      const guideRequest = original.guideRequest ?? (original.guide ? { step: original.guide } : undefined);
       setEditingIndex(null);
       setEditDraft("");
       setInvokeError(null);
       setSubmitting(true);
       scrollToBottom();
       try {
-        await editPrompt(
-          targetIndex,
-          original.content,
-          { selection: original.selection, chapterHref: original.chapterHref, guideRequest },
-          {
-            role: "user",
-            content: original.content,
-            selection: original.selection,
-            chapterHref: original.chapterHref,
-            ...(guideRequest ? { guideRequest } : {}),
-          },
-        );
+        // Legacy user-message steps have no `guideRequest`, so re-ask via editPrompt.
+        if (original.guide && !original.guideRequest) {
+          const guideRequest = { step: original.guide };
+          await editPrompt(
+            targetIndex,
+            original.content,
+            { selection: original.selection, chapterHref: original.chapterHref, guideRequest },
+            {
+              role: "user",
+              content: original.content,
+              selection: original.selection,
+              chapterHref: original.chapterHref,
+              guideRequest,
+            },
+          );
+        } else {
+          await regeneratePrompt(targetIndex);
+        }
       } catch (error) {
         setInvokeError(String(error));
         setSubmitting(false);
       }
-    }, [bookId, editPrompt, isStreaming, scrollToBottom, state.messages]);
+    }, [bookId, editPrompt, isStreaming, regeneratePrompt, scrollToBottom, state.messages]);
 
     const handleSwitchBranch = useCallback(async (anchorId: string, direction: -1 | 1) => {
       if (isStreaming) return;
@@ -918,34 +927,48 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
                     />
                   );
                 })()}
-                {message.role === "assistant" && (
-                  <HoldHeight active={isStreaming && index === lastChatIndex}>
-                    {guideCalls(message, isStreaming && index === lastChatIndex).map((call) => {
-                      const step = call.guide;
-                      if (!step) return <GuideStepMarkerPlaceholder key={call.toolCallId} />;
-                      return (
-                        <div key={call.toolCallId}>
-                          <GuideStepMarker
-                            label={guideStepLabel(step)}
-                            onOpen={canOpenGuideStep ? () => openGuideStep(step) : undefined}
-                          />
-                          {bookReady && guideStepImages && readStepImageUrl && (
-                            <GuideStepImages step={step} loadImages={guideStepImages} loadImageUrl={readStepImageUrl} />
-                          )}
-                        </div>
-                      );
-                    })}
-                    <AssistantMessage
-                      message={message}
-                      messageIndex={index}
-                      streaming={isStreaming && index === lastChatIndex}
-                      canRegenerate={
-                        !isStreaming && bookReady && firstUserIndex !== -1 && index > firstUserIndex
-                      }
-                      onRegenerate={handleRegenerate}
+                {message.role === "assistant" && (() => {
+                  const anchorId = state.branchAnchors[index];
+                  const info = anchorId !== undefined ? state.branchNavigation[anchorId] : undefined;
+                  const branchSwitcher = !info || info.options.length <= 1 || info.activeIndex < 0 ? undefined : (
+                    <BranchSwitcher
+                      current={info.activeIndex + 1}
+                      total={info.options.length}
+                      disabled={isStreaming}
+                      onPrev={() => void handleSwitchBranch(info.options[info.activeIndex - 1].anchorId, -1)}
+                      onNext={() => void handleSwitchBranch(info.options[info.activeIndex + 1].anchorId, 1)}
                     />
-                  </HoldHeight>
-                )}
+                  );
+                  return (
+                    <HoldHeight active={isStreaming && index === lastChatIndex}>
+                      {guideCalls(message, isStreaming && index === lastChatIndex).map((call) => {
+                        const step = call.guide;
+                        if (!step) return <GuideStepMarkerPlaceholder key={call.toolCallId} />;
+                        return (
+                          <div key={call.toolCallId}>
+                            <GuideStepMarker
+                              label={guideStepLabel(step)}
+                              onOpen={canOpenGuideStep ? () => openGuideStep(step) : undefined}
+                            />
+                            {bookReady && guideStepImages && readStepImageUrl && (
+                              <GuideStepImages step={step} loadImages={guideStepImages} loadImageUrl={readStepImageUrl} />
+                            )}
+                          </div>
+                        );
+                      })}
+                      <AssistantMessage
+                        message={message}
+                        messageIndex={index}
+                        streaming={isStreaming && index === lastChatIndex}
+                        canRegenerate={
+                          !isStreaming && bookReady && firstUserIndex !== -1 && index > firstUserIndex
+                        }
+                        onRegenerate={handleRegenerate}
+                        branchSwitcher={branchSwitcher}
+                      />
+                    </HoldHeight>
+                  );
+                })()}
                 {message.role === "notice" && <CompactionNotice notice={message} />}
                 {message.role === "guide_cut" && (
                   <div

@@ -270,6 +270,48 @@ describe("agentReducer", () => {
     state = reduce(state, { version: 2, type: "thinking_delta", bookId: "book-a", sessionId: "s2", promptId: "p", contentIndex: 0, delta: "stale" });
     expect(state.messages).toEqual([]);
   });
+
+  it("rolls back an optimistic user message when a prompt fails before prompt_started", () => {
+    let state = settledSession();
+    state = agentReducer(state, { type: "prompt_queued", bookId: "book-a", promptId: "p" });
+    state = agentReducer(state, { type: "user_message", message: { role: "user", content: "unsent" } });
+    expect(state.messages).toHaveLength(2);
+
+    state = reduce(state, {
+      version: 2,
+      type: "error",
+      scope: "prompt",
+      message: "API Key 无效或无权限，请检查模型配置",
+      recoverable: true,
+      bookId: "book-a",
+      sessionId: "s",
+      promptId: "p",
+    });
+    expect(state.messages).toEqual([{ role: "user", content: "one" }]);
+    expect(state.status).toBe("bookReady");
+    expect(state.promptId).toBeNull();
+  });
+
+  it("keeps the user message if an error arrives after prompt_started persisted it", () => {
+    let state = settledSession();
+    state = agentReducer(state, { type: "prompt_queued", bookId: "book-a", promptId: "p" });
+    state = agentReducer(state, { type: "user_message", message: { role: "user", content: "persisted" } });
+    state = reduce(state, { version: 2, type: "prompt_started", bookId: "book-a", sessionId: "s", promptId: "p" });
+    state = reduce(state, {
+      version: 3,
+      type: "error",
+      scope: "prompt",
+      message: "failed later",
+      recoverable: true,
+      bookId: "book-a",
+      sessionId: "s",
+      promptId: "p",
+    });
+    expect(state.messages).toEqual([
+      { role: "user", content: "one" },
+      { role: "user", content: "persisted" },
+    ]);
+  });
 });
 
 const forkNavigation: Record<string, AnchorBranchInfo> = {

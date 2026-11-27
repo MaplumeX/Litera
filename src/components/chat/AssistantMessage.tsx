@@ -93,10 +93,12 @@ const TextBlock = memo(function TextBlock({
   text,
   streaming,
   onRegenerate,
+  branchSwitcher,
 }: {
   text: string;
   streaming: boolean;
   onRegenerate?: () => void;
+  branchSwitcher?: ReactNode;
 }) {
   const { t } = useT();
   // Memoized: every keystroke in the chat input re-renders the whole panel,
@@ -113,18 +115,21 @@ const TextBlock = memo(function TextBlock({
           <span className="ml-0.5 inline-block h-4 w-0.5 translate-y-0.5 animate-pulse rounded-full bg-primary motion-reduce:animate-none" />
         )}
       </div>
-      <div className="message-actions mt-1 -ml-1 flex h-6 items-center gap-0.5">
-        <CopyButton text={stripCitations(text)} />
-        {onRegenerate && (
-          <button
-            type="button"
-            onClick={onRegenerate}
-            className={MESSAGE_ACTION_CLASS}
-            aria-label={t("chat.regenerate")}
-          >
-            <RefreshCw className="h-3.5 w-3.5" />
-          </button>
-        )}
+      <div className="mt-1 -ml-1 flex h-6 items-center gap-0.5">
+        {branchSwitcher}
+        <div className="message-actions flex items-center gap-0.5">
+          <CopyButton text={stripCitations(text)} />
+          {onRegenerate && (
+            <button
+              type="button"
+              onClick={onRegenerate}
+              className={MESSAGE_ACTION_CLASS}
+              aria-label={t("chat.regenerate")}
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -144,6 +149,8 @@ interface AssistantMessageProps {
   canRegenerate?: boolean;
   /** Stable callback: inline arrows would defeat memoization of the whole list. */
   onRegenerate?: (messageIndex?: number) => void;
+  /** Optional assistant-level branch switcher for regenerated replies. */
+  branchSwitcher?: ReactNode;
 }
 
 export const AssistantMessage = memo(function AssistantMessage({
@@ -152,6 +159,7 @@ export const AssistantMessage = memo(function AssistantMessage({
   streaming = false,
   canRegenerate = true,
   onRegenerate,
+  branchSwitcher,
 }: AssistantMessageProps) {
   const { t } = useT();
   const handleRegenerate = useCallback(
@@ -165,6 +173,7 @@ export const AssistantMessage = memo(function AssistantMessage({
   const lastBlock = blocks[blocks.length - 1];
   const liveThinking = activity?.kind === "thinking" && lastBlock?.type === "thinking" ? lastBlock.text : undefined;
   const lastTextIndex = answer.reduce((last, entry) => (entry.block.type === "text" ? entry.index : last), -1);
+  const isError = !streaming && message.stopReason === "error";
   return (
     <div className="message-row min-w-0">
       <div className="min-w-0 space-y-2">
@@ -181,23 +190,29 @@ export const AssistantMessage = memo(function AssistantMessage({
               text={block.text}
               streaming={streaming && index === lastTextIndex}
               onRegenerate={
-                canRegenerate && !streaming && index === lastTextIndex && onRegenerate
+                canRegenerate && !streaming && !isError && index === lastTextIndex && onRegenerate
                   ? handleRegenerate
                   : undefined
               }
+              branchSwitcher={index === lastTextIndex ? branchSwitcher : undefined}
             />
           ) : null,
         )}
-        {!streaming && canRegenerate && lastTextIndex === -1 && onRegenerate && (
-          <div className="message-actions -ml-1 flex h-6 items-center gap-0.5">
-            <button
-              type="button"
-              onClick={handleRegenerate}
-              className={MESSAGE_ACTION_CLASS}
-              aria-label={t("chat.regenerate")}
-            >
-              <RefreshCw className="h-3.5 w-3.5" />
-            </button>
+        {!streaming && lastTextIndex === -1 && !isError && ((canRegenerate && onRegenerate) || branchSwitcher) && (
+          <div className="-ml-1 flex h-6 items-center gap-0.5">
+            {branchSwitcher}
+            {canRegenerate && onRegenerate && (
+              <div className="message-actions flex items-center gap-0.5">
+                <button
+                  type="button"
+                  onClick={handleRegenerate}
+                  className={MESSAGE_ACTION_CLASS}
+                  aria-label={t("chat.regenerate")}
+                >
+                  <RefreshCw className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            )}
           </div>
         )}
         {!streaming && message.stopReason === "aborted" && (
@@ -205,11 +220,32 @@ export const AssistantMessage = memo(function AssistantMessage({
             <span className="text-2xs text-muted-foreground/70">{t("chat.stopped")}</span>
           </div>
         )}
-        {!streaming && message.stopReason === "error" && (
-          <div role="alert" className="flex items-start gap-1.5 rounded-lg bg-destructive/10 px-2.5 py-2 text-xs text-destructive">
-            <AlertCircle className="mt-px h-3.5 w-3.5 shrink-0" />
-            <span>{message.errorMessage ?? t("chat.requestFailed")}</span>
+        {isError && (
+          <div
+            role="alert"
+            className="flex items-center justify-between gap-2 rounded-lg border border-destructive/20 bg-destructive/10 px-2.5 py-2 text-xs text-destructive"
+          >
+            <div className="flex min-w-0 items-start gap-1.5">
+              <AlertCircle className="mt-px h-3.5 w-3.5 shrink-0" />
+              <span className="min-w-0 break-words">
+                {message.errorMessage ?? t("chat.requestFailed")}
+              </span>
+            </div>
+            {canRegenerate && onRegenerate && (
+              <button
+                type="button"
+                onClick={handleRegenerate}
+                className="inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-destructive transition-colors hover:bg-destructive/15"
+                aria-label={t("chat.retry")}
+              >
+                <RefreshCw className="h-3 w-3" />
+                <span>{t("chat.retry")}</span>
+              </button>
+            )}
           </div>
+        )}
+        {isError && lastTextIndex === -1 && branchSwitcher && (
+          <div className="-ml-1 flex h-6 items-center gap-0.5">{branchSwitcher}</div>
         )}
       </div>
     </div>

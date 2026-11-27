@@ -45,6 +45,7 @@ export type GuideRuntimePort = Pick<
   | "guidePageMarks"
   | "locateQuote"
   | "prompt"
+  | "regenerate"
   | "abort"
   | "refreshAfterSync"
 >;
@@ -203,6 +204,15 @@ export class GuideController {
     editIndex?: number,
   ): Promise<void> {
     return this.runtime.prompt(text, context, promptId, requestId, editIndex);
+  }
+
+  /** Retry / regenerate the assistant reply for an existing visible user turn without duplicating the user entry. */
+  regenerateTurn(
+    userMessageIndex: number,
+    promptId?: string,
+    requestId?: string,
+  ): Promise<void> {
+    return this.runtime.regenerate(userMessageIndex, promptId, requestId);
   }
 
   abort(requestId?: string): void {
