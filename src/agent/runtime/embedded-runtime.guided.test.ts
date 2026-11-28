@@ -427,4 +427,81 @@ describe("Guided sessions in the runtime",()=>{
     });
     expect(historyResult[0]).toContain("土地财政的制度起源");
   });
+
+  it("branches chapter follow-ups off the guided spine, sees in-progress chapter steps + prior Q&As, excludes later chapters, and keeps edits off-spine",async()=>{
+    const {runtime,batches,requests,events,tools}=setup(undefined,null,[
+      takeStep({chapterIndex:0,toBlock:1}),"One part 1 explanation","title",
+      "Answer to Q1 on One part 1",
+      takeStep({toBlock:3}),"One part 2 explanation","Recap of chapter One",
+      "Answer to Q2 seeing One part 1+2 and Q1",
+      takeStep({chapterIndex:1}),"Two explanation","Recap of chapter Two",
+      "Answer to Q3 anchored on One (no Two)",
+      "Edited Q1 reply on One",
+      "Regenerated Q1 reply on One",
+      fauxAssistantMessage(fauxToolCall("search_guide_history",{queries:["Edited Q1"]}),{stopReason:"toolUse"}),
+      "Found your earlier chapter One question.",
+    ]);
+    await runtime.openBook("book",new ArrayBuffer(1));
+    await runtime.newSession(undefined,"guided");
+
+    // Step 1: Ch1 (1/2)
+    await runtime.prompt("继续带读",{guideRequest:{}});
+    await runtime.settled();
+    const ch1Anchor=batches.flat().find((entry)=>entry.type==="message"&&(entry.message as {role?:string}).role==="user")!.id;
+
+    // Q1 on Ch1 side-thread while Ch1 is half-read
+    await runtime.promptSideThread(ch1Anchor,"Q1 about One part 1",{});
+    expect(tools[tools.length-1]).not.toContain("guide_step");
+    expect(tools[tools.length-1]).toContain("search_guide_history");
+
+    // Step 2: Continue Ch1 (2/2) on spine — spine must NOT contain Q1
+    const requestsBeforeStep2=requests.length;
+    await runtime.prompt("继续带读",{guideRequest:{}});
+    await runtime.settled();
+    const step2Request=requests[requestsBeforeStep2];
+    expect(step2Request).toContain("One part 1 explanation");
+    expect(step2Request).not.toContain("Q1 about One part 1");
+
+    // Q2 on Ch1 side-thread — must see BOTH One part 1+2 AND Q1/A1
+    await runtime.promptSideThread(ch1Anchor,"Q2 about One part 2",{});
+    const q2Request=requests.find((payload)=>payload.includes("Q2 about One part 2"))!;
+    expect(q2Request).toContain("One part 1 explanation");
+    expect(q2Request).toContain("One part 2 explanation");
+    expect(q2Request).toContain("Q1 about One part 1");
+    expect(q2Request).toContain("Answer to Q1 on One part 1");
+
+    // Step 3: Continue into Ch2 on spine — spine stays pure
+    const requestsBeforeCh2=requests.length;
+    await runtime.prompt("继续带读",{guideRequest:{}});
+    await runtime.settled();
+    const ch2Request=requests[requestsBeforeCh2];
+    expect(ch2Request).toContain("Recap of chapter One");
+    expect(ch2Request).not.toContain("Q1 about One part 1");
+    expect(ch2Request).not.toContain("Q2 about One part 2");
+
+    // Q3 on Ch1 side-thread after Ch2 is read — must NOT see Ch2!
+    await runtime.promptSideThread(ch1Anchor,"Q3 revisit One",{});
+    const q3Request=requests.find((payload)=>payload.includes("Q3 revisit One"))!;
+    expect(q3Request).toContain("One part 2 explanation");
+    expect(q3Request).toContain("Q2 about One part 2");
+    expect(q3Request).not.toContain("Two explanation");
+
+    // Editing & regenerating Q1 inside Ch1's side-thread must leave Ch2 intact on the spine
+    await runtime.promptSideThread(ch1Anchor,"Edited Q1 on One",{},undefined,undefined,0);
+    await runtime.regenerateSideThread(ch1Anchor,0);
+    const latestEnd=[...events].reverse().find((event)=>event.type==="prompt_end");
+    expect(latestEnd && latestEnd.type==="prompt_end" ? latestEnd.messages?.some((m)=>m.role==="assistant"&&m.content.includes("Two explanation")) : false).toBe(true);
+    expect(latestEnd && latestEnd.type==="prompt_end" ? latestEnd.sideThreads?.[ch1Anchor]?.messages : []).toEqual([
+      expect.objectContaining({role:"user",content:"Edited Q1 on One"}),
+      expect.objectContaining({role:"assistant",content:"Regenerated Q1 reply on One"}),
+    ]);
+
+    // Spine `search_guide_history` can still retrieve side-thread Q&As on demand
+    await runtime.prompt("回顾之前的问题",{});
+    const historyResults=batches.flat().flatMap((entry)=>{
+      const message=entry.type==="message"?entry.message as {role?:string;toolName?:string;content?:Array<{type?:string;text?:string}>}:undefined;
+      return message?.role==="toolResult"&&message.toolName==="search_guide_history"?[message.content?.[0]?.text??""]:[];
+    });
+    expect(historyResults[0]).toContain("Edited Q1 on One");
+  });
 });

@@ -182,8 +182,7 @@ impl PiSessionStore {
             .map_err(|_| AppError::storage_io("Session lock is poisoned"))?;
         let path = self.find_file(book_id, session_id)?;
         let (header, entries) = load_and_migrate(&path)?;
-        let leaf_id = stored_leaf_id(&path, &entries)
-            .or_else(|| entries.last().and_then(entry_id).map(str::to_string));
+        let leaf_id = resolved_spine_leaf_id(&path, &entries);
         Ok(LoadedPiSession {
             header,
             entries,
@@ -284,8 +283,7 @@ impl PiSessionStore {
                 .filter(|value| *value);
             // The runtime applies the latest session_config on the active
             // branch only, so the summary must resolve it the same way.
-            let leaf_id = stored_leaf_id(&path, &entries)
-                .or_else(|| entries.last().and_then(entry_id).map(str::to_string));
+            let leaf_id = resolved_spine_leaf_id(&path, &entries);
             let session_config = latest_on_branch(&entries, leaf_id.as_deref(), "session_config");
             let system_prompt = session_config
                 .and_then(|entry| entry.get("systemPrompt"))
@@ -339,17 +337,30 @@ impl PiSessionStore {
             .filter_map(entry_id)
             .map(str::to_string)
             .collect();
+        let side_thread_batch = entries.iter().all(is_side_thread_entry);
         // Optimistic leaf check, relaxed for branch switching: `None` requires
-        // an empty session (fresh-session semantics); `Some(id)` only requires
-        // the id to exist in the file, so a stale writer cannot fork history it
-        // never saw, while continuing on a non-final (old) branch is allowed.
+        // an empty spine (fresh-session semantics) or a root side-thread start;
+        // `Some(id)` only requires the id to exist in the file, so a stale
+        // writer cannot fork history it never saw, while continuing on a
+        // non-final branch or side-thread is allowed.
         match expected_leaf_id {
             Some(expected) if !ids.contains(expected) => {
                 return Err(AppError::invalid_input(
                     "Session leaf changed; reload before appending",
                 ));
             }
-            None if !existing.is_empty() => {
+            None if side_thread_batch => {
+                let starts_at_root = entries
+                    .first()
+                    .and_then(|entry| entry.get("parentId"))
+                    .is_some_and(Value::is_null);
+                if !starts_at_root && !existing.is_empty() {
+                    return Err(AppError::invalid_input(
+                        "Session leaf changed; reload before appending",
+                    ));
+                }
+            }
+            None if existing.iter().any(|entry| !is_side_thread_entry(entry)) => {
                 return Err(AppError::invalid_input(
                     "Session leaf changed; reload before appending",
                 ));
@@ -391,12 +402,14 @@ impl PiSessionStore {
             .and_then(|_| file.sync_all())
             .map_err(|error| AppError::storage_io(format!("Failed to append session: {error}")))?;
         let new_leaf = entries.last().and_then(entry_id).map(str::to_string);
-        // Appending always advances the active-branch sidecar to the newest
-        // leaf ("latest branch" semantics: continuing a conversation moves
-        // the pointer even when the append extended an older branch).
-        if let Some(leaf) = new_leaf.as_deref() {
-            if write_leaf_sidecar(&path, leaf).is_err() {
-                eprintln!("[sessions] Failed to persist active leaf sidecar for {session_id}");
+        // Appending on the spine advances the active-branch sidecar to the
+        // newest leaf; side-thread entries stay attached off-spine so the
+        // guided reading spine's leaf never moves.
+        if !side_thread_batch {
+            if let Some(leaf) = new_leaf.as_deref() {
+                if write_leaf_sidecar(&path, leaf).is_err() {
+                    eprintln!("[sessions] Failed to persist active leaf sidecar for {session_id}");
+                }
             }
         }
         Ok(new_leaf)
@@ -563,7 +576,7 @@ impl PiSessionStore {
                     .map(str::to_string)
                     .collect();
                 local_has_extra = ids.iter().any(|id| !remote_ids.contains(id));
-                let local_leaf = stored_leaf_id(path, &merged);
+                let local_leaf = resolved_spine_leaf_id(path, &merged);
                 let mut added = Vec::new();
                 for entry in remote_entries {
                     let Some(id) = entry_id(&entry) else { continue };
@@ -572,10 +585,22 @@ impl PiSessionStore {
                         merged.push(entry);
                     }
                 }
-                // Another device continued this device's active branch: move
-                // the pointer along, or the new messages would sit off-branch.
-                advanced_leaf = local_leaf
-                    .and_then(|leaf| newest_descendant(&merged, &leaf, &added));
+                // Another device continued this device's active spine branch:
+                // move the pointer along, ignoring side-thread entries so an
+                // off-spine follow-up never hijacks the guided spine leaf.
+                advanced_leaf = match local_leaf {
+                    Some(leaf) => newest_descendant(&merged, &leaf, &added),
+                    None => added
+                        .iter()
+                        .rev()
+                        .find(|id| {
+                            merged
+                                .iter()
+                                .find(|entry| entry_id(entry) == Some(id.as_str()))
+                                .is_some_and(|entry| !is_side_thread_entry(entry))
+                        })
+                        .cloned(),
+                };
                 (local_header, merged)
             }
             None => (remote_header, remote_entries),
@@ -783,6 +808,30 @@ fn entry_id(entry: &Value) -> Option<&str> {
     entry.get("id").and_then(Value::as_str)
 }
 
+fn is_side_thread_entry(entry: &Value) -> bool {
+    entry.get("sideThread").is_some_and(Value::is_object)
+}
+
+fn fallback_spine_leaf_id(entries: &[Value]) -> Option<String> {
+    entries
+        .iter()
+        .rev()
+        .find(|entry| !is_side_thread_entry(entry))
+        .and_then(entry_id)
+        .map(str::to_string)
+}
+
+fn resolved_spine_leaf_id(session_path: &Path, entries: &[Value]) -> Option<String> {
+    stored_leaf_id(session_path, entries)
+        .filter(|id| {
+            entries
+                .iter()
+                .find(|entry| entry_id(entry) == Some(id.as_str()))
+                .is_some_and(|entry| !is_side_thread_entry(entry))
+        })
+        .or_else(|| fallback_spine_leaf_id(entries))
+}
+
 /// The active-branch pointer lives next to the JSONL file (append-only stays
 /// intact): `<session>.jsonl.leaf` holds the target leaf id as one line.
 fn leaf_sidecar_path(session_path: &Path) -> PathBuf {
@@ -911,8 +960,9 @@ fn furthest_guide_on_branch<'a>(entries: &'a [Value], leaf_id: Option<&str>) -> 
     furthest.map(|(guide, _)| guide)
 }
 
-/// The newest of `candidates` (by append order) whose ancestry reaches
-/// `leaf`, i.e. the latest entry that continues the branch ending at `leaf`.
+/// The newest non-side-thread entry in `candidates` (by append order) whose
+/// ancestry reaches `leaf`, i.e. the latest entry that continues the spine
+/// branch ending at `leaf`.
 fn newest_descendant(entries: &[Value], leaf: &str, candidates: &[String]) -> Option<String> {
     let by_id: HashMap<&str, &Value> = entries
         .iter()
@@ -922,6 +972,12 @@ fn newest_descendant(entries: &[Value], leaf: &str, candidates: &[String]) -> Op
         .iter()
         .rev()
         .find(|candidate| {
+            if by_id
+                .get(candidate.as_str())
+                .is_some_and(|entry| is_side_thread_entry(entry))
+            {
+                return false;
+            }
             let mut visited = HashSet::new();
             let mut current = by_id.get(candidate.as_str()).copied();
             while let Some(entry) = current {
@@ -1894,5 +1950,70 @@ mod sync_merge_tests {
             .iter()
             .any(|file| file.book_id == "book-1" && file.session_id == id));
         assert!(files.iter().all(|file| file.path.extension().and_then(|v| v.to_str()) == Some("jsonl")));
+    }
+
+    #[test]
+    fn side_thread_appends_preserve_spine_leaf_and_allow_pre_guide_then_spine() {
+        let (_temp, store) = store();
+        let created = store.create_with_kind("book", Some("guided")).unwrap();
+        let id = created.header["id"].as_str().unwrap().to_string();
+
+        // Pre-guide root side-thread question before any spine step.
+        let mut pre_q = message("preq0001", None, "Who is the author?");
+        pre_q["sideThread"] = json!({"anchorId": null});
+        let tip = store.append("book", &id, None, vec![pre_q]).unwrap();
+        assert_eq!(tip.as_deref(), Some("preq0001"));
+        assert_eq!(store.load("book", &id).unwrap().leaf_id, None);
+
+        // First spine step can still append with expected_leaf_id = None.
+        let mut ch3 = message("ch3step1", None, "Chapter 3 step");
+        ch3["guide"] = json!({"from": {"chapterIndex": 2, "block": 0}, "to": {"chapterIndex": 2, "block": 4}});
+        let mut ch4 = message("ch4step1", Some("ch3step1"), "Chapter 4 step");
+        ch4["guide"] = json!({"from": {"chapterIndex": 3, "block": 0}, "to": {"chapterIndex": 3, "block": 4}});
+        store.append("book", &id, None, vec![ch3, ch4]).unwrap();
+        assert_eq!(store.load("book", &id).unwrap().leaf_id.as_deref(), Some("ch4step1"));
+
+        // Follow-up anchored to Chapter 3 must not move the spine leaf off Chapter 4.
+        let mut side_q = message("sideq001", Some("ch3step1"), "Clarify Ch3");
+        side_q["sideThread"] = json!({"anchorId": "ch3step1"});
+        let side_tip = store.append("book", &id, Some("ch3step1"), vec![side_q]).unwrap();
+        assert_eq!(side_tip.as_deref(), Some("sideq001"));
+
+        let loaded = store.load("book", &id).unwrap();
+        assert_eq!(loaded.leaf_id.as_deref(), Some("ch4step1"));
+        assert_eq!(loaded.entries.len(), 4);
+
+        // Even without a .leaf sidecar, load/list resolve the newest spine entry.
+        let path = store.find_file("book", &id).unwrap();
+        let _ = fs::remove_file(leaf_sidecar_path(&path));
+        assert_eq!(store.load("book", &id).unwrap().leaf_id.as_deref(), Some("ch4step1"));
+        let summary = &store.list("book").unwrap()[0];
+        assert_eq!(summary.guide.as_ref().unwrap()["to"]["chapterIndex"], 3);
+    }
+
+    #[test]
+    fn merging_remote_side_thread_does_not_hijack_local_spine_leaf() {
+        let (_temp, store) = store();
+        let created = store.create_with_kind("book", Some("guided")).unwrap();
+        let id = created.header["id"].as_str().unwrap().to_string();
+
+        let ch3 = message("ch3step1", None, "Ch3");
+        let ch4 = message("ch4step1", Some("ch3step1"), "Ch4");
+        store.append("book", &id, None, vec![ch3.clone(), ch4.clone()]).unwrap();
+
+        let mut remote_side = message("sideq001", Some("ch4step1"), "Ch4 follow-up from phone");
+        remote_side["sideThread"] = json!({"anchorId": "ch4step1"});
+        let remote = format!(
+            "{}\n{}\n{}\n{}\n",
+            serde_json::to_string(&created.header).unwrap(),
+            serde_json::to_string(&ch3).unwrap(),
+            serde_json::to_string(&ch4).unwrap(),
+            serde_json::to_string(&remote_side).unwrap(),
+        );
+        store.merge_remote_session("book", &remote).unwrap();
+
+        let loaded = store.load("book", &id).unwrap();
+        assert_eq!(loaded.leaf_id.as_deref(), Some("ch4step1"));
+        assert_eq!(loaded.entries.len(), 3);
     }
 }

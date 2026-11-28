@@ -7,6 +7,7 @@ import type {
   AnchorBranchInfo,
   AssistantBlock,
   AssistantChatMessage,
+  SideThreadSnapshot,
 } from "@/types/agent";
 import { t } from "@/lib/i18n";
 
@@ -29,6 +30,10 @@ export interface AgentState {
   branchNavigation: Record<string, AnchorBranchInfo>;
   /** Anchor entry ids, index-aligned with `messages` (visibleMessageEntries). */
   branchAnchors: string[];
+  /** Chapter-scoped side-thread transcripts & branch navigation, keyed by `anchorId ?? "__root__"`. */
+  sideThreads: Record<string, SideThreadSnapshot>;
+  /** Side-thread key targeted by the active in-flight prompt, or null for spine/ordinary prompts. */
+  activeSideThreadKey: string | null;
   /** True while the trailing user message was optimistically appended before `prompt_started` persisted it. */
   optimisticUserMessage?: boolean;
 }
@@ -37,9 +42,9 @@ export type AgentAction =
   | { type: "book_changed"; bookId: string | null }
   | { type: "event"; event: AgentEvent }
   | { type: "session_list_requested"; requestId: string }
-  | { type: "prompt_queued"; bookId: string; promptId: string }
+  | { type: "prompt_queued"; bookId: string; promptId: string; sideThreadKey?: string }
   | { type: "prompt_queue_failed"; promptId: string; message: string }
-  | { type: "user_message"; message: AgentMessage }
+  | { type: "user_message"; message: AgentMessage; sideThreadKey?: string }
   | { type: "clear_error" };
 
 export function createAgentState(bookId: string | null = null): AgentState {
@@ -56,6 +61,8 @@ export function createAgentState(bookId: string | null = null): AgentState {
     sessionListRequestId: null,
     branchNavigation: {},
     branchAnchors: [],
+    sideThreads: {},
+    activeSideThreadKey: null,
   };
 }
 
@@ -127,14 +134,31 @@ function updateLastAssistant(
   return [...messages, update({ role: "assistant", content: "", blocks: [] })];
 }
 
+function updateSideThreadMessages(
+  sideThreads: Record<string, SideThreadSnapshot>,
+  key: string,
+  updater: (messages: AgentMessage[]) => AgentMessage[],
+): Record<string, SideThreadSnapshot> {
+  const existing = sideThreads[key] ?? { messages: [], anchors: [], navigation: {} };
+  return {
+    ...sideThreads,
+    [key]: { ...existing, messages: updater(existing.messages) },
+  };
+}
+
 function applyNavigation(
   base: AgentState,
-  event: { anchors?: string[]; navigation?: Record<string, AnchorBranchInfo> },
+  event: {
+    anchors?: string[];
+    navigation?: Record<string, AnchorBranchInfo>;
+    sideThreads?: Record<string, SideThreadSnapshot>;
+  },
 ): AgentState {
   return {
     ...base,
     branchAnchors: event.anchors ?? [],
     branchNavigation: event.navigation ?? {},
+    ...(event.sideThreads !== undefined ? { sideThreads: event.sideThreads } : {}),
   };
 }
 
@@ -168,20 +192,28 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
   switch (event.type) {
     case "book_loading":
       return matchesBook(base, event.bookId)
-        ? { ...base, status: "loadingBook", sessionId: null, promptId: null, messages: [], sessions: [], error: null, compaction: null, branchNavigation: {}, branchAnchors: [], optimisticUserMessage: false }
+        ? { ...base, status: "loadingBook", sessionId: null, promptId: null, messages: [], sessions: [], error: null, compaction: null, branchNavigation: {}, branchAnchors: [], sideThreads: {}, activeSideThreadKey: null, optimisticUserMessage: false }
         : base;
     case "book_ready":
       return matchesBook(base, event.bookId) ? { ...base, status: "bookReady", error: null } : base;
     case "book_closed":
       return matchesBook(base, event.bookId)
-        ? { ...base, status: "idle", sessionId: null, promptId: null, messages: [], sessions: [], error: null, compaction: null, branchNavigation: {}, branchAnchors: [], optimisticUserMessage: false }
+        ? { ...base, status: "idle", sessionId: null, promptId: null, messages: [], sessions: [], error: null, compaction: null, branchNavigation: {}, branchAnchors: [], sideThreads: {}, activeSideThreadKey: null, optimisticUserMessage: false }
         : base;
     case "prompt_started":
       return matchesBook(base, event.bookId)
-        ? { ...base, status: "prompting", sessionId: event.sessionId, promptId: event.promptId, error: null, compaction: null, optimisticUserMessage: false }
+        ? { ...base, status: "prompting", sessionId: event.sessionId, promptId: event.promptId, activeSideThreadKey: event.sideThreadKey ?? null, error: null, compaction: null, optimisticUserMessage: false }
         : base;
     case "text_delta":
       if (!matchesPrompt(base, event)) return base;
+      if (event.sideThreadKey) {
+        return {
+          ...base,
+          sideThreads: updateSideThreadMessages(base.sideThreads, event.sideThreadKey, (messages) =>
+            updateLastAssistant(messages, (message) =>
+              withBlocks(message, appendDelta(message.blocks, "text", event.delta)))),
+        };
+      }
       return {
         ...base,
         messages: updateLastAssistant(base.messages, (message) =>
@@ -192,6 +224,14 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
       return base;
     case "thinking_delta":
       if (!matchesPrompt(base, event)) return base;
+      if (event.sideThreadKey) {
+        return {
+          ...base,
+          sideThreads: updateSideThreadMessages(base.sideThreads, event.sideThreadKey, (messages) =>
+            updateLastAssistant(messages, (message) =>
+              withBlocks(message, appendDelta(message.blocks, "thinking", event.delta)))),
+        };
+      }
       return {
         ...base,
         messages: updateLastAssistant(base.messages, (message) =>
@@ -199,44 +239,52 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
       };
     case "tool_start":
       if (!matchesPrompt(base, event)) return base;
-      return {
-        ...base,
-        messages: updateLastAssistant(base.messages, (message) => {
-          const blocks = message.blocks ? message.blocks.slice() : [];
-          blocks.push({
-            type: "toolCall",
-            toolCall: {
-              toolCallId: event.toolCallId,
-              tool: event.tool,
-              params: event.params,
-              done: false,
-            },
+      {
+        const applyToolStart = (messages: AgentMessage[]) =>
+          updateLastAssistant(messages, (message) => {
+            const blocks = message.blocks ? message.blocks.slice() : [];
+            blocks.push({
+              type: "toolCall",
+              toolCall: {
+                toolCallId: event.toolCallId,
+                tool: event.tool,
+                params: event.params,
+                done: false,
+              },
+            });
+            return withBlocks(message, blocks);
           });
-          return withBlocks(message, blocks);
-        }),
-      };
+        if (event.sideThreadKey) {
+          return { ...base, sideThreads: updateSideThreadMessages(base.sideThreads, event.sideThreadKey, applyToolStart) };
+        }
+        return { ...base, messages: applyToolStart(base.messages) };
+      }
     case "tool_end":
       if (!matchesPrompt(base, event)) return base;
-      return {
-        ...base,
-        messages: updateLastAssistant(base.messages, (message) => {
-          const blocks = message.blocks?.map((block) =>
-            block.type === "toolCall" && block.toolCall.toolCallId === event.toolCallId
-              ? {
-                  type: "toolCall" as const,
-                  toolCall: {
-                    ...block.toolCall,
-                    result: event.result,
-                    done: true,
-                    isError: event.isError,
-                    ...(event.guide ? { guide: event.guide } : {}),
-                  },
-                }
-              : block,
-          );
-          return blocks ? withBlocks(message, blocks) : message;
-        }),
-      };
+      {
+        const applyToolEnd = (messages: AgentMessage[]) =>
+          updateLastAssistant(messages, (message) => {
+            const blocks = message.blocks?.map((block) =>
+              block.type === "toolCall" && block.toolCall.toolCallId === event.toolCallId
+                ? {
+                    type: "toolCall" as const,
+                    toolCall: {
+                      ...block.toolCall,
+                      result: event.result,
+                      done: true,
+                      isError: event.isError,
+                      ...(event.guide ? { guide: event.guide } : {}),
+                    },
+                  }
+                : block,
+            );
+            return blocks ? withBlocks(message, blocks) : message;
+          });
+        if (event.sideThreadKey) {
+          return { ...base, sideThreads: updateSideThreadMessages(base.sideThreads, event.sideThreadKey, applyToolEnd) };
+        }
+        return { ...base, messages: applyToolEnd(base.messages) };
+      }
     case "compaction_started":
       return matchesSession(base, event)
         ? { ...base, compaction: { status: event.reason === "overflow" ? "recovering" : "compacting" } }
@@ -259,7 +307,16 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
     case "retry_scheduled":
       // The retry restarts the whole turn: drop the failed attempt's streamed
       // bubble so the next attempt does not append onto it.
-      if (!matchesPrompt(base, event) || base.messages[base.messages.length - 1]?.role !== "assistant") return base;
+      if (!matchesPrompt(base, event)) return base;
+      if (event.sideThreadKey) {
+        const list = base.sideThreads[event.sideThreadKey]?.messages;
+        if (!list || list[list.length - 1]?.role !== "assistant") return base;
+        return {
+          ...base,
+          sideThreads: updateSideThreadMessages(base.sideThreads, event.sideThreadKey, (messages) => messages.slice(0, -1)),
+        };
+      }
+      if (base.messages[base.messages.length - 1]?.role !== "assistant") return base;
       return { ...base, messages: base.messages.slice(0, -1) };
     case "prompt_end":
     case "prompt_aborted":
@@ -267,7 +324,7 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
       {
         // A compaction during the prompt shows up as a notice item in the
         // projection, so the pending state is cleared.
-        const next = { ...base, status: "bookReady" as const, promptId: null, compaction: null, optimisticUserMessage: false };
+        const next = { ...base, status: "bookReady" as const, promptId: null, activeSideThreadKey: null, compaction: null, optimisticUserMessage: false };
         // Streaming deltas already maintained messages; the runtime's full
         // projection replaces them (equal content) and refreshes navigation.
         if (event.messages !== undefined) next.messages = event.messages;
@@ -281,6 +338,8 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
             messages: base.promptId ? base.messages : [],
             branchNavigation: base.promptId ? base.branchNavigation : {},
             branchAnchors: base.promptId ? base.branchAnchors : [],
+            sideThreads: base.promptId ? base.sideThreads : {},
+            activeSideThreadKey: base.promptId ? base.activeSideThreadKey : null,
             error: null,
             sessions: upsertSession(base.sessions, {
               id: event.sessionId,
@@ -293,7 +352,7 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
         : base;
     case "session_switched":
       return matchesBook(base, event.bookId)
-        ? applyNavigation({ ...base, sessionId: event.sessionId, promptId: null, messages: event.messages, status: "bookReady", error: null, compaction: null, optimisticUserMessage: false }, event)
+        ? applyNavigation({ ...base, sessionId: event.sessionId, promptId: null, activeSideThreadKey: null, messages: event.messages, sideThreads: event.sideThreads ?? {}, status: "bookReady", error: null, compaction: null, optimisticUserMessage: false }, event)
         : base;
     case "branch_switched":
       if (!matchesBook(base, event.bookId)) return base;
@@ -306,12 +365,22 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
         compaction: null,
         branchNavigation: event.navigation,
         branchAnchors: event.anchors,
+        sideThreads: event.sideThreads ?? base.sideThreads,
         optimisticUserMessage: false,
       };
     case "session_rewound":
-      return matchesBook(base, event.bookId)
-        ? { ...base, sessionId: event.sessionId, messages: event.messages, error: null, compaction: null, optimisticUserMessage: false }
-        : base;
+      if (!matchesBook(base, event.bookId)) return base;
+      if (event.sideThreadKey) {
+        return {
+          ...base,
+          sessionId: event.sessionId,
+          sideThreads: updateSideThreadMessages(base.sideThreads, event.sideThreadKey, () => event.messages),
+          error: null,
+          compaction: null,
+          optimisticUserMessage: false,
+        };
+      }
+      return { ...base, sessionId: event.sessionId, messages: event.messages, error: null, compaction: null, optimisticUserMessage: false };
     case "session_deleted":
       if (!matchesBook(base, event.bookId)) return base;
       return {
@@ -320,6 +389,8 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
         messages: base.sessionId === event.sessionId ? [] : base.messages,
         branchNavigation: base.sessionId === event.sessionId ? {} : base.branchNavigation,
         branchAnchors: base.sessionId === event.sessionId ? [] : base.branchAnchors,
+        sideThreads: base.sessionId === event.sessionId ? {} : base.sideThreads,
+        activeSideThreadKey: base.sessionId === event.sessionId ? null : base.activeSideThreadKey,
         optimisticUserMessage: base.sessionId === event.sessionId ? false : base.optimisticUserMessage,
         sessions: base.sessions.filter((session) => session.id !== event.sessionId),
       };
@@ -361,14 +432,26 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
         || (!!event.sessionId && event.sessionId !== base.sessionId)
       )) return base;
       const matchesActivePrompt = !!event.promptId && event.promptId === base.promptId;
+      const sideKey = event.sideThreadKey ?? base.activeSideThreadKey;
+      const sideMsgs = sideKey ? base.sideThreads[sideKey]?.messages : undefined;
+      const rollbackSide = matchesActivePrompt
+        && base.optimisticUserMessage
+        && !!sideKey
+        && !!sideMsgs
+        && sideMsgs[sideMsgs.length - 1]?.role === "user";
       const rollbackOptimistic = matchesActivePrompt
         && base.optimisticUserMessage
+        && !sideKey
         && base.messages[base.messages.length - 1]?.role === "user";
       return {
         ...base,
         messages: rollbackOptimistic ? base.messages.slice(0, -1) : base.messages,
+        sideThreads: rollbackSide && sideKey
+          ? updateSideThreadMessages(base.sideThreads, sideKey, (messages) => messages.slice(0, -1))
+          : base.sideThreads,
         status: matchesActivePrompt ? "bookReady" : event.scope === "book" ? "error" : base.status,
         promptId: matchesActivePrompt ? null : base.promptId,
+        activeSideThreadKey: matchesActivePrompt ? null : base.activeSideThreadKey,
         compaction: matchesActivePrompt ? null : base.compaction,
         optimisticUserMessage: matchesActivePrompt ? false : base.optimisticUserMessage,
         error: {
@@ -403,19 +486,28 @@ export function agentReducer(state: AgentState, action: AgentAction): AgentState
         ...state,
         status: "prompting",
         promptId: action.promptId,
+        activeSideThreadKey: action.sideThreadKey ?? null,
         error: null,
         compaction: state.compaction?.status === "failed" ? null : state.compaction,
         optimisticUserMessage: false,
       };
     case "prompt_queue_failed": {
       if (state.promptId !== action.promptId) return state;
+      const sideKey = state.activeSideThreadKey;
+      const sideMsgs = sideKey ? state.sideThreads[sideKey]?.messages : undefined;
+      const rollbackSide =
+        state.optimisticUserMessage && !!sideKey && !!sideMsgs && sideMsgs[sideMsgs.length - 1]?.role === "user";
       const rollbackOptimistic =
-        state.optimisticUserMessage && state.messages[state.messages.length - 1]?.role === "user";
+        state.optimisticUserMessage && !sideKey && state.messages[state.messages.length - 1]?.role === "user";
       return {
         ...state,
         messages: rollbackOptimistic ? state.messages.slice(0, -1) : state.messages,
+        sideThreads: rollbackSide && sideKey
+          ? updateSideThreadMessages(state.sideThreads, sideKey, (messages) => messages.slice(0, -1))
+          : state.sideThreads,
         status: state.activeBookId ? "bookReady" : "idle",
         promptId: null,
+        activeSideThreadKey: null,
         optimisticUserMessage: false,
         error: {
           scope: "prompt",
@@ -427,6 +519,17 @@ export function agentReducer(state: AgentState, action: AgentAction): AgentState
       };
     }
     case "user_message":
+      if (action.sideThreadKey) {
+        return {
+          ...state,
+          sideThreads: updateSideThreadMessages(state.sideThreads, action.sideThreadKey, (messages) => [
+            ...messages,
+            action.message,
+          ]),
+          error: null,
+          optimisticUserMessage: state.promptId !== null,
+        };
+      }
       return {
         ...state,
         messages: [...state.messages, action.message],

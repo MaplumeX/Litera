@@ -133,6 +133,18 @@ export interface AnchorBranchInfo {
   activeIndex: number;
 }
 
+/** Anchor tagging a Guided session side-thread entry to its chapter run (or null pre-guide). */
+export interface SideThreadRef {
+  anchorId: string | null;
+}
+
+/** Visible transcript + internal branch navigation for one chapter side-thread. */
+export interface SideThreadSnapshot {
+  messages: AgentMessage[];
+  anchors: string[];
+  navigation: Record<string, AnchorBranchInfo>;
+}
+
 export interface AgentToolCall {
   toolCallId: string;
   tool: string;
@@ -231,7 +243,8 @@ type EventEnvelope = {
 type RequestCorrelation = { requestId?: string };
 type BookCorrelation = { bookId: string };
 type SessionCorrelation = BookCorrelation & { sessionId: string };
-type PromptCorrelation = SessionCorrelation & { promptId: string };
+type PromptCorrelation = SessionCorrelation & { promptId: string; sideThreadKey?: string };
+type SideThreadsPayload = { sideThreads?: Record<string, SideThreadSnapshot> };
 
 export type AgentEvent = EventEnvelope & (
   | ({ type: "book_loading" } & BookCorrelation & RequestCorrelation)
@@ -248,25 +261,25 @@ export type AgentEvent = EventEnvelope & (
   // Context maintenance runs inside a prompt or in the background after one,
   // so compaction events correlate to the Session, not to a prompt.
   // `reason: "overflow"`: a request exceeded the context window and is retried after compaction.
-  | ({ type: "compaction_started"; reason: "budget" | "overflow" } & SessionCorrelation)
-  | ({ type: "compaction_completed"; messages: AgentMessage[]; anchors: string[]; navigation: Record<string, AnchorBranchInfo> } & SessionCorrelation)
-  | ({ type: "compaction_failed"; aborted: boolean } & SessionCorrelation)
+  | ({ type: "compaction_started"; reason: "budget" | "overflow"; sideThreadKey?: string } & SessionCorrelation)
+  | ({ type: "compaction_completed"; messages: AgentMessage[]; anchors: string[]; navigation: Record<string, AnchorBranchInfo>; sideThreadKey?: string } & SideThreadsPayload & SessionCorrelation)
+  | ({ type: "compaction_failed"; aborted: boolean; sideThreadKey?: string } & SessionCorrelation)
   // A chapter recap was written after a guided turn, in the same background
   // task as context maintenance.
-  | ({ type: "guide_recap_added"; messages: AgentMessage[]; anchors: string[]; navigation: Record<string, AnchorBranchInfo> } & SessionCorrelation)
+  | ({ type: "guide_recap_added"; messages: AgentMessage[]; anchors: string[]; navigation: Record<string, AnchorBranchInfo> } & SideThreadsPayload & SessionCorrelation)
   // A Guided session's sliding window advanced or was manually reset.
-  | ({ type: "guide_window_updated"; messages: AgentMessage[]; anchors: string[]; navigation: Record<string, AnchorBranchInfo> } & SessionCorrelation)
+  | ({ type: "guide_window_updated"; messages: AgentMessage[]; anchors: string[]; navigation: Record<string, AnchorBranchInfo> } & SideThreadsPayload & SessionCorrelation)
   | ({ type: "session_archived" } & BookCorrelation & { sessionId: string } & RequestCorrelation)
   | ({ type: "retry_scheduled"; attempt: number; maxAttempts: number; delayMs: number } & PromptCorrelation)
-  | ({ type: "prompt_end"; messages?: AgentMessage[]; anchors?: string[]; navigation?: Record<string, AnchorBranchInfo>} & PromptCorrelation)
-  | ({ type: "prompt_aborted"; messages?: AgentMessage[]; anchors?: string[]; navigation?: Record<string, AnchorBranchInfo> } & PromptCorrelation & RequestCorrelation)
+  | ({ type: "prompt_end"; messages?: AgentMessage[]; anchors?: string[]; navigation?: Record<string, AnchorBranchInfo> } & SideThreadsPayload & PromptCorrelation)
+  | ({ type: "prompt_aborted"; messages?: AgentMessage[]; anchors?: string[]; navigation?: Record<string, AnchorBranchInfo> } & SideThreadsPayload & PromptCorrelation & RequestCorrelation)
   | ({ type: "session_created"; kind?: SessionKind } & BookCorrelation & { sessionId: string } & RequestCorrelation)
-  | ({ type: "session_switched"; messages: AgentMessage[]; anchors?: string[]; navigation?: Record<string, AnchorBranchInfo> } & BookCorrelation & { sessionId: string } & RequestCorrelation)
-  | ({ type: "branch_switched"; messages: AgentMessage[]; anchors: string[]; navigation: Record<string, AnchorBranchInfo> } & BookCorrelation & { sessionId: string } & RequestCorrelation)
+  | ({ type: "session_switched"; messages: AgentMessage[]; anchors?: string[]; navigation?: Record<string, AnchorBranchInfo> } & SideThreadsPayload & BookCorrelation & { sessionId: string } & RequestCorrelation)
+  | ({ type: "branch_switched"; messages: AgentMessage[]; anchors: string[]; navigation: Record<string, AnchorBranchInfo>; sideThreadKey?: string } & SideThreadsPayload & BookCorrelation & { sessionId: string } & RequestCorrelation)
   | ({ type: "session_rewound"; messages: AgentMessage[] } & PromptCorrelation & RequestCorrelation)
   | ({ type: "session_deleted" } & BookCorrelation & { sessionId: string } & RequestCorrelation)
   | ({ type: "session_renamed"; title: string } & BookCorrelation & { sessionId: string } & RequestCorrelation)
   | ({ type: "session_config_updated"; systemPrompt?: string } & BookCorrelation & { sessionId: string } & RequestCorrelation)
   | ({ type: "sessions_list"; sessions: AgentSessionSummary[] } & BookCorrelation & RequestCorrelation)
-  | ({ type: "error" } & AgentError)
+  | ({ type: "error"; sideThreadKey?: string } & AgentError)
 );

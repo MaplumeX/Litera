@@ -1,5 +1,6 @@
 import { guideStepLabel, positionTitle } from "@/components/chat/GuideBar";
 import type { GuideChapterProgress } from "@/agent/runtime/guide";
+import { ROOT_SIDE_THREAD_KEY } from "@/agent/sessions/pi-session";
 import type {
   AgentMessage,
   AnchorBranchInfo,
@@ -7,12 +8,20 @@ import type {
   CompactionNotice,
   GuideContextCutMarker,
   RecordedGuideStep,
+  SideThreadSnapshot,
 } from "@/types/agent";
 
 export interface GuideSideQaNode {
   id: string;
+  /** Unique numeric scroll/outline index across the GuideDocument (spine index for legacy inline QAs, synthetic index for side-thread QAs). */
   userMessageIndex: number;
   assistantMessageIndex?: number;
+  /** Side-thread map key (`anchorEntryId` or `"__root__"`) for off-spine Q&As; absent for legacy inline Q&As. */
+  sideThreadKey?: string;
+  /** 0-based user message index inside `sideThreads[sideThreadKey].messages`. */
+  sideMessageIndex?: number;
+  /** 0-based assistant message index inside `sideThreads[sideThreadKey].messages`. */
+  sideAssistantMessageIndex?: number;
   question: string;
   selection?: string;
   chapterHref?: string;
@@ -104,11 +113,15 @@ export type GuideTimelineMarker =
 /** Chronological run of consecutive steps starting in the same chapter (for GuideWorkspace). */
 export interface GuideChapterRun {
   id: string;
+  /** Stable spine entry id of this run's first step (used to anchor chapter side-threads). */
+  anchorEntryId: string | null;
   chapterIndex: number;
   chapterTitle: string;
   /** True when an earlier run already covered this chapter (a re-read). */
   isReread: boolean;
   steps: GuideStepNode[];
+  /** Chapter-scoped follow-up Q&As (legacy inline Q&As in this run + off-spine side-thread Q&As). */
+  sideThreads: GuideSideQaNode[];
 }
 
 export type GuideChapterStatus = "unread" | "in_progress" | "completed";
@@ -153,6 +166,10 @@ export interface ProjectGuideDocumentInput {
   messages: readonly AgentMessage[];
   branchAnchors?: readonly string[];
   branchNavigation?: Readonly<Record<string, AnchorBranchInfo>>;
+  /** Chapter-scoped off-spine side-thread snapshots keyed by `anchorEntryId ?? "__root__"`. */
+  sideThreads?: Readonly<Record<string, SideThreadSnapshot>>;
+  /** Side-thread key currently streaming an answer, or null for spine streaming. */
+  activeSideThreadKey?: string | null;
   isStreaming?: boolean;
   toc?: readonly GuideTocInput[];
   tocProgress?: Readonly<Record<string, GuideChapterProgress>>;
@@ -197,6 +214,94 @@ function preferAssistantBranch(
   return user.branchInfo ? user : assistant;
 }
 
+function projectSideThreadSnapshot(
+  sideThreadKey: string,
+  snapshot: SideThreadSnapshot | undefined,
+  isStreamingThread: boolean,
+  allocateIndex: () => number,
+): GuideSideQaNode[] {
+  if (!snapshot || snapshot.messages.length === 0) return [];
+  const { messages, anchors, navigation } = snapshot;
+  const result: GuideSideQaNode[] = [];
+  let lastChatIndex = -1;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const role = messages[i].role;
+    if (role === "user" || role === "assistant") {
+      lastChatIndex = i;
+      break;
+    }
+  }
+  let pending: {
+    index: number;
+    content: string;
+    selection?: string;
+    chapterHref?: string;
+  } | null = null;
+
+  const flushPending = () => {
+    if (!pending) return;
+    const { branchAnchorId, branchInfo } = branchForIndex(pending.index, anchors, navigation);
+    result.push({
+      id: `side-${sideThreadKey}-qa-${pending.index}`,
+      userMessageIndex: allocateIndex(),
+      sideThreadKey,
+      sideMessageIndex: pending.index,
+      question: pending.content,
+      selection: pending.selection,
+      chapterHref: pending.chapterHref,
+      answer: "",
+      streaming: isStreamingThread && pending.index === lastChatIndex,
+      branchAnchorId,
+      branchInfo,
+    });
+    pending = null;
+  };
+
+  for (let index = 0; index < messages.length; index += 1) {
+    const message = messages[index];
+    if (message.role === "user") {
+      flushPending();
+      pending = {
+        index,
+        content: message.content,
+        selection: message.selection,
+        chapterHref: message.chapterHref,
+      };
+      continue;
+    }
+    if (message.role === "assistant" && pending) {
+      const streamingThis = isStreamingThread && index === lastChatIndex;
+      const { branchAnchorId, branchInfo } = branchForIndex(pending.index, anchors, navigation);
+      const assistantBranch = branchForIndex(index, anchors, navigation);
+      const userScrollIndex = allocateIndex();
+      const assistantScrollIndex = allocateIndex();
+      result.push({
+        id: `side-${sideThreadKey}-qa-${pending.index}`,
+        userMessageIndex: userScrollIndex,
+        assistantMessageIndex: assistantScrollIndex,
+        sideThreadKey,
+        sideMessageIndex: pending.index,
+        sideAssistantMessageIndex: index,
+        question: pending.content,
+        selection: pending.selection,
+        chapterHref: pending.chapterHref,
+        answer: message.content,
+        blocks: message.blocks,
+        streaming: streamingThis,
+        stopReason: message.stopReason,
+        errorMessage: message.errorMessage,
+        branchAnchorId,
+        branchInfo,
+        assistantBranchAnchorId: assistantBranch.branchAnchorId,
+        assistantBranchInfo: assistantBranch.branchInfo,
+      });
+      pending = null;
+    }
+  }
+  flushPending();
+  return result;
+}
+
 /**
  * Pure projection of a Guided session's active branch transcript into a
  * structured `GuideDocument`: chapter-grouped step sections, anchored
@@ -208,10 +313,13 @@ export function projectGuideDocument({
   messages,
   branchAnchors,
   branchNavigation,
+  sideThreads,
+  activeSideThreadKey = null,
   isStreaming = false,
   toc,
   tocProgress,
 }: ProjectGuideDocumentInput): GuideDocument {
+  const isSpineStreaming = isStreaming && !activeSideThreadKey;
   const steps: GuideStepNode[] = [];
   const pendingSteps: GuidePendingStepNode[] = [];
   const incompleteSteps: GuideIncompleteStepNode[] = [];
@@ -246,7 +354,7 @@ export function projectGuideDocument({
       // While streaming before the first assistant event arrives, GuideWorkspace
       // renders TypingIndicator directly; only materialize an unanswered request
       // once it is no longer awaiting a live response.
-      if (atEnd && isStreaming && pendingUser.index === lastChatIndex) {
+      if (atEnd && isSpineStreaming && pendingUser.index === lastChatIndex) {
         pendingUser = null;
         return;
       }
@@ -282,7 +390,7 @@ export function projectGuideDocument({
       selection: pendingUser.selection,
       chapterHref: pendingUser.chapterHref,
       answer: "",
-      streaming: isStreaming && pendingUser.index === lastChatIndex,
+      streaming: isSpineStreaming && pendingUser.index === lastChatIndex,
       branchAnchorId,
       branchInfo,
     };
@@ -360,7 +468,7 @@ export function projectGuideDocument({
     }
 
     if (message.role === "assistant") {
-      const streamingThis = isStreaming && index === lastChatIndex;
+      const streamingThis = isSpineStreaming && index === lastChatIndex;
       const toolCalls = (message.blocks ?? []).flatMap((block) =>
         block.type === "toolCall" ? [block.toolCall] : [],
       );
@@ -491,6 +599,21 @@ export function projectGuideDocument({
   flushPendingUser(true);
 
   // Build chronological chapter runs for document-flow rendering.
+  let nextSyntheticIndex = messages.length + 1000;
+  const allocateSideIndex = () => nextSyntheticIndex++;
+
+  // Append pre-guide off-spine root side-thread Q&As into orphanSideThreads.
+  if (sideThreads?.[ROOT_SIDE_THREAD_KEY]) {
+    orphanSideThreads.push(
+      ...projectSideThreadSnapshot(
+        ROOT_SIDE_THREAD_KEY,
+        sideThreads[ROOT_SIDE_THREAD_KEY],
+        isStreaming && activeSideThreadKey === ROOT_SIDE_THREAD_KEY,
+        allocateSideIndex,
+      ),
+    );
+  }
+
   const runs: GuideChapterRun[] = [];
   const seenChapters = new Set<number>();
   for (const step of steps) {
@@ -500,22 +623,65 @@ export function projectGuideDocument({
     } else {
       const isReread = seenChapters.has(step.chapterIndex);
       seenChapters.add(step.chapterIndex);
+      const anchorIndex = step.requestMessageIndex ?? step.messageIndex;
+      const anchorEntryId = branchAnchors?.[anchorIndex] ?? null;
       runs.push({
         id: `run-${runs.length}-ch-${step.chapterIndex}`,
+        anchorEntryId,
         chapterIndex: step.chapterIndex,
         chapterTitle: step.chapterTitle,
         isReread,
         steps: [step],
+        sideThreads: [],
       });
+    }
+  }
+
+  // Populate chapter-level `run.sideThreads` from both legacy inline Q&As and
+  // off-spine chapter side-threads (matching either the run's primary anchor or
+  // any step anchor within the run).
+  for (const run of runs) {
+    for (const step of run.steps) {
+      run.sideThreads.push(...step.sideThreads);
+    }
+    if (sideThreads) {
+      const matchedKeys = new Set<string>();
+      if (run.anchorEntryId && sideThreads[run.anchorEntryId]) {
+        matchedKeys.add(run.anchorEntryId);
+      }
+      for (const step of run.steps) {
+        const reqAnchor =
+          step.requestMessageIndex !== undefined ? branchAnchors?.[step.requestMessageIndex] : undefined;
+        const msgAnchor = branchAnchors?.[step.messageIndex];
+        if (reqAnchor && sideThreads[reqAnchor]) matchedKeys.add(reqAnchor);
+        if (msgAnchor && sideThreads[msgAnchor]) matchedKeys.add(msgAnchor);
+      }
+      for (const stKey of matchedKeys) {
+        run.sideThreads.push(
+          ...projectSideThreadSnapshot(
+            stKey,
+            sideThreads[stKey],
+            isStreaming && activeSideThreadKey === stKey,
+            allocateSideIndex,
+          ),
+        );
+      }
     }
   }
 
   // Build TOC-aligned chapter summaries.
   const stepsByChapter = new Map<number, GuideStepNode[]>();
+  const questionsByChapter = new Map<number, number>();
   for (const step of steps) {
     const list = stepsByChapter.get(step.chapterIndex) ?? [];
     list.push(step);
     stepsByChapter.set(step.chapterIndex, list);
+  }
+  for (const run of runs) {
+    questionsByChapter.set(
+      run.chapterIndex,
+      (questionsByChapter.get(run.chapterIndex) ?? 0) + run.sideThreads.length,
+    );
   }
 
   const chapters: GuideChapterNode[] = [];
@@ -528,7 +694,7 @@ export function projectGuideDocument({
       const chapterSteps = stepsByChapter.get(chapterIndex) ?? [];
       listedChapterIndices.add(chapterIndex);
       const status = resolveChapterStatus(progress, chapterSteps);
-      const questionCount = chapterSteps.reduce((sum, s) => sum + s.sideThreads.length, 0);
+      const questionCount = questionsByChapter.get(chapterIndex) ?? 0;
       chapters.push({
         chapterIndex,
         title: entry.label,
@@ -553,13 +719,13 @@ export function projectGuideDocument({
         totalBlocks: chapterSteps.length,
         isCurrent: false,
         stepIndices: chapterSteps.map((s) => s.stepIndex),
-        questionCount: chapterSteps.reduce((sum, s) => sum + s.sideThreads.length, 0),
+        questionCount: questionsByChapter.get(chapterIndex) ?? 0,
       });
     }
   }
 
   const totalQuestions =
-    orphanSideThreads.length + steps.reduce((sum, step) => sum + step.sideThreads.length, 0);
+    orphanSideThreads.length + runs.reduce((sum, run) => sum + run.sideThreads.length, 0);
 
   return {
     bookId,
@@ -652,13 +818,13 @@ export function findRunIdForMessage(doc: GuideDocument, messageIndex: number): s
       if (step.messageIndex === messageIndex || step.requestMessageIndex === messageIndex) {
         return run.id;
       }
-      if (
-        step.sideThreads.some(
-          (qa) => qa.userMessageIndex === messageIndex || qa.assistantMessageIndex === messageIndex,
-        )
-      ) {
-        return run.id;
-      }
+    }
+    if (
+      run.sideThreads.some(
+        (qa) => qa.userMessageIndex === messageIndex || qa.assistantMessageIndex === messageIndex,
+      )
+    ) {
+      return run.id;
     }
   }
   const incomplete = doc.incompleteSteps.find(
@@ -695,8 +861,8 @@ export function findSideQuestionUserIndex(doc: GuideDocument, messageIndex: numb
       return qa.userMessageIndex;
     }
   }
-  for (const step of doc.steps) {
-    for (const qa of step.sideThreads) {
+  for (const run of doc.runs) {
+    for (const qa of run.sideThreads) {
       if (qa.userMessageIndex === messageIndex || qa.assistantMessageIndex === messageIndex) {
         return qa.userMessageIndex;
       }
@@ -780,21 +946,21 @@ export function searchGuideDocument(
         });
         if (hits.length >= limit) return hits;
       }
-      for (const qa of step.sideThreads) {
-        const qaSnippet = makeSnippet(qa.question, query) ?? makeSnippet(qa.answer, query);
-        if (!qaSnippet) continue;
-        hits.push({
-          id: `hit-${qa.id}`,
-          kind: "question",
-          runId: run.id,
-          chapterIndex: run.chapterIndex,
-          chapterTitle: run.chapterTitle,
-          label: qa.question,
-          messageIndex: qa.userMessageIndex,
-          snippet: qaSnippet,
-        });
-        if (hits.length >= limit) return hits;
-      }
+    }
+    for (const qa of run.sideThreads) {
+      const qaSnippet = makeSnippet(qa.question, query) ?? makeSnippet(qa.answer, query);
+      if (!qaSnippet) continue;
+      hits.push({
+        id: `hit-${qa.id}`,
+        kind: "question",
+        runId: run.id,
+        chapterIndex: run.chapterIndex,
+        chapterTitle: run.chapterTitle,
+        label: qa.question,
+        messageIndex: qa.userMessageIndex,
+        snippet: qaSnippet,
+      });
+      if (hits.length >= limit) return hits;
     }
   }
 

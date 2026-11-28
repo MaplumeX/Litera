@@ -162,10 +162,7 @@ export function GuideChapterBar({
                 {runs.map((run, index) => {
                   const isActive = run.id === activeRun.id;
                   const isLatest = index === totalRuns - 1;
-                  const questionCount = run.steps.reduce(
-                    (sum, step) => sum + step.sideThreads.length,
-                    0,
-                  );
+                  const questionCount = run.sideThreads.length;
                   return (
                     <button
                       key={run.id}

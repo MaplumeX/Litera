@@ -100,13 +100,13 @@ export function GuideNavRail({
     for (const qa of document.orphanSideThreads) {
       list.push({ id: qa.id, userMessageIndex: qa.userMessageIndex, question: qa.question });
     }
-    for (const step of document.steps) {
-      for (const qa of step.sideThreads) {
+    for (const run of document.runs) {
+      for (const qa of run.sideThreads) {
         list.push({
           id: qa.id,
           userMessageIndex: qa.userMessageIndex,
           question: qa.question,
-          chapterTitle: step.chapterTitle,
+          chapterTitle: run.chapterTitle,
         });
       }
     }

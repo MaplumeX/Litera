@@ -5,7 +5,6 @@ import { BranchSwitcher } from "@/components/chat/BranchSwitcher";
 import { GuideStepImages } from "@/components/chat/GuideStepImages";
 import { HoldHeight } from "@/components/chat/HoldHeight";
 import { Tip } from "@/components/ui/tooltip";
-import { GuideSideThread } from "./GuideSideThread";
 import type { GuideBlockImage } from "@/agent/book/book-content";
 import type { GuideStepNode } from "@/lib/guide-document";
 import type { RecordedGuideStep } from "@/types/agent";
@@ -21,8 +20,6 @@ export interface GuideStepAction {
 
 interface GuideStepSectionProps {
   node: GuideStepNode;
-  isLatestStep: boolean;
-  expandedQuestionIndex?: number | null;
   bookReady: boolean;
   isStreaming: boolean;
   readOnly?: boolean;
@@ -32,12 +29,6 @@ interface GuideStepSectionProps {
   loadStepImageUrl?: (src: string) => Promise<string>;
   onRegenerateMessage: (messageIndex: number) => void;
   onSwitchBranch: (anchorId: string, direction: -1 | 1) => void;
-  editingIndex: number | null;
-  editDraft: string;
-  onDraftChange: (value: string) => void;
-  onStartEdit: (messageIndex: number) => void;
-  onSaveEdit: () => void;
-  onCancelEdit: () => void;
   registerItem?: (index: number, element: HTMLDivElement | null) => void;
   /** Declarative per-step extension actions (e.g. Save to Note). */
   extraActions?: (step: GuideStepNode) => readonly GuideStepAction[];
@@ -45,13 +36,11 @@ interface GuideStepSectionProps {
 
 /**
  * First-class document section for one `Guided step`: clean header bar,
- * optional inline Book figures, retelling prose, and anchored `GuideSideThread`.
- * Mechanical `guideRequest` user bubbles are never shown.
+ * optional inline Book figures, and retelling prose. Mechanical `guideRequest`
+ * user bubbles are never shown; follow-up Q&As live at the chapter level.
  */
 export function GuideStepSection({
   node,
-  isLatestStep,
-  expandedQuestionIndex,
   bookReady,
   isStreaming,
   readOnly = false,
@@ -61,12 +50,6 @@ export function GuideStepSection({
   loadStepImageUrl,
   onRegenerateMessage,
   onSwitchBranch,
-  editingIndex,
-  editDraft,
-  onDraftChange,
-  onStartEdit,
-  onSaveEdit,
-  onCancelEdit,
   registerItem,
   extraActions,
 }: GuideStepSectionProps) {
@@ -179,24 +162,6 @@ export function GuideStepSection({
           />
         </HoldHeight>
       )}
-
-      <GuideSideThread
-        threads={node.sideThreads}
-        defaultExpanded={isLatestStep}
-        expandedQuestionIndex={expandedQuestionIndex}
-        isStreaming={isStreaming}
-        bookReady={bookReady}
-        readOnly={readOnly}
-        editingIndex={editingIndex}
-        editDraft={editDraft}
-        onDraftChange={onDraftChange}
-        onStartEdit={onStartEdit}
-        onSaveEdit={onSaveEdit}
-        onCancelEdit={onCancelEdit}
-        onRegenerate={onRegenerateMessage}
-        onSwitchBranch={onSwitchBranch}
-        registerItem={registerItem}
-      />
     </article>
   );
 }

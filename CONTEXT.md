@@ -29,7 +29,7 @@ One assistant conversation about a book. A book has many sessions; a session can
 _Avoid_: Chat, conversation (too generic)
 
 **Guided session**:
-A Session in which the assistant takes the reader through the Book part by part, in order, explaining each part in full. Fixed at creation; each Book has one canonical Guided session presented in its own top-level Guide workspace (archived or legacy Guided sessions remain readable). Its model context stays lean via a coherence-leaning sliding window relayed by Chapter recaps (with automatic clearing on non-adjacent chapter jumps and a manual reset divider). Only a Guided step the assistant takes moves the reading on; other questions in it do not.
+A Session in which the assistant takes the reader through the Book part by part, in order, explaining each part in full. Fixed at creation; each Book has one canonical Guided session presented in its own top-level Guide workspace (archived or legacy Guided sessions remain readable). Its model context stays lean via a coherence-leaning sliding window relayed by Chapter recaps (with automatic clearing on non-adjacent chapter jumps and a manual reset divider). Only a Guided step the assistant takes moves the reading on; follow-up questions branch per chapter as off-spine side-threads anchored to the viewed chapter run so they stay in that chapter's view without moving the Guide cursor or disturbing the guided spine's context window.
 _Avoid_: Tutor mode, read-along, guided mode
 
 **Guided step**:

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activeBranch, branchLeafId, branchNavigation, contextBranch, convertPiContextToLlm, decodeGuide, decodePiSession, guidedTurns, guideRecapChapters, piContextMessages, sessionConfig, sessionSummary, visibleMessageEntries, visibleMessages } from "./pi-session";
+import { activeBranch, branchLeafId, branchNavigation, contextBranch, convertPiContextToLlm, decodeGuide, decodePiSession, guidedTurns, guideRecapChapters, guideSpineRuns, isSideThreadEntry, piContextMessages, piSideThreadContextMessages, resolveGuideRunForAnchor, ROOT_SIDE_THREAD_KEY, sessionConfig, sessionSummary, sideThreadBranchLeafId, sideThreadContextEntries, sideThreadSnapshots, visibleMessageEntries, visibleMessages } from "./pi-session";
 import type { PiSessionEntry } from "./pi-session";
 
 const timestamp = "2026-08-14T00:00:00Z";
@@ -797,5 +797,205 @@ describe("guided sessions", () => {
     const ordinary = sessionSummary({ id: "o", title: "t", createdAt: timestamp, updatedAt: timestamp, kind: null, guide: null });
     expect(ordinary.kind).toBeUndefined();
     expect(ordinary.guide).toBeUndefined();
+  });
+});
+
+describe("chapter side-threads in Pi sessions", () => {
+  const timestamp = "2026-04-01T00:00:00Z";
+  const stepGuide = (chapterIndex: number, fromBlock: number, toBlock: number, title: string) => ({
+    from: { chapterIndex, chapterTitle: title, block: fromBlock },
+    to: { chapterIndex, chapterTitle: title, block: toBlock },
+  });
+  const toolTurn = (
+    userId: string,
+    parentId: string | null,
+    assistant1Id: string,
+    toolResultId: string,
+    assistant2Id: string,
+    callId: string,
+    chapterIndex: number,
+    fromBlock: number,
+    toBlock: number,
+    title: string,
+    explanation: string,
+  ): PiSessionEntry[] => [
+    {
+      type: "message",
+      id: userId,
+      parentId,
+      timestamp,
+      guideRequest: {},
+      message: { role: "user", content: "继续带读", timestamp: 1 },
+    },
+    {
+      type: "message",
+      id: assistant1Id,
+      parentId: userId,
+      timestamp,
+      message: {
+        role: "assistant",
+        content: [{ type: "toolCall", id: callId, name: "guide_step", arguments: {} }],
+        timestamp: 2,
+      },
+    },
+    {
+      type: "message",
+      id: toolResultId,
+      parentId: assistant1Id,
+      timestamp,
+      guide: stepGuide(chapterIndex, fromBlock, toBlock, title),
+      message: {
+        role: "toolResult",
+        toolCallId: callId,
+        toolName: "guide_step",
+        isError: false,
+        content: [{ type: "text", text: `Source text for ${title} ${fromBlock}-${toBlock}` }],
+        timestamp: 3,
+      },
+    },
+    {
+      type: "message",
+      id: assistant2Id,
+      parentId: toolResultId,
+      timestamp,
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: explanation }],
+        timestamp: 4,
+      },
+    },
+  ];
+
+  const sideMsg = (
+    id: string,
+    parentId: string | null,
+    anchorId: string | null,
+    role: "user" | "assistant",
+    text: string,
+    ts = timestamp,
+  ): PiSessionEntry => ({
+    type: "message",
+    id,
+    parentId,
+    timestamp: ts,
+    sideThread: { anchorId },
+    message:
+      role === "user"
+        ? { role: "user", content: text, timestamp: 10 }
+        : { role: "assistant", content: [{ type: "text", text }], timestamp: 11 },
+  });
+
+  it("isolates chapter side-threads from spine branches and projects chapter-accurate context even after later window cuts", () => {
+    const entries: PiSessionEntry[] = [
+      {
+        type: "custom_message",
+        id: "snap1",
+        parentId: null,
+        timestamp,
+        customType: "bookSnapshot",
+        content: "Book snapshot",
+        display: false,
+      },
+      ...toolTurn("u3a", "snap1", "a3a1", "tr3a", "a3a2", "c3a", 2, 0, 4, "Chapter 3", "Ch3 part 1"),
+      ...toolTurn("u3b", "a3a2", "a3b1", "tr3b", "a3b2", "c3b", 2, 5, 9, "Chapter 3", "Ch3 part 2"),
+      {
+        type: "custom_message",
+        id: "recap3",
+        parentId: "a3b2",
+        timestamp,
+        customType: "guideRecap",
+        content: "Recap Ch3",
+        display: false,
+        details: { chapterIndex: 2, chapterTitle: "Chapter 3", text: "Summary of Ch3" },
+      },
+      {
+        type: "guide_window_cut",
+        id: "cut4",
+        parentId: "recap3",
+        timestamp,
+        firstKeptEntryId: null,
+        reason: "batch",
+      },
+      ...toolTurn("u4a", "cut4", "a4a1", "tr4a", "a4a2", "c4a", 3, 0, 5, "Chapter 4", "Ch4 part 1"),
+      // Follow-up anchored on Chapter 3's run anchor (`u3a`):
+      sideMsg("q3_1", "u3a", "u3a", "user", "Explain Ch3 part 1"),
+      sideMsg("ans3_1", "q3_1", "u3a", "assistant", "Here is Ch3 part 1 clarified."),
+      sideMsg("q3_2", "ans3_1", "u3a", "user", "And how does Ch3 part 2 connect?"),
+    ];
+
+    const session = makeSession(entries, "a4a2");
+    session.header.kind = "guided";
+
+    // Side-thread entries are tagged and completely excluded from spine branch navigation.
+    expect(isSideThreadEntry(entries[entries.length - 1])).toBe(true);
+    expect(branchNavigation(session).size).toBe(0);
+    expect(branchLeafId(session, "u3a")).toBe("a4a2");
+
+    // Spine runs resolve both Ch3 (two steps merged) and Ch4.
+    const runs = guideSpineRuns(session);
+    expect(runs).toHaveLength(2);
+    expect(runs[0]).toMatchObject({ anchorEntryId: "u3a", endEntryId: "a3b2", chapterIndex: 2 });
+    expect(runs[1]).toMatchObject({ anchorEntryId: "u4a", endEntryId: "a4a2", chapterIndex: 3 });
+    expect(resolveGuideRunForAnchor(session, "u3a")?.endEntryId).toBe("a3b2");
+
+    // Ch3 side-thread context sees Ch3 part 1 + part 2 (unaffected by later cut4 / Ch4) + Ch3 Q&As.
+    const ch3Ctx = sideThreadContextEntries(session, "u3a", "a3b2").map((e) => e.id);
+    expect(ch3Ctx).toEqual([
+      "snap1",
+      "u3a", "a3a1", "tr3a", "a3a2",
+      "u3b", "a3b1", "tr3b", "a3b2",
+      "q3_1", "ans3_1", "q3_2",
+    ]);
+    expect(ch3Ctx).not.toContain("u4a");
+    expect(ch3Ctx).not.toContain("recap3");
+    expect(piSideThreadContextMessages(session, "u3a", "a3b2")).toHaveLength(ch3Ctx.length);
+
+    // Spine context for Ch4 stays pure (no Ch3 follow-ups).
+    const spineCtx = contextBranch(session).map((e) => e.id);
+    expect(spineCtx).not.toContain("q3_1");
+    expect(spineCtx).toContain("recap3");
+    expect(spineCtx).toContain("a4a2");
+
+    // Snapshot projects visible side-thread messages cleanly.
+    const snaps = sideThreadSnapshots(session);
+    expect(Object.keys(snaps)).toEqual(["u3a"]);
+    expect(snaps.u3a.messages.map((m) => (m.role === "user" || m.role === "assistant" ? m.content : ""))).toEqual([
+      "Explain Ch3 part 1",
+      "Here is Ch3 part 1 clarified.",
+      "And how does Ch3 part 2 connect?",
+    ]);
+  });
+
+  it("supports independent edit/regenerate branching inside a chapter side-thread and root pre-guide side-threads", () => {
+    const entries: PiSessionEntry[] = [
+      sideMsg("pre1", null, null, "user", "About this book", "2026-04-01T00:00:01Z"),
+      sideMsg("pre_a1", "pre1", null, "assistant", "Overview", "2026-04-01T00:00:02Z"),
+      ...toolTurn("u1", null, "a1", "tr1", "a2", "c1", 0, 0, 2, "Chapter 1", "Ch1 explanation"),
+      sideMsg("q1", "u1", "u1", "user", "First phrasing", "2026-04-01T00:01:00Z"),
+      sideMsg("ans1", "q1", "u1", "assistant", "First reply", "2026-04-01T00:01:01Z"),
+      // Edited q1 inside Ch1's side-thread (forks at u1):
+      sideMsg("q1_edit", "u1", "u1", "user", "Edited phrasing", "2026-04-01T00:02:00Z"),
+      sideMsg("ans1_edit", "q1_edit", "u1", "assistant", "Edited reply", "2026-04-01T00:02:01Z"),
+    ];
+    const session = makeSession(entries, "a2");
+    session.header.kind = "guided";
+
+    // Spine branch navigation stays clean; side-thread navigation tracks the edit fork.
+    expect(branchNavigation(session).size).toBe(0);
+    const snaps = sideThreadSnapshots(session);
+    expect(snaps[ROOT_SIDE_THREAD_KEY].messages).toHaveLength(2);
+    expect(snaps.u1.messages.map((m) => (m.role === "user" || m.role === "assistant" ? m.content : ""))).toEqual([
+      "Edited phrasing",
+      "Edited reply",
+    ]);
+    expect(snaps.u1.navigation.q1_edit?.options.map((o) => o.anchorId)).toEqual(["q1", "q1_edit"]);
+    expect(snaps.u1.navigation.q1_edit?.activeIndex).toBe(1);
+
+    // Switching back to the original phrasing via preferredLeaves resolves its leaf cleanly.
+    const origLeaf = sideThreadBranchLeafId(session, "u1", "q1");
+    expect(origLeaf).toBe("ans1");
+    const switched = sideThreadSnapshots(session, new Map([["u1", origLeaf!]]));
+    expect(switched.u1.messages[0]).toMatchObject({ role: "user", content: "First phrasing" });
+    expect(switched.u1.navigation.q1?.activeIndex).toBe(0);
   });
 });

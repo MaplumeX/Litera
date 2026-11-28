@@ -29,7 +29,7 @@ import { GuideIncompleteStepCard } from "./GuideIncompleteStepCard";
 import { GuideSideThread } from "./GuideSideThread";
 import type { GuideStepAction } from "./GuideStepSection";
 import type { QuoteLocation } from "@/agent/book/book-content";
-import { canonicalGuidedSession } from "@/agent/sessions/pi-session";
+import { canonicalGuidedSession, sideThreadAnchorFromKey } from "@/agent/sessions/pi-session";
 import type { GuideBlockTarget } from "@/lib/guide-marks";
 import {
   findRunIdForChapter,
@@ -41,6 +41,7 @@ import {
   type GuideDocument,
   type GuideIncompleteStepNode,
   type GuideSearchHit,
+  type GuideSideQaNode,
   type GuideStepNode,
   type GuideTimelineMarker,
 } from "@/lib/guide-document";
@@ -158,10 +159,13 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
       takeStep,
       askSideQuestion,
       editTurn: editPrompt,
+      editSideTurn,
       regenerateTurn,
+      regenerateSideTurn,
       switchSession,
       updateConfig: updateSessionConfig,
       switchBranchAtAnchor,
+      switchSideBranchAtAnchor,
       locateQuote,
     } = bridge;
     const [pace, setPace] = useState<GuideStepPace>("standard");
@@ -176,7 +180,7 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
     const [submitting, setSubmitting] = useState(false);
     const [invokeError, setInvokeError] = useState<string | null>(null);
     const [configSession, setConfigSession] = useState<SessionConfigTarget | null>(null);
-    const [editingIndex, setEditingIndex] = useState<number | null>(null);
+    const [editingQa, setEditingQa] = useState<GuideSideQaNode | null>(null);
     const [editDraft, setEditDraft] = useState("");
     const [expandedQuestionIndex, setExpandedQuestionIndex] = useState<number | null>(null);
     const [focusedRunId, setFocusedRunId] = useState<string | null>(null);
@@ -275,16 +279,20 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
           messages: isGuided ? state.messages : [],
           branchAnchors: state.branchAnchors,
           branchNavigation: state.branchNavigation,
+          sideThreads: isGuided ? state.sideThreads : undefined,
+          activeSideThreadKey: state.activeSideThreadKey,
           isStreaming,
         }),
       [
         bookId,
         isGuided,
         isStreaming,
+        state.activeSideThreadKey,
         state.branchAnchors,
         state.branchNavigation,
         state.messages,
         state.sessionId,
+        state.sideThreads,
       ],
     );
 
@@ -300,7 +308,10 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
     }
     const lastChatMessage = lastChatIndex >= 0 ? state.messages[lastChatIndex] : undefined;
 
-    const activity = chatActivity(state.messages, isStreaming);
+    const activeMessagesForActivity = state.activeSideThreadKey
+      ? (state.sideThreads[state.activeSideThreadKey]?.messages ?? state.messages)
+      : state.messages;
+    const activity = chatActivity(activeMessagesForActivity, isStreaming);
     useEffect(() => {
       onActivityChange?.({
         answering: activity.answering,
@@ -339,13 +350,13 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
             preview: step.label,
             kind: "step",
           });
-          for (const qa of step.sideThreads) {
-            items.push({
-              messageIndex: qa.userMessageIndex,
-              preview: userMessagePreview(qa.question),
-              kind: "question",
-            });
-          }
+        }
+        for (const qa of activeRun.sideThreads) {
+          items.push({
+            messageIndex: qa.userMessageIndex,
+            preview: userMessagePreview(qa.question),
+            kind: "question",
+          });
         }
       }
       return items;
@@ -356,11 +367,16 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
       [outlineItems],
     );
 
+    const scrollContentKey = useMemo(
+      () => ({ messages: state.messages, sideThreads: state.sideThreads }),
+      [state.messages, state.sideThreads],
+    );
+
     const scroll = useTranscriptScroll({
       bookId,
       sessionId: state.sessionId,
       isStreaming,
-      contentKey: state.messages,
+      contentKey: scrollContentKey,
       trackedIndices,
     });
 
@@ -407,7 +423,7 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
     useEffect(() => {
       setInvokeError(null);
       setSubmitting(false);
-      setEditingIndex(null);
+      setEditingQa(null);
       setEditDraft("");
       setExpandedQuestionIndex(null);
       setFocusedRunId(null);
@@ -417,7 +433,7 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
     }, [bookId]);
 
     useEffect(() => {
-      setEditingIndex(null);
+      setEditingQa(null);
       setEditDraft("");
       setPickedStep(undefined);
       setFocusedRunId(null);
@@ -524,7 +540,7 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
         if (isStreaming || !bookId || isViewingArchived) return;
         const guideRequest = transformGuideRequest ? transformGuideRequest(rawRequest) : rawRequest;
         setPickedStep(undefined);
-        setEditingIndex(null);
+        setEditingQa(null);
         setEditDraft("");
         setInvokeError(null);
         setSubmitting(true);
@@ -584,17 +600,19 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
     const handleSendQuestion = useCallback(async () => {
       const text = input.trim();
       if (!text || isStreaming || !bookId || isViewingArchived) return;
-      setEditingIndex(null);
+      setEditingQa(null);
       setEditDraft("");
       const selection = pendingSelection?.text;
       const chapterHref = pendingSelection?.chapterHref ?? currentChapterHref;
+      const sideThreadAnchorId = activeRun?.anchorEntryId ?? null;
       setInput("");
       setPendingSelection(null);
       setInvokeError(null);
       setSubmitting(true);
-      focusRun(null, { kind: "bottom", smooth: true });
+      // Stay inside the viewed chapter run; follow-up Q&As branch per chapter.
+      scroll.scrollToBottom(true);
       try {
-        await askSideQuestion(text, { selection, chapterHref });
+        await askSideQuestion(text, { selection, chapterHref, sideThreadAnchorId });
       } catch (err) {
         setInput((current) => (current ? current : text));
         if (selection) {
@@ -603,7 +621,17 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
         setInvokeError(String(err));
         setSubmitting(false);
       }
-    }, [askSideQuestion, bookId, currentChapterHref, focusRun, input, isStreaming, isViewingArchived, pendingSelection]);
+    }, [
+      activeRun?.anchorEntryId,
+      askSideQuestion,
+      bookId,
+      currentChapterHref,
+      input,
+      isStreaming,
+      isViewingArchived,
+      pendingSelection,
+      scroll,
+    ]);
 
     const handleAbort = useCallback(async () => {
       setInvokeError(null);
@@ -614,48 +642,65 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
       }
     }, [abort]);
 
-    const handleStartEdit = useCallback(
-      (index: number) => {
+    const handleStartEditQa = useCallback(
+      (qa: GuideSideQaNode) => {
         if (isStreaming || isViewingArchived) return;
-        const message = state.messages[index];
-        if (!message || message.role !== "user" || message.guide || message.guideRequest) return;
-        setEditingIndex(index);
-        setEditDraft(message.content);
+        setEditingQa(qa);
+        setEditDraft(qa.question);
       },
-      [isStreaming, isViewingArchived, state.messages],
+      [isStreaming, isViewingArchived],
     );
 
     const handleCancelEdit = useCallback(() => {
-      setEditingIndex(null);
+      setEditingQa(null);
       setEditDraft("");
     }, []);
 
     const handleSaveEdit = useCallback(async () => {
-      if (editingIndex === null || isViewingArchived) return;
+      if (!editingQa || isViewingArchived) return;
       const text = editDraft.trim();
       if (!text || isStreaming || !bookId) return;
-      const original = state.messages[editingIndex];
-      if (!original || original.role !== "user") return;
-      const { selection, chapterHref } = original;
-      const index = editingIndex;
-      setEditingIndex(null);
+      const qa = editingQa;
+      const { selection, chapterHref } = qa;
+      setEditingQa(null);
       setInvokeError(null);
       setSubmitting(true);
-      focusRun(null, { kind: "bottom", smooth: true });
       try {
-        await editPrompt(
-          index,
-          text,
-          { selection, chapterHref },
-          { role: "user", content: text, selection, chapterHref },
-        );
+        if (qa.sideThreadKey !== undefined && qa.sideMessageIndex !== undefined) {
+          scroll.scrollToBottom(true);
+          await editSideTurn(
+            sideThreadAnchorFromKey(qa.sideThreadKey),
+            qa.sideMessageIndex,
+            text,
+            { selection, chapterHref },
+            { role: "user", content: text, selection, chapterHref },
+          );
+        } else {
+          focusRun(null, { kind: "bottom", smooth: true });
+          await editPrompt(
+            qa.userMessageIndex,
+            text,
+            { selection, chapterHref },
+            { role: "user", content: text, selection, chapterHref },
+          );
+        }
         setEditDraft("");
       } catch (err) {
         setInvokeError(String(err));
         setSubmitting(false);
-        setEditingIndex(index);
+        setEditingQa(qa);
       }
-    }, [bookId, editDraft, editPrompt, editingIndex, focusRun, isStreaming, isViewingArchived, state.messages]);
+    }, [
+      bookId,
+      editDraft,
+      editPrompt,
+      editSideTurn,
+      editingQa,
+      focusRun,
+      isStreaming,
+      isViewingArchived,
+      scroll,
+    ]);
 
     const handleRegenerate = useCallback(
       async (atIndex?: number) => {
@@ -678,7 +723,7 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
           original.guideRequest ?? (original.guide ? { step: original.guide } : undefined);
         const guideRequest =
           rawReq && transformGuideRequest ? transformGuideRequest(rawReq) : rawReq;
-        setEditingIndex(null);
+        setEditingQa(null);
         setEditDraft("");
         setInvokeError(null);
         setSubmitting(true);
@@ -712,11 +757,36 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
       [bookId, editPrompt, focusRun, isStreaming, isViewingArchived, regenerateTurn, state.messages, transformGuideRequest],
     );
 
+    const handleRegenerateQa = useCallback(
+      async (qa: GuideSideQaNode) => {
+        if (isViewingArchived || isStreaming || !bookId) return;
+        if (qa.sideThreadKey !== undefined && qa.sideMessageIndex !== undefined) {
+          setEditingQa(null);
+          setEditDraft("");
+          setInvokeError(null);
+          setSubmitting(true);
+          scroll.scrollToBottom(true);
+          try {
+            await regenerateSideTurn(
+              sideThreadAnchorFromKey(qa.sideThreadKey),
+              qa.sideMessageIndex,
+            );
+          } catch (err) {
+            setInvokeError(String(err));
+            setSubmitting(false);
+          }
+          return;
+        }
+        await handleRegenerate(qa.assistantMessageIndex ?? qa.userMessageIndex);
+      },
+      [bookId, handleRegenerate, isStreaming, isViewingArchived, regenerateSideTurn, scroll],
+    );
+
     const handleSwitchBranch = useCallback(
       async (anchorId: string, direction: -1 | 1) => {
         if (isStreaming || isViewingArchived) return;
-        if (editingIndex !== null) {
-          setEditingIndex(null);
+        if (editingQa) {
+          setEditingQa(null);
           setEditDraft("");
         }
         setInvokeError(null);
@@ -727,7 +797,29 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
           setInvokeError(String(err));
         }
       },
-      [editingIndex, isStreaming, isViewingArchived, scroll, switchBranchAtAnchor],
+      [editingQa, isStreaming, isViewingArchived, scroll, switchBranchAtAnchor],
+    );
+
+    const handleSwitchQaBranch = useCallback(
+      async (qa: GuideSideQaNode, anchorId: string, direction: -1 | 1) => {
+        if (isStreaming || isViewingArchived) return;
+        if (editingQa) {
+          setEditingQa(null);
+          setEditDraft("");
+        }
+        setInvokeError(null);
+        try {
+          if (qa.sideThreadKey !== undefined) {
+            await switchSideBranchAtAnchor(qa.sideThreadKey, anchorId, direction);
+          } else {
+            await switchBranchAtAnchor(anchorId, direction);
+            scroll.scrollToBottom(false);
+          }
+        } catch (err) {
+          setInvokeError(String(err));
+        }
+      },
+      [editingQa, isStreaming, isViewingArchived, scroll, switchBranchAtAnchor, switchSideBranchAtAnchor],
     );
 
     const handleSaveSessionConfig = useCallback(
@@ -924,7 +1016,6 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
       activeRun && (document.runs.length >= 2 || !(hasNavRail && navRailOpen)),
     );
     const showOutlineRail = isWorkspace && outlineItems.length >= 2;
-    const latestStepIndex = document.steps.length - 1;
 
     const navRailContent = hasNavRail
       ? renderNavRail!({
@@ -1097,14 +1188,14 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
                     isStreaming={isStreaming}
                     bookReady={bookReady}
                     readOnly={isViewingArchived}
-                    editingIndex={editingIndex}
+                    editingQaId={editingQa?.id ?? null}
                     editDraft={editDraft}
                     onDraftChange={setEditDraft}
-                    onStartEdit={handleStartEdit}
+                    onStartEdit={handleStartEditQa}
                     onSaveEdit={() => void handleSaveEdit()}
                     onCancelEdit={handleCancelEdit}
-                    onRegenerate={(idx) => void handleRegenerate(idx)}
-                    onSwitchBranch={(anchorId, dir) => void handleSwitchBranch(anchorId, dir)}
+                    onRegenerate={(qa) => void handleRegenerateQa(qa)}
+                    onSwitchBranch={(qa, anchorId, dir) => void handleSwitchQaBranch(qa, anchorId, dir)}
                     registerItem={scroll.registerItem}
                   />
                 )}
@@ -1128,7 +1219,7 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
                   <GuideChapterGroup
                     key={activeRun.id}
                     run={activeRun}
-                    latestStepIndex={latestStepIndex}
+                    isLatestRun={isLatestRun}
                     markersByAfterStep={markersByAfterStep}
                     incompleteStepsByAfterStep={incompleteStepsByAfterStep}
                     activeTailIncompleteId={activeTailIncompleteId}
@@ -1142,12 +1233,14 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
                     loadStepImageUrl={readStepImageUrl}
                     onRegenerateMessage={(idx) => void handleRegenerate(idx)}
                     onSwitchBranch={(anchorId, dir) => void handleSwitchBranch(anchorId, dir)}
-                    editingIndex={editingIndex}
+                    editingQaId={editingQa?.id ?? null}
                     editDraft={editDraft}
                     onDraftChange={setEditDraft}
-                    onStartEdit={handleStartEdit}
+                    onStartEditQa={handleStartEditQa}
                     onSaveEdit={() => void handleSaveEdit()}
                     onCancelEdit={handleCancelEdit}
+                    onRegenerateQa={(qa) => void handleRegenerateQa(qa)}
+                    onSwitchQaBranch={(qa, anchorId, dir) => void handleSwitchQaBranch(qa, anchorId, dir)}
                     registerItem={scroll.registerItem}
                     extraActions={extraStepActions}
                   />
@@ -1159,6 +1252,7 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
                   ))}
 
                 {(!activeRun || isLatestRun) &&
+                  !state.activeSideThreadKey &&
                   isStreaming &&
                   (!lastChatMessage || lastChatMessage.role === "user") && (
                     <div className="flex gap-2">
@@ -1178,6 +1272,7 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
                 )}
 
                 {(!activeRun || isLatestRun) &&
+                  !state.activeSideThreadKey &&
                   (!lastChatMessage ||
                     (lastChatMessage.role === "user" && !lastChatMessage.guideRequest)) &&
                   !isStreaming &&

@@ -512,4 +512,88 @@ describe("guide-document chapter-scoped helpers", () => {
       messageIndex: 7,
     });
   });
+
+  it("projects off-spine chapter side-threads and root pre-guide side-threads onto runs without colliding with spine indices", () => {
+    const ch0Step: GuideStep = {
+      from: { chapterIndex: 0, chapterTitle: "第一章 起源", block: 0, paragraph: 1 },
+      to: { chapterIndex: 0, chapterTitle: "第一章 起源", block: 2, paragraph: 3 },
+    };
+    const ch1Step: GuideStep = {
+      from: { chapterIndex: 1, chapterTitle: "第二章 演化", block: 0, paragraph: 1 },
+      to: { chapterIndex: 1, chapterTitle: "第二章 演化", block: 3, paragraph: 4 },
+    };
+    const doc = projectGuideDocument({
+      bookId: "book-1",
+      sessionId: "guided-1",
+      messages: [
+        { role: "user", content: "继续带读", guideRequest: {} },
+        {
+          role: "assistant",
+          content: "第一章讲解。",
+          blocks: [
+            { type: "toolCall", toolCall: { toolCallId: "t1", tool: "guide_step", params: {}, done: true, guide: ch0Step } },
+            { type: "text", text: "第一章讲解。" },
+          ],
+        },
+        { role: "user", content: "继续带读", guideRequest: {} },
+        {
+          role: "assistant",
+          content: "第二章讲解。",
+          blocks: [
+            { type: "toolCall", toolCall: { toolCallId: "t2", tool: "guide_step", params: {}, done: true, guide: ch1Step } },
+            { type: "text", text: "第二章讲解。" },
+          ],
+        },
+      ],
+      branchAnchors: ["u-ch0", "a-ch0", "u-ch1", "a-ch1"],
+      sideThreads: {
+        __root__: {
+          messages: [
+            { role: "user", content: "读前提问" },
+            { role: "assistant", content: "读前回答" },
+          ],
+          anchors: ["pre-q", "pre-a"],
+          navigation: {},
+        },
+        "u-ch0": {
+          messages: [
+            { role: "user", content: "第一章侧枝追问：自然选择如何验证？" },
+            { role: "assistant", content: "可通过人工选择与化石对照验证。" },
+          ],
+          anchors: ["sq-0", "sa-0"],
+          navigation: {},
+        },
+      },
+    });
+
+    expect(doc.orphanSideThreads).toHaveLength(1);
+    expect(doc.orphanSideThreads[0]).toMatchObject({
+      sideThreadKey: "__root__",
+      sideMessageIndex: 0,
+      question: "读前提问",
+      answer: "读前回答",
+    });
+    expect(doc.runs[0].anchorEntryId).toBe("u-ch0");
+    expect(doc.runs[0].sideThreads).toHaveLength(1);
+    expect(doc.runs[0].sideThreads[0]).toMatchObject({
+      sideThreadKey: "u-ch0",
+      sideMessageIndex: 0,
+      question: "第一章侧枝追问：自然选择如何验证？",
+    });
+    expect(doc.runs[1].sideThreads).toHaveLength(0);
+    expect(doc.totalQuestions).toBe(2);
+
+    const ch0QaIdx = doc.runs[0].sideThreads[0].userMessageIndex;
+    expect(ch0QaIdx).toBeGreaterThanOrEqual(4);
+    expect(findRunIdForMessage(doc, ch0QaIdx)).toBe(doc.runs[0].id);
+    expect(findSideQuestionUserIndex(doc, ch0QaIdx)).toBe(ch0QaIdx);
+
+    const hits = searchGuideDocument(doc, "自然选择");
+    expect(hits).toHaveLength(1);
+    expect(hits[0]).toMatchObject({
+      kind: "question",
+      runId: doc.runs[0].id,
+      messageIndex: ch0QaIdx,
+    });
+  });
 });

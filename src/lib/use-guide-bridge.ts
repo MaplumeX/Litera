@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useReducer, useRef } from "react";
 import { guideController } from "@/agent/runtime/guide-controller";
+import { sideThreadKeyFor } from "@/agent/sessions/pi-session";
 import { agentReducer, createAgentState } from "@/lib/agent-reducer";
 import type {
   AgentMessage,
@@ -23,7 +24,7 @@ export function useGuideBridge(bookId: string) {
   bookIdRef.current = bookId;
   const statusRef = useRef(state.status);
   statusRef.current = state.status;
-  const pendingEditRef = useRef<{ promptId: string; message: AgentMessage } | null>(null);
+  const pendingEditRef = useRef<{ promptId: string; message: AgentMessage; sideThreadKey?: string } | null>(null);
 
   const listSessions = useCallback(async () => {
     if (!bookIdRef.current) return;
@@ -41,7 +42,7 @@ export function useGuideBridge(bookId: string) {
         const pending = pendingEditRef.current;
         if (pending?.promptId === event.promptId) {
           pendingEditRef.current = null;
-          dispatch({ type: "user_message", message: pending.message });
+          dispatch({ type: "user_message", message: pending.message, sideThreadKey: pending.sideThreadKey ?? event.sideThreadKey });
         }
       }
       if (event.type === "error" && pendingEditRef.current?.promptId === event.promptId) {
@@ -120,20 +121,29 @@ export function useGuideBridge(bookId: string) {
   );
 
   const askSideQuestion = useCallback(
-    async (text: string, context: { selection?: string; chapterHref?: string }) => {
+    async (
+      text: string,
+      context: { selection?: string; chapterHref?: string; sideThreadAnchorId?: string | null },
+    ) => {
       const currentBookId = bookIdRef.current;
       if (!currentBookId) throw new Error("No book is open");
       if (statusRef.current !== "bookReady") throw new Error("Book is not ready");
       const requestId = id("guide-ask-req");
       const promptId = id("prompt");
+      const sideThreadKey =
+        context.sideThreadAnchorId !== undefined
+          ? sideThreadKeyFor(context.sideThreadAnchorId)
+          : undefined;
       const message: AgentMessage = {
         role: "user",
         content: text,
         selection: context.selection,
         chapterHref: context.chapterHref,
       };
-      dispatch({ type: "prompt_queued", bookId: currentBookId, promptId });
-      dispatch({ type: "user_message", message });
+      dispatch({ type: "prompt_queued", bookId: currentBookId, promptId, sideThreadKey });
+      if (sideThreadKey !== undefined) {
+        dispatch({ type: "user_message", message, sideThreadKey });
+      }
       try {
         await guideController.askSideQuestion(text, context, promptId, requestId);
       } catch (error) {
@@ -144,6 +154,57 @@ export function useGuideBridge(bookId: string) {
     },
     [],
   );
+
+  const editSideTurn = useCallback(
+    async (
+      anchorId: string | null,
+      messageIndex: number,
+      text: string,
+      context: { selection?: string; chapterHref?: string },
+      message: AgentMessage,
+    ) => {
+      const currentBookId = bookIdRef.current;
+      if (!currentBookId) throw new Error("No book is open");
+      if (statusRef.current !== "bookReady") throw new Error("Book is not ready");
+      const requestId = id("guide-side-edit-req");
+      const promptId = id("prompt");
+      const sideThreadKey = sideThreadKeyFor(anchorId);
+      dispatch({ type: "prompt_queued", bookId: currentBookId, promptId, sideThreadKey });
+      pendingEditRef.current = { promptId, message, sideThreadKey };
+      try {
+        await guideController.askSideQuestion(
+          text,
+          { ...context, sideThreadAnchorId: anchorId },
+          promptId,
+          requestId,
+          messageIndex,
+        );
+      } catch (error) {
+        pendingEditRef.current = null;
+        dispatch({ type: "prompt_queue_failed", promptId, message: String(error) });
+        throw error;
+      }
+      return { requestId, promptId };
+    },
+    [],
+  );
+
+  const regenerateSideTurn = useCallback(async (anchorId: string | null, messageIndex: number) => {
+    const currentBookId = bookIdRef.current;
+    if (!currentBookId) throw new Error("No book is open");
+    if (statusRef.current !== "bookReady") throw new Error("Book is not ready");
+    const requestId = id("guide-side-regen-req");
+    const promptId = id("prompt");
+    const sideThreadKey = sideThreadKeyFor(anchorId);
+    dispatch({ type: "prompt_queued", bookId: currentBookId, promptId, sideThreadKey });
+    try {
+      await guideController.regenerateSideTurn(anchorId, messageIndex, promptId, requestId);
+    } catch (error) {
+      dispatch({ type: "prompt_queue_failed", promptId, message: String(error) });
+      throw error;
+    }
+    return { requestId, promptId };
+  }, []);
 
   const editTurn = useCallback(
     async (
@@ -161,9 +222,16 @@ export function useGuideBridge(bookId: string) {
       pendingEditRef.current = { promptId, message };
       try {
         if (context.guideRequest) {
-          await guideController.takeStep(text, context.guideRequest, undefined, promptId, requestId, messageIndex);
+          await guideController.takeStep(
+            text,
+            context.guideRequest,
+            undefined,
+            promptId,
+            requestId,
+            messageIndex,
+          );
         } else {
-          await guideController.askSideQuestion(text, context, promptId, requestId, messageIndex);
+          await guideController.editLegacySpineTurn(text, context, promptId, requestId, messageIndex);
         }
       } catch (error) {
         pendingEditRef.current = null;
@@ -196,6 +264,19 @@ export function useGuideBridge(bookId: string) {
     async (anchorId: string, direction: -1 | 1) => {
       if (!bookIdRef.current || !state.sessionId) return;
       await guideController.switchBranchAtAnchor(state.sessionId, anchorId, direction, id("switch-branch"));
+    },
+    [state.sessionId],
+  );
+  const switchSideBranchAtAnchor = useCallback(
+    async (sideThreadKey: string, anchorEntryId: string, direction: -1 | 1) => {
+      if (!bookIdRef.current || !state.sessionId) return;
+      await guideController.switchSideBranchAtAnchor(
+        state.sessionId,
+        sideThreadKey,
+        anchorEntryId,
+        direction,
+        id("switch-side-branch"),
+      );
     },
     [state.sessionId],
   );
@@ -240,9 +321,12 @@ export function useGuideBridge(bookId: string) {
     takeStep,
     askSideQuestion,
     editTurn,
+    editSideTurn,
     regenerateTurn,
+    regenerateSideTurn,
     abort,
     switchBranchAtAnchor,
+    switchSideBranchAtAnchor,
     restartGuide,
     updateConfig,
     resetContext,

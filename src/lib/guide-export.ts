@@ -89,14 +89,14 @@ export function formatGuideExportMarkdown(
         lines.push(cleanGuideCitations(step.explanation.trim()));
         lines.push("");
       }
-      if (includeSideQuestions && step.sideThreads.length > 0) {
-        for (const qa of step.sideThreads) {
-          if (!qa.answer.trim()) continue;
-          lines.push(`> **Q:** ${qa.question.trim()}`);
-          lines.push(">");
-          lines.push(`> ${cleanGuideCitations(qa.answer.trim()).replace(/\n/g, "\n> ")}`);
-          lines.push("");
-        }
+    }
+    if (includeSideQuestions && run.sideThreads.length > 0) {
+      for (const qa of run.sideThreads) {
+        if (!qa.answer.trim()) continue;
+        lines.push(`> **Q:** ${qa.question.trim()}`);
+        lines.push(">");
+        lines.push(`> ${cleanGuideCitations(qa.answer.trim()).replace(/\n/g, "\n> ")}`);
+        lines.push("");
       }
     }
   }

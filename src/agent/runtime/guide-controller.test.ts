@@ -13,6 +13,7 @@ function mockRuntimePort(): GuideRuntimePort {
     newSession: vi.fn(),
     switchSession: vi.fn(),
     switchBranchAtAnchor: vi.fn(),
+    switchSideThreadBranchAtAnchor: vi.fn(),
     deleteSession: vi.fn(),
     renameSession: vi.fn(),
     updateSessionConfig: vi.fn(),
@@ -32,6 +33,9 @@ function mockRuntimePort(): GuideRuntimePort {
     guidePageMarks: vi.fn(),
     locateQuote: vi.fn(),
     prompt: vi.fn(),
+    promptSideThread: vi.fn(),
+    regenerate: vi.fn(),
+    regenerateSideThread: vi.fn(),
     abort: vi.fn(),
     refreshAfterSync: vi.fn(),
   };
@@ -68,20 +72,31 @@ describe("GuideController", () => {
     expect(port.prompt).toHaveBeenCalledWith("继续带读", { guideRequest: {} }, "p-2", undefined, undefined);
   });
 
-  it("ensures canonical guide session and forwards askSideQuestion without guideRequest", async () => {
+  it("ensures canonical guide session and forwards askSideQuestion to chapter side-threads", async () => {
     const port = mockRuntimePort();
     const controller = new GuideController(port);
 
     expect(await controller.ensureCanonicalGuide("req-1")).toBe("guided-1");
-    await controller.askSideQuestion("这个术语什么意思？", { selection: "异化", chapterHref: "ch1.xhtml" }, "p-3");
+    await controller.askSideQuestion(
+      "这个术语什么意思？",
+      { selection: "异化", chapterHref: "ch1.xhtml", sideThreadAnchorId: "anchor-ch1" },
+      "p-3",
+    );
 
-    expect(port.prompt).toHaveBeenCalledWith(
+    expect(port.promptSideThread).toHaveBeenCalledWith(
+      "anchor-ch1",
       "这个术语什么意思？",
       { selection: "异化", chapterHref: "ch1.xhtml" },
       "p-3",
       undefined,
       undefined,
     );
+
+    await controller.regenerateSideTurn("anchor-ch1", 0, "p-4", "r-4");
+    expect(port.regenerateSideThread).toHaveBeenCalledWith("anchor-ch1", 0, "p-4", "r-4");
+
+    await controller.switchSideBranchAtAnchor("guided-1", "anchor-ch1", "q-1", -1, "r-5");
+    expect(port.switchSideThreadBranchAtAnchor).toHaveBeenCalledWith("guided-1", "anchor-ch1", "q-1", -1, "r-5");
   });
 
   it("formats pace and styleOverride cleanly into guideRequestContext", () => {
