@@ -354,6 +354,21 @@ export function useGuideBridge(bookId: string) {
   const restartGuide = useCallback(async (sessionId: string) => {
     if (bookIdRef.current) await guideController.restartGuide(sessionId, id("restart-guide"));
   }, []);
+  const restoreGuide = useCallback(async (sessionId: string) => {
+    if (!bookIdRef.current) return;
+    await guideController.restoreGuide(sessionId, id("restore-guide"));
+    await listSessions();
+  }, [listSessions]);
+  const renameSession = useCallback(async (sessionId: string, title: string) => {
+    if (bookIdRef.current) await guideController.renameSession(sessionId, title, id("rename-guide"));
+  }, []);
+  const deleteSession = useCallback(async (sessionId: string) => {
+    if (bookIdRef.current) await guideController.deleteSession(sessionId, id("delete-guide"));
+  }, []);
+  const loadGuideSession = useCallback(async (sessionId: string) => {
+    if (!bookIdRef.current) return null;
+    return guideController.loadGuideSession(bookIdRef.current, sessionId);
+  }, []);
   const updateConfig = useCallback(async (sessionId: string, systemPrompt: string) => {
     if (bookIdRef.current) {
       await guideController.updateConfig(sessionId, systemPrompt, id("update-guide-config"));
@@ -404,6 +419,10 @@ export function useGuideBridge(bookId: string) {
     switchBranchAtAnchor,
     switchSideBranchAtAnchor,
     restartGuide,
+    restoreGuide,
+    renameSession,
+    deleteSession,
+    loadGuideSession,
     updateConfig,
     resetContext,
     contextStats,

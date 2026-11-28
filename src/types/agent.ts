@@ -325,6 +325,7 @@ export type AgentEvent = EventEnvelope & (
   // A Guided session's sliding window advanced or was manually reset.
   | ({ type: "guide_window_updated"; messages: AgentMessage[]; anchors: string[]; navigation: Record<string, AnchorBranchInfo> } & SideThreadsPayload & SessionCorrelation)
   | ({ type: "session_archived" } & BookCorrelation & { sessionId: string } & RequestCorrelation)
+  | ({ type: "session_unarchived" } & BookCorrelation & { sessionId: string } & RequestCorrelation)
   | ({ type: "retry_scheduled"; attempt: number; maxAttempts: number; delayMs: number } & PromptCorrelation)
   | ({ type: "prompt_end"; messages?: AgentMessage[]; anchors?: string[]; navigation?: Record<string, AnchorBranchInfo> } & SideThreadsPayload & PromptCorrelation)
   | ({ type: "prompt_aborted"; messages?: AgentMessage[]; anchors?: string[]; navigation?: Record<string, AnchorBranchInfo> } & SideThreadsPayload & PromptCorrelation & RequestCorrelation)

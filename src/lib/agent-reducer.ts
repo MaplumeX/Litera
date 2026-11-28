@@ -447,6 +447,16 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
         sessions: base.sessions.map((session) =>
           session.id === event.sessionId ? { ...session, archived: true } : session),
       };
+    case "session_unarchived":
+      if (!matchesBook(base, event.bookId)) return base;
+      return {
+        ...base,
+        sessions: base.sessions.map((session) => {
+          if (session.id !== event.sessionId) return session;
+          const { archived: _removed, ...rest } = session;
+          return { ...rest, updatedAt: new Date().toISOString() };
+        }),
+      };
     case "compaction_failed":
       return matchesSession(base, event) ? { ...base, compaction: event.aborted ? null : { status: "failed" } } : base;
     case "retry_scheduled":

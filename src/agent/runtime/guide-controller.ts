@@ -23,6 +23,7 @@ export type GuideRuntimePort = Pick<
   | "syncBook"
   | "listSessions"
   | "loadCanonicalGuide"
+  | "loadGuideSession"
   | "ensureCanonicalGuideSession"
   | "newSession"
   | "switchSession"
@@ -36,6 +37,7 @@ export type GuideRuntimePort = Pick<
   | "renameSession"
   | "updateSessionConfig"
   | "restartGuidedSession"
+  | "restoreGuidedSession"
   | "guideContextStats"
   | "resetGuideContext"
   | "nextGuideStep"
@@ -84,6 +86,10 @@ export class GuideController {
     return this.runtime.loadCanonicalGuide(bookId);
   }
 
+  loadGuideSession(bookId: string, sessionId: string): Promise<CanonicalGuideSnapshot | null> {
+    return this.runtime.loadGuideSession(bookId, sessionId);
+  }
+
   ensureCanonicalGuide(requestId?: string): Promise<string | null> {
     return this.runtime.ensureCanonicalGuideSession(requestId);
   }
@@ -102,6 +108,18 @@ export class GuideController {
 
   restartGuide(sessionId: string, requestId?: string): Promise<void> {
     return this.runtime.restartGuidedSession(sessionId, requestId);
+  }
+
+  restoreGuide(sessionId: string, requestId?: string): Promise<void> {
+    return this.runtime.restoreGuidedSession(sessionId, requestId);
+  }
+
+  renameSession(sessionId: string, title: string, requestId?: string): Promise<void> {
+    return this.runtime.renameSession(sessionId, title, requestId);
+  }
+
+  deleteSession(sessionId: string, requestId?: string): Promise<void> {
+    return this.runtime.deleteSession(sessionId, requestId);
   }
 
   updateConfig(sessionId: string, systemPrompt: string, requestId?: string): Promise<void> {
