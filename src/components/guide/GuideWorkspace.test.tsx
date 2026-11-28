@@ -11,6 +11,11 @@ const editPrompt = vi.fn();
 const editSideTurn = vi.fn();
 const regenerateTurn = vi.fn();
 const regenerateSideTurn = vi.fn();
+const reviseStep = vi.fn();
+const selectStepRevision = vi.fn();
+const undoLatestStep = vi.fn();
+const dismissIncompleteTail = vi.fn();
+const rollbackToChapterRun = vi.fn();
 const abort = vi.fn();
 const switchSession = vi.fn();
 const newSession = vi.fn();
@@ -45,6 +50,11 @@ vi.mock("@/lib/use-guide-bridge", () => ({
     editSideTurn,
     regenerateTurn,
     regenerateSideTurn,
+    reviseStep,
+    selectStepRevision,
+    undoLatestStep,
+    dismissIncompleteTail,
+    rollbackToChapterRun,
     abort,
     switchBranchAtAnchor,
     switchSideBranchAtAnchor,
@@ -109,6 +119,8 @@ function makeGuidedState(overrides?: Partial<AgentState>): AgentState {
     branchAnchors: [],
     sideThreads: {},
     activeSideThreadKey: null,
+    stepRevisions: {},
+    activeRevisionTarget: null,
     ...overrides,
   };
 }
@@ -532,5 +544,177 @@ describe("GuideWorkspace", () => {
     // Still viewing Chapter 1 (never snapped back to Chapter 2).
     expect(screen.getByText("第一章讲解。")).toBeTruthy();
     expect(screen.queryByText("第二章讲解。")).toBeNull();
+  });
+
+  it("revises a historical chapter step in place without jumping to latest or rewinding spine, and switches local revisions", async () => {
+    reviseStep.mockResolvedValue({ requestId: "req-rev", promptId: "p-rev", revisionId: "rev-2" });
+    selectStepRevision.mockResolvedValue(undefined);
+    mockState = makeGuidedState({
+      messages: [
+        { role: "user", content: "继续带读", guideRequest: {} },
+        {
+          role: "assistant",
+          content: "第一章原版讲解。",
+          blocks: [
+            { type: "toolCall", toolCall: { toolCallId: "t1", tool: "guide_step", params: {}, done: true, guide: step0 } },
+            { type: "text", text: "第一章原版讲解。" },
+          ],
+        },
+        { role: "user", content: "继续带读", guideRequest: {} },
+        {
+          role: "assistant",
+          content: "第二章讲解。",
+          blocks: [
+            { type: "toolCall", toolCall: { toolCallId: "t2", tool: "guide_step", params: {}, done: true, guide: step1 } },
+            { type: "text", text: "第二章讲解。" },
+          ],
+        },
+      ],
+      branchAnchors: ["u-ch1", "a-ch1", "u-ch2", "a-ch2"],
+      stepRevisions: {
+        "a-ch1": {
+          targetAnchorId: "a-ch1",
+          activeRevisionId: "rev-1",
+          revisions: [
+            {
+              revisionId: "rev-1",
+              timestamp: "2026-04-01T00:05:00Z",
+              pace: "deep",
+              content: "第一章深入修订版。",
+              blocks: [{ type: "text", text: "第一章深入修订版。" }],
+            },
+          ],
+        },
+      },
+    });
+
+    render(<GuideWorkspace bookId="book-1" />);
+
+    // Flip back to Chapter 1: shows the active revision ("第一章深入修订版。") and semantic pill.
+    fireEvent.click(screen.getByRole("button", { name: "上一章" }));
+    expect(screen.getByText("第一章深入修订版。")).toBeTruthy();
+    const revSwitcher = screen.getByTestId("guide-step-revision-switcher");
+    expect(revSwitcher.textContent).toContain("深入");
+
+    // Switch back to original version locally.
+    fireEvent.click(revSwitcher);
+    const options = screen.getAllByTestId("guide-step-revision-option");
+    expect(options[0].textContent).toContain("原版");
+    fireEvent.click(options[0]);
+    await waitFor(() => expect(selectStepRevision).toHaveBeenCalledWith("a-ch1", "__original__"));
+
+    // Trigger an intentful in-place revision on Chapter 1 ("compact"): stays on Chapter 1 and never calls spine regenerateTurn.
+    fireEvent.click(screen.getByTestId("guide-step-reexplain-trigger"));
+    expect(screen.queryByTestId("guide-step-undo-latest")).toBeNull();
+    fireEvent.click(screen.getByTestId("guide-reexplain-pace-compact"));
+    await waitFor(() => expect(reviseStep).toHaveBeenCalledWith("a-ch1", { pace: "compact" }));
+    expect(regenerateTurn).not.toHaveBeenCalled();
+    expect(screen.getByText("第一章深入修订版。")).toBeTruthy();
+    expect(screen.queryByText("第二章讲解。")).toBeNull();
+  });
+
+  it("supports dismissing an incomplete tail attempt and undoing strictly the latest committed step", async () => {
+    dismissIncompleteTail.mockResolvedValue(undefined);
+    undoLatestStep.mockResolvedValue(undefined);
+    mockState = makeGuidedState({
+      messages: [
+        { role: "user", content: "继续带读", guideRequest: {} },
+        {
+          role: "assistant",
+          content: "第一章讲解。",
+          blocks: [
+            { type: "toolCall", toolCall: { toolCallId: "t1", tool: "guide_step", params: {}, done: true, guide: step0 } },
+            { type: "text", text: "第一章讲解。" },
+          ],
+        },
+        { role: "user", content: "继续带读", guideRequest: {} },
+        {
+          role: "assistant",
+          content: "",
+          stopReason: "error",
+          errorMessage: "网络超时",
+        },
+      ],
+      branchAnchors: ["u-ch1", "a-ch1", "u-err", "a-err"],
+    });
+
+    const { rerender } = render(<GuideWorkspace bookId="book-1" />);
+    fireEvent.click(screen.getByTestId("guide-incomplete-dismiss"));
+    await waitFor(() => expect(dismissIncompleteTail).toHaveBeenCalledTimes(1));
+
+    // Once tail incomplete attempt is gone, Chapter 1 step becomes latest and offers undo.
+    mockState = makeGuidedState({
+      messages: mockState.messages.slice(0, 2),
+      branchAnchors: ["u-ch1", "a-ch1"],
+    });
+    rerender(<GuideWorkspace bookId="book-1" />);
+    fireEvent.click(screen.getByTestId("guide-step-reexplain-trigger"));
+    fireEvent.click(screen.getByTestId("guide-step-undo-latest"));
+    await waitFor(() => expect(undoLatestStep).toHaveBeenCalledTimes(1));
+  });
+
+  it("folds repeated chapter passes in GuideChapterBar and gates chapter rollback behind confirmation", async () => {
+    guideStepAnchor.mockResolvedValue({ chapterIndex: 0, href: "ch1.xhtml", snippet: "a", target: { hrefs: ["ch1.xhtml"], key: "a", occurrence: 0 } });
+    guideStepAtHref.mockResolvedValue(step0);
+    rollbackToChapterRun.mockResolvedValue(undefined);
+
+    mockState = makeGuidedState({
+      messages: [
+        { role: "user", content: "开始带读", guideRequest: { step: step0 } },
+        {
+          role: "assistant",
+          content: "第一章第一遍。",
+          blocks: [
+            { type: "toolCall", toolCall: { toolCallId: "t1", tool: "guide_step", params: {}, done: true, guide: step0 } },
+            { type: "text", text: "第一章第一遍。" },
+          ],
+        },
+        { role: "user", content: "继续带读", guideRequest: {} },
+        {
+          role: "assistant",
+          content: "第二章讲解。",
+          blocks: [
+            { type: "toolCall", toolCall: { toolCallId: "t2", tool: "guide_step", params: {}, done: true, guide: step1 } },
+            { type: "text", text: "第二章讲解。" },
+          ],
+        },
+        { role: "user", content: "重读第一章", guideRequest: { step: step0 } },
+        {
+          role: "assistant",
+          content: "第一章第二遍。",
+          blocks: [
+            { type: "toolCall", toolCall: { toolCallId: "t3", tool: "guide_step", params: {}, done: true, guide: step0 } },
+            { type: "text", text: "第一章第二遍。" },
+          ],
+        },
+      ],
+      branchAnchors: ["u-ch1-1", "a-ch1-1", "u-ch2", "a-ch2", "u-ch1-2", "a-ch1-2"],
+    });
+
+    render(<GuideWorkspace bookId="book-1" />);
+
+    // Viewing pass 2 of Chapter 1 shows folded pass badge.
+    expect(screen.getByTestId("guide-chapter-pass-badge").textContent).toContain("第 2 遍");
+
+    // Opening chapter switcher folds Chapter 1's two passes into one group.
+    fireEvent.click(screen.getByTestId("guide-chapter-switcher"));
+    expect(screen.getAllByTestId("guide-chapter-folded-group")).toHaveLength(1);
+    const passButtons = screen.getAllByTestId("guide-chapter-option");
+    // Switch to pass 1 of Chapter 1.
+    fireEvent.click(passButtons[0]);
+    expect(screen.getByText("第一章第一遍。")).toBeTruthy();
+
+    // Destructive chapter rollback requires explicit confirmation and displays affected count (2 downstream runs).
+    fireEvent.click(screen.getByTestId("guide-chapter-actions-trigger"));
+    fireEvent.click(screen.getByTestId("guide-chapter-action-rollback"));
+    expect(rollbackToChapterRun).not.toHaveBeenCalled();
+    expect(screen.getByText(/2 个章节记录/)).toBeTruthy();
+    fireEvent.click(screen.getByTestId("guide-chapter-rollback-confirm"));
+    await waitFor(() => expect(rollbackToChapterRun).toHaveBeenCalledWith("u-ch1-1"));
+
+    // Non-destructive chapter re-read triggers guideChapter without confirmation.
+    fireEvent.click(screen.getByTestId("guide-chapter-actions-trigger"));
+    fireEvent.click(screen.getByTestId("guide-chapter-action-reread"));
+    await waitFor(() => expect(guideStepAtHref).toHaveBeenCalledWith("ch1.xhtml"));
   });
 });

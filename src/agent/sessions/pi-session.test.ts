@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activeBranch, branchLeafId, branchNavigation, contextBranch, convertPiContextToLlm, decodeGuide, decodePiSession, guidedTurns, guideRecapChapters, guideSpineRuns, isSideThreadEntry, piContextMessages, piSideThreadContextMessages, resolveGuideRunForAnchor, ROOT_SIDE_THREAD_KEY, sessionConfig, sessionSummary, sideThreadBranchLeafId, sideThreadContextEntries, sideThreadSnapshots, visibleMessageEntries, visibleMessages } from "./pi-session";
+import { activeBranch, applyActiveStepRevisions, branchLeafId, branchNavigation, contextBranch, convertPiContextToLlm, decodeGuide, decodePiSession, decodeStepRevision, guidedTurns, guideRecapChapters, guideSpineRuns, isOffSpineEntry, isSideThreadEntry, isStepRevisionEntry, ORIGINAL_STEP_REVISION_ID, piContextMessages, piSideThreadContextMessages, resolveGuideRunForAnchor, ROOT_SIDE_THREAD_KEY, sessionConfig, sessionSummary, sideThreadBranchLeafId, sideThreadContextEntries, sideThreadSnapshots, stepRevisionContextEntries, stepRevisionSnapshots, visibleMessageEntries, visibleMessages } from "./pi-session";
 import type { PiSessionEntry } from "./pi-session";
 
 const timestamp = "2026-08-14T00:00:00Z";
@@ -997,5 +997,94 @@ describe("chapter side-threads in Pi sessions", () => {
     const switched = sideThreadSnapshots(session, new Map([["u1", origLeaf!]]));
     expect(switched.u1.messages[0]).toMatchObject({ role: "user", content: "First phrasing" });
     expect(switched.u1.navigation.q1?.activeIndex).toBe(0);
+  });
+
+  it("isolates off-spine step revisions from spine branches and projects spoiler-free context", () => {
+    const revMsg = (
+      id: string,
+      parentId: string,
+      targetAnchorId: string,
+      revisionId: string,
+      text: string,
+      opts?: { pace?: "standard" | "compact" | "deep"; styleOverride?: string; modelId?: string; stopReason?: "error" | "aborted" },
+      tsValue = "2026-04-01T00:05:00Z",
+    ): PiSessionEntry => ({
+      type: "message",
+      id,
+      parentId,
+      timestamp: tsValue,
+      stepRevision: {
+        targetAnchorId,
+        revisionId,
+        ...(opts?.pace ? { pace: opts.pace } : {}),
+        ...(opts?.styleOverride ? { styleOverride: opts.styleOverride } : {}),
+        ...(opts?.modelId ? { modelId: opts.modelId } : {}),
+      },
+      message: {
+        role: "assistant",
+        content: text ? [{ type: "text", text }] : [],
+        ...(opts?.stopReason ? { stopReason: opts.stopReason } : {}),
+        timestamp: Date.parse(tsValue),
+      },
+    });
+
+    const entries: PiSessionEntry[] = [
+      { type: "custom_message", id: "snap1", parentId: null, timestamp: "2026-04-01T00:00:00Z", customType: "bookSnapshot", content: "Book TOC", display: false },
+      ...toolTurn("u2", "snap1", "a2_1", "tr2", "a2_2", "c2", 1, 0, 3, "Chapter 2", "Ch2 original explanation"),
+      { type: "custom_message", id: "recap2", parentId: "a2_2", timestamp: "2026-04-01T00:01:00Z", customType: "guideRecap", content: "Ch2 recap", display: false, details: { chapterIndex: 1, chapterTitle: "Chapter 2", text: "Recap 2" } },
+      ...toolTurn("u3", "recap2", "a3_1", "tr3", "a3_2", "c3", 2, 0, 3, "Chapter 3", "Ch3 explanation"),
+      // Off-spine revisions anchored on Ch2's step assistant anchor (`a2_1`):
+      revMsg("rev_fail", "a2_1", "a2_1", "rev-fail", "", { stopReason: "error" }, "2026-04-01T00:02:00Z"),
+      revMsg("rev_deep", "a2_1", "a2_1", "rev-deep", "Ch2 deeper explanation", { pace: "deep", modelId: "claude-sonnet" }, "2026-04-01T00:03:00Z"),
+      revMsg("rev_custom", "a2_1", "a2_1", "rev-custom", "Ch2 example-rich explanation", { styleOverride: "多举例子" }, "2026-04-01T00:04:00Z"),
+      // Chapter 2 side-thread question:
+      sideMsg("q2", "u2", "u2", "user", "Why did the author say this?"),
+    ];
+
+    const session = makeSession(entries, "a3_2");
+    session.header.kind = "guided";
+
+    // Decoding & off-spine classification
+    expect(isStepRevisionEntry(entries[entries.length - 2])).toBe(true);
+    expect(isOffSpineEntry(entries[entries.length - 2])).toBe(true);
+    expect(decodeStepRevision(entries[entries.length - 2])).toMatchObject({
+      targetAnchorId: "a2_1",
+      revisionId: "rev-custom",
+      styleOverride: "多举例子",
+    });
+
+    // Excluded from spine branch navigation and side-thread snapshots
+    expect(branchNavigation(session).size).toBe(0);
+    expect(branchLeafId(session, "a2_1")).toBe("a3_2");
+    expect(sideThreadSnapshots(session).u2.messages).toHaveLength(1);
+
+    // Revision snapshots suppress inactive empty failed attempts and default to newest good revision
+    const snaps = stepRevisionSnapshots(session);
+    expect(snaps.a2_1.revisions.map((r) => r.revisionId)).toEqual(["rev-deep", "rev-custom"]);
+    expect(snaps.a2_1.activeRevisionId).toBe("rev-custom");
+
+    // Preferred revision can select an earlier revision or the original spine explanation
+    const preferOriginal = new Map([["a2_1", ORIGINAL_STEP_REVISION_ID]]);
+    expect(stepRevisionSnapshots(session, preferOriginal).a2_1.activeRevisionId).toBe(ORIGINAL_STEP_REVISION_ID);
+
+    // Spoiler-free revision context for Ch2(a2_1) includes bookSnapshot only (before u2), no old Ch2/Ch3
+    expect(stepRevisionContextEntries(session, "a2_1").map((e) => e.id)).toEqual(["snap1"]);
+
+    // Spoiler-free revision context for Ch3(a3_1) includes Ch2 with its ACTIVE revision substituted
+    const ch3RevCtx = stepRevisionContextEntries(session, "a3_1");
+    expect(ch3RevCtx.map((e) => e.id)).toEqual(["snap1", "u2", "a2_1", "tr2", "rev_custom", "recap2"]);
+
+    // Chapter 2 side-thread context also reflects the active revision for Ch2
+    const ch2SideCtx = sideThreadContextEntries(session, "u2", "a2_2");
+    expect(ch2SideCtx.map((e) => e.id)).toEqual(["snap1", "u2", "a2_1", "tr2", "rev_custom", "q2"]);
+
+    // guidedTurns picks up the active revision text (for Chapter recap refresh)
+    expect(guidedTurns(session)[0].text).toBe("Ch2 example-rich explanation");
+    expect(guidedTurns(session, preferOriginal)[0].text).toBe("Ch2 original explanation");
+
+    // applyActiveStepRevisions leaves original intact when ORIGINAL_STEP_REVISION_ID is selected
+    const spineWithOrig = applyActiveStepRevisions(activeBranch(session), session, preferOriginal);
+    expect(spineWithOrig.map((e) => e.id)).toContain("a2_2");
+    expect(spineWithOrig.map((e) => e.id)).not.toContain("rev_custom");
   });
 });

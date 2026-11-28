@@ -14,6 +14,7 @@ import type {
   GuideStep,
   GuideStepOptions,
   RecordedGuideStep,
+  StepRevisionOptions,
 } from "@/types/agent";
 
 export type GuideRuntimePort = Pick<
@@ -27,6 +28,10 @@ export type GuideRuntimePort = Pick<
   | "switchSession"
   | "switchBranchAtAnchor"
   | "switchSideThreadBranchAtAnchor"
+  | "selectStepRevision"
+  | "undoLatestGuidedStep"
+  | "dismissIncompleteTailStep"
+  | "rollbackToChapterRun"
   | "deleteSession"
   | "renameSession"
   | "updateSessionConfig"
@@ -47,6 +52,7 @@ export type GuideRuntimePort = Pick<
   | "locateQuote"
   | "prompt"
   | "promptSideThread"
+  | "reviseGuidedStep"
   | "regenerate"
   | "regenerateSideThread"
   | "abort"
@@ -264,6 +270,46 @@ export class GuideController {
     requestId?: string,
   ): Promise<void> {
     return this.runtime.regenerateSideThread(anchorId, userMessageIndex, promptId, requestId);
+  }
+
+  /** Re-explain a committed Guided step in place (off-spine) with a pinned span and intent options. */
+  reviseStep(
+    targetAnchorId: string,
+    options?: StepRevisionOptions,
+    promptId?: string,
+    requestId?: string,
+    revisionId?: string,
+  ): Promise<void> {
+    return this.runtime.reviseGuidedStep(targetAnchorId, options, promptId, requestId, revisionId);
+  }
+
+  /** Switch the displayed revision (or `"__original__"`) for a single Guided step without moving the spine. */
+  selectStepRevision(
+    sessionId: string,
+    targetAnchorId: string,
+    revisionId: string,
+    requestId?: string,
+  ): Promise<void> {
+    return this.runtime.selectStepRevision(sessionId, targetAnchorId, revisionId, requestId);
+  }
+
+  /** Undo strictly the latest committed Guided step on the spine so the reader can re-pick its range. */
+  undoLatestStep(sessionId: string, requestId?: string): Promise<void> {
+    return this.runtime.undoLatestGuidedStep(sessionId, requestId);
+  }
+
+  /** Dismiss an uncommitted (failed/aborted) tail attempt off the active spine. */
+  dismissIncompleteTail(sessionId: string, requestId?: string): Promise<void> {
+    return this.runtime.dismissIncompleteTailStep(sessionId, requestId);
+  }
+
+  /** Explicitly roll back the guided spine to right before the target chapter run. */
+  rollbackToChapterRun(
+    sessionId: string,
+    runAnchorEntryId: string,
+    requestId?: string,
+  ): Promise<void> {
+    return this.runtime.rollbackToChapterRun(sessionId, runAnchorEntryId, requestId);
   }
 
   abort(requestId?: string): void {

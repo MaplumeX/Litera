@@ -58,6 +58,35 @@ export function GuideChapterBar({
   const nextRun = activeRunIndex >= 0 && activeRunIndex + 1 < totalRuns ? runs[activeRunIndex + 1] : null;
   const latestRun = totalRuns > 0 ? runs[totalRuns - 1] : null;
 
+  /** Group repeated runs of the same chapter so re-reads fold under one chapter entry. */
+  const groupedChapters = useMemo(() => {
+    const groups: Array<{
+      chapterIndex: number;
+      chapterTitle: string;
+      passes: Array<{ run: GuideChapterRun; runIndex: number; passNumber: number }>;
+    }> = [];
+    const byChapter = new Map<number, (typeof groups)[number]>();
+    runs.forEach((run, runIndex) => {
+      let group = byChapter.get(run.chapterIndex);
+      if (!group) {
+        group = { chapterIndex: run.chapterIndex, chapterTitle: run.chapterTitle, passes: [] };
+        byChapter.set(run.chapterIndex, group);
+        groups.push(group);
+      }
+      group.passes.push({ run, runIndex, passNumber: group.passes.length + 1 });
+    });
+    return groups;
+  }, [runs]);
+
+  const activeChapterGroup = useMemo(
+    () => groupedChapters.find((group) => group.chapterIndex === activeRun.chapterIndex) ?? null,
+    [activeRun.chapterIndex, groupedChapters],
+  );
+  const activePassNumber =
+    activeChapterGroup && activeChapterGroup.passes.length > 1
+      ? (activeChapterGroup.passes.find((p) => p.run.id === activeRun.id)?.passNumber ?? 1)
+      : null;
+
   const trimmedQuery = query.trim();
   const lowerQuery = trimmedQuery.toLowerCase();
 
@@ -112,11 +141,18 @@ export function GuideChapterBar({
             <span className="min-w-0 truncate font-medium text-foreground">
               {activeRun.chapterTitle}
             </span>
-            {activeRun.isReread && (
+            {activePassNumber !== null ? (
+              <span
+                data-testid="guide-chapter-pass-badge"
+                className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-2xs font-medium text-muted-foreground"
+              >
+                {t("guide.chapterPass", { n: activePassNumber })}
+              </span>
+            ) : activeRun.isReread ? (
               <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-2xs font-medium text-muted-foreground">
                 {t("guide.chapterReread")}
               </span>
-            )}
+            ) : null}
             {totalRuns > 1 && (
               <span className="shrink-0 text-2xs tabular-nums text-muted-foreground">
                 {activeRunIndex + 1}/{totalRuns}
@@ -159,43 +195,101 @@ export function GuideChapterBar({
           <div className="max-h-72 space-y-2 overflow-y-auto pr-0.5">
             {!trimmedQuery ? (
               <div className="space-y-0.5">
-                {runs.map((run, index) => {
-                  const isActive = run.id === activeRun.id;
-                  const isLatest = index === totalRuns - 1;
-                  const questionCount = run.sideThreads.length;
+                {groupedChapters.map((group) => {
+                  if (group.passes.length === 1) {
+                    const { run, runIndex } = group.passes[0];
+                    const isActive = run.id === activeRun.id;
+                    const isLatest = runIndex === totalRuns - 1;
+                    const questionCount = run.sideThreads.length;
+                    return (
+                      <button
+                        key={run.id}
+                        type="button"
+                        data-testid="guide-chapter-option"
+                        onClick={() => {
+                          onSelectRun(run.id);
+                          handleOpenChange(false);
+                        }}
+                        className={cn(
+                          "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors",
+                          isActive
+                            ? "bg-primary/10 font-medium text-primary"
+                            : "text-foreground/90 hover:bg-foreground/5",
+                        )}
+                      >
+                        <span className="min-w-0 flex-1 truncate">{run.chapterTitle}</span>
+                        {isLatest && totalRuns > 1 && (
+                          <span className="shrink-0 rounded-full bg-primary/10 px-1.5 py-0.5 text-2xs font-medium text-primary">
+                            {t("guide.chapterLatestBadge")}
+                          </span>
+                        )}
+                        <span className="shrink-0 text-2xs tabular-nums text-muted-foreground">
+                          {t("guide.chapterStepsCount", { count: run.steps.length })}
+                          {questionCount > 0 ? ` · ${questionCount}` : ""}
+                        </span>
+                        {isActive && <Check className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden />}
+                      </button>
+                    );
+                  }
+
+                  const groupHasActive = group.passes.some((p) => p.run.id === activeRun.id);
+                  const groupHasLatest = group.passes.some((p) => p.runIndex === totalRuns - 1);
+                  const latestPass = group.passes[group.passes.length - 1];
                   return (
-                    <button
-                      key={run.id}
-                      type="button"
-                      data-testid="guide-chapter-option"
-                      onClick={() => {
-                        onSelectRun(run.id);
-                        handleOpenChange(false);
-                      }}
+                    <div
+                      key={`ch-${group.chapterIndex}`}
+                      data-testid="guide-chapter-folded-group"
                       className={cn(
-                        "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors",
-                        isActive
-                          ? "bg-primary/10 font-medium text-primary"
-                          : "text-foreground/90 hover:bg-foreground/5",
+                        "rounded-lg px-2 py-1.5 transition-colors",
+                        groupHasActive ? "bg-primary/5" : "hover:bg-foreground/5",
                       )}
                     >
-                      <span className="min-w-0 flex-1 truncate">{run.chapterTitle}</span>
-                      {run.isReread && (
-                        <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-2xs text-muted-foreground">
-                          {t("guide.chapterReread")}
-                        </span>
-                      )}
-                      {isLatest && totalRuns > 1 && (
-                        <span className="shrink-0 rounded-full bg-primary/10 px-1.5 py-0.5 text-2xs font-medium text-primary">
-                          {t("guide.chapterLatestBadge")}
-                        </span>
-                      )}
-                      <span className="shrink-0 text-2xs tabular-nums text-muted-foreground">
-                        {t("guide.chapterStepsCount", { count: run.steps.length })}
-                        {questionCount > 0 ? ` · ${questionCount}` : ""}
-                      </span>
-                      {isActive && <Check className="h-3.5 w-3.5 shrink-0 text-primary" aria-hidden />}
-                    </button>
+                      <div className="flex items-center gap-2 text-xs">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onSelectRun(latestPass.run.id);
+                            handleOpenChange(false);
+                          }}
+                          className={cn(
+                            "min-w-0 flex-1 truncate text-left",
+                            groupHasActive ? "font-medium text-primary" : "text-foreground/90",
+                          )}
+                        >
+                          {group.chapterTitle}
+                        </button>
+                        {groupHasLatest && totalRuns > 1 && (
+                          <span className="shrink-0 rounded-full bg-primary/10 px-1.5 py-0.5 text-2xs font-medium text-primary">
+                            {t("guide.chapterLatestBadge")}
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-1 flex flex-wrap items-center gap-1">
+                        {group.passes.map(({ run, passNumber }) => {
+                          const isActive = run.id === activeRun.id;
+                          return (
+                            <button
+                              key={run.id}
+                              type="button"
+                              data-testid="guide-chapter-option"
+                              onClick={() => {
+                                onSelectRun(run.id);
+                                handleOpenChange(false);
+                              }}
+                              className={cn(
+                                "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-2xs transition-colors",
+                                isActive
+                                  ? "border-primary/40 bg-primary/10 font-medium text-primary"
+                                  : "border-border/70 bg-background text-muted-foreground hover:text-foreground",
+                              )}
+                            >
+                              <span>{t("guide.chapterPass", { n: passNumber })}</span>
+                              <span className="tabular-nums opacity-75">({run.steps.length})</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
                   );
                 })}
               </div>

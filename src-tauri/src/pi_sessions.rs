@@ -337,19 +337,19 @@ impl PiSessionStore {
             .filter_map(entry_id)
             .map(str::to_string)
             .collect();
-        let side_thread_batch = entries.iter().all(is_side_thread_entry);
+        let off_spine_batch = entries.iter().all(is_off_spine_entry);
         // Optimistic leaf check, relaxed for branch switching: `None` requires
-        // an empty spine (fresh-session semantics) or a root side-thread start;
+        // an empty spine (fresh-session semantics) or a root off-spine start;
         // `Some(id)` only requires the id to exist in the file, so a stale
         // writer cannot fork history it never saw, while continuing on a
-        // non-final branch or side-thread is allowed.
+        // non-final branch, side-thread, or step revision is allowed.
         match expected_leaf_id {
             Some(expected) if !ids.contains(expected) => {
                 return Err(AppError::invalid_input(
                     "Session leaf changed; reload before appending",
                 ));
             }
-            None if side_thread_batch => {
+            None if off_spine_batch => {
                 let starts_at_root = entries
                     .first()
                     .and_then(|entry| entry.get("parentId"))
@@ -360,7 +360,7 @@ impl PiSessionStore {
                     ));
                 }
             }
-            None if existing.iter().any(|entry| !is_side_thread_entry(entry)) => {
+            None if existing.iter().any(|entry| !is_off_spine_entry(entry)) => {
                 return Err(AppError::invalid_input(
                     "Session leaf changed; reload before appending",
                 ));
@@ -403,9 +403,9 @@ impl PiSessionStore {
             .map_err(|error| AppError::storage_io(format!("Failed to append session: {error}")))?;
         let new_leaf = entries.last().and_then(entry_id).map(str::to_string);
         // Appending on the spine advances the active-branch sidecar to the
-        // newest leaf; side-thread entries stay attached off-spine so the
-        // guided reading spine's leaf never moves.
-        if !side_thread_batch {
+        // newest leaf; off-spine entries (side-threads and step revisions)
+        // never move the guided reading spine's leaf.
+        if !off_spine_batch {
             if let Some(leaf) = new_leaf.as_deref() {
                 if write_leaf_sidecar(&path, leaf).is_err() {
                     eprintln!("[sessions] Failed to persist active leaf sidecar for {session_id}");
@@ -597,7 +597,7 @@ impl PiSessionStore {
                             merged
                                 .iter()
                                 .find(|entry| entry_id(entry) == Some(id.as_str()))
-                                .is_some_and(|entry| !is_side_thread_entry(entry))
+                                .is_some_and(|entry| !is_off_spine_entry(entry))
                         })
                         .cloned(),
                 };
@@ -808,15 +808,16 @@ fn entry_id(entry: &Value) -> Option<&str> {
     entry.get("id").and_then(Value::as_str)
 }
 
-fn is_side_thread_entry(entry: &Value) -> bool {
+fn is_off_spine_entry(entry: &Value) -> bool {
     entry.get("sideThread").is_some_and(Value::is_object)
+        || entry.get("stepRevision").is_some_and(Value::is_object)
 }
 
 fn fallback_spine_leaf_id(entries: &[Value]) -> Option<String> {
     entries
         .iter()
         .rev()
-        .find(|entry| !is_side_thread_entry(entry))
+        .find(|entry| !is_off_spine_entry(entry))
         .and_then(entry_id)
         .map(str::to_string)
 }
@@ -827,7 +828,7 @@ fn resolved_spine_leaf_id(session_path: &Path, entries: &[Value]) -> Option<Stri
             entries
                 .iter()
                 .find(|entry| entry_id(entry) == Some(id.as_str()))
-                .is_some_and(|entry| !is_side_thread_entry(entry))
+                .is_some_and(|entry| !is_off_spine_entry(entry))
         })
         .or_else(|| fallback_spine_leaf_id(entries))
 }
@@ -974,7 +975,7 @@ fn newest_descendant(entries: &[Value], leaf: &str, candidates: &[String]) -> Op
         .find(|candidate| {
             if by_id
                 .get(candidate.as_str())
-                .is_some_and(|entry| is_side_thread_entry(entry))
+                .is_some_and(|entry| is_off_spine_entry(entry))
             {
                 return false;
             }
@@ -2015,5 +2016,48 @@ mod sync_merge_tests {
         let loaded = store.load("book", &id).unwrap();
         assert_eq!(loaded.leaf_id.as_deref(), Some("ch4step1"));
         assert_eq!(loaded.entries.len(), 3);
+    }
+
+    #[test]
+    fn step_revision_appends_and_merges_preserve_spine_leaf() {
+        let (_temp, store) = store();
+        let created = store.create_with_kind("book", Some("guided")).unwrap();
+        let id = created.header["id"].as_str().unwrap().to_string();
+
+        let mut ch2 = message("ch2step1", None, "Ch2 explanation v1");
+        ch2["guide"] = json!({"from": {"chapterIndex": 1, "block": 0}, "to": {"chapterIndex": 1, "block": 4}});
+        let mut ch4 = message("ch4step1", Some("ch2step1"), "Ch4 explanation");
+        ch4["guide"] = json!({"from": {"chapterIndex": 3, "block": 0}, "to": {"chapterIndex": 3, "block": 4}});
+        store.append("book", &id, None, vec![ch2.clone(), ch4.clone()]).unwrap();
+
+        let mut rev = message("rev00001", Some("ch2step1"), "Ch2 deeper revision");
+        rev["stepRevision"] = json!({"targetAnchorId": "ch2step1", "revisionId": "rev-1", "pace": "deep"});
+        let tip = store.append("book", &id, Some("ch2step1"), vec![rev]).unwrap();
+        assert_eq!(tip.as_deref(), Some("rev00001"));
+
+        let loaded = store.load("book", &id).unwrap();
+        assert_eq!(loaded.leaf_id.as_deref(), Some("ch4step1"));
+        assert_eq!(loaded.entries.len(), 3);
+
+        // Even without a .leaf sidecar, load resolves the newest spine entry.
+        let path = store.find_file("book", &id).unwrap();
+        let _ = fs::remove_file(leaf_sidecar_path(&path));
+        assert_eq!(store.load("book", &id).unwrap().leaf_id.as_deref(), Some("ch4step1"));
+
+        // Merging a remote step revision unions entries without moving spine leaf.
+        let mut remote_rev = message("rev00002", Some("ch2step1"), "Ch2 phone revision");
+        remote_rev["stepRevision"] = json!({"targetAnchorId": "ch2step1", "revisionId": "rev-2", "pace": "compact"});
+        let remote = format!(
+            "{}\n{}\n{}\n{}\n",
+            serde_json::to_string(&created.header).unwrap(),
+            serde_json::to_string(&ch2).unwrap(),
+            serde_json::to_string(&ch4).unwrap(),
+            serde_json::to_string(&remote_rev).unwrap(),
+        );
+        store.merge_remote_session("book", &remote).unwrap();
+
+        let merged = store.load("book", &id).unwrap();
+        assert_eq!(merged.leaf_id.as_deref(), Some("ch4step1"));
+        assert_eq!(merged.entries.len(), 4);
     }
 }

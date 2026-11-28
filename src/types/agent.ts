@@ -145,6 +145,54 @@ export interface SideThreadSnapshot {
   navigation: Record<string, AnchorBranchInfo>;
 }
 
+/** Tag attaching an off-spine step revision entry to its target spine step anchor. */
+export interface StepRevisionRef {
+  targetAnchorId: string;
+  revisionId: string;
+  pace?: GuideStepPace;
+  styleOverride?: string;
+  modelId?: string;
+  provider?: string;
+}
+
+/** One persisted (or live-streaming) off-spine revision of a Guided step. */
+export interface StepRevisionEntry {
+  revisionId: string;
+  timestamp: string;
+  pace?: GuideStepPace;
+  styleOverride?: string;
+  modelId?: string;
+  provider?: string;
+  content: string;
+  blocks?: AssistantBlock[];
+  stopReason?: "aborted" | "error";
+  errorMessage?: string;
+}
+
+/** All off-spine revisions anchored to one spine Guided step entry. */
+export interface StepRevisionSnapshot {
+  targetAnchorId: string;
+  revisions: StepRevisionEntry[];
+  /** Selected revision id, or `"__original__"` when explicitly viewing the original spine explanation. */
+  activeRevisionId: string;
+}
+
+/** Intent options passed when re-explaining a Guided step in place. */
+export interface StepRevisionOptions {
+  pace?: GuideStepPace;
+  styleOverride?: string;
+  modelOverride?: string;
+}
+
+/** Identifies an in-flight off-spine step revision prompt. */
+export interface ActiveStepRevisionTarget {
+  targetAnchorId: string;
+  revisionId: string;
+  pace?: GuideStepPace;
+  styleOverride?: string;
+  modelId?: string;
+}
+
 export interface AgentToolCall {
   toolCallId: string;
   tool: string;
@@ -243,8 +291,15 @@ type EventEnvelope = {
 type RequestCorrelation = { requestId?: string };
 type BookCorrelation = { bookId: string };
 type SessionCorrelation = BookCorrelation & { sessionId: string };
-type PromptCorrelation = SessionCorrelation & { promptId: string; sideThreadKey?: string };
-type SideThreadsPayload = { sideThreads?: Record<string, SideThreadSnapshot> };
+type PromptCorrelation = SessionCorrelation & {
+  promptId: string;
+  sideThreadKey?: string;
+  stepRevisionTarget?: ActiveStepRevisionTarget;
+};
+type SideThreadsPayload = {
+  sideThreads?: Record<string, SideThreadSnapshot>;
+  stepRevisions?: Record<string, StepRevisionSnapshot>;
+};
 
 export type AgentEvent = EventEnvelope & (
   | ({ type: "book_loading" } & BookCorrelation & RequestCorrelation)
@@ -275,11 +330,12 @@ export type AgentEvent = EventEnvelope & (
   | ({ type: "prompt_aborted"; messages?: AgentMessage[]; anchors?: string[]; navigation?: Record<string, AnchorBranchInfo> } & SideThreadsPayload & PromptCorrelation & RequestCorrelation)
   | ({ type: "session_created"; kind?: SessionKind } & BookCorrelation & { sessionId: string } & RequestCorrelation)
   | ({ type: "session_switched"; messages: AgentMessage[]; anchors?: string[]; navigation?: Record<string, AnchorBranchInfo> } & SideThreadsPayload & BookCorrelation & { sessionId: string } & RequestCorrelation)
-  | ({ type: "branch_switched"; messages: AgentMessage[]; anchors: string[]; navigation: Record<string, AnchorBranchInfo>; sideThreadKey?: string } & SideThreadsPayload & BookCorrelation & { sessionId: string } & RequestCorrelation)
+  | ({ type: "branch_switched"; messages: AgentMessage[]; anchors: string[]; navigation: Record<string, AnchorBranchInfo>; sideThreadKey?: string } & SideThreadsPayload & SessionCorrelation & RequestCorrelation)
+  | ({ type: "step_revision_selected"; targetAnchorId: string; revisionId: string } & SideThreadsPayload & SessionCorrelation & RequestCorrelation)
   | ({ type: "session_rewound"; messages: AgentMessage[] } & PromptCorrelation & RequestCorrelation)
   | ({ type: "session_deleted" } & BookCorrelation & { sessionId: string } & RequestCorrelation)
   | ({ type: "session_renamed"; title: string } & BookCorrelation & { sessionId: string } & RequestCorrelation)
   | ({ type: "session_config_updated"; systemPrompt?: string } & BookCorrelation & { sessionId: string } & RequestCorrelation)
   | ({ type: "sessions_list"; sessions: AgentSessionSummary[] } & BookCorrelation & RequestCorrelation)
-  | ({ type: "error"; sideThreadKey?: string } & AgentError)
+  | ({ type: "error"; sideThreadKey?: string; stepRevisionTarget?: ActiveStepRevisionTarget } & AgentError)
 );

@@ -82,4 +82,42 @@ describe("guide-export", () => {
     expect(defaultGuideExportFileName("A/B:C*D")).toBe("A B C D-guide.md");
     expect(defaultGuideExportFileName("   ")).toBe("litera-guide-guide.md");
   });
+
+  it("exports the currently selected off-spine step revision", () => {
+    const messages: AgentMessage[] = [
+      { role: "user", content: "继续", guideRequest: {} },
+      {
+        role: "assistant",
+        content: "原始简短讲解。",
+        blocks: [
+          { type: "toolCall", toolCall: { toolCallId: "t1", tool: "guide_step", params: {}, done: true, guide: step0 } },
+          { type: "text", text: "原始简短讲解。" },
+        ],
+      },
+    ];
+    const doc = projectGuideDocument({
+      bookId: "b1",
+      sessionId: "g1",
+      messages,
+      branchAnchors: ["u1", "a1"],
+      stepRevisions: {
+        a1: {
+          targetAnchorId: "a1",
+          activeRevisionId: "rev-deep",
+          revisions: [
+            {
+              revisionId: "rev-deep",
+              timestamp: "2026-04-01T00:05:00Z",
+              pace: "deep",
+              content: "深入修订版讲解，引用[核心原文](cite:0)。",
+              blocks: [{ type: "text", text: "深入修订版讲解，引用[核心原文](cite:0)。" }],
+            },
+          ],
+        },
+      },
+    });
+    const md = formatGuideExportMarkdown(doc, { bookTitle: "大转型", includeSideQuestions: true });
+    expect(md).toContain("深入修订版讲解，引用“核心原文”。");
+    expect(md).not.toContain("原始简短讲解。");
+  });
 });

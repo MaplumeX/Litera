@@ -44,6 +44,23 @@ When the guide finishes a chapter, a chapter recap of it is added to the convers
 
 export const GUIDED_PROMPT = guidedPrompt();
 
+/**
+ * System prompt supplement for an off-spine in-place step revision:
+ * the source span is pinned and provided inline in the user turn, so
+ * `guide_step` is not available and step boundaries stay fixed.
+ */
+export function guidedRevisionPrompt(style: string = DEFAULT_GUIDED_STYLE): string {
+  return `<guided_reading_revision>
+This is an in-place revision of a single Guided step in a Guided session. The exact source passage for this step is already provided in the user message below; do not alter the step's boundaries or preview later passages.
+
+<style>
+${style.trim() || DEFAULT_GUIDED_STYLE}
+</style>
+
+Start the explanation directly, with no preamble or apology, and do not ask whether to continue. Write in the reader's language.
+</guided_reading_revision>`;
+}
+
 /** A block of the open Book. */
 export interface GuidePoint {
   entry: BookTocEntry;
@@ -554,7 +571,7 @@ export function guideStepRequestFor(toc: readonly BookTocEntry[], cursor: GuideP
   return request;
 }
 
-function guideStepOptionsNote(options?: GuideStepOptions): string {
+export function guideStepOptionsNote(options?: GuideStepOptions): string {
   if (!options) return "";
   const notes: string[] = [];
   if (options.pace === "compact") {
@@ -567,6 +584,16 @@ function guideStepOptionsNote(options?: GuideStepOptions): string {
     notes.push(`Additional style guidance for this step: ${style}`);
   }
   return notes.length ? ` ${notes.join(" ")}` : "";
+}
+
+/** Build the user message fed to the ephemeral revision agent for a pinned span. */
+export function guideRevisionUserMessage(
+  stepContext: string,
+  options?: GuideStepOptions,
+): string {
+  const note = guideStepOptionsNote(options).trim();
+  const guidance = note ? `\n\nRevision instructions:\n${note}` : "";
+  return `Re-explain this exact guided step in full.${guidance}\n\n<step_source>\n${stepContext}\n</step_source>`;
 }
 
 /**

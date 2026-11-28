@@ -9,7 +9,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
-import { AlertCircle, ArrowLeft, RefreshCw } from "lucide-react";
+import { AlertCircle, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { AgentConfigDialog } from "@/components/AgentConfigDialog";
 import { ChatOutlineRail, userMessagePreview, type ChatOutlineItem } from "@/components/chat/ChatOutlineRail";
@@ -29,6 +29,7 @@ import { GuideIncompleteStepCard } from "./GuideIncompleteStepCard";
 import { GuideSideThread } from "./GuideSideThread";
 import type { GuideStepAction } from "./GuideStepSection";
 import type { QuoteLocation } from "@/agent/book/book-content";
+import { listBuiltinModelIds } from "@/agent/runtime/model-resolution";
 import { canonicalGuidedSession, sideThreadAnchorFromKey } from "@/agent/sessions/pi-session";
 import type { GuideBlockTarget } from "@/lib/guide-marks";
 import {
@@ -38,6 +39,7 @@ import {
   findSideQuestionUserIndex,
   projectGuideDocument,
   resolveActiveGuideRun,
+  type GuideChapterRun,
   type GuideDocument,
   type GuideIncompleteStepNode,
   type GuideSearchHit,
@@ -66,7 +68,9 @@ import {
   type GuideStep,
   type GuideStepPace,
   type RecordedGuideStep,
+  type StepRevisionOptions,
 } from "@/types/agent";
+import { CHATGPT_PROVIDER_ID, isCustomProviderId } from "@/types/agent-config";
 
 export interface GuideWorkspaceHandle {
   fillInput: (text: string, chapterHref?: string) => void;
@@ -162,6 +166,11 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
       editSideTurn,
       regenerateTurn,
       regenerateSideTurn,
+      reviseStep,
+      selectStepRevision,
+      undoLatestStep,
+      dismissIncompleteTail,
+      rollbackToChapterRun,
       switchSession,
       updateConfig: updateSessionConfig,
       switchBranchAtAnchor,
@@ -208,6 +217,45 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
       handleModelSelect,
       handleThinkingLevelChange,
     } = useAssistantModelControls(setInvokeError);
+
+    const [providerModels, setProviderModels] = useState<string[]>([]);
+    const activeProvider = configSnapshot?.provider ?? null;
+    const activeModel = configSnapshot?.model ?? null;
+    const customModelsKey = customModels.join("\0");
+    useEffect(() => {
+      const updateIfChanged = (next: string[]) => {
+        setProviderModels((prev) =>
+          prev.length === next.length && prev.every((id, idx) => id === next[idx]) ? prev : next,
+        );
+      };
+      if (!activeProvider) {
+        updateIfChanged([]);
+        return;
+      }
+      if (
+        isCustomProviderId(activeProvider) ||
+        (activeProvider === CHATGPT_PROVIDER_ID && customModels.length > 0)
+      ) {
+        updateIfChanged(customModels);
+        return;
+      }
+      let cancelled = false;
+      void listBuiltinModelIds(activeProvider).then((ids) => {
+        if (!cancelled) updateIfChanged(ids);
+      });
+      return () => {
+        cancelled = true;
+      };
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [activeProvider, customModelsKey]);
+
+    const availableModels = useMemo(
+      () =>
+        activeModel && !providerModels.includes(activeModel)
+          ? [activeModel, ...providerModels]
+          : providerModels,
+      [activeModel, providerModels],
+    );
 
     const isWorkspace = variant === "workspace";
     const isStreaming = submitting || state.status === "prompting";
@@ -281,18 +329,22 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
           branchNavigation: state.branchNavigation,
           sideThreads: isGuided ? state.sideThreads : undefined,
           activeSideThreadKey: state.activeSideThreadKey,
+          stepRevisions: isGuided ? state.stepRevisions : undefined,
+          activeRevisionTarget: state.activeRevisionTarget,
           isStreaming,
         }),
       [
         bookId,
         isGuided,
         isStreaming,
+        state.activeRevisionTarget,
         state.activeSideThreadKey,
         state.branchAnchors,
         state.branchNavigation,
         state.messages,
         state.sessionId,
         state.sideThreads,
+        state.stepRevisions,
       ],
     );
 
@@ -308,9 +360,28 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
     }
     const lastChatMessage = lastChatIndex >= 0 ? state.messages[lastChatIndex] : undefined;
 
-    const activeMessagesForActivity = state.activeSideThreadKey
-      ? (state.sideThreads[state.activeSideThreadKey]?.messages ?? state.messages)
-      : state.messages;
+    const activeMessagesForActivity = useMemo(() => {
+      if (state.activeRevisionTarget) {
+        const snap = state.stepRevisions[state.activeRevisionTarget.targetAnchorId];
+        const rev = snap?.revisions.find(
+          (item) => item.revisionId === state.activeRevisionTarget?.revisionId,
+        );
+        return rev
+          ? [
+              {
+                role: "assistant" as const,
+                content: rev.content,
+                blocks: rev.blocks,
+                stopReason: rev.stopReason,
+                errorMessage: rev.errorMessage,
+              },
+            ]
+          : [];
+      }
+      return state.activeSideThreadKey
+        ? (state.sideThreads[state.activeSideThreadKey]?.messages ?? state.messages)
+        : state.messages;
+    }, [state.activeRevisionTarget, state.activeSideThreadKey, state.messages, state.sideThreads, state.stepRevisions]);
     const activity = chatActivity(activeMessagesForActivity, isStreaming);
     useEffect(() => {
       onActivityChange?.({
@@ -368,8 +439,12 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
     );
 
     const scrollContentKey = useMemo(
-      () => ({ messages: state.messages, sideThreads: state.sideThreads }),
-      [state.messages, state.sideThreads],
+      () => ({
+        messages: state.messages,
+        sideThreads: state.sideThreads,
+        stepRevisions: state.stepRevisions,
+      }),
+      [state.messages, state.sideThreads, state.stepRevisions],
     );
 
     const scroll = useTranscriptScroll({
@@ -822,6 +897,82 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
       [editingQa, isStreaming, isViewingArchived, scroll, switchBranchAtAnchor, switchSideBranchAtAnchor],
     );
 
+    const handleReviseStep = useCallback(
+      async (targetAnchorId: string, options: StepRevisionOptions) => {
+        if (isStreaming || isViewingArchived || !bookId) return;
+        setEditingQa(null);
+        setEditDraft("");
+        setInvokeError(null);
+        setSubmitting(true);
+        // Stay anchored on the viewed chapter run during off-spine in-place revision.
+        try {
+          await reviseStep(targetAnchorId, options);
+        } catch (err) {
+          setInvokeError(String(err));
+          setSubmitting(false);
+        }
+      },
+      [bookId, isStreaming, isViewingArchived, reviseStep],
+    );
+
+    const handleSelectRevision = useCallback(
+      async (targetAnchorId: string, revisionId: string) => {
+        if (isStreaming || isViewingArchived) return;
+        setInvokeError(null);
+        try {
+          await selectStepRevision(targetAnchorId, revisionId);
+        } catch (err) {
+          setInvokeError(String(err));
+        }
+      },
+      [isStreaming, isViewingArchived, selectStepRevision],
+    );
+
+    const handleUndoLatestStep = useCallback(async () => {
+      if (isStreaming || isViewingArchived) return;
+      setInvokeError(null);
+      setPickedStep(undefined);
+      try {
+        await undoLatestStep();
+      } catch (err) {
+        setInvokeError(String(err));
+      }
+    }, [isStreaming, isViewingArchived, undoLatestStep]);
+
+    const handleDismissIncompleteTail = useCallback(async () => {
+      if (isStreaming || isViewingArchived) return;
+      setInvokeError(null);
+      try {
+        await dismissIncompleteTail();
+      } catch (err) {
+        setInvokeError(String(err));
+      }
+    }, [dismissIncompleteTail, isStreaming, isViewingArchived]);
+
+    const handleRetryIncompleteWithModel = useCallback(
+      async (model: string, messageIndex: number) => {
+        if (isStreaming || isViewingArchived) return;
+        await handleModelSelect(model);
+        await handleRegenerate(messageIndex);
+      },
+      [handleModelSelect, handleRegenerate, isStreaming, isViewingArchived],
+    );
+
+    const handleRollbackChapter = useCallback(
+      async (run: GuideChapterRun) => {
+        if (isStreaming || isViewingArchived || !run.anchorEntryId) return;
+        setInvokeError(null);
+        setPickedStep(undefined);
+        try {
+          await rollbackToChapterRun(run.anchorEntryId);
+          setFocusedRunId(null);
+        } catch (err) {
+          setInvokeError(String(err));
+        }
+      },
+      [isStreaming, isViewingArchived, rollbackToChapterRun],
+    );
+
     const handleSaveSessionConfig = useCallback(
       async (systemPrompt: string) => {
         const session = configSession;
@@ -885,6 +1036,25 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
         }
       },
       [bookReady, guideStepAtHref, isGuided, isStreaming, isViewingArchived, sendGuideStep, t],
+    );
+
+    const handleRereadChapter = useCallback(
+      async (run: GuideChapterRun) => {
+        if (!isGuided || !bookReady || isViewingArchived || isStreaming) return;
+        const firstStep = run.steps[0];
+        if (!firstStep) return;
+        setInvokeError(null);
+        try {
+          const anchor = await guideStepAnchor(firstStep.step);
+          const href =
+            anchor?.href ??
+            document.chapters.find((chapter) => chapter.chapterIndex === run.chapterIndex)?.href;
+          if (href) await guideChapter(href);
+        } catch (err) {
+          setInvokeError(String(err));
+        }
+      },
+      [bookReady, document.chapters, guideChapter, guideStepAnchor, isGuided, isStreaming, isViewingArchived],
     );
 
     const handleSelectRun = useCallback(
@@ -1206,11 +1376,15 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
                       key={attempt.id}
                       node={attempt}
                       defaultExpanded={attempt.id === activeTailIncompleteId}
+                      isTail={attempt.id === activeTailIncompleteId}
                       bookReady={bookReady}
                       isStreaming={isStreaming}
                       readOnly={isViewingArchived}
+                      availableModels={availableModels}
+                      currentModel={activeModel}
                       onRegenerate={(idx) => void handleRegenerate(idx)}
-                      onSwitchBranch={(anchorId, dir) => void handleSwitchBranch(anchorId, dir)}
+                      onRetryWithModel={(model, idx) => void handleRetryIncompleteWithModel(model, idx)}
+                      onDismiss={() => void handleDismissIncompleteTail()}
                       registerItem={scroll.registerItem}
                     />
                   ))}
@@ -1220,6 +1394,7 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
                     key={activeRun.id}
                     run={activeRun}
                     isLatestRun={isLatestRun}
+                    subsequentRunsCount={Math.max(0, document.runs.length - 1 - activeRunIndex)}
                     markersByAfterStep={markersByAfterStep}
                     incompleteStepsByAfterStep={incompleteStepsByAfterStep}
                     activeTailIncompleteId={activeTailIncompleteId}
@@ -1228,10 +1403,21 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
                     isStreaming={isStreaming}
                     readOnly={isViewingArchived}
                     canOpenStep={Boolean(onOpenQuote)}
+                    availableModels={availableModels}
+                    currentModel={activeModel}
                     onOpenStep={openGuideStep}
                     loadStepImages={guideStepImages}
                     loadStepImageUrl={readStepImageUrl}
                     onRegenerateMessage={(idx) => void handleRegenerate(idx)}
+                    onRetryIncompleteWithModel={(model, idx) =>
+                      void handleRetryIncompleteWithModel(model, idx)
+                    }
+                    onDismissIncompleteTail={() => void handleDismissIncompleteTail()}
+                    onReviseStep={(anchorId, opts) => void handleReviseStep(anchorId, opts)}
+                    onSelectRevision={(anchorId, revId) => void handleSelectRevision(anchorId, revId)}
+                    onUndoLatestStep={() => void handleUndoLatestStep()}
+                    onRereadChapter={(run) => void handleRereadChapter(run)}
+                    onRollbackChapter={(run) => void handleRollbackChapter(run)}
                     onSwitchBranch={(anchorId, dir) => void handleSwitchBranch(anchorId, dir)}
                     editingQaId={editingQa?.id ?? null}
                     editDraft={editDraft}
@@ -1253,6 +1439,7 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
 
                 {(!activeRun || isLatestRun) &&
                   !state.activeSideThreadKey &&
+                  !state.activeRevisionTarget &&
                   isStreaming &&
                   (!lastChatMessage || lastChatMessage.role === "user") && (
                     <div className="flex gap-2">
@@ -1270,26 +1457,6 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
                 {(!activeRun || isLatestRun) && state.compaction && (
                   <CompactionStatus status={state.compaction.status} />
                 )}
-
-                {(!activeRun || isLatestRun) &&
-                  !state.activeSideThreadKey &&
-                  (!lastChatMessage ||
-                    (lastChatMessage.role === "user" && !lastChatMessage.guideRequest)) &&
-                  !isStreaming &&
-                  bookReady &&
-                  !isViewingArchived &&
-                  state.messages.some((m) => m.role === "user") && (
-                    <div className="flex justify-center">
-                      <button
-                        type="button"
-                        onClick={() => void handleRegenerate()}
-                        className="text-xs text-muted-foreground/50 transition-colors hover:text-muted-foreground"
-                        aria-label={t("chat.regenerate")}
-                      >
-                        <RefreshCw className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  )}
 
                 {activeRun && document.runs.length >= 2 && (
                   <GuideChapterFooter

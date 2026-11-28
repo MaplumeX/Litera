@@ -1,14 +1,17 @@
 import { guideStepLabel, positionTitle } from "@/components/chat/GuideBar";
 import type { GuideChapterProgress } from "@/agent/runtime/guide";
-import { ROOT_SIDE_THREAD_KEY } from "@/agent/sessions/pi-session";
+import { ORIGINAL_STEP_REVISION_ID, ROOT_SIDE_THREAD_KEY } from "@/agent/sessions/pi-session";
 import type {
+  ActiveStepRevisionTarget,
   AgentMessage,
   AnchorBranchInfo,
   AssistantBlock,
   CompactionNotice,
   GuideContextCutMarker,
+  GuideStepPace,
   RecordedGuideStep,
   SideThreadSnapshot,
+  StepRevisionSnapshot,
 } from "@/types/agent";
 
 export interface GuideSideQaNode {
@@ -36,6 +39,15 @@ export interface GuideSideQaNode {
   assistantBranchInfo?: AnchorBranchInfo;
 }
 
+export interface GuideStepRevisionOption {
+  id: string;
+  isOriginal: boolean;
+  pace?: GuideStepPace;
+  styleOverride?: string;
+  modelId?: string;
+  timestamp?: string;
+}
+
 export interface GuideStepNode {
   /** 0-based index aligned with `takenGuideSteps(messages)` and `data-litera-guide-step`. */
   stepIndex: number;
@@ -59,6 +71,14 @@ export interface GuideStepNode {
   errorMessage?: string;
   branchAnchorId?: string;
   branchInfo?: AnchorBranchInfo;
+  /** Stable spine assistant anchor entry id for off-spine step revisions. */
+  revisionAnchorId?: string;
+  /** Ordered revision choices: `[original, ...offSpineRevisions]`. */
+  revisions: GuideStepRevisionOption[];
+  /** Currently displayed revision id (`"__original__"` or an off-spine `revisionId`). */
+  activeRevisionId: string;
+  /** True strictly for the spine's final committed step (when no uncommitted tail attempt follows it). */
+  isLatestStep: boolean;
   sideThreads: GuideSideQaNode[];
 }
 
@@ -170,6 +190,10 @@ export interface ProjectGuideDocumentInput {
   sideThreads?: Readonly<Record<string, SideThreadSnapshot>>;
   /** Side-thread key currently streaming an answer, or null for spine streaming. */
   activeSideThreadKey?: string | null;
+  /** Off-spine step revision snapshots keyed by spine step assistant anchor entry id. */
+  stepRevisions?: Readonly<Record<string, StepRevisionSnapshot>>;
+  /** Active in-flight step revision target, or null when not revising a step. */
+  activeRevisionTarget?: ActiveStepRevisionTarget | null;
   isStreaming?: boolean;
   toc?: readonly GuideTocInput[];
   tocProgress?: Readonly<Record<string, GuideChapterProgress>>;
@@ -315,11 +339,13 @@ export function projectGuideDocument({
   branchNavigation,
   sideThreads,
   activeSideThreadKey = null,
+  stepRevisions,
+  activeRevisionTarget = null,
   isStreaming = false,
   toc,
   tocProgress,
 }: ProjectGuideDocumentInput): GuideDocument {
-  const isSpineStreaming = isStreaming && !activeSideThreadKey;
+  const isSpineStreaming = isStreaming && !activeSideThreadKey && !activeRevisionTarget;
   const steps: GuideStepNode[] = [];
   const pendingSteps: GuidePendingStepNode[] = [];
   const incompleteSteps: GuideIncompleteStepNode[] = [];
@@ -343,6 +369,8 @@ export function projectGuideDocument({
     chapterHref?: string;
     isGuideRequest: boolean;
     guideStep?: RecordedGuideStep;
+    pace?: GuideStepPace;
+    styleOverride?: string;
   } | null = null;
 
   const incompleteLabel = (user: NonNullable<typeof pendingUser>): string =>
@@ -450,6 +478,10 @@ export function projectGuideDocument({
           streaming: false,
           branchAnchorId,
           branchInfo,
+          revisionAnchorId: branchAnchors?.[index],
+          revisions: [{ id: ORIGINAL_STEP_REVISION_ID, isOriginal: true }],
+          activeRevisionId: ORIGINAL_STEP_REVISION_ID,
+          isLatestStep: false,
           sideThreads: [],
         };
         steps.push(node);
@@ -462,6 +494,8 @@ export function projectGuideDocument({
           chapterHref: message.chapterHref,
           isGuideRequest: !!message.guideRequest,
           guideStep: message.guideRequest?.step,
+          pace: message.guideRequest?.pace,
+          styleOverride: message.guideRequest?.styleOverride,
         };
       }
       continue;
@@ -481,13 +515,22 @@ export function projectGuideDocument({
       if (takenCalls.length > 0) {
         const reqIndex = pendingUser?.index;
         const reqText = pendingUser && !pendingUser.isGuideRequest ? pendingUser.content : undefined;
+        const reqPace = pendingUser?.pace;
+        const reqStyle = pendingUser?.styleOverride;
         const { branchAnchorId, branchInfo } = preferAssistantBranch(index, reqIndex, branchAnchors, branchNavigation);
+        const assistantAnchorId = branchAnchors?.[index];
         pendingUser = null;
 
         takenCalls.forEach((call, callIdx) => {
           const step = call.guide!;
           const start = stepChapterStart(step);
           const isLastCallInMsg = callIdx === takenCalls.length - 1;
+          const originalOption: GuideStepRevisionOption = {
+            id: ORIGINAL_STEP_REVISION_ID,
+            isOriginal: true,
+            ...(reqPace ? { pace: reqPace } : {}),
+            ...(reqStyle ? { styleOverride: reqStyle } : {}),
+          };
           const node: GuideStepNode = {
             stepIndex: steps.length,
             id: `step-${steps.length}-${call.toolCallId}`,
@@ -508,6 +551,10 @@ export function projectGuideDocument({
             errorMessage: isLastCallInMsg ? message.errorMessage : undefined,
             branchAnchorId: callIdx === 0 ? branchAnchorId : undefined,
             branchInfo: callIdx === 0 ? branchInfo : undefined,
+            revisionAnchorId: isLastCallInMsg ? assistantAnchorId : undefined,
+            revisions: [originalOption],
+            activeRevisionId: ORIGINAL_STEP_REVISION_ID,
+            isLatestStep: false,
             sideThreads: [],
           };
           steps.push(node);
@@ -591,12 +638,64 @@ export function projectGuideDocument({
         currentStep.streaming = streamingThis;
         currentStep.stopReason = message.stopReason;
         currentStep.errorMessage = message.errorMessage;
+        if (branchAnchors?.[index]) currentStep.revisionAnchorId = branchAnchors[index];
       }
     }
   }
 
   // Trailing unanswered user message (e.g., optimistic message right before assistant starts).
   flushPendingUser(true);
+
+  // Suppress empty historical incomplete step attempts wedged between committed
+  // steps; only keep tail attempts or historical attempts with substantive output.
+  const lastStepIndex = steps.length - 1;
+  const visibleIncompleteSteps = incompleteSteps.filter((attempt) => {
+    const isAtTail = (attempt.afterStepIndex ?? -1) === lastStepIndex;
+    if (isAtTail || attempt.streaming) return true;
+    const hasText = attempt.content.trim().length > 0;
+    const hasTools = (attempt.blocks ?? []).some((block) => block.type === "toolCall");
+    return hasText || hasTools;
+  });
+
+  // Mark strictly the spine's final committed step (when no tail incomplete attempt sits after it)
+  // and overlay any off-spine step revisions onto each step's canonical explanation/blocks.
+  const hasTailIncomplete = visibleIncompleteSteps.some(
+    (attempt) => (attempt.afterStepIndex ?? -1) === lastStepIndex,
+  );
+  if (steps.length > 0 && !hasTailIncomplete) {
+    steps[steps.length - 1].isLatestStep = true;
+  }
+
+  for (const step of steps) {
+    const anchor = step.revisionAnchorId;
+    const snap = anchor ? stepRevisions?.[anchor] : undefined;
+    if (!anchor || !snap || snap.revisions.length === 0) continue;
+    step.revisions = [
+      ...step.revisions,
+      ...snap.revisions.map((rev): GuideStepRevisionOption => ({
+        id: rev.revisionId,
+        isOriginal: false,
+        ...(rev.pace ? { pace: rev.pace } : {}),
+        ...(rev.styleOverride ? { styleOverride: rev.styleOverride } : {}),
+        ...(rev.modelId ? { modelId: rev.modelId } : {}),
+        timestamp: rev.timestamp,
+      })),
+    ];
+    step.activeRevisionId = snap.activeRevisionId;
+    if (snap.activeRevisionId !== ORIGINAL_STEP_REVISION_ID) {
+      const activeRev = snap.revisions.find((rev) => rev.revisionId === snap.activeRevisionId);
+      if (activeRev) {
+        step.explanation = activeRev.content;
+        step.blocks = activeRev.blocks;
+        step.stopReason = activeRev.stopReason;
+        step.errorMessage = activeRev.errorMessage;
+        step.streaming =
+          isStreaming &&
+          activeRevisionTarget?.targetAnchorId === anchor &&
+          activeRevisionTarget.revisionId === activeRev.revisionId;
+      }
+    }
+  }
 
   // Build chronological chapter runs for document-flow rendering.
   let nextSyntheticIndex = messages.length + 1000;
@@ -732,7 +831,7 @@ export function projectGuideDocument({
     sessionId,
     steps,
     pendingSteps,
-    incompleteSteps,
+    incompleteSteps: visibleIncompleteSteps,
     runs,
     chapters,
     orphanSideThreads,

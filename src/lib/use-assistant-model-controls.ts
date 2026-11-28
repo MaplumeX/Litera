@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import { useAgentConfig } from "@/lib/use-agent-config";
 import { invokeErrorMessage } from "@/lib/app-error";
 import { useT } from "@/lib/i18n";
@@ -17,12 +17,15 @@ export function useAssistantModelControls(onError: (message: string | null) => v
 
   const thinkingLevel = snapshot?.thinkingLevel ?? "medium";
 
-  const customModels =
-    snapshot && snapshot.provider && isCustomProviderId(snapshot.provider)
-      ? (snapshot.customProviders.find((entry) => entry.id === snapshot.provider)?.models ?? [])
-      : snapshot?.provider === CHATGPT_PROVIDER_ID
-        ? (snapshot.chatgptAccount?.models ?? [])
-        : [];
+  const customModels = useMemo(
+    () =>
+      snapshot && snapshot.provider && isCustomProviderId(snapshot.provider)
+        ? (snapshot.customProviders.find((entry) => entry.id === snapshot.provider)?.models ?? [])
+        : snapshot?.provider === CHATGPT_PROVIDER_ID
+          ? (snapshot.chatgptAccount?.models ?? [])
+          : [],
+    [snapshot],
+  );
 
   const handleModelSelect = useCallback(
     async (model: string) => {
