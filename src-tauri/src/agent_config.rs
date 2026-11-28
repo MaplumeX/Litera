@@ -656,9 +656,11 @@ fn parse_openai_model_ids(body: &[u8]) -> AppResult<Vec<String>> {
 }
 
 const MAX_MODELS_BODY: usize = 1024 * 1024;
+const APP_USER_AGENT: &str = concat!("Litera/", env!("CARGO_PKG_VERSION"));
 
 pub(crate) async fn fetch_models_body(url: &str, api_key: &str) -> AppResult<Vec<u8>> {
     let client = reqwest::Client::builder()
+        .user_agent(APP_USER_AGENT)
         .timeout(std::time::Duration::from_secs(10))
         .build()
         .map_err(|_| AppError::invalid_input("Failed to initialize model discovery"))?;
@@ -2235,5 +2237,44 @@ mod tests {
         for valid in VALID_THINKING_LEVELS {
             assert!(VALID_THINKING_LEVELS.contains(valid));
         }
+    }
+
+    #[tokio::test]
+    async fn fetch_models_body_sends_litera_user_agent() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("local_addr");
+
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("accept");
+            let mut buf = [0u8; 4096];
+            let n = stream.read(&mut buf).await.expect("read");
+            let req = String::from_utf8_lossy(&buf[..n]).to_string();
+            let body = r#"{"data":[{"id":"gpt-4.1"}]}"#;
+            let resp = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream.write_all(resp.as_bytes()).await.expect("write");
+            req
+        });
+
+        let url = format!("http://{addr}/v1/models");
+        let body = fetch_models_body(&url, "sk-test").await.expect("fetch");
+        assert_eq!(parse_openai_model_ids(&body).expect("parse"), vec!["gpt-4.1"]);
+
+        let raw_request = server.await.expect("server").to_ascii_lowercase();
+        let expected_ua = format!("user-agent: {}", APP_USER_AGENT.to_ascii_lowercase());
+        assert!(
+            raw_request.contains(&expected_ua),
+            "expected {expected_ua:?} in request:\n{raw_request}"
+        );
+        assert!(
+            !raw_request.contains("\r\norigin:"),
+            "unexpected Origin header in request:\n{raw_request}"
+        );
     }
 }

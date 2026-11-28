@@ -1,8 +1,19 @@
 import { fetch as tauriFetch } from "@tauri-apps/plugin-http";
 import type { FetchFunction } from "@earendil-works/pi-ai";
 
+const OPENROUTER_REFERER = "https://github.com/MaplumeX/Litera";
+const OPENROUTER_TITLE = "Litera";
+const PI_DEFAULT_USER_AGENT = /^pi \([^)]+\)$/;
+
+export const APP_USER_AGENT =
+  typeof __APP_VERSION__ === "string" && __APP_VERSION__.trim()
+    ? `Litera/${__APP_VERSION__.trim()}`
+    : "Litera";
+
 export interface NativeFetchOptions {
   baseUrl: string;
+  provider?: string;
+  userAgent?: string;
   fetchImpl?: typeof tauriFetch;
 }
 
@@ -24,6 +35,51 @@ function requestUrl(input: URL | RequestInfo): URL {
   }
 }
 
+function normalizeHeaders(
+  input: URL | RequestInfo,
+  init: RequestInit | undefined,
+  provider: string | undefined,
+  userAgent: string,
+): Headers {
+  const source =
+    init?.headers != null
+      ? init.headers
+      : input instanceof Request
+        ? input.headers
+        : undefined;
+  const headers = new Headers(source);
+
+  // Strip browser-direct-access and Stainless SDK telemetry headers that leak
+  // an inaccurate WebView environment.
+  headers.delete("anthropic-dangerous-direct-browser-access");
+  for (const name of Array.from(headers.keys())) {
+    if (name.startsWith("x-stainless-")) {
+      headers.delete(name);
+    }
+  }
+
+  // With tauri-plugin-http's `unsafe-headers` feature enabled, an explicit
+  // empty Origin instructs the plugin to omit Origin completely instead of
+  // injecting `Origin: tauri://localhost`.
+  headers.set("origin", "");
+
+  const existingUa = headers.get("user-agent")?.trim();
+  if (!existingUa || PI_DEFAULT_USER_AGENT.test(existingUa)) {
+    headers.set("user-agent", userAgent);
+  }
+
+  if (provider === "openrouter") {
+    if (!headers.has("http-referer")) {
+      headers.set("http-referer", OPENROUTER_REFERER);
+    }
+    if (!headers.has("x-title")) {
+      headers.set("x-title", OPENROUTER_TITLE);
+    }
+  }
+
+  return headers;
+}
+
 /**
  * Pi providers receive this function instead of WebView `fetch`.
  *
@@ -34,6 +90,7 @@ function requestUrl(input: URL | RequestInfo): URL {
 export function createGuardedNativeFetch(options: NativeFetchOptions): FetchFunction {
   const origin = allowedOrigin(options.baseUrl);
   const fetchImpl = options.fetchImpl ?? tauriFetch;
+  const userAgent = options.userAgent ?? APP_USER_AGENT;
 
   return async (input, init) => {
     const url = requestUrl(input);
@@ -41,9 +98,11 @@ export function createGuardedNativeFetch(options: NativeFetchOptions): FetchFunc
       throw new Error("模型请求地址不在当前提供商允许范围内");
     }
 
+    const headers = normalizeHeaders(input, init, options.provider, userAgent);
+
     try {
       // Redirects are rejected so credentials cannot cross the validated origin.
-      return await fetchImpl(input, { ...init, maxRedirections: 0 });
+      return await fetchImpl(input, { ...init, headers, maxRedirections: 0 });
     } catch {
       // Never echo the native error: SDKs may include headers, bodies, or a URL
       // whose query contains credentials.
