@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.4] - 2026-11-28
+
+### Changed
+
+- **发往模型服务的请求干净了**：统一带上 `Litera/<版本>` 的标识，去掉原先夹带的浏览器专用和遥测请求头；用 OpenRouter 时附上应用归属头。
+
+### Fixed
+
+- **界面设置不会丢**：界面字号、界面字体、问答字体、主题色一改就存进本地配置文件，重开应用也还在；以前存在浏览器里的设置会自动带过来。
+
 ## [0.8.3] - 2026-11-27
 
 ### Added
