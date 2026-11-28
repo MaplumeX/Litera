@@ -234,6 +234,38 @@ describe("branchNavigation", () => {
     ], "a1b");
     expect(branchNavigation(edited).get("u1b")?.options.map((option) => option.anchorId)).toEqual(["u1", "u1b"]);
   });
+
+  it("suppresses superseded or retried uncommitted guided attempts from branchNavigation even with partial text", () => {
+    const guidedBase = makeSession([], null);
+    guidedBase.header.kind = "guided";
+
+    // Case 1: Continue superseded an aborted guided attempt with partial text (user-level fork).
+    const superseded: DecodedPiSession = {
+      ...guidedBase,
+      entries: [
+        { ...entry("u1", null, "user", "继续带读", 1), guideRequest: {} },
+        { type: "message", id: "a1", parentId: "u1", timestamp: ts(2), message: { role: "assistant", content: [{ type: "text", text: "半截中断内容" }], stopReason: "aborted", timestamp: 2 } },
+        { ...entry("u2", null, "user", "带读：第二章", 5), guideRequest: {} },
+        { type: "message", id: "tr2", parentId: "u2", timestamp: ts(6), message: { role: "toolResult", toolCallId: "t2", toolName: "guide_step", content: [{ type: "text", text: "ok" }], isError: false, timestamp: 6 }, guide: { from: { chapterIndex: 1, block: 0 }, to: { chapterIndex: 1, block: 1 } } },
+        entry("a2", "tr2", "assistant", "第二章完整讲解", 7),
+      ],
+      leafId: "a2",
+    };
+    expect(branchNavigation(superseded).size).toBe(0);
+
+    // Case 2: Retry replaced an aborted guided assistant with partial text (assistant-level fork).
+    const retried: DecodedPiSession = {
+      ...guidedBase,
+      entries: [
+        { ...entry("u1", null, "user", "继续带读", 1), guideRequest: {} },
+        { type: "message", id: "a1-abort", parentId: "u1", timestamp: ts(2), message: { role: "assistant", content: [{ type: "text", text: "半截中断内容" }], stopReason: "aborted", timestamp: 2 } },
+        { type: "message", id: "tr2", parentId: "u1", timestamp: ts(5), message: { role: "toolResult", toolCallId: "t2", toolName: "guide_step", content: [{ type: "text", text: "ok" }], isError: false, timestamp: 5 }, guide: { from: { chapterIndex: 1, block: 0 }, to: { chapterIndex: 1, block: 1 } } },
+        entry("a2", "tr2", "assistant", "第二章完整讲解", 6),
+      ],
+      leafId: "a2",
+    };
+    expect(branchNavigation(retried).size).toBe(0);
+  });
 });
 
 describe("branchLeafId", () => {

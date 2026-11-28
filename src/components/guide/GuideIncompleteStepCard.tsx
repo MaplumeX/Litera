@@ -53,7 +53,7 @@ export function GuideIncompleteStepCard({
     setExpanded(defaultExpanded || forceExpanded);
   }, [defaultExpanded, forceExpanded]);
 
-  const canRetry = !isStreaming && bookReady && !readOnly;
+  const canRetry = !isStreaming && bookReady && !readOnly && isTail;
   const otherModels = availableModels.filter((m) => m && m !== currentModel);
   const canRetryWithModel = canRetry && isTail && otherModels.length > 0 && Boolean(onRetryWithModel);
   const canDismiss = canRetry && isTail && Boolean(onDismiss);

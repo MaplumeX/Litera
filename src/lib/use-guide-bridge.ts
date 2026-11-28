@@ -47,7 +47,10 @@ export function useGuideBridge(bookId: string) {
           dispatch({ type: "user_message", message: pending.message, sideThreadKey: pending.sideThreadKey ?? event.sideThreadKey });
         }
       }
-      if (event.type === "error" && pendingEditRef.current?.promptId === event.promptId) {
+      if (
+        (event.type === "prompt_started" || event.type === "prompt_end" || event.type === "prompt_aborted" || event.type === "error") &&
+        pendingEditRef.current?.promptId === event.promptId
+      ) {
         pendingEditRef.current = null;
       }
       if (event.type === "prompt_end" || event.type === "prompt_aborted") {
@@ -111,9 +114,13 @@ export function useGuideBridge(bookId: string) {
       const message: AgentMessage = { role: "user", content: label, guideRequest: merged };
       dispatch({ type: "prompt_queued", bookId: currentBookId, promptId });
       dispatch({ type: "user_message", message });
+      // If the runtime auto-rewinds a trailing incomplete attempt before persisting,
+      // `session_rewound` will restore this optimistic user message onto the clean spine.
+      pendingEditRef.current = { promptId, message };
       try {
         await guideController.takeStep(label, request, options, promptId, requestId);
       } catch (error) {
+        if (pendingEditRef.current?.promptId === promptId) pendingEditRef.current = null;
         dispatch({ type: "prompt_queue_failed", promptId, message: String(error) });
         throw error;
       }

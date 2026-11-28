@@ -794,6 +794,82 @@ function isLegacyEmptyErrorUserBranch(
     && assistantAnchors.every((id) => isEmptyFailedAssistantAttempt(id, byId, children));
 }
 
+/**
+ * True when an assistant turn in a Guided session ended in `error`, `aborted`,
+ * or `length` without committing a `guide` step and has no subsequent user turn.
+ */
+function isUncommittedGuidedAssistantAttempt(
+  anchorId: string,
+  byId: ReadonlyMap<string, PiSessionEntry>,
+  children: ReadonlyMap<string, PiSessionEntry[]>,
+): boolean {
+  const start = byId.get(anchorId);
+  if (!start || messageRole(start) !== "assistant") return false;
+  const stack: PiSessionEntry[] = [start];
+  const visited = new Set<string>();
+  let terminalAssistantCount = 0;
+  let allTerminalFailed = true;
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    if (visited.has(current.id)) continue;
+    visited.add(current.id);
+    if (messageRole(current) === "user") return false;
+    if (decodeGuide(current.guide) !== null) return false;
+    const kids = children.get(current.id) ?? [];
+    if (kids.some((kid) => messageRole(kid) === "user")) return false;
+    if (kids.length === 0) {
+      let cursor: PiSessionEntry | undefined = current;
+      while (cursor && messageRole(cursor) !== "assistant") {
+        cursor = cursor.parentId ? byId.get(cursor.parentId) : undefined;
+      }
+      if (cursor && messageRole(cursor) === "assistant") {
+        terminalAssistantCount += 1;
+        const stop = string(object(cursor.message)?.stopReason);
+        if (stop !== "error" && stop !== "aborted" && stop !== "length") allTerminalFailed = false;
+      }
+    } else {
+      for (const kid of kids) stack.push(kid);
+    }
+  }
+  return terminalAssistantCount > 0 && allTerminalFailed;
+}
+
+/**
+ * True when an inactive user branch in a Guided session was an uncommitted
+ * guided-step attempt (aborted, errored, or replied without committing `guide`)
+ * with no subsequent user turns.
+ */
+function isUncommittedGuidedUserBranch(
+  userEntry: PiSessionEntry,
+  children: ReadonlyMap<string, PiSessionEntry[]>,
+): boolean {
+  const hasGuideRequest = userEntry.guideRequest !== undefined && userEntry.guideRequest !== null;
+  let calledGuideStep = false;
+  const stack: PiSessionEntry[] = [...(children.get(userEntry.id) ?? [])];
+  const visited = new Set<string>();
+  while (stack.length > 0) {
+    const current = stack.pop()!;
+    if (visited.has(current.id)) continue;
+    visited.add(current.id);
+    if (messageRole(current) === "user") return false;
+    if (decodeGuide(current.guide) !== null) return false;
+    if (messageRole(current) === "assistant") {
+      const content = object(current.message)?.content;
+      if (
+        Array.isArray(content) &&
+        content.some((part) => {
+          const block = object(part);
+          return block?.type === "toolCall" && block.name === "guide_step";
+        })
+      ) {
+        calledGuideStep = true;
+      }
+    }
+    for (const kid of children.get(current.id) ?? []) stack.push(kid);
+  }
+  return hasGuideRequest || calledGuideStep;
+}
+
 const BRANCH_PREVIEW_CHARS = 40;
 
 function branchPreview(content: unknown): string {
@@ -880,6 +956,7 @@ function computeBranchNavigation(
   }
 
   const activeIds = new Set(activeBranch({ ...session, entries }).map((entry) => entry.id));
+  const isGuidedSpine = !includeSideThreads && session.header.kind === "guided";
   const navigation = new Map<string, AnchorBranchInfo>();
 
   for (const group of userGroups.values()) {
@@ -891,6 +968,7 @@ function computeBranchNavigation(
     }
     const visible = group.filter((entry) => {
       if (activeIds.has(entry.id)) return true;
+      if (isGuidedSpine && isUncommittedGuidedUserBranch(entry, children)) return false;
       const normalized = contentText(object(entry.message)?.content).trim();
       if ((textCounts.get(normalized) ?? 0) < 2) return true;
       return !isLegacyEmptyErrorUserBranch(entry, byId, children);
@@ -909,11 +987,20 @@ function computeBranchNavigation(
     for (const option of options) navigation.set(option.anchorId, info);
   }
 
-  for (const group of assistantGroups.values()) {
+  for (const [parentUserId, group] of assistantGroups.entries()) {
     if (group.length < 2) continue;
-    const visible = group.filter(
-      (entry) => activeIds.has(entry.id) || !isEmptyFailedAssistantAttempt(entry.id, byId, children),
-    );
+    const parentUser = byId.get(parentUserId);
+    const isGuidedRequestTurn =
+      isGuidedSpine &&
+      Boolean(parentUser && parentUser.guideRequest !== undefined && parentUser.guideRequest !== null);
+    const visible = group.filter((entry) => {
+      if (activeIds.has(entry.id)) return true;
+      if (isEmptyFailedAssistantAttempt(entry.id, byId, children)) return false;
+      if (isGuidedRequestTurn && isUncommittedGuidedAssistantAttempt(entry.id, byId, children)) {
+        return false;
+      }
+      return true;
+    });
     if (visible.length < 2) continue;
     const options = [...visible]
       .sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp))

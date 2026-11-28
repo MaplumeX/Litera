@@ -39,7 +39,10 @@ export function useAgentBridge(bookId: string) {
           dispatch({ type: "user_message", message: pending.message });
         }
       }
-      if (event.type === "error" && pendingEditRef.current?.promptId === event.promptId) {
+      if (
+        (event.type === "prompt_started" || event.type === "prompt_end" || event.type === "prompt_aborted" || event.type === "error") &&
+        pendingEditRef.current?.promptId === event.promptId
+      ) {
         pendingEditRef.current = null;
       }
       if (event.type === "prompt_end" || event.type === "prompt_aborted") {
@@ -88,9 +91,13 @@ export function useAgentBridge(bookId: string) {
     const promptId = id("prompt");
     dispatch({ type: "prompt_queued", bookId: currentBookId, promptId });
     dispatch({ type: "user_message", message });
+    if (context.guideRequest !== undefined) {
+      pendingEditRef.current = { promptId, message };
+    }
     try {
       await embeddedAgentRuntime.prompt(text, context, promptId, requestId);
     } catch (error) {
+      if (pendingEditRef.current?.promptId === promptId) pendingEditRef.current = null;
       dispatch({ type: "prompt_queue_failed", promptId, message: String(error) });
       throw error;
     }
