@@ -433,8 +433,11 @@ impl TokenError {
     }
 }
 
+const APP_USER_AGENT: &str = concat!("Litera/", env!("CARGO_PKG_VERSION"));
+
 fn http_client() -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
+        .user_agent(APP_USER_AGENT)
         .timeout(HTTP_TIMEOUT)
         .redirect(reqwest::redirect::Policy::none())
         .build()
@@ -869,5 +872,40 @@ mod tests {
         .unwrap();
         let auth = read_auth(dir.path()).unwrap();
         assert_eq!(auth, json!({ "openai": { "type": "api_key", "key": "sk-1" } }));
+    }
+
+    #[tokio::test]
+    async fn http_client_sends_litera_user_agent() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("local_addr");
+
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("accept");
+            let mut buf = [0u8; 4096];
+            let n = stream.read(&mut buf).await.expect("read");
+            let req = String::from_utf8_lossy(&buf[..n]).to_string();
+            stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}")
+                .await
+                .expect("write");
+            req
+        });
+
+        let client = http_client().expect("http_client");
+        client
+            .get(format!("http://{addr}/test"))
+            .send()
+            .await
+            .expect("send");
+
+        let raw_request = server.await.expect("server").to_ascii_lowercase();
+        let expected_ua = format!("user-agent: {}", APP_USER_AGENT.to_ascii_lowercase());
+        assert!(
+            raw_request.contains(&expected_ua),
+            "expected {expected_ua:?} in request:\n{raw_request}"
+        );
     }
 }

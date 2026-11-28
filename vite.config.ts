@@ -2,7 +2,12 @@
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import { readFileSync } from "node:fs";
 import path from "path";
+
+const appVersion: string = JSON.parse(
+  readFileSync(new URL("./package.json", import.meta.url), "utf8"),
+).version;
 
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
@@ -120,6 +125,10 @@ function patchFoliatePaginator(): Plugin {
 // https://vite.dev/config/
 export default defineConfig(async () => ({
   plugins: [patchFoliatePaginator(), fixFoliateGlob(), react(), tailwindcss()],
+
+  define: {
+    __APP_VERSION__: JSON.stringify(appVersion),
+  },
 
   resolve: {
     alias: {
