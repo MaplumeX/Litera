@@ -92,6 +92,7 @@ import {
   saveUiFontFamily,
   saveUiFontSize,
 } from "@/lib/ui-chrome-font";
+import { subscribeUiPreferences } from "@/lib/ui-preferences";
 
 export type SettingsSection = "typography" | "appearance" | "footer" | "device" | "ai" | "stats" | "sync" | "about";
 
@@ -409,7 +410,10 @@ function FontFamilyPicker({
           aria-label={ariaLabel}
           className="w-full justify-between font-normal"
         >
-          <span className="min-w-0 truncate" style={{ fontFamily: cssFontFamily(value) }}>
+          <span
+            className="min-w-0 truncate"
+            style={followsUi ? undefined : { fontFamily: cssFontFamily(value) }}
+          >
             {selectedLabel}
           </span>
           <span className="flex shrink-0 items-center gap-1.5">
@@ -622,6 +626,15 @@ export function SettingsDialog({
     setChatFontFamily(loadChatFontFamily());
     setAccent(loadUiAccent());
   }, [open]);
+
+  useEffect(() => {
+    return subscribeUiPreferences(() => {
+      setUiFontFamily(loadUiFontFamily());
+      setUiFontSize(loadUiFontSize());
+      setChatFontFamily(loadChatFontFamily());
+      setAccent(loadUiAccent());
+    });
+  }, []);
 
   useEffect(() => {
     if (!open || section !== "about") return;

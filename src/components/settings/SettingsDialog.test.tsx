@@ -14,6 +14,8 @@ import {
   applyUiChrome,
   chromeFontStack,
 } from "@/lib/ui-chrome-font";
+import { flushUiPreferences } from "@/lib/ui-preferences";
+import { resetUiPreferencesForTests } from "@/lib/ui-preferences-store";
 
 class ResizeObserverStub {
   observe() {}
@@ -92,6 +94,9 @@ invokeMock.mockImplementation((cmd: string) => {
   if (cmd === "list_system_fonts") {
     return Promise.resolve(["Noto Sans CJK SC", "Source Han Serif"]);
   }
+  if (cmd === "save_ui_preferences") {
+    return Promise.resolve(undefined);
+  }
   return Promise.reject(new Error(`unexpected invoke: ${cmd}`));
 });
 
@@ -105,6 +110,7 @@ afterEach(() => {
   document.documentElement.style.fontSize = "";
   document.documentElement.style.removeProperty("--font-sans");
   document.documentElement.style.removeProperty("--font-chat");
+  resetUiPreferencesForTests();
   invokeMock.mockClear();
   getVersionMock.mockReset();
   getVersionMock.mockImplementation(() => Promise.resolve("0.2.0"));
@@ -1159,6 +1165,10 @@ describe("SettingsDialog", () => {
     expect(document.documentElement.style.getPropertyValue("--font-sans")).toBe(uiStack);
     expect(localStorage.getItem(CHAT_FONT_FAMILY_KEY)).toBe("Noto Sans CJK SC");
     expect(localStorage.getItem(UI_FONT_FAMILY_KEY)).toBeNull();
+    await flushUiPreferences();
+    expect(invokeMock).toHaveBeenCalledWith("save_ui_preferences", {
+      chatFontFamily: "Noto Sans CJK SC",
+    });
 
     act(() => {
       getByRole("combobox", { name: "聊天字体" }).click();
@@ -1169,6 +1179,10 @@ describe("SettingsDialog", () => {
     });
     expect(document.documentElement.style.getPropertyValue("--font-chat")).toBe("");
     expect(localStorage.getItem(CHAT_FONT_FAMILY_KEY)).toBeNull();
+    await flushUiPreferences();
+    expect(invokeMock).toHaveBeenCalledWith("save_ui_preferences", {
+      chatFontFamily: "",
+    });
   });
 
   it("persists the default reader mode to localStorage only", () => {

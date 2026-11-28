@@ -1,4 +1,5 @@
 import { cssFontFamily, isFontFamily, isGenericFontFamily } from "@/lib/reader-styles";
+import { persistUiPreferences } from "@/lib/ui-preferences-store";
 
 export const UI_FONT_SIZE_KEY = "litera.uiFontSize";
 export const UI_FONT_FAMILY_KEY = "litera.uiFontFamily";
@@ -75,7 +76,7 @@ export function loadChatFontFamily(): string {
   }
 }
 
-export function saveUiFontSize(px: number): void {
+export function cacheUiFontSize(px: number): void {
   try {
     if (typeof localStorage === "undefined") return;
     localStorage.setItem(UI_FONT_SIZE_KEY, String(parseUiFontSize(px)));
@@ -84,7 +85,7 @@ export function saveUiFontSize(px: number): void {
   }
 }
 
-export function saveUiFontFamily(name: string): void {
+export function cacheUiFontFamily(name: string): void {
   try {
     if (typeof localStorage === "undefined") return;
     localStorage.setItem(UI_FONT_FAMILY_KEY, parseUiFontFamily(name));
@@ -93,7 +94,7 @@ export function saveUiFontFamily(name: string): void {
   }
 }
 
-export function saveChatFontFamily(name: string): void {
+export function cacheChatFontFamily(name: string): void {
   try {
     if (typeof localStorage === "undefined") return;
     const family = parseChatFontFamily(name);
@@ -102,6 +103,24 @@ export function saveChatFontFamily(name: string): void {
   } catch {
     // private mode / quota
   }
+}
+
+export function saveUiFontSize(px: number): void {
+  const size = parseUiFontSize(px);
+  cacheUiFontSize(size);
+  persistUiPreferences({ uiFontSize: size });
+}
+
+export function saveUiFontFamily(name: string): void {
+  const family = parseUiFontFamily(name);
+  cacheUiFontFamily(family);
+  persistUiPreferences({ uiFontFamily: family });
+}
+
+export function saveChatFontFamily(name: string): void {
+  const family = parseChatFontFamily(name);
+  cacheChatFontFamily(family);
+  persistUiPreferences({ chatFontFamily: family });
 }
 
 function quoteFallback(name: string): string {

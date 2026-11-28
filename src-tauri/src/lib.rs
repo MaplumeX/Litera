@@ -183,6 +183,8 @@ pub fn run() {
             chatgpt_auth::chatgpt_logout,
             preferences::get_preferences,
             preferences::save_preferences,
+            preferences::get_ui_preferences,
+            preferences::save_ui_preferences,
             preferences::list_system_fonts,
             fonts::import_incoming_font,
             fonts::list_imported_fonts,

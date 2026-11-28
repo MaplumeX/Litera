@@ -1,3 +1,5 @@
+import { persistUiPreferences } from "@/lib/ui-preferences-store";
+
 export const UI_ACCENT_KEY = "litera.uiAccent";
 
 /** index.css holds each accent's light and dark values, keyed by `data-accent`. */
@@ -18,12 +20,19 @@ export function loadUiAccent(): UiAccent {
   }
 }
 
-export function saveUiAccent(accent: UiAccent): void {
+export function cacheUiAccent(accent: UiAccent): void {
   try {
-    localStorage.setItem(UI_ACCENT_KEY, accent);
+    if (typeof localStorage === "undefined") return;
+    localStorage.setItem(UI_ACCENT_KEY, parseUiAccent(accent));
   } catch {
     // Storage is unavailable: the accent still applies for this run.
   }
+}
+
+export function saveUiAccent(accent: UiAccent): void {
+  const normalized = parseUiAccent(accent);
+  cacheUiAccent(normalized);
+  persistUiPreferences({ uiAccent: normalized });
 }
 
 export function applyUiAccent(accent: UiAccent): void {
