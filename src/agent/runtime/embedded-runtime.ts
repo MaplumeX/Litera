@@ -163,6 +163,13 @@ export class LiteraAgentRuntime {
     if(this.bookId!==bookId)return null;
     return{bookId,sessionId:canonical.id,messages:visibleMessages(session),...sessionNavigation(session),...this.sessionOffSpine(session)};
   }
+  /** Read-only snapshot of any Guided session by id without switching `this.session`. */
+  async loadGuideSession(bookId:string,sessionId:string):Promise<CanonicalGuideSnapshot|null>{
+    if(!bookId||this.bookId!==bookId||!sessionId)return null;
+    const session=this.session?.header.id===sessionId?this.session:await this.sessions.load(bookId,sessionId);
+    if(this.bookId!==bookId)return null;
+    return{bookId,sessionId:session.header.id,messages:visibleMessages(session),...sessionNavigation(session),...this.sessionOffSpine(session)};
+  }
   /** Switch to the Book's canonical Guided session, creating one if none exists yet. */
   async ensureCanonicalGuideSession(requestId?:string):Promise<string|null>{
     if(!this.bookId)return null;
@@ -458,6 +465,8 @@ export class LiteraAgentRuntime {
   async archiveSession(sessionId:string,requestId?:string){if(!this.bookId)return;const bookId=this.bookId;this.cancelMaintenance();const session=this.session?.header.id===sessionId?this.session:await this.sessions.load(bookId,sessionId);if(this.bookId!==bookId)return;const entry=newEntry("session_info",session.leafId,{archived:true});const leaf=await this.sessions.append(bookId,sessionId,session.leafId,[entry]);if(this.bookId!==bookId)return;session.entries.push(entry);session.leafId=leaf;this.emit({type:"session_archived",bookId,sessionId,requestId});}
   /** Archive the current Guided session and start a fresh canonical Guided session for the Book. */
   async restartGuidedSession(sessionId:string,requestId?:string){if(!this.bookId)return;await this.archiveSession(sessionId,requestId);await this.newSession(requestId,"guided");}
+  /** Restore an archived Guided session as the Book's canonical Guided session, archiving any currently active Guided session. */
+  async restoreGuidedSession(sessionId:string,requestId?:string){if(!this.bookId)return;const bookId=this.bookId;this.cancelMaintenance();const sessions=await this.sessions.list(bookId);if(this.bookId!==bookId)return;for(const existing of sessions){if(existing.kind==="guided"&&!existing.archived&&existing.id!==sessionId){await this.archiveSession(existing.id,requestId);if(this.bookId!==bookId)return;}}const session=this.session?.header.id===sessionId?this.session:await this.sessions.load(bookId,sessionId);if(this.bookId!==bookId)return;const entry=newEntry("session_info",session.leafId,{archived:false});const leaf=await this.sessions.append(bookId,sessionId,session.leafId,[entry]);if(this.bookId!==bookId)return;session.entries.push(entry);session.leafId=leaf;this.emit({type:"session_unarchived",bookId,sessionId,requestId});await this.switchSession(sessionId,requestId);}
   /** Snapshot of the open Guided session's active context window and loaded chapter recaps. */
   guideContextStats():GuideContextStats|null{const session=this.session;if(session?.header.kind!=="guided")return null;const windowTarget=guideWindowTarget(this.agent?.state.model.contextWindow??0);return{...guideContextTokens(contextBranch(session)),windowTarget};}
   /** Manually collapse earlier Guided turns out of model context while keeping all chapter recaps. */

@@ -29,6 +29,7 @@ const REFRESH_EVENTS = new Set<AgentEvent["type"]>([
   "guide_recap_added",
   "session_created",
   "session_archived",
+  "session_unarchived",
   "session_deleted",
 ]);
 

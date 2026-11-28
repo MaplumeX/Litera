@@ -409,6 +409,41 @@ describe("Guided sessions in the runtime",()=>{
     expect(created).toEqual(["guided","guided"]);
   });
 
+  it("restores an archived Guided session by archiving the active one, unarchiving the target, and switching to it",async()=>{
+    const store=new Map<string,DecodedPiSession>([
+      ["s-old",{header:{type:"session",version:3,id:"s-old",timestamp:now,cwd:"",kind:"guided"},entries:[{type:"session_info",id:"i1",parentId:null,timestamp:now,archived:true}],leafId:"i1"}],
+      ["s-cur",{header:{type:"session",version:3,id:"s-cur",timestamp:now,cwd:"",kind:"guided"},entries:[],leafId:null}],
+    ]);
+    const events:AgentEvent[]=[];
+    const sessions:SessionPort={
+      create:async()=>store.get("s-cur")!,
+      list:async()=>[
+        {id:"s-cur",title:"当前",createdAt:now,updatedAt:now,kind:"guided"},
+        {id:"s-old",title:"旧归档",createdAt:now,updatedAt:now,kind:"guided",archived:true},
+      ],
+      load:async(_book,id)=>({...store.get(id)!,entries:[...store.get(id)!.entries]}),
+      setLeaf:async(_book,id,leafId)=>{const s=store.get(id)!;s.leafId=leafId;return {...s,entries:[...s.entries]};},
+      delete:async()=>{},
+      append:async(_book,id,_leaf,entries)=>{const s=store.get(id)!;s.entries.push(...entries);s.leafId=entries.at(-1)?.id??s.leafId;return s.leafId;},
+    };
+    const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:2}),toc:async()=>toc,readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:2,fromBlock:0,toBlock:1,totalBlocks:4,text:"chapter"}),guideBlocks:async()=>[],locateGuideBlock:async()=>null,search:async()=>[],close:()=>{}};
+    const runtime=new LiteraAgentRuntime({sessions,book});
+    runtime.subscribe((event)=>{events.push(event);});
+    await runtime.openBook("book",new ArrayBuffer(1));
+    await runtime.switchSession("s-cur");
+
+    // loadGuideSession reads an archived session without switching the active session.
+    const snap=await runtime.loadGuideSession("book","s-old");
+    expect(snap?.sessionId).toBe("s-old");
+
+    await runtime.restoreGuidedSession("s-old");
+    expect(store.get("s-cur")!.entries).toContainEqual(expect.objectContaining({type:"session_info",archived:true}));
+    expect(store.get("s-old")!.entries).toContainEqual(expect.objectContaining({type:"session_info",archived:false}));
+    expect(events).toContainEqual(expect.objectContaining({type:"session_archived",sessionId:"s-cur"}));
+    expect(events).toContainEqual(expect.objectContaining({type:"session_unarchived",sessionId:"s-old"}));
+    expect(events.at(-1)).toMatchObject({type:"session_switched",sessionId:"s-old"});
+  });
+
   it("lets the model search earlier guided explanations and reader questions after a context reset",async()=>{
     const {runtime,batches}=setup(undefined,null,[
       takeStep(),"这段详述了土地财政的制度起源。","title",

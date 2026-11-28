@@ -104,6 +104,9 @@ export interface GuideWorkspaceProps {
     onOpenSettings: () => void;
     onViewArchived: (sessionId: string) => void;
     onReturnToCanonical: () => void;
+    onRenameArchived: (sessionId: string, title: string) => void;
+    onDeleteArchived: (sessionId: string) => void;
+    onRestoreArchived: (sessionId: string) => void;
   }) => ReactNode;
   /** Optional bridge injected when wrapped by another host. */
   bridge?: ReturnType<typeof useGuideBridge>;
@@ -149,6 +152,9 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
       abort,
       newGuidedSession,
       restartGuide,
+      restoreGuide,
+      renameSession,
+      deleteSession,
       contextStats: guideContextStats,
       resetContext: resetGuideContext,
       nextStep: nextGuideStep,
@@ -1215,6 +1221,33 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
             if (canonical) {
               void switchSession(canonical.id).catch((err) => setInvokeError(String(err)));
             }
+          },
+          onRenameArchived: (id, title) => {
+            setInvokeError(null);
+            void renameSession?.(id, title).catch((err) => setInvokeError(String(err)));
+          },
+          onDeleteArchived: (id) => {
+            setInvokeError(null);
+            void deleteSession?.(id)
+              .then(() => {
+                if (viewingArchivedId === id) {
+                  setViewingArchivedId(null);
+                  if (canonical && canonical.id !== id) {
+                    return switchSession(canonical.id);
+                  }
+                }
+              })
+              .catch((err) => setInvokeError(String(err)));
+          },
+          onRestoreArchived: (id) => {
+            setInvokeError(null);
+            setViewingArchivedId(null);
+            setFocusedRunId(null);
+            autoInitRef.current = id;
+            void restoreGuide?.(id).catch((err) => {
+              autoInitRef.current = null;
+              setInvokeError(String(err));
+            });
           },
         })
       : null;

@@ -9,15 +9,21 @@ function mockRuntimePort(): GuideRuntimePort {
     syncBook: vi.fn(),
     listSessions: vi.fn(),
     loadCanonicalGuide: vi.fn(),
+    loadGuideSession: vi.fn(),
     ensureCanonicalGuideSession: vi.fn(async () => "guided-1"),
     newSession: vi.fn(),
     switchSession: vi.fn(),
     switchBranchAtAnchor: vi.fn(),
     switchSideThreadBranchAtAnchor: vi.fn(),
+    selectStepRevision: vi.fn(),
+    undoLatestGuidedStep: vi.fn(),
+    dismissIncompleteTailStep: vi.fn(),
+    rollbackToChapterRun: vi.fn(),
     deleteSession: vi.fn(),
     renameSession: vi.fn(),
     updateSessionConfig: vi.fn(),
     restartGuidedSession: vi.fn(),
+    restoreGuidedSession: vi.fn(),
     guideContextStats: vi.fn(() => ({ recapCount: 2, activeTokens: 1200, windowTarget: 35000 })),
     resetGuideContext: vi.fn(),
     nextGuideStep: vi.fn(),
@@ -109,5 +115,22 @@ describe("GuideController", () => {
     const deep = guideRequestContext(toc, null, undefined, { pace: "deep", styleOverride: "Use bullet chains" });
     expect(deep).toContain("Explanation pace for this step: deep");
     expect(deep).toContain("Additional style guidance for this step: Use bullet chains");
+  });
+
+  it("forwards archived guide management actions (rename, delete, restore, loadGuideSession)", async () => {
+    const port = mockRuntimePort();
+    const controller = new GuideController(port);
+
+    await controller.renameSession("g-old", "重命名", "r-rename");
+    expect(port.renameSession).toHaveBeenCalledWith("g-old", "重命名", "r-rename");
+
+    await controller.deleteSession("g-old", "r-del");
+    expect(port.deleteSession).toHaveBeenCalledWith("g-old", "r-del");
+
+    await controller.restoreGuide("g-old", "r-restore");
+    expect(port.restoreGuidedSession).toHaveBeenCalledWith("g-old", "r-restore");
+
+    await controller.loadGuideSession("book-1", "g-old");
+    expect(port.loadGuideSession).toHaveBeenCalledWith("book-1", "g-old");
   });
 });

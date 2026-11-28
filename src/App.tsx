@@ -33,14 +33,15 @@ import { ChatWorkspace, type ChatWorkspaceHandle } from "@/components/chat/ChatW
 import { GuideWorkspace, type GuideWorkspaceHandle } from "@/components/guide/GuideWorkspace";
 import { GuideNavRail } from "@/components/guide/GuideNavRail";
 import { embeddedAgentRuntime } from "@/agent/runtime/embedded-runtime";
+import { guideController } from "@/agent/runtime/guide-controller";
 import { useGuideDocument } from "@/lib/use-guide-document";
-import type { GuideDocument, GuideStepNode } from "@/lib/guide-document";
+import { projectGuideDocument, type GuideDocument, type GuideStepNode } from "@/lib/guide-document";
 import {
   defaultGuideExportFileName,
   formatGuideExportMarkdown,
   markdownToPlainProse,
 } from "@/lib/guide-export";
-import type { GuideSelection } from "@/types/agent";
+import type { AgentSessionSummary, GuideSelection } from "@/types/agent";
 import type { QuoteLocation } from "@/agent/book/book-content";
 import type { GuideBlockTarget } from "@/lib/guide-marks";
 import { LibraryView } from "@/components/LibraryView";
@@ -478,6 +479,42 @@ function App() {
       }
     },
     [bookTitle, currentBook?.title, t],
+  );
+
+  const handleExportArchivedGuide = useCallback(
+    async (archived: AgentSessionSummary) => {
+      const currentBookId = fileData?.bookId;
+      if (!currentBookId) return;
+      try {
+        const snapshot = await guideController.loadGuideSession(currentBookId, archived.id);
+        if (!snapshot) return;
+        const doc = projectGuideDocument({
+          bookId: snapshot.bookId,
+          sessionId: snapshot.sessionId,
+          messages: snapshot.messages,
+          branchAnchors: snapshot.anchors,
+          branchNavigation: snapshot.navigation,
+          sideThreads: snapshot.sideThreads,
+          stepRevisions: snapshot.stepRevisions,
+        });
+        const baseTitle = bookTitle || currentBook?.title || "Litera";
+        const exportTitle = archived.title.trim()
+          ? `${baseTitle} - ${archived.title.trim()}`
+          : baseTitle;
+        const contents = formatGuideExportMarkdown(doc, {
+          bookTitle: exportTitle,
+          includeSideQuestions: true,
+        });
+        const defaultName = defaultGuideExportFileName(exportTitle);
+        await invoke("save_text_file", { defaultName, contents });
+        setGuideNotice({ message: t("guide.navExportSuccess") });
+      } catch (error) {
+        const msg = invokeErrorMessage(error);
+        if (/cancelled|No file selected/i.test(msg)) return;
+        setGuideNotice({ tone: "error", message: t("guide.navExportFailed", { message: msg }) });
+      }
+    },
+    [bookTitle, currentBook?.title, fileData?.bookId, t],
   );
 
   const {
@@ -1212,6 +1249,10 @@ function App() {
                     onOpenSettings={ctx.onOpenSettings}
                     onViewArchived={ctx.onViewArchived}
                     onReturnToCanonical={ctx.onReturnToCanonical}
+                    onRenameArchived={ctx.onRenameArchived}
+                    onDeleteArchived={ctx.onDeleteArchived}
+                    onRestoreArchived={ctx.onRestoreArchived}
+                    onExportArchived={(archived) => void handleExportArchivedGuide(archived)}
                     onExportMarkdown={() => void handleExportGuideMarkdown(ctx.document)}
                   />
                 )}
