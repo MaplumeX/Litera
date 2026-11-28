@@ -26,6 +26,7 @@ import {
   type TypographyKey,
 } from "@/lib/reader-styles";
 import { usePreferences, resolveTheme, themeToClassName, type AppPreferences } from "@/lib/preferences";
+import { flushUiPreferences } from "@/lib/ui-preferences";
 import { importedFontFaceCss, useImportedFonts } from "@/lib/imported-fonts";
 import type {
   AnnotationsFile,
@@ -238,6 +239,7 @@ export function useReaderSession(options: UseReaderSessionOptions = {}) {
           persistReaderMode.flush(),
           persistLayout.flush(),
           flushPreferences(),
+          flushUiPreferences(),
           readingTracker.flush(),
         ]);
       } catch (error) {

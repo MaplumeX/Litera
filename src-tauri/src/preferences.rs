@@ -10,8 +10,11 @@ use crate::library::{
 };
 
 const PREFERENCES_SCHEMA_VERSION: u32 = 1;
+const UI_PREFERENCES_SCHEMA_VERSION: u32 = 1;
 const VALID_THEMES: [&str; 3] = ["light", "dark", "system"];
 const VALID_TEXT_ALIGNS: [&str; 2] = ["start", "justify"];
+const VALID_UI_ACCENTS: [&str; 5] = ["cobalt", "violet", "pine", "amber", "graphite"];
+const UI_FONT_SIZE_RANGE: (i64, i64) = (12, 20);
 const FONT_SIZE_RANGE: (f64, f64) = (12.0, 32.0);
 const LINE_HEIGHT_RANGE: (f64, f64) = (1.2, 2.4);
 const CONTENT_WIDTH_RANGE: (f64, f64) = (28.0, 60.0);
@@ -310,6 +313,82 @@ impl PreferencesPatch {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UiPreferencesData {
+    #[serde(default = "default_ui_preferences_schema_version")]
+    schema_version: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ui_font_size: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ui_font_family: Option<String>,
+    /// `Some("")` means explicitly reset to follow the interface font.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chat_font_family: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ui_accent: Option<String>,
+}
+
+fn default_ui_preferences_schema_version() -> u32 {
+    UI_PREFERENCES_SCHEMA_VERSION
+}
+
+impl Default for UiPreferencesData {
+    fn default() -> Self {
+        Self {
+            schema_version: UI_PREFERENCES_SCHEMA_VERSION,
+            ui_font_size: None,
+            ui_font_family: None,
+            chat_font_family: None,
+            ui_accent: None,
+        }
+    }
+}
+
+impl UiPreferencesData {
+    fn sanitized(self) -> Self {
+        let ui_font_size = self
+            .ui_font_size
+            .map(|size| size.clamp(UI_FONT_SIZE_RANGE.0, UI_FONT_SIZE_RANGE.1));
+        let ui_font_family = self.ui_font_family.and_then(|value| {
+            let trimmed = value.trim().to_string();
+            is_valid_font_family(&trimmed).then_some(trimmed)
+        });
+        let chat_font_family = self.chat_font_family.and_then(|value| {
+            let trimmed = value.trim().to_string();
+            (trimmed.is_empty() || is_valid_font_family(&trimmed)).then_some(trimmed)
+        });
+        let ui_accent = self
+            .ui_accent
+            .filter(|accent| VALID_UI_ACCENTS.contains(&accent.as_str()));
+        Self {
+            schema_version: UI_PREFERENCES_SCHEMA_VERSION,
+            ui_font_size,
+            ui_font_family,
+            chat_font_family,
+            ui_accent,
+        }
+    }
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub(crate) struct UiPreferencesPatch {
+    ui_font_size: Option<i64>,
+    ui_font_family: Option<String>,
+    chat_font_family: Option<String>,
+    ui_accent: Option<String>,
+}
+
+impl UiPreferencesPatch {
+    fn is_empty(&self) -> bool {
+        self.ui_font_size.is_none()
+            && self.ui_font_family.is_none()
+            && self.chat_font_family.is_none()
+            && self.ui_accent.is_none()
+    }
+}
+
 #[derive(Clone)]
 pub struct PreferencesStore {
     root: PathBuf,
@@ -340,6 +419,10 @@ impl PreferencesStore {
 
     fn preferences_path(&self) -> PathBuf {
         self.root.join("preferences.json")
+    }
+
+    fn ui_preferences_path(&self) -> PathBuf {
+        self.root.join("ui-preferences.json")
     }
 
     fn ensure_file(&self) -> AppResult<()> {
@@ -475,6 +558,98 @@ impl PreferencesStore {
         }
         self.write_unlocked(&data)
     }
+
+    fn read_ui_unlocked(&self) -> AppResult<Option<UiPreferencesData>> {
+        match std::fs::read(self.ui_preferences_path()) {
+            Ok(bytes) => match serde_json::from_slice::<UiPreferencesData>(&bytes) {
+                Ok(data) => Ok(Some(data.sanitized())),
+                Err(error) => {
+                    eprintln!("[preferences] Corrupt ui-preferences.json ignored: {error}");
+                    Ok(None)
+                }
+            },
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(AppError::storage_io(format!(
+                "Failed to read ui-preferences.json: {error}"
+            ))),
+        }
+    }
+
+    fn write_ui_unlocked(&self, data: &UiPreferencesData) -> AppResult<()> {
+        let json = serde_json::to_vec_pretty(data).map_err(|e| {
+            AppError::storage_io(format!("Failed to serialize ui-preferences: {e}"))
+        })?;
+        atomic_write(&self.ui_preferences_path(), &json, "ui-preferences.json")?;
+        sync_parent_directory(&self.root, "app data directory")
+    }
+
+    pub fn get_ui(&self) -> AppResult<Option<UiPreferencesData>> {
+        if !self.is_available() {
+            return Ok(None);
+        }
+        let _guard = self
+            .gate
+            .lock()
+            .map_err(|_| AppError::storage_io("Preferences lock is poisoned"))?;
+        self.read_ui_unlocked()
+    }
+
+    pub(crate) fn save_ui(&self, patch: UiPreferencesPatch) -> AppResult<()> {
+        validate_ui_patch(&patch)?;
+        if !self.is_available() {
+            return Ok(());
+        }
+        let _guard = self
+            .gate
+            .lock()
+            .map_err(|_| AppError::storage_io("Preferences lock is poisoned"))?;
+        let mut data = self.read_ui_unlocked()?.unwrap_or_default();
+        if let Some(ui_font_size) = patch.ui_font_size {
+            data.ui_font_size = Some(ui_font_size);
+        }
+        if let Some(ui_font_family) = patch.ui_font_family {
+            data.ui_font_family = Some(ui_font_family.trim().to_string());
+        }
+        if let Some(chat_font_family) = patch.chat_font_family {
+            data.chat_font_family = Some(chat_font_family.trim().to_string());
+        }
+        if let Some(ui_accent) = patch.ui_accent {
+            data.ui_accent = Some(ui_accent);
+        }
+        self.write_ui_unlocked(&data)
+    }
+}
+
+fn validate_ui_patch(patch: &UiPreferencesPatch) -> AppResult<()> {
+    if patch.is_empty() {
+        return Err(AppError::invalid_input(
+            "At least one UI preference field is required",
+        ));
+    }
+    if let Some(ui_font_size) = patch.ui_font_size {
+        if !(UI_FONT_SIZE_RANGE.0..=UI_FONT_SIZE_RANGE.1).contains(&ui_font_size) {
+            return Err(AppError::invalid_input(
+                "uiFontSize must be an integer between 12 and 20",
+            ));
+        }
+    }
+    if let Some(ui_font_family) = &patch.ui_font_family {
+        if !is_valid_font_family(ui_font_family.trim()) {
+            return Err(AppError::invalid_input("Unsupported uiFontFamily"));
+        }
+    }
+    if let Some(chat_font_family) = &patch.chat_font_family {
+        let trimmed = chat_font_family.trim();
+        if !trimmed.is_empty() && !is_valid_font_family(trimmed) {
+            return Err(AppError::invalid_input("Unsupported chatFontFamily"));
+        }
+    }
+    if let Some(ui_accent) = &patch.ui_accent {
+        if !VALID_UI_ACCENTS.contains(&ui_accent.as_str()) {
+            return Err(AppError::invalid_input("Unsupported uiAccent"));
+        }
+    }
+    Ok(())
 }
 
 fn validate_patch(patch: &PreferencesPatch) -> AppResult<()> {
@@ -617,6 +792,37 @@ pub async fn save_preferences(
     })
     .await
     .map_err(|e| AppError::storage_io(format!("Preferences write worker failed: {e}")))?
+}
+
+#[tauri::command]
+pub async fn get_ui_preferences(
+    store: tauri::State<'_, PreferencesStore>,
+) -> AppResult<Option<UiPreferencesData>> {
+    let store = store.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || store.get_ui())
+        .await
+        .map_err(|e| AppError::storage_io(format!("UI preferences read worker failed: {e}")))?
+}
+
+#[tauri::command]
+pub async fn save_ui_preferences(
+    store: tauri::State<'_, PreferencesStore>,
+    ui_font_size: Option<i64>,
+    ui_font_family: Option<String>,
+    chat_font_family: Option<String>,
+    ui_accent: Option<String>,
+) -> AppResult<()> {
+    let store = store.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        store.save_ui(UiPreferencesPatch {
+            ui_font_size,
+            ui_font_family,
+            chat_font_family,
+            ui_accent,
+        })
+    })
+    .await
+    .map_err(|e| AppError::storage_io(format!("UI preferences write worker failed: {e}")))?
 }
 
 #[cfg(desktop)]
@@ -1182,5 +1388,118 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(&path).expect("read")).expect("parse");
         assert!(value.get("overrideFont").is_none());
         assert!(value.get("overrideLayout").is_none());
+    }
+
+    #[test]
+    fn ui_preferences_round_trip_and_stay_separate_from_preferences_json() {
+        let (directory, store) = test_store();
+        assert_eq!(store.get_ui().expect("empty ui prefs"), None);
+
+        store
+            .save_ui(UiPreferencesPatch {
+                chat_font_family: Some("LXGW WenKai".to_string()),
+                ui_font_family: Some("Noto Sans CJK SC".to_string()),
+                ui_font_size: Some(18),
+                ui_accent: Some("pine".to_string()),
+            })
+            .expect("save ui prefs");
+
+        let prefs_json: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(directory.path().join("preferences.json"))
+                .expect("read preferences.json"),
+        )
+        .expect("parse preferences.json");
+        assert!(prefs_json.get("chatFontFamily").is_none());
+        assert!(prefs_json.get("uiFontFamily").is_none());
+
+        drop(store);
+        let recovered =
+            PreferencesStore::initialize(directory.path().to_path_buf()).expect("reinit");
+        let loaded = recovered.get_ui().expect("get_ui").expect("some ui prefs");
+        assert_eq!(loaded.chat_font_family.as_deref(), Some("LXGW WenKai"));
+        assert_eq!(loaded.ui_font_family.as_deref(), Some("Noto Sans CJK SC"));
+        assert_eq!(loaded.ui_font_size, Some(18));
+        assert_eq!(loaded.ui_accent.as_deref(), Some("pine"));
+
+        // Explicit reset to follow-interface stores an empty string while keeping other fields.
+        recovered
+            .save_ui(UiPreferencesPatch {
+                chat_font_family: Some(String::new()),
+                ..UiPreferencesPatch::default()
+            })
+            .expect("reset chat font");
+        let after_reset = recovered.get_ui().expect("get_ui").expect("some ui prefs");
+        assert_eq!(after_reset.chat_font_family.as_deref(), Some(""));
+        assert_eq!(after_reset.ui_font_family.as_deref(), Some("Noto Sans CJK SC"));
+        assert_eq!(after_reset.ui_font_size, Some(18));
+        assert_eq!(after_reset.ui_accent.as_deref(), Some("pine"));
+    }
+
+    #[test]
+    fn ui_preferences_tolerate_unknown_future_fields_and_corrupt_files() {
+        let (directory, store) = test_store();
+        let path = directory.path().join("ui-preferences.json");
+        std::fs::write(
+            &path,
+            br#"{"schemaVersion":1,"chatFontFamily":"LXGW WenKai","futureField":true}"#,
+        )
+        .expect("write future fields");
+
+        let loaded = store.get_ui().expect("get_ui").expect("some ui prefs");
+        assert_eq!(loaded.chat_font_family.as_deref(), Some("LXGW WenKai"));
+
+        std::fs::write(&path, b"{not json").expect("corrupt ui prefs");
+        assert_eq!(store.get_ui().expect("corrupt returns none"), None);
+
+        store
+            .save_ui(UiPreferencesPatch {
+                chat_font_family: Some("Source Han Serif".to_string()),
+                ..UiPreferencesPatch::default()
+            })
+            .expect("overwrite corrupt file");
+        let healed = store.get_ui().expect("get_ui").expect("healed");
+        assert_eq!(healed.chat_font_family.as_deref(), Some("Source Han Serif"));
+    }
+
+    #[test]
+    fn ui_preferences_reject_invalid_values() {
+        let (_directory, store) = test_store();
+        assert_eq!(
+            store
+                .save_ui(UiPreferencesPatch::default())
+                .expect_err("empty patch")
+                .code,
+            crate::error::AppErrorCode::InvalidInput
+        );
+        assert_eq!(
+            store
+                .save_ui(UiPreferencesPatch {
+                    ui_font_size: Some(99),
+                    ..UiPreferencesPatch::default()
+                })
+                .expect_err("bad size")
+                .code,
+            crate::error::AppErrorCode::InvalidInput
+        );
+        assert_eq!(
+            store
+                .save_ui(UiPreferencesPatch {
+                    chat_font_family: Some("evil;font".to_string()),
+                    ..UiPreferencesPatch::default()
+                })
+                .expect_err("bad chat font")
+                .code,
+            crate::error::AppErrorCode::InvalidInput
+        );
+        assert_eq!(
+            store
+                .save_ui(UiPreferencesPatch {
+                    ui_accent: Some("hotpink".to_string()),
+                    ..UiPreferencesPatch::default()
+                })
+                .expect_err("bad accent")
+                .code,
+            crate::error::AppErrorCode::InvalidInput
+        );
     }
 }

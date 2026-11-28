@@ -14,6 +14,7 @@ import {
   loadUiFontSize,
 } from "@/lib/ui-chrome-font";
 import { applyUiAccent, loadUiAccent } from "@/lib/ui-accent";
+import { hydrateUiPreferences } from "@/lib/ui-preferences";
 import "@fontsource-variable/geist/wght.css";
 import "./index.css";
 
@@ -22,6 +23,7 @@ primeImportedFonts();
 applyUiChrome(loadUiFontSize(), loadUiFontFamily());
 applyUiAccent(loadUiAccent());
 applyChatFont(loadChatFontFamily());
+void hydrateUiPreferences();
 void refreshImportedFonts();
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
