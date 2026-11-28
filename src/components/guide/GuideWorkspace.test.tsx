@@ -713,4 +713,18 @@ describe("GuideWorkspace", () => {
     fireEvent.click(screen.getByTestId("guide-chapter-action-reread"));
     await waitFor(() => expect(guideStepAtHref).toHaveBeenCalledWith("ch1.xhtml"));
   });
+
+  it("scopes font-chat to the guide content card so the nav rail keeps the interface font", () => {
+    render(
+      <GuideWorkspace
+        bookId="book-1"
+        variant="workspace"
+        navRailOpen
+        renderNavRail={() => <aside data-testid="custom-nav-rail">nav</aside>}
+      />,
+    );
+
+    expect(screen.getByTestId("custom-nav-rail").closest(".font-chat")).toBeNull();
+    expect(screen.getByTestId("guide-document-scroll").closest(".font-chat")).not.toBeNull();
+  });
 });
