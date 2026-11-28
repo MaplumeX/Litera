@@ -796,8 +796,15 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
         if (!original || original.role !== "user") return;
         const rawReq =
           original.guideRequest ?? (original.guide ? { step: original.guide } : undefined);
+        const withPace: GuideRequest | undefined = rawReq
+          ? {
+              ...rawReq,
+              ...(pace !== "standard" ? { pace } : {}),
+            }
+          : undefined;
+        if (withPace && pace === "standard") delete withPace.pace;
         const guideRequest =
-          rawReq && transformGuideRequest ? transformGuideRequest(rawReq) : rawReq;
+          withPace && transformGuideRequest ? transformGuideRequest(withPace) : withPace;
         setEditingQa(null);
         setEditDraft("");
         setInvokeError(null);
@@ -806,7 +813,7 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
         try {
           const legacyGuide = Boolean(original.guide && !original.guideRequest);
           const requestChanged =
-            Boolean(rawReq && transformGuideRequest) &&
+            Boolean(rawReq) &&
             JSON.stringify(guideRequest) !== JSON.stringify(rawReq);
           if (legacyGuide || requestChanged) {
             await editPrompt(

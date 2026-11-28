@@ -429,7 +429,7 @@ describe("GuideWorkspace", () => {
     expect(editPrompt).not.toHaveBeenCalled();
   });
 
-  it("auto-collapses an older aborted guided step once a newer committed step succeeds", () => {
+  it("hides historical mid-spine aborted guided attempts on earlier chapters once a newer committed step succeeds", () => {
     mockState = makeGuidedState({
       messages: [
         { role: "user", content: "继续带读", guideRequest: {} },
@@ -469,15 +469,11 @@ describe("GuideWorkspace", () => {
     expect(screen.getAllByTestId("guide-step-section")).toHaveLength(1);
     expect(screen.getByText("第二章完整讲解。")).toBeTruthy();
 
-    // Navigate back to Chapter 1 where the superseded interrupted step sits.
+    // Navigate back to Chapter 1: superseded interrupted attempts must not pollute Chapter 1.
     fireEvent.click(screen.getByRole("button", { name: "上一章" }));
-
-    // Superseded interrupted step collapses by default so the continuous reading flow stays clean.
+    expect(screen.getByText("第一章讲解。")).toBeTruthy();
+    expect(screen.queryByTestId("guide-incomplete-step")).toBeNull();
     expect(screen.queryByText("旧的中断半截内容")).toBeNull();
-
-    // Expanding it reveals the preserved aborted partial output.
-    fireEvent.click(screen.getByRole("button", { name: "展开未完成的带读" }));
-    expect(screen.getByText("旧的中断半截内容")).toBeTruthy();
   });
 
   it("keeps chapter follow-up questions inside the viewed historical chapter and passes its run anchor without jumping to latest", async () => {

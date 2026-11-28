@@ -646,15 +646,13 @@ export function projectGuideDocument({
   // Trailing unanswered user message (e.g., optimistic message right before assistant starts).
   flushPendingUser(true);
 
-  // Suppress empty historical incomplete step attempts wedged between committed
-  // steps; only keep tail attempts or historical attempts with substantive output.
+  // Only surface uncommitted guided-step attempts while they sit at the active
+  // spine tail (or are actively streaming); historical attempts superseded by
+  // newer committed steps never pollute earlier chapters.
   const lastStepIndex = steps.length - 1;
   const visibleIncompleteSteps = incompleteSteps.filter((attempt) => {
     const isAtTail = (attempt.afterStepIndex ?? -1) === lastStepIndex;
-    if (isAtTail || attempt.streaming) return true;
-    const hasText = attempt.content.trim().length > 0;
-    const hasTools = (attempt.blocks ?? []).some((block) => block.type === "toolCall");
-    return hasText || hasTools;
+    return isAtTail || attempt.streaming;
   });
 
   // Mark strictly the spine's final committed step (when no tail incomplete attempt sits after it)

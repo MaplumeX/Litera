@@ -324,12 +324,12 @@ export class LiteraAgentRuntime {
     this.agent=null;
     this.emit({type:"step_revision_selected",bookId,sessionId,targetAnchorId,revisionId,requestId,...this.sessionOffSpine(current)});
   }
-  private async rewindSpineTo(bookId:string,session:DecodedPiSession,targetLeafId:string|null):Promise<DecodedPiSession>{
+  private async rewindSpineTo(bookId:string,session:DecodedPiSession,targetLeafId:string|null,expectedLeafId:string|null=session.leafId):Promise<DecodedPiSession>{
     if(targetLeafId){
       return this.sessions.setLeaf(bookId,session.header.id,targetLeafId);
     }
     const resetEntry=newEntry("guide_reset",null,{});
-    const leaf=await this.sessions.append(bookId,session.header.id,session.leafId,[resetEntry]);
+    const leaf=await this.sessions.append(bookId,session.header.id,expectedLeafId,[resetEntry]);
     return {...session,entries:[...session.entries,resetEntry],leafId:leaf};
   }
   /** Undo strictly the latest committed Guided step on the spine so the reader can re-pick its range. */
@@ -364,6 +364,50 @@ export class LiteraAgentRuntime {
     this.session=updated;this.agent=null;
     this.emit({type:"branch_switched",bookId,sessionId,requestId,messages:visibleMessages(updated),...sessionNavigation(updated),...this.sessionOffSpine(updated)});
   }
+  private findIncompleteGuidedTailLeaf(session:DecodedPiSession):{found:true;targetLeafId:string|null}|{found:false}{
+    const spine=activeBranch(session);
+    let end=spine.length;
+    let found=false;
+    while(end>0){
+      let lastUserIdx=-1;
+      for(let i=end-1;i>=0;i-=1){
+        const role=spine[i].type==="message"?(spine[i].message as {role?:unknown}|undefined)?.role:undefined;
+        if(role==="user"){lastUserIdx=i;break;}
+      }
+      if(lastUserIdx<0)break;
+      const segment=spine.slice(lastUserIdx,end);
+      const hasCommitted=segment.some((entry)=>decodeGuide(entry.guide)!==null);
+      if(hasCommitted)break;
+      const userEntry=spine[lastUserIdx];
+      const isGuideReq=userEntry.guideRequest!==undefined&&userEntry.guideRequest!==null;
+      const calledGuideStep=segment.slice(1).some((entry)=>{
+        if(entry.type!=="message")return false;
+        const content=(entry.message as {content?:unknown}|undefined)?.content;
+        return Array.isArray(content)&&content.some((part)=>typeof part==="object"&&part!==null&&(part as {type?:unknown;name?:unknown}).type==="toolCall"&&(part as {name?:unknown}).name==="guide_step");
+      });
+      if(!isGuideReq&&!calledGuideStep)break;
+      let beforeTurn=lastUserIdx-1;
+      if(beforeTurn>=0&&spine[beforeTurn].type==="custom_message"&&spine[beforeTurn].customType==="readingContext")beforeTurn-=1;
+      if(beforeTurn>=0&&isGuideWindowCutEntry(spine[beforeTurn])&&spine[beforeTurn].reason==="jump"&&spine[beforeTurn].firstKeptEntryId===null)beforeTurn-=1;
+      found=true;
+      end=beforeTurn+1;
+    }
+    if(!found)return {found:false};
+    return {found:true,targetLeafId:end>0?spine[end-1].id:null};
+  }
+  private hasVisibleTurnOutput(messages:readonly PiMessage[]):boolean{
+    for(const message of messages){
+      if(message.role!=="assistant")continue;
+      const content=(message as AssistantMessage).content;
+      if(Array.isArray(content)){
+        for(const part of content){
+          if(part.type==="text"&&typeof part.text==="string"&&part.text.trim().length>0)return true;
+          if(part.type==="thinking"&&typeof part.thinking==="string"&&part.thinking.trim().length>0)return true;
+        }
+      }
+    }
+    return false;
+  }
   /** Dismiss an uncommitted (aborted/errored/replied-without-step) tail attempt off the active spine. */
   async dismissIncompleteTailStep(sessionId:string,requestId?:string){
     if(!this.bookId)throw new Error("No book is open");
@@ -374,27 +418,9 @@ export class LiteraAgentRuntime {
     this.cancelMaintenance();
     await this.maintenance?.done;
     if(this.bookId!==bookId||this.session!==current)return;
-    const spine=activeBranch(current);
-    let lastUserIdx=-1;
-    for(let i=spine.length-1;i>=0;i-=1){
-      const role=spine[i].type==="message"?(spine[i].message as {role?:unknown}|undefined)?.role:undefined;
-      if(role==="user"){lastUserIdx=i;break;}
-    }
-    if(lastUserIdx<0)throw new Error("No incomplete guided attempt to dismiss");
-    const userEntry=spine[lastUserIdx];
-    const hasCommitted=spine.slice(lastUserIdx).some((entry)=>decodeGuide(entry.guide)!==null);
-    if(hasCommitted)throw new Error("Latest turn already committed a guided step");
-    const isGuideReq=userEntry.guideRequest!==undefined&&userEntry.guideRequest!==null;
-    const calledGuideStep=spine.slice(lastUserIdx+1).some((entry)=>{
-      if(entry.type!=="message")return false;
-      const content=(entry.message as {content?:unknown}|undefined)?.content;
-      return Array.isArray(content)&&content.some((part)=>typeof part==="object"&&part!==null&&(part as {type?:unknown;name?:unknown}).type==="toolCall"&&(part as {name?:unknown}).name==="guide_step");
-    });
-    if(!isGuideReq&&!calledGuideStep)throw new Error("Latest turn is not an incomplete guided attempt");
-    let beforeTurn=lastUserIdx-1;
-    if(beforeTurn>=0&&spine[beforeTurn].type==="custom_message"&&spine[beforeTurn].customType==="readingContext")beforeTurn-=1;
-    const targetLeafId=beforeTurn>=0?spine[beforeTurn].id:null;
-    const updated=await this.rewindSpineTo(bookId,current,targetLeafId);
+    const tail=this.findIncompleteGuidedTailLeaf(current);
+    if(!tail.found)throw new Error("No incomplete guided attempt to dismiss");
+    const updated=await this.rewindSpineTo(bookId,current,tail.targetLeafId);
     if(this.bookId!==bookId||this.session!==current)return;
     this.session=updated;this.agent=null;
     this.emit({type:"branch_switched",bookId,sessionId,requestId,messages:visibleMessages(updated),...sessionNavigation(updated),...this.sessionOffSpine(updated)});
@@ -472,6 +498,16 @@ export class LiteraAgentRuntime {
         // system prompt; carry it onto the new branch.
         if(configBefore&&configBefore.systemPrompt!==(sessionConfig(session)?.systemPrompt??""))carriedConfig=configBefore;
         this.emit({type:"session_rewound",bookId:promptBookId,sessionId:session.header.id,promptId,requestId,messages:visibleMessages({...session,leafId:session.leafId})});
+      }else if(session.header.kind==="guided"&&context.guideRequest!==undefined){
+        // Starting a new guided step automatically supersedes any uncommitted
+        // (aborted/errored/replied-without-step) attempt sitting at the spine tail.
+        const incompleteTail=this.findIncompleteGuidedTailLeaf(session);
+        if(incompleteTail.found){
+          const configBefore=sessionConfig(session);
+          rewoundFrom=persistedLeaf;session.leafId=incompleteTail.targetLeafId;this.agent=null;
+          if(configBefore&&configBefore.systemPrompt!==(sessionConfig(session)?.systemPrompt??""))carriedConfig=configBefore;
+          this.emit({type:"session_rewound",bookId:promptBookId,sessionId:session.header.id,promptId,requestId,messages:visibleMessages({...session,leafId:session.leafId})});
+        }
       }
       const isFirstTurn=!activeBranch(session).some((entry)=>entry.type==="message"&&((entry.message as {role?:unknown})?.role==="user"));
       const configAtStart=this.configRevision; const config=await this.loadConfig();if(this.bookId!==promptBookId)throw new Error("Book context changed");
@@ -495,6 +531,7 @@ export class LiteraAgentRuntime {
       }
       const readingContext=[guideState,requested,...(guideRequest?[]:[chapterAside(toc,context.chapterHref),context.selection?`Selected text: ${context.selection}`:""])].filter(Boolean).join("\n\n");
       let expectedLeaf=persistedLeaf;
+      const leafBeforeJump=session.leafId;
       if(preJumpCut){
         // Jumping to a non-adjacent chapter clears prior chapter's short-term turns while keeping all recaps.
         const jumpEntry=newEntry(GUIDE_WINDOW_CUT,session.leafId,{firstKeptEntryId:null,reason:"jump"});
@@ -509,6 +546,8 @@ export class LiteraAgentRuntime {
       this.promptAgent=agent;if(configAtStart===this.configRevision)this.agent=agent;
       compactedBeforePrompt=await this.maintainContext(agent,session,promptBookId,promptAbort.signal);
       if(this.bookId!==promptBookId)throw new Error("Agent context changed");
+      if(compactedBeforePrompt)expectedLeaf=session.leafId;
+      const leafBeforeTurn=preJumpCut?leafBeforeJump:session.leafId;
       let before=agent.state.messages.length;
       const pendingEntries:PiSessionEntry[]=[];let pendingParent=session.leafId;
       if(carriedConfig){const configEntry=newEntry("session_config",pendingParent,{systemPrompt:carriedConfig.systemPrompt});pendingEntries.push(configEntry);pendingParent=configEntry.id;}
@@ -565,9 +604,14 @@ export class LiteraAgentRuntime {
         entries.push(jumpEntry);
         parent=jumpEntry.id;
       }
-      if(entries.length){session.leafId=await this.sessions.append(promptBookId,session.header.id,session.leafId,entries);session.entries.push(...entries);if(entries.some(isGuideWindowCutEntry)){const system=agent.state.messages[0];const ctx=piContextMessages(session,this.activePreferredRevisions(session));agent.state.messages=system?.role==="system"?[system,...ctx]:ctx;}}
       const aborted=completed.some((message)=>message.role==="assistant"&&message.stopReason==="aborted");
       const errored=finalAssistant.stopReason==="error";
+      const autoCleanZeroOutputAbort=aborted&&!errored&&session.header.kind==="guided"&&(guideRequest!==undefined||this.turnSteps.length>0)&&!this.hasVisibleTurnOutput(completed);
+      if(autoCleanZeroOutputAbort){
+        const rewound=await this.rewindSpineTo(promptBookId,session,leafBeforeTurn);
+        if(this.bookId!==promptBookId)throw new Error("Agent context changed");
+        session=rewound;this.session=rewound;this.agent=null;
+      }else if(entries.length){session.leafId=await this.sessions.append(promptBookId,session.header.id,session.leafId,entries);session.entries.push(...entries);if(entries.some(isGuideWindowCutEntry)){const system=agent.state.messages[0];const ctx=piContextMessages(session,this.activePreferredRevisions(session));agent.state.messages=system?.role==="system"?[system,...ctx]:ctx;}}
       const finalMessages=visibleMessages(session);const finalNavigation=sessionNavigation(session);const finalOffSpine=this.sessionOffSpine(session);
       // The answer is complete: unlock the input first, then maintain the context in the background.
       this.emit(aborted?{type:"prompt_aborted",bookId:promptBookId,sessionId:session.header.id,promptId,requestId,messages:finalMessages,...finalNavigation,...finalOffSpine}:{type:"prompt_end",bookId:promptBookId,sessionId:session.header.id,promptId,messages:finalMessages,...finalNavigation,...finalOffSpine});
@@ -606,6 +650,14 @@ export class LiteraAgentRuntime {
       const target=visibleMessageEntries(session)[userMessageIndex];
       const targetMessage=target?.message as {role?:unknown;content?:unknown}|undefined;
       if(!target||targetMessage?.role!=="user")throw new Error(EDIT_TARGET_ERROR);
+      const priorSpine=activeBranch(session);
+      const targetSpineIdx=priorSpine.findIndex((entry)=>entry.id===target.id);
+      const targetHadCommittedStep=targetSpineIdx>=0&&priorSpine.slice(targetSpineIdx).some((entry)=>decodeGuide(entry.guide)!==null);
+      const isUncommittedGuidedRetry=session.header.kind==="guided"&&!targetHadCommittedStep&&(target.guideRequest!==undefined&&target.guideRequest!==null);
+      let beforeTargetIdx=targetSpineIdx-1;
+      if(beforeTargetIdx>=0&&priorSpine[beforeTargetIdx].type==="custom_message"&&priorSpine[beforeTargetIdx].customType==="readingContext")beforeTargetIdx-=1;
+      if(beforeTargetIdx>=0&&isGuideWindowCutEntry(priorSpine[beforeTargetIdx])&&priorSpine[beforeTargetIdx].reason==="jump"&&priorSpine[beforeTargetIdx].firstKeptEntryId===null)beforeTargetIdx-=1;
+      const beforeTargetLeaf=beforeTargetIdx>=0?priorSpine[beforeTargetIdx].id:null;
       const configBefore=sessionConfig(session);
       rewoundFrom=persistedLeaf;session.leafId=target.id;this.agent=null;
       if(configBefore&&configBefore.systemPrompt!==(sessionConfig(session)?.systemPrompt??""))carriedConfig=configBefore;
@@ -665,9 +717,14 @@ export class LiteraAgentRuntime {
         entries.push(jumpEntry);
         parent=jumpEntry.id;
       }
-      if(entries.length){session.leafId=await this.sessions.append(promptBookId,session.header.id,expectedLeaf,entries);session.entries.push(...entries);persistedAny=true;if(entries.some(isGuideWindowCutEntry)){const system=agent.state.messages[0];const ctx=piContextMessages(session,this.activePreferredRevisions(session));agent.state.messages=system?.role==="system"?[system,...ctx]:ctx;}}
       const aborted=completed.some((message)=>message.role==="assistant"&&message.stopReason==="aborted");
       const errored=finalAssistant.stopReason==="error";
+      const autoCleanZeroOutputAbort=aborted&&!errored&&isUncommittedGuidedRetry&&!this.hasVisibleTurnOutput(completed);
+      if(autoCleanZeroOutputAbort){
+        const rewound=await this.rewindSpineTo(promptBookId,session,beforeTargetLeaf,expectedLeaf);
+        if(this.bookId!==promptBookId)throw new Error("Agent context changed");
+        session=rewound;this.session=rewound;this.agent=null;persistedAny=true;
+      }else if(entries.length){session.leafId=await this.sessions.append(promptBookId,session.header.id,expectedLeaf,entries);session.entries.push(...entries);persistedAny=true;if(entries.some(isGuideWindowCutEntry)){const system=agent.state.messages[0];const ctx=piContextMessages(session,this.activePreferredRevisions(session));agent.state.messages=system?.role==="system"?[system,...ctx]:ctx;}}
       const finalMessages=visibleMessages(session);const finalNavigation=sessionNavigation(session);const finalOffSpine=this.sessionOffSpine(session);
       this.emit(aborted?{type:"prompt_aborted",bookId:promptBookId,sessionId:session.header.id,promptId,requestId,messages:finalMessages,...finalNavigation,...finalOffSpine}:{type:"prompt_end",bookId:promptBookId,sessionId:session.header.id,promptId,messages:finalMessages,...finalNavigation,...finalOffSpine});
       if(!aborted&&!errored&&configAtStart===this.configRevision)this.startMaintenance(agent,session,promptBookId);

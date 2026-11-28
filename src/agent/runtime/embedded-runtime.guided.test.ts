@@ -16,8 +16,8 @@ const toc=[
 const snippets:Record<number,string[]>={0:["a","b","c","d"],1:["e","f"]};
 
 function setup(kind?:SessionKind,guidedStyle:string|null=null,responses:Array<string|ReturnType<typeof fauxAssistantMessage>>=["retelling","title","retelling two","title"],blocks:Record<number,string[]>=snippets){
-  let current=session(kind);const located:Array<[number,string,unknown]>=[];const batches:PiSessionEntry[][]=[];const systemPrompts:Array<string|undefined>=[];const requests:string[]=[];const created:Array<SessionKind|undefined>=[];const events:AgentEvent[]=[];
-  const sessions:SessionPort={create:async(_book,requested)=>{created.push(requested);current=session(requested);return current;},list:async()=>[],load:async()=>current,setLeaf:async(_book,_session,leafId)=>{current={...current,leafId};return current;},delete:async()=>{},append:async(_book,_session,_leaf,entries)=>{batches.push(entries);return entries.at(-1)?.id??null;}};
+  let current=session(kind);let diskEntries:PiSessionEntry[]=[];const located:Array<[number,string,unknown]>=[];const batches:PiSessionEntry[][]=[];const systemPrompts:Array<string|undefined>=[];const requests:string[]=[];const created:Array<SessionKind|undefined>=[];const events:AgentEvent[]=[];
+  const sessions:SessionPort={create:async(_book,requested)=>{created.push(requested);diskEntries=[];current=session(requested);return {...current,entries:[...diskEntries]};},list:async()=>[],load:async()=>({...current,entries:[...diskEntries]}),setLeaf:async(_book,_session,leafId)=>{current={...current,entries:[...diskEntries],leafId};return {...current,entries:[...diskEntries]};},delete:async()=>{},append:async(_book,_session,_leaf,entries)=>{batches.push(entries);diskEntries.push(...entries);const leaf=entries.at(-1)?.id??null;current={...current,entries:[...diskEntries],leafId:leaf};return leaf;}};
   const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:2}),toc:async()=>toc,readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:2,fromBlock:0,toBlock:1,totalBlocks:4,text:"chapter"}),guideBlocks:async(chapterIndex)=>(blocks[chapterIndex]??[]).map((snippet)=>({snippet,chars:10,heading:0,part:0})),locateGuideBlock:async(chapterIndex,selection,hints)=>{located.push([chapterIndex,selection,hints]);for(const [index,list] of Object.entries(blocks)){const block=list.indexOf(selection.trim());if(block>=0)return{chapterIndex:Number(index),block};}return null;},search:async()=>[],close:()=>{}};
   const faux=createFauxCore({tokensPerSecond:10_000});faux.setResponses(responses.map((response)=>typeof response==="string"?fauxAssistantMessage(response):response));const tools:string[][]=[];
   const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret",thinkingLevel:"off"};
@@ -607,5 +607,91 @@ describe("Guided sessions in the runtime",()=>{
     await runtime.rollbackToChapterRun(sessionId,ch1Anchor);
     const afterRollback=[...events].reverse().find((e)=>e.type==="branch_switched");
     expect(afterRollback && afterRollback.type==="branch_switched" ? afterRollback.messages : null).toEqual([]);
+  });
+
+  it("auto-supersedes a trailing aborted guided attempt when pressing Continue without polluting prior chapter, model context, or branch navigation",async()=>{
+    const {runtime,requests,events}=setup(undefined,null,[
+      takeStep({chapterIndex:0,toBlock:3}),"Ch1 explanation","title","Recap Ch1",
+      takeStep({chapterIndex:1}),fauxAssistantMessage("Aborted partial Ch2",{stopReason:"aborted"}),
+      takeStep({chapterIndex:1}),"Ch2 clean explanation","Recap Ch2",
+    ]);
+    await runtime.openBook("book",new ArrayBuffer(1));
+    await runtime.newSession(undefined,"guided");
+
+    // Ch1 commits cleanly.
+    await runtime.prompt("开始带读",{guideRequest:{}});
+    await runtime.settled();
+
+    // Ch2 aborts mid-way with partial output -> stays at tail for inspection/recovery.
+    await runtime.prompt("继续带读",{guideRequest:{}});
+    const afterAbort=[...events].reverse().find((e)=>e.type==="prompt_aborted");
+    expect(afterAbort && afterAbort.type==="prompt_aborted"
+      ? afterAbort.messages?.filter((m)=>m.role==="assistant").map((m)=>m.content)
+      : []).toEqual(["Ch1 explanation","Aborted partial Ch2"]);
+
+    // User presses Continue instead of Retry -> runtime auto-rewinds the aborted tail first.
+    const reqBeforeContinue=requests.length;
+    await runtime.prompt("继续带读",{guideRequest:{}});
+    await runtime.settled();
+
+    // Rewind event fired, Ch2 prompt never saw the aborted partial text, and spine + navigation stay clean.
+    expect(events.some((e)=>e.type==="session_rewound")).toBe(true);
+    expect(requests[reqBeforeContinue]).not.toContain("Aborted partial Ch2");
+    const finalEnd=[...events].reverse().find((e)=>e.type==="prompt_end");
+    expect(finalEnd && finalEnd.type==="prompt_end").toBe(true);
+    if(finalEnd && finalEnd.type==="prompt_end"){
+      expect(finalEnd.messages?.filter((m)=>m.role==="assistant").map((m)=>m.content)).toEqual([
+        "Ch1 explanation",
+        "Ch2 clean explanation",
+      ]);
+      expect(finalEnd.navigation).toEqual({});
+    }
+  });
+
+  it("auto-cleans a zero-output aborted guided step (at root, after a committed chapter, and on retry) while preserving errors and partial output",async()=>{
+    const {runtime,events}=setup(undefined,null,[
+      // 1) Root zero-output abort -> cleans back to empty transcript.
+      fauxAssistantMessage("",{stopReason:"aborted"}),
+      // 2) Ch1 commits cleanly.
+      takeStep({chapterIndex:0,toBlock:3}),"Ch1 explanation","title","Recap Ch1",
+      // 3) Ch2 zero-output abort (even after guide_step ran, no text/thinking emitted) -> auto-cleans back to Ch1.
+      takeStep({chapterIndex:1}),fauxAssistantMessage("",{stopReason:"aborted"}),
+      // 4) Ch2 error with empty output -> MUST remain visible so the user sees the failure reason.
+      fauxAssistantMessage("",{stopReason:"error",errorMessage:"401: invalid api key"}),
+      // 5) Retry that error, then abort with zero output -> auto-cleans back to Ch1.
+      fauxAssistantMessage("",{stopReason:"aborted"}),
+    ]);
+    await runtime.openBook("book",new ArrayBuffer(1));
+    await runtime.newSession(undefined,"guided");
+
+    // 1) Root zero-output abort
+    await runtime.prompt("开始带读",{guideRequest:{}});
+    let abortedEvent=[...events].reverse().find((e)=>e.type==="prompt_aborted");
+    expect(abortedEvent && abortedEvent.type==="prompt_aborted" ? abortedEvent.messages : null).toEqual([]);
+
+    // 2) Ch1 commits
+    await runtime.prompt("开始带读",{guideRequest:{}});
+    await runtime.settled();
+
+    // 3) Ch2 zero-output abort auto-cleans back to Ch1
+    await runtime.prompt("继续带读",{guideRequest:{}});
+    abortedEvent=[...events].reverse().find((e)=>e.type==="prompt_aborted");
+    expect(abortedEvent && abortedEvent.type==="prompt_aborted"
+      ? abortedEvent.messages?.filter((m)=>m.role==="assistant").map((m)=>m.content)
+      : []).toEqual(["Ch1 explanation"]);
+
+    // 4) Empty error stays at tail so the user sees the error banner
+    await runtime.prompt("继续带读",{guideRequest:{}});
+    const erroredEnd=[...events].reverse().find((e)=>e.type==="prompt_end");
+    expect(erroredEnd && erroredEnd.type==="prompt_end"
+      ? erroredEnd.messages?.filter((m)=>m.role==="assistant").map((m)=>m.stopReason)
+      : []).toEqual([undefined,"error"]);
+
+    // 5) Retrying that failed attempt and aborting with zero output cleans back to Ch1
+    await runtime.regenerate(2);
+    abortedEvent=[...events].reverse().find((e)=>e.type==="prompt_aborted");
+    expect(abortedEvent && abortedEvent.type==="prompt_aborted"
+      ? abortedEvent.messages?.filter((m)=>m.role==="assistant").map((m)=>m.content)
+      : []).toEqual(["Ch1 explanation"]);
   });
 });

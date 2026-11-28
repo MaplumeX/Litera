@@ -354,18 +354,10 @@ describe("projectGuideDocument", () => {
     expect(doc.orphanSideThreads).toEqual([]);
     expect(doc.steps[0].sideThreads).toEqual([]);
     expect(doc.totalQuestions).toBe(0);
-    expect(doc.incompleteSteps).toHaveLength(5);
+    // The historical aborted attempt before committed step 0 is hidden; only tail/streaming attempts remain.
+    expect(doc.incompleteSteps).toHaveLength(4);
 
     expect(doc.incompleteSteps[0]).toMatchObject({
-      afterStepIndex: null,
-      requestMessageIndex: 0,
-      assistantMessageIndex: 1,
-      isGuideRequest: true,
-      status: "aborted",
-      content: "刚讲了一半",
-      stopReason: "aborted",
-    });
-    expect(doc.incompleteSteps[1]).toMatchObject({
       afterStepIndex: 0,
       requestMessageIndex: 4,
       assistantMessageIndex: 5,
@@ -376,7 +368,7 @@ describe("projectGuideDocument", () => {
       branchAnchorId: "aborted-req",
       branchInfo,
     });
-    expect(doc.incompleteSteps[2]).toMatchObject({
+    expect(doc.incompleteSteps[1]).toMatchObject({
       afterStepIndex: 0,
       requestMessageIndex: 6,
       assistantMessageIndex: 7,
@@ -384,7 +376,7 @@ describe("projectGuideDocument", () => {
       status: "error",
       errorMessage: "网络超时",
     });
-    expect(doc.incompleteSteps[3]).toMatchObject({
+    expect(doc.incompleteSteps[2]).toMatchObject({
       afterStepIndex: 0,
       requestMessageIndex: 8,
       assistantMessageIndex: 9,
@@ -393,7 +385,7 @@ describe("projectGuideDocument", () => {
       status: "aborted",
       content: "第三章开头……",
     });
-    expect(doc.incompleteSteps[4]).toMatchObject({
+    expect(doc.incompleteSteps[3]).toMatchObject({
       afterStepIndex: 0,
       requestMessageIndex: 10,
       assistantMessageIndex: 11,
@@ -609,9 +601,17 @@ describe("guide-document chapter-scoped helpers", () => {
           { type: "text", text: "第一章原始讲解。" },
         ],
       },
-      // Empty historical error attempt wedged before Chapter 2 — should be suppressed.
+      // Historical aborted attempt (even with partial output) wedged before Chapter 2 — should be hidden.
       { role: "user", content: "继续带读", guideRequest: {} },
-      { role: "assistant", content: "", stopReason: "error", errorMessage: "Timeout" },
+      {
+        role: "assistant",
+        content: "被中断的半截内容",
+        stopReason: "aborted",
+        blocks: [
+          { type: "toolCall", toolCall: { toolCallId: "t-abort", tool: "guide_step", params: {}, done: true } },
+          { type: "text", text: "被中断的半截内容" },
+        ],
+      },
       { role: "user", content: "继续带读", guideRequest: {} },
       {
         role: "assistant",
