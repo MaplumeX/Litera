@@ -11,12 +11,12 @@ import { GUIDE_INLINE_MAX_PARTS, collectStepImages, dueRecap, findableGuideBlock
 import { generateChapterRecap, guideRecapContext } from "@/agent/runtime/recap";
 import { resolveRuntimeModel } from "@/agent/runtime/model-resolution";
 import { classifyPromptError } from "@/agent/runtime/prompt-error";
-import { activeBranch, branchLeafId, canonicalGuidedSession, decodeGuide, GUIDE_RECAP, GUIDE_WINDOW_CUT, guidedTurns, guideRecapChapters, guideRecaps, isGuideRecapEntry, isGuideWindowCutEntry, branchNavigation, contextBranch, convertPiContextToLlm, newEntry, piContextMessages, sessionConfig, sessionNavigation, visibleMessageEntries, visibleMessages, type DecodedPiSession, type PiSessionEntry, type SessionConfig } from "@/agent/sessions/pi-session";
+import { activeBranch, branchLeafId, canonicalGuidedSession, decodeGuide, entriesToPiContextMessages, GUIDE_RECAP, GUIDE_WINDOW_CUT, guidedTurns, guideRecapChapters, guideRecaps, guideSpineRuns, isGuideRecapEntry, isGuideWindowCutEntry, isSideThreadEntry, branchNavigation, contextBranch, convertPiContextToLlm, newEntry, piContextMessages, resolveGuideRunForAnchor, sessionConfig, sessionNavigation, sideThreadActiveLeaf, sideThreadAnchorFromKey, sideThreadBranchLeafId, sideThreadContextEntries, sideThreadKeyFor, sideThreadNavigation, sideThreadSnapshots, visibleMessageEntries, visibleMessages, visibleSideThreadEntries, visibleSideThreadMessages, type DecodedPiSession, type PiSessionEntry, type SessionConfig } from "@/agent/sessions/pi-session";
 import { restoreImageRefs, withImageRefs } from "@/agent/sessions/image-refs";
 import { tauriSessionPort, type SessionPort } from "@/agent/sessions/session-port";
 import { invokeErrorMessage } from "@/lib/app-error";
 import { loadGuidedStyle } from "@/lib/guided-style";
-import type { AgentEvent, AgentMessage as UiMessage, AnchorBranchInfo, GuideContextStats, GuideRequest, GuideSelection, GuideStep, RecordedGuideStep, SessionKind } from "@/types/agent";
+import type { AgentEvent, AgentMessage as UiMessage, AnchorBranchInfo, GuideContextStats, GuideRequest, GuideSelection, GuideStep, RecordedGuideStep, SessionKind, SideThreadSnapshot } from "@/types/agent";
 import type { AnnotationsFile } from "@/types/library";
 
 export interface CanonicalGuideSnapshot {
@@ -25,6 +25,7 @@ export interface CanonicalGuideSnapshot {
   messages: UiMessage[];
   anchors: string[];
   navigation: Record<string, AnchorBranchInfo>;
+  sideThreads: Record<string, SideThreadSnapshot>;
 }
 
 export interface RuntimeConfig { provider:string; model:string; api:string; baseUrl:string; apiKey:string; thinkingLevel:string; contextWindow?:number; imageInput?:boolean }
@@ -96,6 +97,12 @@ function withoutImageBlocks(value:unknown):unknown{const content=(value as {cont
 const RETRY_POLICY={enabled:true,maxRetries:3,baseDelayMs:500};
 const EDIT_TARGET_ERROR="Edited message is not a visible user message";
 const TITLE_PROMPT="Generate a short session title for the conversation below, in the user's language, at most 20 characters. Output only the title text itself: no quotes, no prefix, no explanation.";
+const SIDE_THREAD_PROMPT=`<guided_side_thread>
+This is a chapter-scoped follow-up discussion anchored to a chapter of a Guided reading session.
+Answer the reader's question directly and thoroughly using the chapter explanations, recaps, and book tools as needed.
+Do not try to advance the reading guide or announce moving to the next chapter; the reader uses the guide controls to continue reading.
+When you quote the book verbatim, write the quote as a clickable citation link ([exact text](cite:CHAPTER_INDEX)).
+</guided_side_thread>`;
 /** True when the leaf has only advanced past `leaf` through maintenance entries (Pruning, Compaction, Window cut). */
 function onlyMaintenanceSince(session:DecodedPiSession,leaf:string|null):boolean{const byId=new Map(session.entries.map((entry)=>[entry.id,entry]));let current=session.leafId;while(current!==leaf){const entry=current?byId.get(current):undefined;if(!entry||(entry.type!=="context_prune"&&entry.type!=="compaction"&&!isGuideRecapEntry(entry)&&!isGuideWindowCutEntry(entry)))return false;current=entry.parentId;}return true;}
 const emptyUsage=()=>({input:0,output:0,cacheRead:0,cacheWrite:0,totalTokens:0,cost:{input:0,output:0,cacheRead:0,cacheWrite:0,total:0}});
@@ -115,9 +122,14 @@ export class LiteraAgentRuntime {
   private guideStepChain:Promise<unknown>=Promise.resolve();
   /** The open Book's blocks per chapter, for guided ranges. */
   private guideBlockCache=new Map<number,Promise<GuideBlock[]>>();
+  /** Selected active leaf per side-thread key for the open Session (defaults to newest leaf when absent). */
+  private sideThreadLeaves=new Map<string,string>();
   private bookId:string|null=null; private session:DecodedPiSession|null=null; private agent:Agent|null=null; private promptId:string|null=null; private revision=0; private bookGeneration=0; private configRevision=0; private promptAbort:AbortController|null=null; private promptAgent:Agent|null=null;
   /** Background context maintenance after a turn; a new prompt awaits it. */
   private maintenance:{abort:AbortController;done:Promise<void>}|null=null;
+  private sessionSideThreads(session:DecodedPiSession):Record<string,SideThreadSnapshot>{
+    return sideThreadSnapshots(session,this.session?.header.id===session.header.id?this.sideThreadLeaves:undefined);
+  }
   constructor(options?:{sessions?:SessionPort;book?:BookContentPort;loadConfig?:()=>Promise<RuntimeConfig>;loadStream?:(api:string)=>Promise<StreamFn>;loadAnnotations?:(bookId:string)=>Promise<AnnotationsFile>;loadGuidedStyle?:()=>string|null}){this.loadGuidedStyle=options?.loadGuidedStyle??loadGuidedStyle;this.sessions=options?.sessions??tauriSessionPort;this.book=options?.book??new BookWorkerClient();this.loadConfig=options?.loadConfig??(()=>invoke<RuntimeConfig>("get_agent_runtime_config"));this.loadStream=options?.loadStream??streamFor;this.loadAnnotations=options?.loadAnnotations??((bookId)=>invoke<AnnotationsFile>("get_annotations",{bookId}));}
   subscribe(listener:Listener){this.listeners.add(listener);return()=>{this.listeners.delete(listener);};}
   syncBook(bookId:string){if(this.bookId===bookId)this.emit({type:"book_ready",bookId});}
@@ -125,8 +137,8 @@ export class LiteraAgentRuntime {
   // A config change only affects later prompts: an in-flight answer finishes on
   // the config it started with, and only the cached Agent is dropped.
   invalidateConfig(){this.configRevision+=1;this.cancelMaintenance();this.agent=null;}
-  async openBook(bookId:string,bytes:ArrayBuffer){this.cancelMaintenance();this.promptAbort?.abort();this.promptAgent?.abort();this.agent?.abort();this.book.close();this.images.clear();this.clearRawImageUrls();this.guideBlockCache.clear();const generation=++this.bookGeneration;this.bookId=bookId;this.session=null;this.agent=null;this.emit({type:"book_loading",bookId});try{await this.book.open(bookId,bytes);if(this.bookGeneration===generation&&this.bookId===bookId)this.emit({type:"book_ready",bookId});}catch(error){if(this.bookGeneration===generation&&this.bookId===bookId)this.emit({type:"error",scope:"book",message:error instanceof Error?error.message:String(error),recoverable:true,bookId});}}
-  closeBook(){const id=this.bookId;this.cancelMaintenance();this.promptAbort?.abort();this.promptAgent?.abort();this.agent?.abort();this.book.close();this.images.clear();this.clearRawImageUrls();this.guideBlockCache.clear();this.bookGeneration+=1;this.bookId=null;this.session=null;this.agent=null;if(id)this.emit({type:"book_closed",bookId:id});}
+  async openBook(bookId:string,bytes:ArrayBuffer){this.cancelMaintenance();this.promptAbort?.abort();this.promptAgent?.abort();this.agent?.abort();this.book.close();this.images.clear();this.clearRawImageUrls();this.guideBlockCache.clear();this.sideThreadLeaves.clear();const generation=++this.bookGeneration;this.bookId=bookId;this.session=null;this.agent=null;this.emit({type:"book_loading",bookId});try{await this.book.open(bookId,bytes);if(this.bookGeneration===generation&&this.bookId===bookId)this.emit({type:"book_ready",bookId});}catch(error){if(this.bookGeneration===generation&&this.bookId===bookId)this.emit({type:"error",scope:"book",message:error instanceof Error?error.message:String(error),recoverable:true,bookId});}}
+  closeBook(){const id=this.bookId;this.cancelMaintenance();this.promptAbort?.abort();this.promptAgent?.abort();this.agent?.abort();this.book.close();this.images.clear();this.clearRawImageUrls();this.guideBlockCache.clear();this.sideThreadLeaves.clear();this.bookGeneration+=1;this.bookId=null;this.session=null;this.agent=null;if(id)this.emit({type:"book_closed",bookId:id});}
   async listSessions(requestId?:string){if(!this.bookId)return;const bookId=this.bookId;const sessions=await this.sessions.list(bookId);if(this.bookId===bookId)this.emit({type:"sessions_list",bookId,requestId,sessions});return sessions;}
   /** Read-only snapshot of the open Book's canonical Guided session without switching `this.session`. */
   async loadCanonicalGuide(bookId:string):Promise<CanonicalGuideSnapshot|null>{
@@ -134,10 +146,10 @@ export class LiteraAgentRuntime {
     const sessions=await this.sessions.list(bookId);
     if(this.bookId!==bookId)return null;
     const canonical=canonicalGuidedSession(sessions);
-    if(!canonical)return{bookId,sessionId:null,messages:[],anchors:[],navigation:{}};
+    if(!canonical)return{bookId,sessionId:null,messages:[],anchors:[],navigation:{},sideThreads:{}};
     const session=this.session?.header.id===canonical.id?this.session:await this.sessions.load(bookId,canonical.id);
     if(this.bookId!==bookId)return null;
-    return{bookId,sessionId:canonical.id,messages:visibleMessages(session),...sessionNavigation(session)};
+    return{bookId,sessionId:canonical.id,messages:visibleMessages(session),...sessionNavigation(session),sideThreads:this.sessionSideThreads(session)};
   }
   /** Switch to the Book's canonical Guided session, creating one if none exists yet. */
   async ensureCanonicalGuideSession(requestId?:string):Promise<string|null>{
@@ -153,7 +165,7 @@ export class LiteraAgentRuntime {
     await this.newSession(requestId,"guided");
     return this.session?.header.id??null;
   }
-  async newSession(requestId?:string,kind?:SessionKind){if(!this.bookId)return;this.cancelMaintenance();const bookId=this.bookId;const session=await this.sessions.create(bookId,kind);if(this.bookId!==bookId)return;this.session=session;this.agent=null;this.emit({type:"session_created",bookId,sessionId:session.header.id,requestId,...(kind?{kind}:{})});}
+  async newSession(requestId?:string,kind?:SessionKind){if(!this.bookId)return;this.cancelMaintenance();const bookId=this.bookId;const session=await this.sessions.create(bookId,kind);if(this.bookId!==bookId)return;this.session=session;this.agent=null;this.sideThreadLeaves.clear();this.emit({type:"session_created",bookId,sessionId:session.header.id,requestId,...(kind?{kind}:{})});}
   /** The open Guided session's next step; before its first step, start from `startHref`'s chapter. Null at the end of the Book or outside a Guided session. */
   async nextGuideStep(startHref?:string):Promise<GuideStep|null>{if(!this.bookId)return null;const bookId=this.bookId;const session=this.session;if(session?.header.kind!=="guided")return null;const toc=await this.bookCall(bookId,()=>this.book.toc());return this.recordSpan(bookId,nextGuideSpan(toc,await this.guideCursorIn(bookId,toc,session),chapterForHref(toc,startHref)?.index));}
   /** The first guided step of the chapter after `step`'s. */
@@ -232,11 +244,11 @@ export class LiteraAgentRuntime {
     return pending;
   }
   async guideStepAnchor(step:RecordedGuideStep):Promise<{chapterIndex:number;href?:string;snippet:string;target:GuideBlockTarget}|null>{if(!this.bookId)return null;const bookId=this.bookId;const toc=await this.bookCall(bookId,()=>this.book.toc());const span=await this.locateStep(bookId,toc,step);if(!span)return null;const {entry}=span.from;const blocks=await this.chapterGuideBlocks(bookId,entry.index);const block=findableGuideBlock(blocks,span.from.block);if(block===null)return null;const {snippet}=blocks[block];const key=guideMarkKey(snippet);const occurrence=blocks.slice(0,block).filter((before)=>!before.kind&&guideMarkKey(before.snippet)===key).length;return{chapterIndex:entry.index,...(entry.hrefs[0]?{href:entry.hrefs[0]}:{}),snippet,target:{hrefs:entry.hrefs,key,occurrence}};}
-  async switchSession(sessionId:string,requestId?:string){if(!this.bookId)return;this.cancelMaintenance();const bookId=this.bookId;const session=await this.sessions.load(bookId,sessionId);if(this.bookId!==bookId)return;this.session=session;this.agent=null;this.emit({type:"session_switched",bookId,sessionId,requestId,messages:visibleMessages(session),...sessionNavigation(session)});}
+  async switchSession(sessionId:string,requestId?:string){if(!this.bookId)return;this.cancelMaintenance();const bookId=this.bookId;const session=await this.sessions.load(bookId,sessionId);if(this.bookId!==bookId)return;this.session=session;this.agent=null;this.sideThreadLeaves.clear();this.emit({type:"session_switched",bookId,sessionId,requestId,messages:visibleMessages(session),...sessionNavigation(session),sideThreads:this.sessionSideThreads(session)});}
   // Sync merged another device's entries into the files: show them, unless a
   // prompt or background maintenance is still writing to the open session.
   // A session another device deleted is closed.
-  async refreshAfterSync(listRequestId?:string){if(!this.bookId)return;const bookId=this.bookId;const listed=await this.listSessions(listRequestId);const current=this.session;if(!current||this.promptId||this.maintenance||this.bookId!==bookId)return;if(listed&&!listed.some((summary)=>summary.id===current.header.id)){this.session=null;this.agent=null;this.emit({type:"session_deleted",bookId,sessionId:current.header.id});return;}const session=await this.sessions.load(bookId,current.header.id);if(this.bookId!==bookId||this.session!==current||this.promptId||this.maintenance)return;if(session.entries.length===current.entries.length&&session.leafId===current.leafId)return;this.session=session;this.agent=null;this.emit({type:"session_switched",bookId,sessionId:session.header.id,messages:visibleMessages(session),...sessionNavigation(session)});}
+  async refreshAfterSync(listRequestId?:string){if(!this.bookId)return;const bookId=this.bookId;const listed=await this.listSessions(listRequestId);const current=this.session;if(!current||this.promptId||this.maintenance||this.bookId!==bookId)return;if(listed&&!listed.some((summary)=>summary.id===current.header.id)){this.session=null;this.agent=null;this.sideThreadLeaves.clear();this.emit({type:"session_deleted",bookId,sessionId:current.header.id});return;}const session=await this.sessions.load(bookId,current.header.id);if(this.bookId!==bookId||this.session!==current||this.promptId||this.maintenance)return;if(session.entries.length===current.entries.length&&session.leafId===current.leafId)return;this.session=session;this.agent=null;this.sideThreadLeaves.clear();this.emit({type:"session_switched",bookId,sessionId:session.header.id,messages:visibleMessages(session),...sessionNavigation(session),sideThreads:this.sessionSideThreads(session)});}
   async switchBranch(sessionId:string,targetLeafId:string,requestId?:string){
     if(!this.bookId)throw new Error("No book is open");
     const bookId=this.bookId;
@@ -249,7 +261,7 @@ export class LiteraAgentRuntime {
       const session=await this.sessions.setLeaf(bookId,sessionId,targetLeafId);
       if(this.bookId!==bookId||this.session!==current)return;
       this.session=session;this.agent=null;
-      this.emit({type:"branch_switched",bookId,sessionId,requestId,messages:visibleMessages(session),...sessionNavigation(session)});
+      this.emit({type:"branch_switched",bookId,sessionId,requestId,messages:visibleMessages(session),...sessionNavigation(session),sideThreads:this.sessionSideThreads(session)});
     }catch(error){
       this.emit({type:"error",scope:"session",message:error instanceof Error?error.message:String(error),recoverable:true,bookId,sessionId});
       throw error;
@@ -267,7 +279,23 @@ export class LiteraAgentRuntime {
     if(!leaf)throw new Error("Branch leaf is not in the session");
     await this.switchBranch(sessionId,leaf,requestId);
   }
-  async deleteSession(sessionId:string,requestId?:string){if(!this.bookId)return;const bookId=this.bookId;await this.sessions.delete(bookId,sessionId);if(this.bookId!==bookId)return;if(this.session?.header.id===sessionId){this.cancelMaintenance();this.session=null;this.agent=null;}this.emit({type:"session_deleted",bookId,sessionId,requestId});}
+  /** Switch to a sibling edit/regenerate branch strictly inside a chapter side-thread without moving the spine leaf. */
+  async switchSideThreadBranchAtAnchor(sessionId:string,sideThreadKey:string,anchorEntryId:string,direction:-1|1,requestId?:string){
+    if(!this.bookId)throw new Error("No book is open");
+    const bookId=this.bookId;
+    const current=this.session;
+    if(!current||current.header.id!==sessionId)throw new Error("Session is not active");
+    if(this.promptId)throw new Error("A prompt is already active");
+    const info=sideThreadNavigation(current,sideThreadKey,this.sideThreadLeaves.get(sideThreadKey)).navigation[anchorEntryId];
+    if(!info)throw new Error("Side-thread branch anchor is not in the session");
+    const target=info.options[info.activeIndex+direction];
+    if(!target)throw new Error("No sibling branch in that direction");
+    const leaf=sideThreadBranchLeafId(current,sideThreadKey,target.anchorId);
+    if(!leaf)throw new Error("Side-thread branch leaf is not in the session");
+    this.sideThreadLeaves.set(sideThreadKey,leaf);
+    this.emit({type:"branch_switched",bookId,sessionId,requestId,sideThreadKey,messages:visibleMessages(current),...sessionNavigation(current),sideThreads:this.sessionSideThreads(current)});
+  }
+  async deleteSession(sessionId:string,requestId?:string){if(!this.bookId)return;const bookId=this.bookId;await this.sessions.delete(bookId,sessionId);if(this.bookId!==bookId)return;if(this.session?.header.id===sessionId){this.cancelMaintenance();this.session=null;this.agent=null;this.sideThreadLeaves.clear();}this.emit({type:"session_deleted",bookId,sessionId,requestId});}
   /** Mark a session as archived (e.g. superseded Guided session) without deleting its transcript. */
   async archiveSession(sessionId:string,requestId?:string){if(!this.bookId)return;const bookId=this.bookId;this.cancelMaintenance();const session=this.session?.header.id===sessionId?this.session:await this.sessions.load(bookId,sessionId);if(this.bookId!==bookId)return;const entry=newEntry("session_info",session.leafId,{archived:true});const leaf=await this.sessions.append(bookId,sessionId,session.leafId,[entry]);if(this.bookId!==bookId)return;session.entries.push(entry);session.leafId=leaf;this.emit({type:"session_archived",bookId,sessionId,requestId});}
   /** Archive the current Guided session and start a fresh canonical Guided session for the Book. */
@@ -275,7 +303,7 @@ export class LiteraAgentRuntime {
   /** Snapshot of the open Guided session's active context window and loaded chapter recaps. */
   guideContextStats():GuideContextStats|null{const session=this.session;if(session?.header.kind!=="guided")return null;const windowTarget=guideWindowTarget(this.agent?.state.model.contextWindow??0);return{...guideContextTokens(contextBranch(session)),windowTarget};}
   /** Manually collapse earlier Guided turns out of model context while keeping all chapter recaps. */
-  async resetGuideContext():Promise<void>{if(!this.bookId||this.promptId)return;const bookId=this.bookId;const session=this.session;if(session?.header.kind!=="guided")return;this.cancelMaintenance();await this.maintenance?.done;if(this.bookId!==bookId||this.session!==session||this.promptId)return;const entry=newEntry(GUIDE_WINDOW_CUT,session.leafId,{firstKeptEntryId:null,reason:"manual"});session.leafId=await this.sessions.append(bookId,session.header.id,session.leafId,[entry]);session.entries.push(entry);if(this.agent){const system=this.agent.state.messages[0];this.agent.state.messages=system?.role==="system"?[system,...piContextMessages(session)]:piContextMessages(session);}this.emit({type:"guide_window_updated",bookId,sessionId:session.header.id,messages:visibleMessages(session),...sessionNavigation(session)});}
+  async resetGuideContext():Promise<void>{if(!this.bookId||this.promptId)return;const bookId=this.bookId;const session=this.session;if(session?.header.kind!=="guided")return;this.cancelMaintenance();await this.maintenance?.done;if(this.bookId!==bookId||this.session!==session||this.promptId)return;const entry=newEntry(GUIDE_WINDOW_CUT,session.leafId,{firstKeptEntryId:null,reason:"manual"});session.leafId=await this.sessions.append(bookId,session.header.id,session.leafId,[entry]);session.entries.push(entry);if(this.agent){const system=this.agent.state.messages[0];this.agent.state.messages=system?.role==="system"?[system,...piContextMessages(session)]:piContextMessages(session);}this.emit({type:"guide_window_updated",bookId,sessionId:session.header.id,messages:visibleMessages(session),...sessionNavigation(session),sideThreads:this.sessionSideThreads(session)});}
   async renameSession(sessionId:string,title:string,requestId?:string){if(!this.bookId)return;const bookId=this.bookId;const clean=title.trim();if(!clean||clean.length>128)throw new Error("Invalid session title");const session=this.session?.header.id===sessionId?this.session:await this.sessions.load(bookId,sessionId);if(this.bookId!==bookId)return;const entry=newEntry("session_info",session.leafId,{name:clean});const leaf=await this.sessions.append(bookId,sessionId,session.leafId,[entry]);if(this.bookId!==bookId)return;session.entries.push(entry);session.leafId=leaf;this.emit({type:"session_renamed",bookId,sessionId,title:clean,requestId});}
   async updateSessionConfig(sessionId:string,systemPrompt:string,requestId?:string){if(!this.bookId)throw new Error("No book is open");this.cancelMaintenance();const bookId=this.bookId;if(systemPrompt.length>16*1024)throw new Error("Invalid system prompt");const session=this.session?.header.id===sessionId?this.session:await this.sessions.load(bookId,sessionId);if(this.bookId!==bookId)return;const entry=newEntry("session_config",session.leafId,{systemPrompt});const leaf=await this.sessions.append(bookId,sessionId,session.leafId,[entry]);if(this.bookId!==bookId)return;session.entries.push(entry);session.leafId=leaf;this.agent=null;this.emit({type:"session_config_updated",bookId,sessionId,systemPrompt,requestId});}
   abort(_requestId?:string){this.cancelMaintenance();this.promptAbort?.abort();this.promptAgent?.abort();this.agent?.abort();}
@@ -408,9 +436,9 @@ export class LiteraAgentRuntime {
       if(entries.length){session.leafId=await this.sessions.append(promptBookId,session.header.id,session.leafId,entries);session.entries.push(...entries);if(entries.some(isGuideWindowCutEntry)){const system=agent.state.messages[0];agent.state.messages=system?.role==="system"?[system,...piContextMessages(session)]:piContextMessages(session);}}
       const aborted=completed.some((message)=>message.role==="assistant"&&message.stopReason==="aborted");
       const errored=finalAssistant.stopReason==="error";
-      const finalMessages=visibleMessages(session);const finalNavigation=sessionNavigation(session);
+      const finalMessages=visibleMessages(session);const finalNavigation=sessionNavigation(session);const finalSideThreads=this.sessionSideThreads(session);
       // The answer is complete: unlock the input first, then maintain the context in the background.
-      this.emit(aborted?{type:"prompt_aborted",bookId:promptBookId,sessionId:session.header.id,promptId,requestId,messages:finalMessages,...finalNavigation}:{type:"prompt_end",bookId:promptBookId,sessionId:session.header.id,promptId,messages:finalMessages,...finalNavigation});
+      this.emit(aborted?{type:"prompt_aborted",bookId:promptBookId,sessionId:session.header.id,promptId,requestId,messages:finalMessages,...finalNavigation,sideThreads:finalSideThreads}:{type:"prompt_end",bookId:promptBookId,sessionId:session.header.id,promptId,messages:finalMessages,...finalNavigation,sideThreads:finalSideThreads});
       if(!aborted&&!errored&&configAtStart===this.configRevision)this.startMaintenance(agent,session,promptBookId);
       const hasManualTitle=session.entries.some((entry)=>entry.type==="session_info"&&entry.auto!==true);
       if(!aborted&&!errored&&isFirstTurn&&!hasManualTitle){const leafAtEnd=session.leafId;const assistantText=finalAssistant.content.flatMap((block)=>block.type==="text"&&typeof block.text==="string"?[block.text]:[]).join("");void this.maybeGenerateTitle(promptBookId,session.header.id,leafAtEnd,text.slice(0,2000),assistantText.slice(0,2000),agent);}
@@ -420,7 +448,7 @@ export class LiteraAgentRuntime {
       if(session&&rewoundFrom!==undefined&&!userPersisted){
         session.leafId=rewoundFrom;
         if(compactedBeforePrompt&&rewoundFrom)await this.sessions.setLeaf(promptBookId,session.header.id,rewoundFrom).catch(()=>{});
-        if(this.bookId===promptBookId&&this.session===session){this.agent=null;this.emit({type:"branch_switched",bookId:promptBookId,sessionId:session.header.id,requestId,messages:visibleMessages(session),...sessionNavigation(session)});}
+        if(this.bookId===promptBookId&&this.session===session){this.agent=null;this.emit({type:"branch_switched",bookId:promptBookId,sessionId:session.header.id,requestId,messages:visibleMessages(session),...sessionNavigation(session),sideThreads:this.sessionSideThreads(session)});}
       }
       const rawMessage=error instanceof Error?error.message:String(error);const safeError=new Error(rawMessage===EDIT_TARGET_ERROR?rawMessage:classifyPromptError(error).message);this.emit({type:"error",scope:"prompt",message:safeError.message,recoverable:true,bookId:promptBookId,sessionId:session?.header.id,promptId});throw safeError;}finally{unsubscribe?.();if(this.promptAbort===promptAbort)this.promptAbort=null;if(this.promptId===promptId){this.promptId=null;this.promptAgent=null;this.turnSteps=[];}}
   }
@@ -508,8 +536,8 @@ export class LiteraAgentRuntime {
       if(entries.length){session.leafId=await this.sessions.append(promptBookId,session.header.id,expectedLeaf,entries);session.entries.push(...entries);persistedAny=true;if(entries.some(isGuideWindowCutEntry)){const system=agent.state.messages[0];agent.state.messages=system?.role==="system"?[system,...piContextMessages(session)]:piContextMessages(session);}}
       const aborted=completed.some((message)=>message.role==="assistant"&&message.stopReason==="aborted");
       const errored=finalAssistant.stopReason==="error";
-      const finalMessages=visibleMessages(session);const finalNavigation=sessionNavigation(session);
-      this.emit(aborted?{type:"prompt_aborted",bookId:promptBookId,sessionId:session.header.id,promptId,requestId,messages:finalMessages,...finalNavigation}:{type:"prompt_end",bookId:promptBookId,sessionId:session.header.id,promptId,messages:finalMessages,...finalNavigation});
+      const finalMessages=visibleMessages(session);const finalNavigation=sessionNavigation(session);const finalSideThreads=this.sessionSideThreads(session);
+      this.emit(aborted?{type:"prompt_aborted",bookId:promptBookId,sessionId:session.header.id,promptId,requestId,messages:finalMessages,...finalNavigation,sideThreads:finalSideThreads}:{type:"prompt_end",bookId:promptBookId,sessionId:session.header.id,promptId,messages:finalMessages,...finalNavigation,sideThreads:finalSideThreads});
       if(!aborted&&!errored&&configAtStart===this.configRevision)this.startMaintenance(agent,session,promptBookId);
       const hasManualTitle=session.entries.some((entry)=>entry.type==="session_info"&&entry.auto!==true);
       if(!aborted&&!errored&&isFirstTurn&&!hasManualTitle){
@@ -522,9 +550,263 @@ export class LiteraAgentRuntime {
       if(session&&rewoundFrom!==undefined&&!persistedAny){
         session.leafId=rewoundFrom;
         if(compactedBeforePrompt&&rewoundFrom)await this.sessions.setLeaf(promptBookId,session.header.id,rewoundFrom).catch(()=>{});
-        if(this.bookId===promptBookId&&this.session===session){this.agent=null;this.emit({type:"branch_switched",bookId:promptBookId,sessionId:session.header.id,requestId,messages:visibleMessages(session),...sessionNavigation(session)});}
+        if(this.bookId===promptBookId&&this.session===session){this.agent=null;this.emit({type:"branch_switched",bookId:promptBookId,sessionId:session.header.id,requestId,messages:visibleMessages(session),...sessionNavigation(session),sideThreads:this.sessionSideThreads(session)});}
       }
       const rawMessage=error instanceof Error?error.message:String(error);const safeError=new Error(rawMessage===EDIT_TARGET_ERROR?rawMessage:classifyPromptError(error).message);this.emit({type:"error",scope:"prompt",message:safeError.message,recoverable:true,bookId:promptBookId,sessionId:session?.header.id,promptId});throw safeError;}finally{unsubscribe?.();if(this.promptAbort===promptAbort)this.promptAbort=null;if(this.promptId===promptId){this.promptId=null;this.promptAgent=null;this.turnSteps=[];}}
+  }
+
+  /**
+   * Ask or edit a follow-up question on a chapter-scoped side-thread in a
+   * Guided session without moving the guided spine's `leafId` or disturbing
+   * its context window / Prompt Cache.
+   */
+  async promptSideThread(
+    anchorId:string|null|undefined,
+    text:string,
+    context:{selection?:string;chapterHref?:string},
+    promptId:string=crypto.randomUUID(),
+    requestId?:string,
+    editIndex?:number,
+  ){
+    if(!this.bookId)throw new Error("No book is open");if(this.promptId)throw new Error("A prompt is already active");
+    if(!text||text.length>64*1024||(context.selection?.length??0)>64*1024||(context.chapterHref?.length??0)>4096)throw new Error("Invalid prompt context");
+    const promptBookId=this.bookId;
+    this.promptId=promptId;this.turnSteps=[];
+    const promptAbort=new AbortController();this.promptAbort=promptAbort;
+    let session:DecodedPiSession|undefined;
+    let unsubscribe:(()=>void)|undefined;
+    let key:string|undefined;
+    let hadPrevLeaf=false;let prevSideLeaf:string|undefined;let userPersisted=false;
+    try{
+      await this.maintenance?.done;if(this.bookId!==promptBookId)throw new Error("Book context changed");
+      if(!this.session){
+        const created=await this.sessions.create(promptBookId,"guided");
+        if(this.bookId!==promptBookId)throw new Error("Book context changed");
+        this.session=created;this.agent=null;this.sideThreadLeaves.clear();
+        this.emit({type:"session_created",bookId:promptBookId,sessionId:created.header.id,requestId,kind:"guided"});
+      }
+      session=this.session!;
+      if(session.header.kind!=="guided")throw new Error("Not a guided session");
+      const spineRuns=guideSpineRuns(session);
+      const resolvedAnchorId=anchorId===undefined?(spineRuns.length?spineRuns[spineRuns.length-1].anchorEntryId:null):anchorId;
+      const runInfo=resolvedAnchorId!==null?resolveGuideRunForAnchor(session,resolvedAnchorId):null;
+      if(resolvedAnchorId!==null&&!runInfo)throw new Error("Guided chapter anchor is not on the active branch");
+      const effectiveAnchorId=runInfo?runInfo.anchorEntryId:null;
+      const spineEndEntryId=runInfo?runInfo.endEntryId:null;
+      key=sideThreadKeyFor(effectiveAnchorId);
+      const sideTag={sideThread:{anchorId:effectiveAnchorId}};
+
+      let currentSideLeaf:string|null=sideThreadActiveLeaf(session,key,this.sideThreadLeaves.get(key));
+      if(editIndex!==undefined){
+        const target=visibleSideThreadEntries(session,key,this.sideThreadLeaves.get(key))[editIndex];
+        if(!target||((target.message as {role?:unknown}|undefined)?.role!=="user"))throw new Error(EDIT_TARGET_ERROR);
+        hadPrevLeaf=this.sideThreadLeaves.has(key);prevSideLeaf=this.sideThreadLeaves.get(key);
+        const parent=session.entries.find((entry)=>entry.id===target.parentId);
+        const beforeContext=parent?.type==="custom_message"&&parent.customType==="readingContext"&&isSideThreadEntry(parent)?parent.parentId:target.parentId;
+        const parentInSide=beforeContext?session.entries.some((entry)=>entry.id===beforeContext&&isSideThreadEntry(entry)):false;
+        currentSideLeaf=parentInSide?beforeContext:null;
+        this.emit({type:"session_rewound",bookId:promptBookId,sessionId:session.header.id,promptId,requestId,sideThreadKey:key,messages:visibleSideThreadMessages(session,key,currentSideLeaf)});
+      }
+
+      const config=await this.loadConfig();if(this.bookId!==promptBookId)throw new Error("Book context changed");
+      const metadata=await this.book.metadata();const toc=await this.book.toc();
+      const snapshot=formatBookSnapshot(metadata,toc);
+      const contextEntries=sideThreadContextEntries(session,key,spineEndEntryId,currentSideLeaf);
+      const agent=await this.ensureSideAgent(config,session,promptBookId,contextEntries,sessionConfig(session));
+      if(this.bookId!==promptBookId)throw new Error("Agent context changed");
+      this.promptAgent=agent;
+
+      const chapterContext=runInfo
+        ?`Discussing chapter: chapterIndex ${runInfo.chapterIndex}${runInfo.chapterTitle?` ("${runInfo.chapterTitle}")`:""}`
+        :chapterAside(toc,context.chapterHref);
+      const readingContext=[chapterContext,context.selection?`Selected text: ${context.selection}`:""].filter(Boolean).join("\n\n");
+
+      const before=agent.state.messages.length;
+      const pendingEntries:PiSessionEntry[]=[];
+      let pendingParent:string|null=currentSideLeaf??effectiveAnchorId;
+      const expectedLeaf=pendingParent;
+      const lastModel=[...contextEntries].reverse().find((entry)=>entry.type==="model_change");
+      if(lastModel?.provider!==config.provider||lastModel?.modelId!==config.model){
+        const change=newEntry("model_change",pendingParent,{provider:config.provider,modelId:config.model,...sideTag});
+        pendingEntries.push(change);pendingParent=change.id;
+      }
+      const promptMessages:PiMessage[]=[];
+      const hasSnapshot=contextEntries.some((entry)=>entry.type==="custom_message"&&entry.customType==="bookSnapshot");
+      if(!hasSnapshot){
+        const snapshotEntry=newEntry("custom_message",pendingParent,{customType:"bookSnapshot",content:snapshot,display:false,...sideTag});
+        pendingEntries.push(snapshotEntry);pendingParent=snapshotEntry.id;
+        promptMessages.push({role:"custom",customType:"bookSnapshot",content:snapshot,display:false,timestamp:Date.now()} as PiMessage);
+      }
+      if(readingContext){
+        const contextEntry=newEntry("custom_message",pendingParent,{customType:"readingContext",content:readingContext,display:false,...sideTag});
+        pendingEntries.push(contextEntry);pendingParent=contextEntry.id;
+        promptMessages.push({role:"custom",customType:"readingContext",content:readingContext,display:false,timestamp:Date.now()} as PiMessage);
+      }
+      const user:PiMessage={role:"user",content:text,timestamp:Date.now()};
+      const userEntry=newEntry("message",pendingParent,{message:user,...(context.selection?{selection:context.selection}:{}),...(context.chapterHref?{chapterHref:context.chapterHref}:{}),...sideTag});
+      pendingEntries.push(userEntry);
+      const nextSideLeaf=await this.sessions.append(promptBookId,session.header.id,expectedLeaf,pendingEntries);
+      session.entries.push(...pendingEntries);
+      if(nextSideLeaf)this.sideThreadLeaves.set(key,nextSideLeaf);
+      userPersisted=true;
+      if(this.bookId!==promptBookId)throw new Error("Agent context changed");
+
+      const activeKey=key;
+      this.emit({type:"prompt_started",bookId:promptBookId,sessionId:session.header.id,promptId,requestId,sideThreadKey:activeKey});
+      unsubscribe=agent.subscribe((event)=>this.onPiEvent(event,promptBookId,promptId,session!.header.id,activeKey));
+      const runTurn=()=>retryAssistantCall(async()=>{
+        agent.state.messages.length=before;this.turnSteps=[];
+        if(promptAbort.signal.aborted){const{errorMessage:_unused,...rest}=errorAssistant(agent.state.model,new Error("Aborted"));return{...rest,stopReason:"aborted"} as AssistantMessage;}
+        try{await agent.prompt([...promptMessages,user]);}
+        catch(error){return errorAssistant(agent.state.model,error);}
+        const last=agent.state.messages[agent.state.messages.length-1] as AssistantMessage|undefined;
+        return last?.role==="assistant"?last:errorAssistant(agent.state.model,new Error("模型请求失败"));
+      },RETRY_POLICY,promptAbort.signal,{onRetryScheduled:(attempt,maxAttempts,delayMs)=>this.emit({type:"retry_scheduled",bookId:promptBookId,sessionId:session!.header.id,promptId,sideThreadKey:activeKey,attempt,maxAttempts,delayMs})});
+      const finalAssistant=await runTurn();
+      if((finalAssistant.stopReason==="aborted"||finalAssistant.stopReason==="error")&&agent.state.messages[agent.state.messages.length-1]!==finalAssistant)agent.state.messages.push(finalAssistant);
+      const completed=agent.state.messages.slice(before).filter((message)=>message.role!=="system").slice(promptMessages.length+1);
+      const entries:PiSessionEntry[]=[];let parent=nextSideLeaf;
+      for(const message of completed){
+        const persisted=message.role==="assistant"&&message.stopReason==="error"?{...message,errorMessage:classifyPromptError(message.errorMessage??"").message}:withImageRefs(message);
+        const entry=newEntry("message",parent,{message:persisted,...sideTag});
+        entries.push(entry);parent=entry.id;
+      }
+      if(entries.length){
+        const finalSideLeaf=await this.sessions.append(promptBookId,session.header.id,nextSideLeaf,entries);
+        session.entries.push(...entries);
+        if(finalSideLeaf)this.sideThreadLeaves.set(activeKey,finalSideLeaf);
+      }
+      const aborted=completed.some((message)=>message.role==="assistant"&&message.stopReason==="aborted");
+      const finalMessages=visibleMessages(session);const finalNavigation=sessionNavigation(session);const finalSideThreads=this.sessionSideThreads(session);
+      this.emit(aborted?{type:"prompt_aborted",bookId:promptBookId,sessionId:session.header.id,promptId,requestId,sideThreadKey:activeKey,messages:finalMessages,...finalNavigation,sideThreads:finalSideThreads}:{type:"prompt_end",bookId:promptBookId,sessionId:session.header.id,promptId,sideThreadKey:activeKey,messages:finalMessages,...finalNavigation,sideThreads:finalSideThreads});
+    }catch(error){
+      if(session&&key&&editIndex!==undefined&&!userPersisted){
+        if(hadPrevLeaf&&prevSideLeaf)this.sideThreadLeaves.set(key,prevSideLeaf);
+        else this.sideThreadLeaves.delete(key);
+        if(this.bookId===promptBookId&&this.session===session){
+          this.emit({type:"branch_switched",bookId:promptBookId,sessionId:session.header.id,requestId,sideThreadKey:key,messages:visibleMessages(session),...sessionNavigation(session),sideThreads:this.sessionSideThreads(session)});
+        }
+      }
+      const rawMessage=error instanceof Error?error.message:String(error);
+      const safeError=new Error(rawMessage===EDIT_TARGET_ERROR?rawMessage:classifyPromptError(error).message);
+      this.emit({type:"error",scope:"prompt",message:safeError.message,recoverable:true,bookId:promptBookId,sessionId:session?.header.id,promptId,...(key?{sideThreadKey:key}:{})});
+      throw safeError;
+    }finally{unsubscribe?.();if(this.promptAbort===promptAbort)this.promptAbort=null;if(this.promptId===promptId){this.promptId=null;this.promptAgent=null;this.turnSteps=[];}}
+  }
+
+  /** Retry / regenerate the assistant reply for an existing user question inside a chapter side-thread. */
+  async regenerateSideThread(
+    anchorId:string|null|undefined,
+    userMessageIndex:number,
+    promptId:string=crypto.randomUUID(),
+    requestId?:string,
+  ){
+    if(!this.bookId)throw new Error("No book is open");if(this.promptId)throw new Error("A prompt is already active");
+    const promptBookId=this.bookId;
+    this.promptId=promptId;this.turnSteps=[];
+    const promptAbort=new AbortController();this.promptAbort=promptAbort;
+    let session:DecodedPiSession|undefined;
+    let unsubscribe:(()=>void)|undefined;
+    let key:string|undefined;
+    let hadPrevLeaf=false;let prevSideLeaf:string|undefined;let persistedAny=false;
+    try{
+      await this.maintenance?.done;if(this.bookId!==promptBookId)throw new Error("Book context changed");
+      session=this.session??undefined;
+      if(!session||session.header.kind!=="guided")throw new Error(EDIT_TARGET_ERROR);
+      const spineRuns=guideSpineRuns(session);
+      const resolvedAnchorId=anchorId===undefined?(spineRuns.length?spineRuns[spineRuns.length-1].anchorEntryId:null):anchorId;
+      const runInfo=resolvedAnchorId!==null?resolveGuideRunForAnchor(session,resolvedAnchorId):null;
+      if(resolvedAnchorId!==null&&!runInfo)throw new Error("Guided chapter anchor is not on the active branch");
+      const effectiveAnchorId=runInfo?runInfo.anchorEntryId:null;
+      const spineEndEntryId=runInfo?runInfo.endEntryId:null;
+      key=sideThreadKeyFor(effectiveAnchorId);
+      const sideTag={sideThread:{anchorId:effectiveAnchorId}};
+
+      const target=visibleSideThreadEntries(session,key,this.sideThreadLeaves.get(key))[userMessageIndex];
+      const targetMessage=target?.message as {role?:unknown}|undefined;
+      if(!target||targetMessage?.role!=="user")throw new Error(EDIT_TARGET_ERROR);
+      hadPrevLeaf=this.sideThreadLeaves.has(key);prevSideLeaf=this.sideThreadLeaves.get(key);
+      this.sideThreadLeaves.set(key,target.id);
+      this.emit({type:"session_rewound",bookId:promptBookId,sessionId:session.header.id,promptId,requestId,sideThreadKey:key,messages:visibleSideThreadMessages(session,key,target.id)});
+
+      const config=await this.loadConfig();if(this.bookId!==promptBookId)throw new Error("Book context changed");
+      const contextEntries=sideThreadContextEntries(session,key,spineEndEntryId,target.id);
+      const agent=await this.ensureSideAgent(config,session,promptBookId,contextEntries,sessionConfig(session));
+      if(this.bookId!==promptBookId)throw new Error("Agent context changed");
+      this.promptAgent=agent;
+
+      const before=agent.state.messages.length;
+      const metaEntries:PiSessionEntry[]=[];let pendingParent=target.id;
+      const lastModel=[...contextEntries].reverse().find((entry)=>entry.type==="model_change");
+      if(lastModel?.provider!==config.provider||lastModel?.modelId!==config.model){
+        const change=newEntry("model_change",pendingParent,{provider:config.provider,modelId:config.model,...sideTag});
+        metaEntries.push(change);pendingParent=change.id;
+      }
+      let currentSideLeaf=target.id;
+      if(metaEntries.length){
+        const nextLeaf=await this.sessions.append(promptBookId,session.header.id,currentSideLeaf,metaEntries);
+        session.entries.push(...metaEntries);
+        if(nextLeaf){currentSideLeaf=nextLeaf;this.sideThreadLeaves.set(key,nextLeaf);}
+        persistedAny=true;
+      }
+      if(this.bookId!==promptBookId)throw new Error("Agent context changed");
+
+      const activeKey=key;
+      this.emit({type:"prompt_started",bookId:promptBookId,sessionId:session.header.id,promptId,requestId,sideThreadKey:activeKey});
+      unsubscribe=agent.subscribe((event)=>this.onPiEvent(event,promptBookId,promptId,session!.header.id,activeKey));
+      const runTurn=()=>retryAssistantCall(async()=>{
+        agent.state.messages.length=before;this.turnSteps=[];
+        if(promptAbort.signal.aborted){const{errorMessage:_unused,...rest}=errorAssistant(agent.state.model,new Error("Aborted"));return{...rest,stopReason:"aborted"} as AssistantMessage;}
+        try{await agent.continue();}
+        catch(error){return errorAssistant(agent.state.model,error);}
+        const last=agent.state.messages[agent.state.messages.length-1] as AssistantMessage|undefined;
+        return last?.role==="assistant"?last:errorAssistant(agent.state.model,new Error("模型请求失败"));
+      },RETRY_POLICY,promptAbort.signal,{onRetryScheduled:(attempt,maxAttempts,delayMs)=>this.emit({type:"retry_scheduled",bookId:promptBookId,sessionId:session!.header.id,promptId,sideThreadKey:activeKey,attempt,maxAttempts,delayMs})});
+      const finalAssistant=await runTurn();
+      if((finalAssistant.stopReason==="aborted"||finalAssistant.stopReason==="error")&&agent.state.messages[agent.state.messages.length-1]!==finalAssistant)agent.state.messages.push(finalAssistant);
+      const completed=agent.state.messages.slice(before).filter((message)=>message.role!=="system");
+      const entries:PiSessionEntry[]=[];let parent=currentSideLeaf;
+      for(const message of completed){
+        const persisted=message.role==="assistant"&&message.stopReason==="error"?{...message,errorMessage:classifyPromptError(message.errorMessage??"").message}:withImageRefs(message);
+        const entry=newEntry("message",parent,{message:persisted,...sideTag});
+        entries.push(entry);parent=entry.id;
+      }
+      if(entries.length){
+        const finalSideLeaf=await this.sessions.append(promptBookId,session.header.id,currentSideLeaf,entries);
+        session.entries.push(...entries);
+        if(finalSideLeaf)this.sideThreadLeaves.set(activeKey,finalSideLeaf);
+        persistedAny=true;
+      }
+      const aborted=completed.some((message)=>message.role==="assistant"&&message.stopReason==="aborted");
+      const finalMessages=visibleMessages(session);const finalNavigation=sessionNavigation(session);const finalSideThreads=this.sessionSideThreads(session);
+      this.emit(aborted?{type:"prompt_aborted",bookId:promptBookId,sessionId:session.header.id,promptId,requestId,sideThreadKey:activeKey,messages:finalMessages,...finalNavigation,sideThreads:finalSideThreads}:{type:"prompt_end",bookId:promptBookId,sessionId:session.header.id,promptId,sideThreadKey:activeKey,messages:finalMessages,...finalNavigation,sideThreads:finalSideThreads});
+    }catch(error){
+      if(session&&key&&!persistedAny){
+        if(hadPrevLeaf&&prevSideLeaf)this.sideThreadLeaves.set(key,prevSideLeaf);
+        else this.sideThreadLeaves.delete(key);
+        if(this.bookId===promptBookId&&this.session===session){
+          this.emit({type:"branch_switched",bookId:promptBookId,sessionId:session.header.id,requestId,sideThreadKey:key,messages:visibleMessages(session),...sessionNavigation(session),sideThreads:this.sessionSideThreads(session)});
+        }
+      }
+      const rawMessage=error instanceof Error?error.message:String(error);
+      const safeError=new Error(rawMessage===EDIT_TARGET_ERROR?rawMessage:classifyPromptError(error).message);
+      this.emit({type:"error",scope:"prompt",message:safeError.message,recoverable:true,bookId:promptBookId,sessionId:session?.header.id,promptId,...(key?{sideThreadKey:key}:{})});
+      throw safeError;
+    }finally{unsubscribe?.();if(this.promptAbort===promptAbort)this.promptAbort=null;if(this.promptId===promptId){this.promptId=null;this.promptAgent=null;this.turnSteps=[];}}
+  }
+
+  private async ensureSideAgent(config:RuntimeConfig,_session:DecodedPiSession,bookId:string,contextEntries:readonly PiSessionEntry[],configured:SessionConfig|null){
+    const resolvedModel=await resolveRuntimeModel(config);
+    const nativeFetch=createGuardedNativeFetch({baseUrl:resolvedModel.baseUrl,provider:config.provider});
+    const providerStream=await this.loadStream(resolvedModel.api);
+    const stream:StreamFn=(requestModel,requestContext,options)=>providerStream(requestModel,requestContext,{...options,fetch:nativeFetch,maxRetries:3});
+    const vision=resolvedModel.input.includes("image");
+    const tools=await this.tools(bookId,vision,false,true);
+    const userPrompt=configured?.systemPrompt.trim();
+    const basePrompt=`${SYSTEM_PROMPT}\n\n${SIDE_THREAD_PROMPT}`;
+    const convertToLlm=async(messages:PiMessage[])=>{const llm=convertPiContextToLlm(messages);return vision?restoreImageRefs(llm,async(src)=>{const image=await this.bookCall(bookId,()=>this.loadImage(src));return{type:"image",data:image.data,mimeType:image.mimeType};}):llm;};
+    return new Agent({initialState:{systemPrompt:userPrompt?`${basePrompt}\n\n${userPrompt}`:basePrompt,model:resolvedModel,thinkingLevel:clampThinkingLevel(resolvedModel,config.thinkingLevel as ModelThinkingLevel),messages:entriesToPiContextMessages(contextEntries),tools},streamFn:stream,convertToLlm,getApiKey:config.provider==="chatgpt"?async()=>{
+      const current=await this.loadConfig();if(current.provider!=="chatgpt")throw new Error("ChatGPT is no longer the active provider");return current.apiKey;}:()=>config.apiKey,transport:"sse"});
   }
 
   private async ensureAgent(config:RuntimeConfig,session:DecodedPiSession,bookId:string,configured:SessionConfig|null){if(this.agent)return this.agent;const resolvedModel=await resolveRuntimeModel(config);const nativeFetch=createGuardedNativeFetch({baseUrl:resolvedModel.baseUrl,provider:config.provider});const providerStream=await this.loadStream(resolvedModel.api);const stream:StreamFn=(requestModel,requestContext,options)=>providerStream(requestModel,requestContext,{...options,fetch:nativeFetch,maxRetries:3});const vision=resolvedModel.input.includes("image");const tools=await this.tools(bookId,vision,session.header.kind==="guided");const userPrompt=configured?.systemPrompt.trim();const basePrompt=session.header.kind==="guided"?`${SYSTEM_PROMPT}\n\n${guidedPrompt(this.loadGuidedStyle()??undefined)}`:SYSTEM_PROMPT;
@@ -604,7 +886,7 @@ export class LiteraAgentRuntime {
       const entry=newEntry("custom_message",session.leafId,{customType:GUIDE_RECAP,content,display:false,details});
       session.leafId=await this.sessions.append(bookId,session.header.id,session.leafId,[entry]);session.entries.push(entry);
       agent.state.messages.push({role:"custom",customType:GUIDE_RECAP,content,display:false,details,timestamp:Date.parse(entry.timestamp)} as PiMessage);
-      this.emit({type:"guide_recap_added",bookId,sessionId:session.header.id,messages:visibleMessages(session),...sessionNavigation(session)});
+      this.emit({type:"guide_recap_added",bookId,sessionId:session.header.id,messages:visibleMessages(session),...sessionNavigation(session),sideThreads:this.sessionSideThreads(session)});
     }catch(error){
       if(!signal.aborted)console.warn("Chapter recap failed",error);
     }
@@ -675,7 +957,7 @@ export class LiteraAgentRuntime {
         const entry=newEntry("compaction",session.leafId,{summary,firstKeptEntryId:preparation.firstKeptEntryId,tokensBefore:preparation.tokensBefore});
         session.leafId=await this.sessions.append(bookId,sessionId,session.leafId,[entry]);session.entries.push(entry);
         changed=true;
-        this.emit({type:"compaction_completed",bookId,sessionId,messages:visibleMessages(session),...sessionNavigation(session)});
+        this.emit({type:"compaction_completed",bookId,sessionId,messages:visibleMessages(session),...sessionNavigation(session),sideThreads:this.sessionSideThreads(session)});
       }catch(error){
         this.emit({type:"compaction_failed",bookId,sessionId,aborted:signal.aborted||(error instanceof DOMException&&error.name==="AbortError")});
       }
@@ -718,7 +1000,7 @@ export class LiteraAgentRuntime {
     return image;
   }
   private async bookCall<T>(bookId:string,call:()=>Promise<T>):Promise<T>{if(this.bookId!==bookId)throw new Error("电子书上下文已切换");const value=await call();if(this.bookId!==bookId)throw new Error("电子书上下文已切换");return value;}
-  private async tools(bookId:string,vision:boolean,guided:boolean):Promise<AgentTool[]>{const empty=Type.Object({});const read=Type.Object({chapterIndex:Type.Number(),part:Type.Optional(Type.Number()),fromBlock:Type.Optional(Type.Number()),toBlock:Type.Optional(Type.Number())});const search=Type.Object({queries:Type.Array(Type.String())});return [
+  private async tools(bookId:string,vision:boolean,guided:boolean,includeGuideHistory=guided):Promise<AgentTool[]>{const empty=Type.Object({});const read=Type.Object({chapterIndex:Type.Number(),part:Type.Optional(Type.Number()),fromBlock:Type.Optional(Type.Number()),toBlock:Type.Optional(Type.Number())});const search=Type.Object({queries:Type.Array(Type.String())});return [
     {name:"get_book_metadata",label:"Book Metadata",description:"Get book metadata",parameters:empty,execute:async()=>result(JSON.stringify(await this.bookCall(bookId,()=>this.book.metadata())))},
     {name:"get_toc",label:"Table of Contents",description:"Get the hierarchical TOC with chapterIndex, path (ancestor volumes/parts plus the entry title), depth and parts (how many read_chapter parts the chapter has)",parameters:empty,execute:async()=>result(JSON.stringify((await this.bookCall(bookId,()=>this.book.toc())).map((entry)=>({chapterIndex:entry.index,chapterNumber:entry.index+1,title:entry.label,path:[...entry.ancestors,entry.label].filter(Boolean),depth:entry.depth,chars:entry.chars,parts:entry.parts}))))},
     {name:"read_chapter",label:"Read Chapter",description:"Read one part of a chapter in Markdown (paragraphs, headings, emphasis, footnotes). Long chapters are split into parts (see totalParts, or parts in the TOC); part defaults to 0. To cover a whole chapter, call this once per part in the same turn. With fromBlock and toBlock, read exactly those blocks (the chapter's paragraphs, numbered from 0, inclusive) instead of a part; a read stops at the end of the part fromBlock is in, and the result's toBlock says where it stopped.",parameters:read,execute:async(_id,args)=>{const input=args as {chapterIndex:number;part?:number;fromBlock?:number;toBlock?:number};const range=input.fromBlock===undefined?undefined:{fromBlock:input.fromBlock,toBlock:input.toBlock??input.fromBlock};return result(JSON.stringify(await this.bookCall(bookId,()=>this.book.readChapter(input.chapterIndex,input.part,range))));}},
@@ -726,11 +1008,11 @@ export class LiteraAgentRuntime {
     ...(vision?[{name:"view_image",label:"View Image",description:"Look at one image from the book. read_chapter shows images as Markdown placeholders ![alt text](src); pass the placeholder's src exactly as written. Use it when the answer depends on what the image shows; alt text is often empty or vague. Call it once per image, several in the same turn when needed.",parameters:Type.Object({src:Type.String()}),execute:async(_id:string,args:unknown)=>{const input=args as {src:string};const image=await this.bookCall(bookId,()=>this.loadImage(input.src));return{content:[{type:"text" as const,text:JSON.stringify({src:image.src,mimeType:image.mimeType,...(image.width?{width:image.width,height:image.height}:{})})},{type:"image" as const,data:image.data,mimeType:image.mimeType}],details:{src:image.src}};}} satisfies AgentTool]:[]),
     ...(guided?[{name:"guide_step",label:"Guided Step",description:"Take the next guided step: this moves the guide on and returns the step's text directly so you can explain it in this same reply (only call read_chapter if the result explicitly lists remaining parts beyond the inline limit). Call it whenever you take the reader on through the book: they press Continue, pick a step, or ask to be guided through a place or a range (\"带读第3章\", \"带读第三章的1-3段\"). Not for questions about the book; those leave the guide where it is. Start: without chapterIndex, right after the furthest point the guide has reached (or the book's first body chapter before the first step); with it, at that chapter's first block (a chapter without text moves on to the next one), which may also be a chapter already read, to go over it again; the guide's furthest point stays where it is. A step never starts mid-chapter: for \"第三章的5-7段\", offer to read from the chapter's start, or from where the guide is, to paragraph 7. End: toBlock in toChapterIndex (default: the start's chapter), or the last block of toChapterIndex when toBlock is left out; with neither, the default step (one part). On Continue, you may pass toBlock from the nearby section breaks in the reading state to stop cleanly before a heading. Find a chapter by its title and path in get_toc, not by counting: front matter and sub-sections are chapters of their own, so \"第3章\" is rarely chapterIndex 2, and a chapter cut into sub-sections ends at its last sub-section. Find paragraphs and section starts with list_guide_blocks. When the place is ambiguous, ask instead of guessing. Each call takes one step, right after the one before.",parameters:Type.Object({chapterIndex:Type.Optional(Type.Number()),toChapterIndex:Type.Optional(Type.Number()),toBlock:Type.Optional(Type.Number())}),execute:async(toolCallId:string,args:unknown)=>{const take=async()=>{const session=this.session;if(session?.header.kind!=="guided")throw new Error("Not a Guided session");const toc=await this.bookCall(bookId,()=>this.book.toc());const picked=requestedGuideSpan(toc,await this.guideCursorIn(bookId,toc,session),args as GuideStepRequest);if("error" in picked)throw new Error(picked.error);const step=await recordGuideSpan(this.guideBlocksOf(bookId),picked.span);this.turnSteps.push({toolCallId,step,span:picked.span});const ranges=spanReadRanges(toc,picked.span);const inlineRanges=ranges.slice(0,GUIDE_INLINE_MAX_PARTS);const [inlined,stepImages]=await Promise.all([Promise.all(inlineRanges.map(async(range)=>{const read=await this.bookCall(bookId,()=>this.book.readChapter(range.chapterIndex,0,{fromBlock:range.fromBlock,toBlock:range.toBlock}));return{range,chapterTitle:read.chapterTitle,text:read.text};})),collectStepImages(toc,this.guideBlocksOf(bookId),picked.span)]);return result(guideStepContext(toc,picked.span,inlined,stepImages,vision));};const taken=this.guideStepChain.then(take,take);this.guideStepChain=taken.catch(()=>{});return taken;}} satisfies AgentTool]:[]),
     {name:"search_in_book",label:"Search Book",description:"Search multiple query variants",parameters:search,execute:async(_id,args)=>{const input=args as {queries:string[]};return result(JSON.stringify(await this.bookCall(bookId,()=>this.book.search(input.queries))));}},
-    ...(guided?[{name:"search_guide_history",label:"Search Guide History",description:"Search earlier guided explanations, chapter recaps, and reader side questions on the active branch (especially those that slid out of the active context window). Use when a chapter connects back to an earlier discussion whose detail is not in the recap.",parameters:search,execute:async(_id:string,args:unknown)=>{const session=this.session;if(session?.header.kind!=="guided")return result("[]");const input=args as {queries:string[]};const records:Array<{source:"explanation"|"recap"|"question";chapterTitle?:string;chapterIndex?:number;text:string}>=[];for(const recap of guideRecaps(session)){records.push({source:"recap",chapterIndex:recap.chapterIndex,chapterTitle:recap.chapterTitle,text:recap.text});}let lastChapter:{index?:number;title?:string}={};for(const message of visibleMessages(session)){if(message.role==="user"){if(message.guide){const ch="from" in message.guide?message.guide.from:message.guide;lastChapter={index:ch.chapterIndex,title:ch.chapterTitle};}else if(!message.guideRequest&&message.content.trim()){records.push({source:"question",chapterIndex:lastChapter.index,chapterTitle:lastChapter.title,text:message.content});}}else if(message.role==="assistant"){const step=(message.blocks??[]).find((block)=>block.type==="toolCall"&&block.toolCall.guide);if(step?.type==="toolCall"&&step.toolCall.guide){const g=step.toolCall.guide;const ch="from" in g?g.from:g;lastChapter={index:ch.chapterIndex,title:ch.chapterTitle};}if(message.content.trim()){records.push({source:"explanation",chapterIndex:lastChapter.index,chapterTitle:lastChapter.title,text:message.content});}}}return result(JSON.stringify(searchGuideHistoryRecords(records,input.queries)));}} satisfies AgentTool]:[]),
+    ...(includeGuideHistory?[{name:"search_guide_history",label:"Search Guide History",description:"Search earlier guided explanations, chapter recaps, and reader side questions across all chapters (especially those that slid out of the active context window or live on chapter side-threads). Use when a chapter connects back to an earlier discussion whose detail is not in the recap.",parameters:search,execute:async(_id:string,args:unknown)=>{const session=this.session;if(session?.header.kind!=="guided")return result("[]");const input=args as {queries:string[]};const records:Array<{source:"explanation"|"recap"|"question";chapterTitle?:string;chapterIndex?:number;text:string}>=[];for(const recap of guideRecaps(session)){records.push({source:"recap",chapterIndex:recap.chapterIndex,chapterTitle:recap.chapterTitle,text:recap.text});}let lastChapter:{index?:number;title?:string}={};for(const message of visibleMessages(session)){if(message.role==="user"){if(message.guide){const ch="from" in message.guide?message.guide.from:message.guide;lastChapter={index:ch.chapterIndex,title:ch.chapterTitle};}else if(!message.guideRequest&&message.content.trim()){records.push({source:"question",chapterIndex:lastChapter.index,chapterTitle:lastChapter.title,text:message.content});}}else if(message.role==="assistant"){const step=(message.blocks??[]).find((block)=>block.type==="toolCall"&&block.toolCall.guide);if(step?.type==="toolCall"&&step.toolCall.guide){const g=step.toolCall.guide;const ch="from" in g?g.from:g;lastChapter={index:ch.chapterIndex,title:ch.chapterTitle};}if(message.content.trim()){records.push({source:"explanation",chapterIndex:lastChapter.index,chapterTitle:lastChapter.title,text:message.content});}}}for(const [stKey,snap] of Object.entries(this.sessionSideThreads(session))){const anchor=sideThreadAnchorFromKey(stKey);const run=anchor?resolveGuideRunForAnchor(session,anchor):null;for(const message of snap.messages){if(message.role==="user"&&message.content.trim()){records.push({source:"question",chapterIndex:run?.chapterIndex,chapterTitle:run?.chapterTitle,text:message.content});}else if(message.role==="assistant"&&message.content.trim()){records.push({source:"explanation",chapterIndex:run?.chapterIndex,chapterTitle:run?.chapterTitle,text:message.content});}}}return result(JSON.stringify(searchGuideHistoryRecords(records,input.queries)));}} satisfies AgentTool]:[]),
     {name:"draw_mindmap",label:"Mind Map",description:"Draw a mind map from a markdown outline, rendered inline in the Session's message flow as a collapsible, interactive, SVG-exportable mind map. Use this when the user asks for a visual overview or summary (chapter structure, character relationships, argument maps) instead of writing long hierarchical prose. Parameters: title (short map title) and outline (one complete markdown outline using headings and/or nested lists). Limits: at most 4 levels deep, at most 100 nodes, each line at most 200 characters; an over-limit outline returns an error, so retry with a smaller, valid outline. Outline principles: keep each node to a short keyword or phrase (typically a few words, never sentences) — if a node needs more than a few words, split the idea across parent and child; choose the first-level branches as the map's skeleton (the few basic ordering ideas the whole topic hangs on); grow from general near the root to specific near the leaves, each child expanding on its parent. One call draws one complete, independent map.",parameters:Type.Object({title:Type.String(),outline:Type.String()}),execute:async(_id,args)=>{const input=args as {title:string;outline:string};return result(JSON.stringify(validateMindmapParams(input.title,input.outline)));}},
     {name:"list_annotations",label:"List Annotations",description:"List the current book's bookmarks and highlights. Use when the user asks about what they marked; not for ordinary chapter questions.",parameters:empty,execute:async()=>{try{const data=await this.bookCall(bookId,()=>this.loadAnnotations(bookId));return result(JSON.stringify({bookmarks:data.bookmarks.map(({id,cfi,fraction,createdAt,label})=>({id,cfi,fraction,createdAt,...(label!==undefined?{label}:{})})),highlights:data.highlights.map(({id,cfi,excerpt,createdAt,color,note})=>({id,cfi,excerpt,createdAt,color:color??"yellow",...(note?.trim()?{note}:{})}))}));}catch(error){throw error instanceof Error?error:new Error(invokeErrorMessage(error));}}},
   ];}
-  private onPiEvent(event:PiEvent,bookId:string,promptId:string,sessionId:string){const base={bookId,sessionId,promptId};const e=event.type==="message_update"?event.assistantMessageEvent:undefined;if(e?.type==="text_delta")this.emit({type:"text_delta",...base,delta:e.delta});else if(e?.type==="thinking_start")this.emit({type:"thinking_start",...base,contentIndex:e.contentIndex});else if(e?.type==="thinking_delta")this.emit({type:"thinking_delta",...base,contentIndex:e.contentIndex,delta:e.delta});else if(e?.type==="thinking_end")this.emit({type:"thinking_end",...base,contentIndex:e.contentIndex});else if(event.type==="tool_execution_start")this.emit({type:"tool_start",...base,toolCallId:event.toolCallId,tool:event.toolName,params:event.args});else if(event.type==="tool_execution_end"){const guide=this.turnSteps.find((taken)=>taken.toolCallId===event.toolCallId)?.step;this.emit({type:"tool_end",...base,toolCallId:event.toolCallId,result:withoutImageBlocks(event.result),isError:event.isError,...(guide?{guide}:{})});}}
+  private onPiEvent(event:PiEvent,bookId:string,promptId:string,sessionId:string,sideThreadKey?:string){const base={bookId,sessionId,promptId,...(sideThreadKey?{sideThreadKey}:{})};const e=event.type==="message_update"?event.assistantMessageEvent:undefined;if(e?.type==="text_delta")this.emit({type:"text_delta",...base,delta:e.delta});else if(e?.type==="thinking_start")this.emit({type:"thinking_start",...base,contentIndex:e.contentIndex});else if(e?.type==="thinking_delta")this.emit({type:"thinking_delta",...base,contentIndex:e.contentIndex,delta:e.delta});else if(e?.type==="thinking_end")this.emit({type:"thinking_end",...base,contentIndex:e.contentIndex});else if(event.type==="tool_execution_start")this.emit({type:"tool_start",...base,toolCallId:event.toolCallId,tool:event.toolName,params:event.args});else if(event.type==="tool_execution_end"){const guide=this.turnSteps.find((taken)=>taken.toolCallId===event.toolCallId)?.step;this.emit({type:"tool_end",...base,toolCallId:event.toolCallId,result:withoutImageBlocks(event.result),isError:event.isError,...(guide?{guide}:{})});}}
 }
 
 export const embeddedAgentRuntime=new LiteraAgentRuntime();

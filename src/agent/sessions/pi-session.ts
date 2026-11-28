@@ -12,6 +12,8 @@ import type {
   GuideRequest,
   RecordedGuideStep,
   SessionKind,
+  SideThreadRef,
+  SideThreadSnapshot,
 } from "@/types/agent";
 
 export interface PiSessionHeader {
@@ -236,6 +238,37 @@ export function isGuideRecapEntry(entry: PiSessionEntry): boolean {
 
 export const GUIDE_RECAP = "guideRecap";
 export const GUIDE_WINDOW_CUT = "guide_window_cut";
+export const ROOT_SIDE_THREAD_KEY = "__root__";
+
+/** Stable map key for a side-thread anchor (`null` -> pre-guide root). */
+export function sideThreadKeyFor(anchorId: string | null): string {
+  return anchorId ?? ROOT_SIDE_THREAD_KEY;
+}
+
+/** Decode a side-thread map key back to its persisted `anchorId` (`null` for pre-guide root). */
+export function sideThreadAnchorFromKey(key: string): string | null {
+  return key === ROOT_SIDE_THREAD_KEY ? null : key;
+}
+
+/** Decode an entry's `sideThread` tag, or null when the entry sits on the spine. */
+export function decodeSideThread(entry: PiSessionEntry): SideThreadRef | null {
+  const ref = object(entry.sideThread);
+  if (!ref) return null;
+  if (ref.anchorId === null) return { anchorId: null };
+  const anchorId = string(ref.anchorId);
+  return anchorId ? { anchorId } : null;
+}
+
+/** True when `entry` belongs to a chapter side-thread rather than the guided spine. */
+export function isSideThreadEntry(entry: PiSessionEntry): boolean {
+  return decodeSideThread(entry) !== null;
+}
+
+/** Map key of `entry`'s side-thread, or null when `entry` sits on the spine. */
+export function entrySideThreadKey(entry: PiSessionEntry): string | null {
+  const ref = decodeSideThread(entry);
+  return ref ? sideThreadKeyFor(ref.anchorId) : null;
+}
 
 /** A sliding-window advance or manual context reset in a Guided session. */
 export function isGuideWindowCutEntry(entry: PiSessionEntry): boolean {
@@ -353,8 +386,8 @@ export function contextBranch(session: DecodedPiSession): PiSessionEntry[] {
   });
 }
 
-export function piContextMessages(session: DecodedPiSession): PiAgentMessage[] {
-  return contextBranch(session).flatMap((entry): PiAgentMessage[] => {
+export function entriesToPiContextMessages(entries: readonly PiSessionEntry[]): PiAgentMessage[] {
+  return entries.flatMap((entry): PiAgentMessage[] => {
     if (entry.type === "message" && object(entry.message)) return [entry.message as PiAgentMessage];
     if (entry.type === "custom_message") {
       return [{
@@ -384,6 +417,10 @@ export function piContextMessages(session: DecodedPiSession): PiAgentMessage[] {
     }
     return [];
   });
+}
+
+export function piContextMessages(session: DecodedPiSession): PiAgentMessage[] {
+  return entriesToPiContextMessages(contextBranch(session));
 }
 
 export function convertPiContextToLlm(messages: PiAgentMessage[]): Message[] {
@@ -718,10 +755,20 @@ function branchPreview(content: unknown): string {
  * of a fork maps to the same AnchorBranchInfo.
  */
 export function branchNavigation(session: DecodedPiSession): Map<string, AnchorBranchInfo> {
-  const byId = new Map(session.entries.map((entry) => [entry.id, entry]));
+  return computeBranchNavigation(session, false);
+}
+
+function computeBranchNavigation(
+  session: DecodedPiSession,
+  includeSideThreads: boolean,
+): Map<string, AnchorBranchInfo> {
+  const entries = includeSideThreads
+    ? session.entries
+    : session.entries.filter((entry) => !isSideThreadEntry(entry));
+  const byId = new Map(entries.map((entry) => [entry.id, entry]));
   const children = new Map<string, PiSessionEntry[]>();
-  for (const entry of session.entries) {
-    if (!entry.parentId) continue;
+  for (const entry of entries) {
+    if (!entry.parentId || !byId.has(entry.parentId)) continue;
     const list = children.get(entry.parentId) ?? [];
     list.push(entry);
     children.set(entry.parentId, list);
@@ -729,7 +776,7 @@ export function branchNavigation(session: DecodedPiSession): Map<string, AnchorB
 
   const userGroups = new Map<string, PiSessionEntry[]>();
   const assistantGroups = new Map<string, PiSessionEntry[]>();
-  for (const entry of session.entries) {
+  for (const entry of entries) {
     if (isUserMessageEntry(entry)) {
       let previousUserId = "";
       let current = entry.parentId ? byId.get(entry.parentId) : undefined;
@@ -768,7 +815,7 @@ export function branchNavigation(session: DecodedPiSession): Map<string, AnchorB
     }
   }
 
-  const activeIds = new Set(activeBranch(session).map((entry) => entry.id));
+  const activeIds = new Set(activeBranch({ ...session, entries }).map((entry) => entry.id));
   const navigation = new Map<string, AnchorBranchInfo>();
 
   for (const group of userGroups.values()) {
@@ -826,12 +873,23 @@ export function branchNavigation(session: DecodedPiSession): Map<string, AnchorB
  * node without children. Returns null when the anchor entry does not exist.
  */
 export function branchLeafId(session: DecodedPiSession, anchorId: string): string | null {
-  const byId = new Map(session.entries.map((entry) => [entry.id, entry]));
+  return computeBranchLeafId(session.entries, anchorId, false);
+}
+
+function computeBranchLeafId(
+  allEntries: readonly PiSessionEntry[],
+  anchorId: string,
+  includeSideThreads: boolean,
+): string | null {
+  const entries = includeSideThreads
+    ? allEntries
+    : allEntries.filter((entry) => !isSideThreadEntry(entry));
+  const byId = new Map(entries.map((entry) => [entry.id, entry]));
   const anchor = byId.get(anchorId);
   if (!anchor) return null;
   const children = new Map<string, PiSessionEntry[]>();
-  for (const entry of session.entries) {
-    if (!entry.parentId) continue;
+  for (const entry of entries) {
+    if (!entry.parentId || !byId.has(entry.parentId)) continue;
     const list = children.get(entry.parentId) ?? [];
     list.push(entry);
     children.set(entry.parentId, list);
@@ -846,6 +904,274 @@ export function branchLeafId(session: DecodedPiSession, anchorId: string): strin
     }
     current = next;
   }
+}
+
+function sideThreadMiniSession(
+  session: DecodedPiSession,
+  key: string,
+  preferredLeafId?: string | null,
+): DecodedPiSession {
+  const entries = session.entries.filter((entry) => entrySideThreadKey(entry) === key);
+  const leafId =
+    preferredLeafId === null
+      ? null
+      : preferredLeafId && entries.some((entry) => entry.id === preferredLeafId)
+        ? preferredLeafId
+        : (entries[entries.length - 1]?.id ?? null);
+  return { header: session.header, entries, leafId };
+}
+
+/** Active leaf entry id of a chapter side-thread (preferred if valid, else newest). */
+export function sideThreadActiveLeaf(
+  session: DecodedPiSession,
+  key: string,
+  preferredLeafId?: string | null,
+): string | null {
+  return sideThreadMiniSession(session, key, preferredLeafId).leafId;
+}
+
+/** Active leaf-to-root path strictly within side-thread `key`, oldest first. */
+export function sideThreadActiveBranch(
+  session: DecodedPiSession,
+  key: string,
+  preferredLeafId?: string | null,
+): PiSessionEntry[] {
+  return activeBranch(sideThreadMiniSession(session, key, preferredLeafId));
+}
+
+/** Visible-message anchor entries for side-thread `key` (1:1 with `visibleSideThreadMessages`). */
+export function visibleSideThreadEntries(
+  session: DecodedPiSession,
+  key: string,
+  preferredLeafId?: string | null,
+): PiSessionEntry[] {
+  return visibleMessageEntries(sideThreadMiniSession(session, key, preferredLeafId));
+}
+
+/** Visible UI messages for side-thread `key`. */
+export function visibleSideThreadMessages(
+  session: DecodedPiSession,
+  key: string,
+  preferredLeafId?: string | null,
+): UiAgentMessage[] {
+  return visibleMessages(sideThreadMiniSession(session, key, preferredLeafId));
+}
+
+/** Internal branch navigation snapshot for side-thread `key`. */
+export function sideThreadNavigation(
+  session: DecodedPiSession,
+  key: string,
+  preferredLeafId?: string | null,
+): SessionNavigation {
+  const mini = sideThreadMiniSession(session, key, preferredLeafId);
+  const navigation: Record<string, AnchorBranchInfo> = {};
+  for (const [anchorId, info] of computeBranchNavigation(mini, true)) {
+    navigation[anchorId] = info;
+  }
+  return {
+    anchors: visibleMessageEntries(mini).map((entry) => entry.id),
+    navigation,
+  };
+}
+
+/** Deepest leaf of a sibling branch inside side-thread `key`. */
+export function sideThreadBranchLeafId(
+  session: DecodedPiSession,
+  key: string,
+  anchorEntryId: string,
+): string | null {
+  const entries = session.entries.filter((entry) => entrySideThreadKey(entry) === key);
+  return computeBranchLeafId(entries, anchorEntryId, true);
+}
+
+/** Snapshots of every side-thread present in `session`, keyed by `anchorId ?? "__root__"`. */
+export function sideThreadSnapshots(
+  session: DecodedPiSession,
+  preferredLeaves?: ReadonlyMap<string, string>,
+): Record<string, SideThreadSnapshot> {
+  const keys = new Set<string>();
+  for (const entry of session.entries) {
+    const key = entrySideThreadKey(entry);
+    if (key !== null) keys.add(key);
+  }
+  const snapshots: Record<string, SideThreadSnapshot> = {};
+  for (const key of keys) {
+    const preferred = preferredLeaves?.get(key);
+    const mini = sideThreadMiniSession(session, key, preferred);
+    const navigation: Record<string, AnchorBranchInfo> = {};
+    for (const [anchorId, info] of computeBranchNavigation(mini, true)) {
+      navigation[anchorId] = info;
+    }
+    snapshots[key] = {
+      messages: visibleMessages(mini),
+      anchors: visibleMessageEntries(mini).map((entry) => entry.id),
+      navigation,
+    };
+  }
+  return snapshots;
+}
+
+export interface GuideSpineRunInfo {
+  /** Stable spine entry id anchoring this chapter run (first step's user request entry, or step entry). */
+  anchorEntryId: string;
+  /** Last spine entry belonging to this run's final step turn (before any recap / next chapter). */
+  endEntryId: string;
+  chapterIndex: number;
+  chapterTitle?: string;
+  /** All step-related entry ids belonging to this run (for flexible anchor lookup). */
+  memberEntryIds: Set<string>;
+}
+
+function stepChapterMeta(step: RecordedGuideStep): { chapterIndex: number; chapterTitle?: string } {
+  const start = "from" in step ? step.from : step;
+  return {
+    chapterIndex: start.chapterIndex,
+    ...(start.chapterTitle ? { chapterTitle: start.chapterTitle } : {}),
+  };
+}
+
+/**
+ * Resolve every chronological chapter run on the active guided spine with its
+ * stable `anchorEntryId` and its terminal `endEntryId` (last assistant/tool
+ * entry of the run's final guided step, excluding later recaps or chapters).
+ */
+export function guideSpineRuns(session: DecodedPiSession): GuideSpineRunInfo[] {
+  const spine = activeBranch(session);
+  const runs: GuideSpineRunInfo[] = [];
+
+  let lastUserEntryId: string | null = null;
+  let currentTurnFirstAssistantId: string | null = null;
+  let currentStepTurnRun: GuideSpineRunInfo | null = null;
+
+  for (const entry of spine) {
+    const role = messageRole(entry);
+    if (role === "user") {
+      currentTurnFirstAssistantId = null;
+      currentStepTurnRun = null;
+      lastUserEntryId = entry.id;
+
+      const legacyStep = decodeGuide(entry.guide);
+      if (legacyStep) {
+        const meta = stepChapterMeta(legacyStep);
+        const lastRun = runs[runs.length - 1];
+        if (lastRun && lastRun.chapterIndex === meta.chapterIndex) {
+          lastRun.endEntryId = entry.id;
+          lastRun.memberEntryIds.add(entry.id);
+          currentStepTurnRun = lastRun;
+        } else {
+          const run: GuideSpineRunInfo = {
+            anchorEntryId: entry.id,
+            endEntryId: entry.id,
+            chapterIndex: meta.chapterIndex,
+            chapterTitle: meta.chapterTitle,
+            memberEntryIds: new Set([entry.id]),
+          };
+          runs.push(run);
+          currentStepTurnRun = run;
+        }
+      }
+      continue;
+    }
+
+    if (role === "assistant") {
+      if (!currentTurnFirstAssistantId) currentTurnFirstAssistantId = entry.id;
+      if (currentStepTurnRun) {
+        currentStepTurnRun.endEntryId = entry.id;
+        currentStepTurnRun.memberEntryIds.add(entry.id);
+      }
+      continue;
+    }
+
+    if (role === "toolResult") {
+      const step = decodeGuide(entry.guide);
+      if (step) {
+        const meta = stepChapterMeta(step);
+        const stepAnchor = lastUserEntryId ?? currentTurnFirstAssistantId ?? entry.id;
+        const lastRun = runs[runs.length - 1];
+        if (lastRun && lastRun.chapterIndex === meta.chapterIndex) {
+          lastRun.endEntryId = entry.id;
+          lastRun.memberEntryIds.add(stepAnchor);
+          if (currentTurnFirstAssistantId) lastRun.memberEntryIds.add(currentTurnFirstAssistantId);
+          lastRun.memberEntryIds.add(entry.id);
+          currentStepTurnRun = lastRun;
+        } else {
+          const members = new Set<string>([stepAnchor, entry.id]);
+          if (currentTurnFirstAssistantId) members.add(currentTurnFirstAssistantId);
+          const run: GuideSpineRunInfo = {
+            anchorEntryId: stepAnchor,
+            endEntryId: entry.id,
+            chapterIndex: meta.chapterIndex,
+            chapterTitle: meta.chapterTitle,
+            memberEntryIds: members,
+          };
+          runs.push(run);
+          currentStepTurnRun = run;
+        }
+      } else if (currentStepTurnRun) {
+        currentStepTurnRun.endEntryId = entry.id;
+      }
+      continue;
+    }
+
+    // Non-message entries (recap, window cut, compaction, readingContext) end the step turn.
+    currentStepTurnRun = null;
+  }
+
+  return runs;
+}
+
+/** Find the spine chapter run owning `anchorId` (null when not found). */
+export function resolveGuideRunForAnchor(
+  session: DecodedPiSession,
+  anchorId: string,
+): GuideSpineRunInfo | null {
+  for (const run of guideSpineRuns(session)) {
+    if (run.anchorEntryId === anchorId || run.memberEntryIds.has(anchorId)) return run;
+  }
+  return null;
+}
+
+/**
+ * Model-context projection for a chapter side-thread:
+ *   contextBranch(spine prefix through `spineEndEntryId`) + contextBranch(side-thread).
+ *
+ * Keeps the guided spine prefix byte-identical through the chapter's latest
+ * step (maximizing Prompt Cache hits and excluding later chapters / later spine
+ * window cuts), then appends the chapter's active side-thread Q&A chain.
+ */
+export function sideThreadContextEntries(
+  session: DecodedPiSession,
+  key: string,
+  spineEndEntryId: string | null,
+  preferredSideLeafId?: string | null,
+): PiSessionEntry[] {
+  const spineEntries = session.entries.filter((entry) => !isSideThreadEntry(entry));
+  const spineContext = spineEndEntryId
+    ? contextBranch({ header: session.header, entries: spineEntries, leafId: spineEndEntryId })
+    : [];
+  const sideMini = sideThreadMiniSession(session, key, preferredSideLeafId);
+  const sideContext = contextBranch(sideMini);
+  const spineHasSnapshot = spineContext.some(
+    (entry) => entry.type === "custom_message" && entry.customType === "bookSnapshot",
+  );
+  const filteredSide = spineHasSnapshot
+    ? sideContext.filter(
+        (entry) => !(entry.type === "custom_message" && entry.customType === "bookSnapshot"),
+      )
+    : sideContext;
+  return [...spineContext, ...filteredSide];
+}
+
+/** PiAgentMessage projection for a chapter side-thread. */
+export function piSideThreadContextMessages(
+  session: DecodedPiSession,
+  key: string,
+  spineEndEntryId: string | null,
+  preferredSideLeafId?: string | null,
+): PiAgentMessage[] {
+  return entriesToPiContextMessages(
+    sideThreadContextEntries(session, key, spineEndEntryId, preferredSideLeafId),
+  );
 }
 
 /**

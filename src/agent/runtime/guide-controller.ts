@@ -26,6 +26,7 @@ export type GuideRuntimePort = Pick<
   | "newSession"
   | "switchSession"
   | "switchBranchAtAnchor"
+  | "switchSideThreadBranchAtAnchor"
   | "deleteSession"
   | "renameSession"
   | "updateSessionConfig"
@@ -45,7 +46,9 @@ export type GuideRuntimePort = Pick<
   | "guidePageMarks"
   | "locateQuote"
   | "prompt"
+  | "promptSideThread"
   | "regenerate"
+  | "regenerateSideThread"
   | "abort"
   | "refreshAfterSync"
 >;
@@ -106,6 +109,22 @@ export class GuideController {
     requestId?: string,
   ): Promise<void> {
     return this.runtime.switchBranchAtAnchor(sessionId, anchorId, direction, requestId);
+  }
+
+  switchSideBranchAtAnchor(
+    sessionId: string,
+    sideThreadKey: string,
+    anchorEntryId: string,
+    direction: -1 | 1,
+    requestId?: string,
+  ): Promise<void> {
+    return this.runtime.switchSideThreadBranchAtAnchor(
+      sessionId,
+      sideThreadKey,
+      anchorEntryId,
+      direction,
+      requestId,
+    );
   }
 
   contextStats(): GuideContextStats | null {
@@ -195,8 +214,30 @@ export class GuideController {
     return this.runtime.prompt(label, { guideRequest: merged }, promptId, requestId, editIndex);
   }
 
-  /** Ask a side question anchored to the active Guided session without moving the Guide cursor. */
+  /**
+   * Ask or edit a follow-up question on a chapter-scoped side-thread without
+   * moving the guided spine's `leafId` or `Guide cursor`.
+   */
   askSideQuestion(
+    text: string,
+    context: { selection?: string; chapterHref?: string; sideThreadAnchorId?: string | null },
+    promptId?: string,
+    requestId?: string,
+    editIndex?: number,
+  ): Promise<void> {
+    const { sideThreadAnchorId, ...rest } = context;
+    return this.runtime.promptSideThread(
+      sideThreadAnchorId,
+      text,
+      rest,
+      promptId,
+      requestId,
+      editIndex,
+    );
+  }
+
+  /** Edit a legacy inline side-question persisted on the spine (pre-side-thread sessions). */
+  editLegacySpineTurn(
     text: string,
     context: { selection?: string; chapterHref?: string },
     promptId?: string,
@@ -213,6 +254,16 @@ export class GuideController {
     requestId?: string,
   ): Promise<void> {
     return this.runtime.regenerate(userMessageIndex, promptId, requestId);
+  }
+
+  /** Retry / regenerate an assistant reply strictly inside a chapter side-thread. */
+  regenerateSideTurn(
+    anchorId: string | null | undefined,
+    userMessageIndex: number,
+    promptId?: string,
+    requestId?: string,
+  ): Promise<void> {
+    return this.runtime.regenerateSideThread(anchorId, userMessageIndex, promptId, requestId);
   }
 
   abort(requestId?: string): void {

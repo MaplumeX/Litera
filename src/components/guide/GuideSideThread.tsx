@@ -11,26 +11,26 @@ import { cn } from "@/lib/utils";
 
 interface GuideSideThreadProps {
   threads: readonly GuideSideQaNode[];
-  /** Auto-expand for the latest step or while a question inside it is streaming/edited. */
+  /** Auto-expand for the latest chapter or while a question inside it is streaming/edited. */
   defaultExpanded: boolean;
   /** External force-expand token (e.g. jumping to a side question from GuideNavRail). */
   expandedQuestionIndex?: number | null;
   isStreaming: boolean;
   bookReady: boolean;
   readOnly?: boolean;
-  editingIndex: number | null;
+  editingQaId: string | null;
   editDraft: string;
   onDraftChange: (value: string) => void;
-  onStartEdit: (messageIndex: number) => void;
+  onStartEdit: (qa: GuideSideQaNode) => void;
   onSaveEdit: () => void;
   onCancelEdit: () => void;
-  onRegenerate: (messageIndex: number) => void;
-  onSwitchBranch: (anchorId: string, direction: -1 | 1) => void;
+  onRegenerate: (qa: GuideSideQaNode) => void;
+  onSwitchBranch: (qa: GuideSideQaNode, anchorId: string, direction: -1 | 1) => void;
   registerItem?: (index: number, element: HTMLDivElement | null) => void;
 }
 
 /**
- * Follow-up Q&As anchored underneath their parent `GuideStepSection`.
+ * Chapter-scoped follow-up Q&As rendered below the chapter's guided steps.
  * Keeps the continuous retelling clean while preserving full edit, regenerate,
  * and branch-switching capabilities on every side question.
  */
@@ -41,7 +41,7 @@ export function GuideSideThread({
   isStreaming,
   bookReady,
   readOnly = false,
-  editingIndex,
+  editingQaId,
   editDraft,
   onDraftChange,
   onStartEdit,
@@ -55,7 +55,7 @@ export function GuideSideThread({
   const hasActiveInteraction = threads.some(
     (qa) =>
       qa.streaming ||
-      qa.userMessageIndex === editingIndex ||
+      qa.id === editingQaId ||
       qa.userMessageIndex === expandedQuestionIndex,
   );
   const [expanded, setExpanded] = useState(defaultExpanded || hasActiveInteraction);
@@ -100,10 +100,10 @@ export function GuideSideThread({
                   total={branchInfo.options.length}
                   disabled={isStreaming}
                   onPrev={() =>
-                    onSwitchBranch(branchInfo.options[branchInfo.activeIndex - 1].anchorId, -1)
+                    onSwitchBranch(qa, branchInfo.options[branchInfo.activeIndex - 1].anchorId, -1)
                   }
                   onNext={() =>
-                    onSwitchBranch(branchInfo.options[branchInfo.activeIndex + 1].anchorId, 1)
+                    onSwitchBranch(qa, branchInfo.options[branchInfo.activeIndex + 1].anchorId, 1)
                   }
                 />
               );
@@ -117,12 +117,14 @@ export function GuideSideThread({
                   disabled={isStreaming}
                   onPrev={() =>
                     onSwitchBranch(
+                      qa,
                       assistantBranchInfo.options[assistantBranchInfo.activeIndex - 1].anchorId,
                       -1,
                     )
                   }
                   onNext={() =>
                     onSwitchBranch(
+                      qa,
                       assistantBranchInfo.options[assistantBranchInfo.activeIndex + 1].anchorId,
                       1,
                     )
@@ -144,10 +146,10 @@ export function GuideSideThread({
                     selection: qa.selection,
                     chapterHref: qa.chapterHref,
                   }}
-                  editing={editingIndex === qa.userMessageIndex}
-                  draft={editingIndex === qa.userMessageIndex ? editDraft : qa.question}
+                  editing={editingQaId === qa.id}
+                  draft={editingQaId === qa.id ? editDraft : qa.question}
                   onDraftChange={onDraftChange}
-                  onStartEdit={() => onStartEdit(qa.userMessageIndex)}
+                  onStartEdit={() => onStartEdit(qa)}
                   onSave={onSaveEdit}
                   onCancel={onCancelEdit}
                   editDisabled={isStreaming || readOnly}
@@ -166,7 +168,7 @@ export function GuideSideThread({
                       messageIndex={qa.assistantMessageIndex}
                       streaming={qa.streaming}
                       canRegenerate={!isStreaming && bookReady && !readOnly}
-                      onRegenerate={() => onRegenerate(qa.assistantMessageIndex!)}
+                      onRegenerate={() => onRegenerate(qa)}
                       branchSwitcher={assistantBranchSwitcher}
                     />
                   </HoldHeight>

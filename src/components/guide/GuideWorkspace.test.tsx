@@ -6,8 +6,11 @@ import type { AgentState } from "@/lib/agent-reducer";
 import type { GuideStep } from "@/types/agent";
 
 const prompt = vi.fn();
+const askSideQuestion = vi.fn();
 const editPrompt = vi.fn();
+const editSideTurn = vi.fn();
 const regenerateTurn = vi.fn();
+const regenerateSideTurn = vi.fn();
 const abort = vi.fn();
 const switchSession = vi.fn();
 const newSession = vi.fn();
@@ -24,6 +27,7 @@ const guideContextStats = vi.fn();
 const resetGuideContext = vi.fn();
 const restartGuidedSession = vi.fn();
 const switchBranchAtAnchor = vi.fn();
+const switchSideBranchAtAnchor = vi.fn();
 const updateSessionConfig = vi.fn();
 const locateQuote = vi.fn();
 
@@ -36,11 +40,14 @@ vi.mock("@/lib/use-guide-bridge", () => ({
     switchSession,
     newGuidedSession: newSession,
     takeStep: prompt,
-    askSideQuestion: prompt,
+    askSideQuestion,
     editTurn: editPrompt,
+    editSideTurn,
     regenerateTurn,
+    regenerateSideTurn,
     abort,
     switchBranchAtAnchor,
+    switchSideBranchAtAnchor,
     restartGuide: restartGuidedSession,
     updateConfig: updateSessionConfig,
     resetContext: resetGuideContext,
@@ -100,6 +107,8 @@ function makeGuidedState(overrides?: Partial<AgentState>): AgentState {
     sessionListRequestId: null,
     branchNavigation: {},
     branchAnchors: [],
+    sideThreads: {},
+    activeSideThreadKey: null,
     ...overrides,
   };
 }
@@ -457,5 +466,71 @@ describe("GuideWorkspace", () => {
     // Expanding it reveals the preserved aborted partial output.
     fireEvent.click(screen.getByRole("button", { name: "展开未完成的带读" }));
     expect(screen.getByText("旧的中断半截内容")).toBeTruthy();
+  });
+
+  it("keeps chapter follow-up questions inside the viewed historical chapter and passes its run anchor without jumping to latest", async () => {
+    askSideQuestion.mockResolvedValue({ requestId: "req-1", promptId: "p-1" });
+    mockState = makeGuidedState({
+      messages: [
+        { role: "user", content: "继续带读", guideRequest: {} },
+        {
+          role: "assistant",
+          content: "第一章讲解。",
+          blocks: [
+            { type: "toolCall", toolCall: { toolCallId: "t1", tool: "guide_step", params: {}, done: true, guide: step0 } },
+            { type: "text", text: "第一章讲解。" },
+          ],
+        },
+        { role: "user", content: "继续带读", guideRequest: {} },
+        {
+          role: "assistant",
+          content: "第二章讲解。",
+          blocks: [
+            { type: "toolCall", toolCall: { toolCallId: "t2", tool: "guide_step", params: {}, done: true, guide: step1 } },
+            { type: "text", text: "第二章讲解。" },
+          ],
+        },
+      ],
+      branchAnchors: ["u-ch1", "a-ch1", "u-ch2", "a-ch2"],
+      sideThreads: {
+        "u-ch1": {
+          messages: [
+            { role: "user", content: "第一章专属追问" },
+            { role: "assistant", content: "第一章专属回答" },
+          ],
+          anchors: ["sq-1", "sa-1"],
+          navigation: {},
+        },
+      },
+    });
+
+    render(<GuideWorkspace bookId="book-1" />);
+
+    // Viewing Chapter 2 does NOT show Chapter 1's follow-up.
+    expect(screen.getByText("第二章讲解。")).toBeTruthy();
+    expect(screen.queryByTestId("guide-side-thread")).toBeNull();
+    expect(screen.queryByText("第一章专属追问")).toBeNull();
+
+    // Switch back to Chapter 1: Chapter 1's side-thread lives here.
+    fireEvent.click(screen.getByRole("button", { name: "上一章" }));
+    expect(screen.getByText("第一章讲解。")).toBeTruthy();
+    expect(screen.getByTestId("guide-side-thread")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "展开追问" }));
+    expect(screen.getByText("第一章专属追问")).toBeTruthy();
+
+    // Asking a new follow-up while viewing Chapter 1 stays on Chapter 1 and targets "u-ch1".
+    const textarea = screen.getByRole("textbox");
+    fireEvent.change(textarea, { target: { value: "再细讲一下第一章的伏笔" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+
+    await waitFor(() => expect(askSideQuestion).toHaveBeenCalledTimes(1));
+    expect(askSideQuestion).toHaveBeenCalledWith("再细讲一下第一章的伏笔", {
+      selection: undefined,
+      chapterHref: undefined,
+      sideThreadAnchorId: "u-ch1",
+    });
+    // Still viewing Chapter 1 (never snapped back to Chapter 2).
+    expect(screen.getByText("第一章讲解。")).toBeTruthy();
+    expect(screen.queryByText("第二章讲解。")).toBeNull();
   });
 });

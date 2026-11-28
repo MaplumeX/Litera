@@ -2,11 +2,13 @@ import { Fragment } from "react";
 import { Layers } from "lucide-react";
 import { CompactionNotice } from "@/components/chat/CompactionNotice";
 import { GuideIncompleteStepCard } from "./GuideIncompleteStepCard";
+import { GuideSideThread } from "./GuideSideThread";
 import { GuideStepSection, type GuideStepAction } from "./GuideStepSection";
 import type { GuideBlockImage } from "@/agent/book/book-content";
 import type {
   GuideChapterRun,
   GuideIncompleteStepNode,
+  GuideSideQaNode,
   GuideStepNode,
   GuideTimelineMarker,
 } from "@/lib/guide-document";
@@ -15,7 +17,7 @@ import { useT } from "@/lib/i18n";
 
 interface GuideChapterGroupProps {
   run: GuideChapterRun;
-  latestStepIndex: number;
+  isLatestRun: boolean;
   markersByAfterStep: ReadonlyMap<number, GuideTimelineMarker[]>;
   incompleteStepsByAfterStep?: ReadonlyMap<number, GuideIncompleteStepNode[]>;
   activeTailIncompleteId?: string | null;
@@ -29,12 +31,14 @@ interface GuideChapterGroupProps {
   loadStepImageUrl?: (src: string) => Promise<string>;
   onRegenerateMessage: (messageIndex: number) => void;
   onSwitchBranch: (anchorId: string, direction: -1 | 1) => void;
-  editingIndex: number | null;
+  editingQaId: string | null;
   editDraft: string;
   onDraftChange: (value: string) => void;
-  onStartEdit: (messageIndex: number) => void;
+  onStartEditQa: (qa: GuideSideQaNode) => void;
   onSaveEdit: () => void;
   onCancelEdit: () => void;
+  onRegenerateQa: (qa: GuideSideQaNode) => void;
+  onSwitchQaBranch: (qa: GuideSideQaNode, anchorId: string, direction: -1 | 1) => void;
   registerItem?: (index: number, element: HTMLDivElement | null) => void;
   registerChapter?: (chapterIndex: number, element: HTMLElement | null) => void;
   extraActions?: (step: GuideStepNode) => readonly GuideStepAction[];
@@ -66,7 +70,7 @@ export function GuideTimelineDivider({ marker }: { marker: GuideTimelineMarker }
  */
 export function GuideChapterGroup({
   run,
-  latestStepIndex,
+  isLatestRun,
   markersByAfterStep,
   incompleteStepsByAfterStep,
   activeTailIncompleteId = null,
@@ -80,12 +84,14 @@ export function GuideChapterGroup({
   loadStepImageUrl,
   onRegenerateMessage,
   onSwitchBranch,
-  editingIndex,
+  editingQaId,
   editDraft,
   onDraftChange,
-  onStartEdit,
+  onStartEditQa,
   onSaveEdit,
   onCancelEdit,
+  onRegenerateQa,
+  onSwitchQaBranch,
   registerItem,
   registerChapter,
   extraActions,
@@ -131,8 +137,6 @@ export function GuideChapterGroup({
             <Fragment key={node.id}>
               <GuideStepSection
                 node={node}
-                isLatestStep={node.stepIndex === latestStepIndex}
-                expandedQuestionIndex={expandedQuestionIndex}
                 bookReady={bookReady}
                 isStreaming={isStreaming}
                 readOnly={readOnly}
@@ -142,12 +146,6 @@ export function GuideChapterGroup({
                 loadStepImageUrl={loadStepImageUrl}
                 onRegenerateMessage={onRegenerateMessage}
                 onSwitchBranch={onSwitchBranch}
-                editingIndex={editingIndex}
-                editDraft={editDraft}
-                onDraftChange={onDraftChange}
-                onStartEdit={onStartEdit}
-                onSaveEdit={onSaveEdit}
-                onCancelEdit={onCancelEdit}
                 registerItem={registerItem}
                 extraActions={extraActions}
               />
@@ -171,6 +169,24 @@ export function GuideChapterGroup({
             </Fragment>
           );
         })}
+
+        <GuideSideThread
+          threads={run.sideThreads}
+          defaultExpanded={isLatestRun}
+          expandedQuestionIndex={expandedQuestionIndex}
+          isStreaming={isStreaming}
+          bookReady={bookReady}
+          readOnly={readOnly}
+          editingQaId={editingQaId}
+          editDraft={editDraft}
+          onDraftChange={onDraftChange}
+          onStartEdit={onStartEditQa}
+          onSaveEdit={onSaveEdit}
+          onCancelEdit={onCancelEdit}
+          onRegenerate={onRegenerateQa}
+          onSwitchBranch={onSwitchQaBranch}
+          registerItem={registerItem}
+        />
       </div>
     </section>
   );

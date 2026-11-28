@@ -139,6 +139,7 @@ export function useGuideDocument(bookId: string, toc: TocItem[]): UseGuideDocume
       messages: snapshot.messages,
       branchAnchors: snapshot.anchors,
       branchNavigation: snapshot.navigation,
+      sideThreads: snapshot.sideThreads,
       toc: flatToc.map((item) => ({ label: item.label, href: item.href })),
       tocProgress,
     });
@@ -146,15 +147,30 @@ export function useGuideDocument(bookId: string, toc: TocItem[]): UseGuideDocume
 
   const cards = useMemo<GuideStepCardData[]>(() => {
     if (!document) return [];
+    const runSideByLastStep = new Map<number, GuideStepCardData["sideQuestions"]>();
+    for (const run of document.runs) {
+      const lastStep = run.steps[run.steps.length - 1];
+      if (!lastStep) continue;
+      const offSpine = run.sideThreads.filter((qa) => qa.sideThreadKey !== undefined && qa.answer.length > 0);
+      if (offSpine.length > 0) {
+        runSideByLastStep.set(
+          lastStep.stepIndex,
+          offSpine.map((qa) => ({ question: qa.question, answer: qa.answer })),
+        );
+      }
+    }
     return document.steps.map((step) => ({
       stepIndex: step.stepIndex,
       step: step.step,
       label: step.label,
       messageIndex: step.messageIndex,
       explanation: step.explanation,
-      sideQuestions: step.sideThreads
-        .filter((qa) => qa.answer.length > 0)
-        .map((qa) => ({ question: qa.question, answer: qa.answer })),
+      sideQuestions: [
+        ...step.sideThreads
+          .filter((qa) => qa.answer.length > 0)
+          .map((qa) => ({ question: qa.question, answer: qa.answer })),
+        ...(runSideByLastStep.get(step.stepIndex) ?? []),
+      ],
     }));
   }, [document]);
 
