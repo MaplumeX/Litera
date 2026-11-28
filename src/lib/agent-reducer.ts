@@ -1,4 +1,5 @@
 import type {
+  ActiveStepRevisionTarget,
   AgentError,
   AgentEvent,
   AgentMessage,
@@ -8,6 +9,8 @@ import type {
   AssistantBlock,
   AssistantChatMessage,
   SideThreadSnapshot,
+  StepRevisionEntry,
+  StepRevisionSnapshot,
 } from "@/types/agent";
 import { t } from "@/lib/i18n";
 
@@ -34,6 +37,10 @@ export interface AgentState {
   sideThreads: Record<string, SideThreadSnapshot>;
   /** Side-thread key targeted by the active in-flight prompt, or null for spine/ordinary prompts. */
   activeSideThreadKey: string | null;
+  /** Off-spine step revisions keyed by spine step assistant anchor entry id. */
+  stepRevisions: Record<string, StepRevisionSnapshot>;
+  /** Active in-flight step revision target, or null when not revising a step. */
+  activeRevisionTarget: ActiveStepRevisionTarget | null;
   /** True while the trailing user message was optimistically appended before `prompt_started` persisted it. */
   optimisticUserMessage?: boolean;
 }
@@ -42,7 +49,7 @@ export type AgentAction =
   | { type: "book_changed"; bookId: string | null }
   | { type: "event"; event: AgentEvent }
   | { type: "session_list_requested"; requestId: string }
-  | { type: "prompt_queued"; bookId: string; promptId: string; sideThreadKey?: string }
+  | { type: "prompt_queued"; bookId: string; promptId: string; sideThreadKey?: string; stepRevisionTarget?: ActiveStepRevisionTarget }
   | { type: "prompt_queue_failed"; promptId: string; message: string }
   | { type: "user_message"; message: AgentMessage; sideThreadKey?: string }
   | { type: "clear_error" };
@@ -63,6 +70,8 @@ export function createAgentState(bookId: string | null = null): AgentState {
     branchAnchors: [],
     sideThreads: {},
     activeSideThreadKey: null,
+    stepRevisions: {},
+    activeRevisionTarget: null,
   };
 }
 
@@ -146,12 +155,77 @@ function updateSideThreadMessages(
   };
 }
 
+function updateStepRevisionEntry(
+  stepRevisions: Record<string, StepRevisionSnapshot>,
+  target: ActiveStepRevisionTarget,
+  updater: (entry: StepRevisionEntry) => StepRevisionEntry,
+): Record<string, StepRevisionSnapshot> {
+  const existing = stepRevisions[target.targetAnchorId] ?? {
+    targetAnchorId: target.targetAnchorId,
+    revisions: [],
+    activeRevisionId: target.revisionId,
+  };
+  const idx = existing.revisions.findIndex((item) => item.revisionId === target.revisionId);
+  const current: StepRevisionEntry =
+    idx >= 0
+      ? existing.revisions[idx]
+      : {
+          revisionId: target.revisionId,
+          timestamp: new Date().toISOString(),
+          ...(target.pace ? { pace: target.pace } : {}),
+          ...(target.styleOverride ? { styleOverride: target.styleOverride } : {}),
+          ...(target.modelId ? { modelId: target.modelId } : {}),
+          content: "",
+          blocks: [],
+        };
+  const updated = updater(current);
+  const revisions =
+    idx >= 0
+      ? [...existing.revisions.slice(0, idx), updated, ...existing.revisions.slice(idx + 1)]
+      : [...existing.revisions, updated];
+  return {
+    ...stepRevisions,
+    [target.targetAnchorId]: {
+      ...existing,
+      revisions,
+      activeRevisionId: target.revisionId,
+    },
+  };
+}
+
+function dropPendingRevisionEntry(
+  stepRevisions: Record<string, StepRevisionSnapshot>,
+  target: ActiveStepRevisionTarget,
+): Record<string, StepRevisionSnapshot> {
+  const existing = stepRevisions[target.targetAnchorId];
+  if (!existing) return stepRevisions;
+  const remaining = existing.revisions.filter((item) => item.revisionId !== target.revisionId);
+  if (remaining.length === existing.revisions.length) return stepRevisions;
+  if (remaining.length === 0) {
+    const next = { ...stepRevisions };
+    delete next[target.targetAnchorId];
+    return next;
+  }
+  return {
+    ...stepRevisions,
+    [target.targetAnchorId]: {
+      ...existing,
+      revisions: remaining,
+      activeRevisionId:
+        existing.activeRevisionId === target.revisionId
+          ? remaining[remaining.length - 1].revisionId
+          : existing.activeRevisionId,
+    },
+  };
+}
+
 function applyNavigation(
   base: AgentState,
   event: {
     anchors?: string[];
     navigation?: Record<string, AnchorBranchInfo>;
     sideThreads?: Record<string, SideThreadSnapshot>;
+    stepRevisions?: Record<string, StepRevisionSnapshot>;
   },
 ): AgentState {
   return {
@@ -159,6 +233,7 @@ function applyNavigation(
     branchAnchors: event.anchors ?? [],
     branchNavigation: event.navigation ?? {},
     ...(event.sideThreads !== undefined ? { sideThreads: event.sideThreads } : {}),
+    ...(event.stepRevisions !== undefined ? { stepRevisions: event.stepRevisions } : {}),
   };
 }
 
@@ -192,20 +267,42 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
   switch (event.type) {
     case "book_loading":
       return matchesBook(base, event.bookId)
-        ? { ...base, status: "loadingBook", sessionId: null, promptId: null, messages: [], sessions: [], error: null, compaction: null, branchNavigation: {}, branchAnchors: [], sideThreads: {}, activeSideThreadKey: null, optimisticUserMessage: false }
+        ? { ...base, status: "loadingBook", sessionId: null, promptId: null, messages: [], sessions: [], error: null, compaction: null, branchNavigation: {}, branchAnchors: [], sideThreads: {}, activeSideThreadKey: null, stepRevisions: {}, activeRevisionTarget: null, optimisticUserMessage: false }
         : base;
     case "book_ready":
       return matchesBook(base, event.bookId) ? { ...base, status: "bookReady", error: null } : base;
     case "book_closed":
       return matchesBook(base, event.bookId)
-        ? { ...base, status: "idle", sessionId: null, promptId: null, messages: [], sessions: [], error: null, compaction: null, branchNavigation: {}, branchAnchors: [], sideThreads: {}, activeSideThreadKey: null, optimisticUserMessage: false }
+        ? { ...base, status: "idle", sessionId: null, promptId: null, messages: [], sessions: [], error: null, compaction: null, branchNavigation: {}, branchAnchors: [], sideThreads: {}, activeSideThreadKey: null, stepRevisions: {}, activeRevisionTarget: null, optimisticUserMessage: false }
         : base;
     case "prompt_started":
       return matchesBook(base, event.bookId)
-        ? { ...base, status: "prompting", sessionId: event.sessionId, promptId: event.promptId, activeSideThreadKey: event.sideThreadKey ?? null, error: null, compaction: null, optimisticUserMessage: false }
+        ? {
+            ...base,
+            status: "prompting",
+            sessionId: event.sessionId,
+            promptId: event.promptId,
+            activeSideThreadKey: event.sideThreadKey ?? null,
+            activeRevisionTarget: event.stepRevisionTarget ?? null,
+            stepRevisions: event.stepRevisionTarget
+              ? updateStepRevisionEntry(base.stepRevisions, event.stepRevisionTarget, (entry) => entry)
+              : base.stepRevisions,
+            error: null,
+            compaction: null,
+            optimisticUserMessage: false,
+          }
         : base;
     case "text_delta":
       if (!matchesPrompt(base, event)) return base;
+      if (event.stepRevisionTarget) {
+        return {
+          ...base,
+          stepRevisions: updateStepRevisionEntry(base.stepRevisions, event.stepRevisionTarget, (entry) => {
+            const blocks = appendDelta(entry.blocks, "text", event.delta);
+            return { ...entry, blocks, content: textContent(blocks) };
+          }),
+        };
+      }
       if (event.sideThreadKey) {
         return {
           ...base,
@@ -224,6 +321,15 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
       return base;
     case "thinking_delta":
       if (!matchesPrompt(base, event)) return base;
+      if (event.stepRevisionTarget) {
+        return {
+          ...base,
+          stepRevisions: updateStepRevisionEntry(base.stepRevisions, event.stepRevisionTarget, (entry) => {
+            const blocks = appendDelta(entry.blocks, "thinking", event.delta);
+            return { ...entry, blocks, content: textContent(blocks) };
+          }),
+        };
+      }
       if (event.sideThreadKey) {
         return {
           ...base,
@@ -240,6 +346,24 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
     case "tool_start":
       if (!matchesPrompt(base, event)) return base;
       {
+        if (event.stepRevisionTarget) {
+          return {
+            ...base,
+            stepRevisions: updateStepRevisionEntry(base.stepRevisions, event.stepRevisionTarget, (entry) => {
+              const blocks = entry.blocks ? entry.blocks.slice() : [];
+              blocks.push({
+                type: "toolCall",
+                toolCall: {
+                  toolCallId: event.toolCallId,
+                  tool: event.tool,
+                  params: event.params,
+                  done: false,
+                },
+              });
+              return { ...entry, blocks, content: textContent(blocks) };
+            }),
+          };
+        }
         const applyToolStart = (messages: AgentMessage[]) =>
           updateLastAssistant(messages, (message) => {
             const blocks = message.blocks ? message.blocks.slice() : [];
@@ -262,6 +386,27 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
     case "tool_end":
       if (!matchesPrompt(base, event)) return base;
       {
+        if (event.stepRevisionTarget) {
+          return {
+            ...base,
+            stepRevisions: updateStepRevisionEntry(base.stepRevisions, event.stepRevisionTarget, (entry) => {
+              const blocks = entry.blocks?.map((block) =>
+                block.type === "toolCall" && block.toolCall.toolCallId === event.toolCallId
+                  ? {
+                      type: "toolCall" as const,
+                      toolCall: {
+                        ...block.toolCall,
+                        result: event.result,
+                        done: true,
+                        isError: event.isError,
+                      },
+                    }
+                  : block,
+              );
+              return blocks ? { ...entry, blocks, content: textContent(blocks) } : entry;
+            }),
+          };
+        }
         const applyToolEnd = (messages: AgentMessage[]) =>
           updateLastAssistant(messages, (message) => {
             const blocks = message.blocks?.map((block) =>
@@ -308,6 +453,16 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
       // The retry restarts the whole turn: drop the failed attempt's streamed
       // bubble so the next attempt does not append onto it.
       if (!matchesPrompt(base, event)) return base;
+      if (event.stepRevisionTarget) {
+        return {
+          ...base,
+          stepRevisions: updateStepRevisionEntry(base.stepRevisions, event.stepRevisionTarget, (entry) => ({
+            ...entry,
+            content: "",
+            blocks: [],
+          })),
+        };
+      }
       if (event.sideThreadKey) {
         const list = base.sideThreads[event.sideThreadKey]?.messages;
         if (!list || list[list.length - 1]?.role !== "assistant") return base;
@@ -324,7 +479,15 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
       {
         // A compaction during the prompt shows up as a notice item in the
         // projection, so the pending state is cleared.
-        const next = { ...base, status: "bookReady" as const, promptId: null, activeSideThreadKey: null, compaction: null, optimisticUserMessage: false };
+        const next = {
+          ...base,
+          status: "bookReady" as const,
+          promptId: null,
+          activeSideThreadKey: null,
+          activeRevisionTarget: null,
+          compaction: null,
+          optimisticUserMessage: false,
+        };
         // Streaming deltas already maintained messages; the runtime's full
         // projection replaces them (equal content) and refreshes navigation.
         if (event.messages !== undefined) next.messages = event.messages;
@@ -340,6 +503,8 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
             branchAnchors: base.promptId ? base.branchAnchors : [],
             sideThreads: base.promptId ? base.sideThreads : {},
             activeSideThreadKey: base.promptId ? base.activeSideThreadKey : null,
+            stepRevisions: base.promptId ? base.stepRevisions : {},
+            activeRevisionTarget: base.promptId ? base.activeRevisionTarget : null,
             error: null,
             sessions: upsertSession(base.sessions, {
               id: event.sessionId,
@@ -352,7 +517,7 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
         : base;
     case "session_switched":
       return matchesBook(base, event.bookId)
-        ? applyNavigation({ ...base, sessionId: event.sessionId, promptId: null, activeSideThreadKey: null, messages: event.messages, sideThreads: event.sideThreads ?? {}, status: "bookReady", error: null, compaction: null, optimisticUserMessage: false }, event)
+        ? applyNavigation({ ...base, sessionId: event.sessionId, promptId: null, activeSideThreadKey: null, activeRevisionTarget: null, messages: event.messages, sideThreads: event.sideThreads ?? {}, stepRevisions: event.stepRevisions ?? {}, status: "bookReady", error: null, compaction: null, optimisticUserMessage: false }, event)
         : base;
     case "branch_switched":
       if (!matchesBook(base, event.bookId)) return base;
@@ -366,7 +531,18 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
         branchNavigation: event.navigation,
         branchAnchors: event.anchors,
         sideThreads: event.sideThreads ?? base.sideThreads,
+        stepRevisions: event.stepRevisions ?? base.stepRevisions,
         optimisticUserMessage: false,
+      };
+    case "step_revision_selected":
+      if (!matchesBook(base, event.bookId)) return base;
+      if (base.sessionId !== null && base.sessionId !== event.sessionId) return base;
+      return {
+        ...base,
+        sessionId: event.sessionId,
+        error: null,
+        sideThreads: event.sideThreads ?? base.sideThreads,
+        stepRevisions: event.stepRevisions ?? base.stepRevisions,
       };
     case "session_rewound":
       if (!matchesBook(base, event.bookId)) return base;
@@ -391,6 +567,8 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
         branchAnchors: base.sessionId === event.sessionId ? [] : base.branchAnchors,
         sideThreads: base.sessionId === event.sessionId ? {} : base.sideThreads,
         activeSideThreadKey: base.sessionId === event.sessionId ? null : base.activeSideThreadKey,
+        stepRevisions: base.sessionId === event.sessionId ? {} : base.stepRevisions,
+        activeRevisionTarget: base.sessionId === event.sessionId ? null : base.activeRevisionTarget,
         optimisticUserMessage: base.sessionId === event.sessionId ? false : base.optimisticUserMessage,
         sessions: base.sessions.filter((session) => session.id !== event.sessionId),
       };
@@ -432,6 +610,7 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
         || (!!event.sessionId && event.sessionId !== base.sessionId)
       )) return base;
       const matchesActivePrompt = !!event.promptId && event.promptId === base.promptId;
+      const revTarget = event.stepRevisionTarget ?? base.activeRevisionTarget;
       const sideKey = event.sideThreadKey ?? base.activeSideThreadKey;
       const sideMsgs = sideKey ? base.sideThreads[sideKey]?.messages : undefined;
       const rollbackSide = matchesActivePrompt
@@ -442,6 +621,7 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
       const rollbackOptimistic = matchesActivePrompt
         && base.optimisticUserMessage
         && !sideKey
+        && !revTarget
         && base.messages[base.messages.length - 1]?.role === "user";
       return {
         ...base,
@@ -449,9 +629,13 @@ function applyEvent(state: AgentState, event: AgentEvent): AgentState {
         sideThreads: rollbackSide && sideKey
           ? updateSideThreadMessages(base.sideThreads, sideKey, (messages) => messages.slice(0, -1))
           : base.sideThreads,
+        stepRevisions: matchesActivePrompt && revTarget
+          ? dropPendingRevisionEntry(base.stepRevisions, revTarget)
+          : base.stepRevisions,
         status: matchesActivePrompt ? "bookReady" : event.scope === "book" ? "error" : base.status,
         promptId: matchesActivePrompt ? null : base.promptId,
         activeSideThreadKey: matchesActivePrompt ? null : base.activeSideThreadKey,
+        activeRevisionTarget: matchesActivePrompt ? null : base.activeRevisionTarget,
         compaction: matchesActivePrompt ? null : base.compaction,
         optimisticUserMessage: matchesActivePrompt ? false : base.optimisticUserMessage,
         error: {
@@ -487,27 +671,36 @@ export function agentReducer(state: AgentState, action: AgentAction): AgentState
         status: "prompting",
         promptId: action.promptId,
         activeSideThreadKey: action.sideThreadKey ?? null,
+        activeRevisionTarget: action.stepRevisionTarget ?? null,
+        stepRevisions: action.stepRevisionTarget
+          ? updateStepRevisionEntry(state.stepRevisions, action.stepRevisionTarget, (entry) => entry)
+          : state.stepRevisions,
         error: null,
         compaction: state.compaction?.status === "failed" ? null : state.compaction,
         optimisticUserMessage: false,
       };
     case "prompt_queue_failed": {
       if (state.promptId !== action.promptId) return state;
+      const revTarget = state.activeRevisionTarget;
       const sideKey = state.activeSideThreadKey;
       const sideMsgs = sideKey ? state.sideThreads[sideKey]?.messages : undefined;
       const rollbackSide =
         state.optimisticUserMessage && !!sideKey && !!sideMsgs && sideMsgs[sideMsgs.length - 1]?.role === "user";
       const rollbackOptimistic =
-        state.optimisticUserMessage && !sideKey && state.messages[state.messages.length - 1]?.role === "user";
+        state.optimisticUserMessage && !sideKey && !revTarget && state.messages[state.messages.length - 1]?.role === "user";
       return {
         ...state,
         messages: rollbackOptimistic ? state.messages.slice(0, -1) : state.messages,
         sideThreads: rollbackSide && sideKey
           ? updateSideThreadMessages(state.sideThreads, sideKey, (messages) => messages.slice(0, -1))
           : state.sideThreads,
+        stepRevisions: revTarget
+          ? dropPendingRevisionEntry(state.stepRevisions, revTarget)
+          : state.stepRevisions,
         status: state.activeBookId ? "bookReady" : "idle",
         promptId: null,
         activeSideThreadKey: null,
+        activeRevisionTarget: null,
         optimisticUserMessage: false,
         error: {
           scope: "prompt",

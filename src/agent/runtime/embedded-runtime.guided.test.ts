@@ -17,7 +17,7 @@ const snippets:Record<number,string[]>={0:["a","b","c","d"],1:["e","f"]};
 
 function setup(kind?:SessionKind,guidedStyle:string|null=null,responses:Array<string|ReturnType<typeof fauxAssistantMessage>>=["retelling","title","retelling two","title"],blocks:Record<number,string[]>=snippets){
   let current=session(kind);const located:Array<[number,string,unknown]>=[];const batches:PiSessionEntry[][]=[];const systemPrompts:Array<string|undefined>=[];const requests:string[]=[];const created:Array<SessionKind|undefined>=[];const events:AgentEvent[]=[];
-  const sessions:SessionPort={create:async(_book,requested)=>{created.push(requested);current=session(requested);return current;},list:async()=>[],load:async()=>current,delete:async()=>{},append:async(_book,_session,_leaf,entries)=>{batches.push(entries);return entries.at(-1)?.id??null;}};
+  const sessions:SessionPort={create:async(_book,requested)=>{created.push(requested);current=session(requested);return current;},list:async()=>[],load:async()=>current,setLeaf:async(_book,_session,leafId)=>{current={...current,leafId};return current;},delete:async()=>{},append:async(_book,_session,_leaf,entries)=>{batches.push(entries);return entries.at(-1)?.id??null;}};
   const book:BookContentPort={open:async()=>{},metadata:async()=>({title:"T",author:"A",language:"en",totalChapters:2}),toc:async()=>toc,readChapter:async()=>({chapterIndex:0,chapterNumber:1,part:0,totalParts:2,fromBlock:0,toBlock:1,totalBlocks:4,text:"chapter"}),guideBlocks:async(chapterIndex)=>(blocks[chapterIndex]??[]).map((snippet)=>({snippet,chars:10,heading:0,part:0})),locateGuideBlock:async(chapterIndex,selection,hints)=>{located.push([chapterIndex,selection,hints]);for(const [index,list] of Object.entries(blocks)){const block=list.indexOf(selection.trim());if(block>=0)return{chapterIndex:Number(index),block};}return null;},search:async()=>[],close:()=>{}};
   const faux=createFauxCore({tokensPerSecond:10_000});faux.setResponses(responses.map((response)=>typeof response==="string"?fauxAssistantMessage(response):response));const tools:string[][]=[];
   const config:RuntimeConfig={provider:"custom-test",model:"model",api:faux.api,baseUrl:"https://example.test/v1",apiKey:"secret",thinkingLevel:"off"};
@@ -503,5 +503,109 @@ describe("Guided sessions in the runtime",()=>{
       return message?.role==="toolResult"&&message.toolName==="search_guide_history"?[message.content?.[0]?.text??""]:[];
     });
     expect(historyResults[0]).toContain("Edited Q1 on One");
+  });
+
+  it("revises historical steps off-spine with pinned span, spoiler-free context, recap refresh, and preserves later chapters & side-threads",async()=>{
+    const {runtime,batches,requests,events,tools}=setup(undefined,null,[
+      takeStep({chapterIndex:0,toBlock:3}),"Ch1 original explanation","title","Recap of Ch1 v1",
+      takeStep({chapterIndex:1}),"Ch2 original explanation","Recap of Ch2",
+      "Answer to Q1 on Ch1",
+      "Ch1 deeper revised explanation","Recap of Ch1 v2",
+      "Answer to Q2 on Ch1 seeing revision",
+    ]);
+    await runtime.openBook("book",new ArrayBuffer(1));
+    await runtime.newSession(undefined,"guided");
+
+    // Take Ch1 and Ch2 on spine
+    await runtime.prompt("开始带读",{guideRequest:{}});
+    await runtime.settled();
+    await runtime.prompt("继续带读",{guideRequest:{}});
+    await runtime.settled();
+
+    const allEntries=batches.flat();
+    const ch1UserAnchor=allEntries.find((entry)=>entry.type==="message"&&(entry.message as {role?:string}).role==="user")!.id;
+    const ch1StepAnchor=allEntries.find((entry)=>entry.type==="message"&&(entry.message as {role?:string}).role==="assistant")!.id;
+
+    // Ask Q1 on Ch1 side-thread
+    await runtime.promptSideThread(ch1UserAnchor,"Q1 about Ch1",{});
+
+    // Revise Ch1 off-spine with pace=deep and styleOverride while Guide cursor is on Ch2
+    const reqBeforeRev=requests.length;
+    await runtime.reviseGuidedStep(ch1StepAnchor,{pace:"deep",styleOverride:"多举例子"});
+    await runtime.settled();
+
+    // Revision agent must NOT have guide_step tool and must NOT see Ch2
+    expect(tools[tools.length-1]).not.toContain("guide_step");
+    const revReq=requests[reqBeforeRev];
+    expect(revReq).toContain("多举例子");
+    expect(revReq).toContain("deep");
+    expect(revReq).not.toContain("Ch2 original explanation");
+
+    // Spine still keeps Ch2 intact and side-thread is still attached
+    const revEnd=[...events].reverse().find((event)=>event.type==="prompt_end");
+    expect(revEnd && revEnd.type==="prompt_end").toBe(true);
+    if(revEnd && revEnd.type==="prompt_end"){
+      expect(revEnd.messages?.some((m)=>m.role==="assistant"&&m.content.includes("Ch2 original explanation"))).toBe(true);
+      expect(revEnd.sideThreads?.[ch1UserAnchor]?.messages).toHaveLength(2);
+      const revSnap=revEnd.stepRevisions?.[ch1StepAnchor];
+      expect(revSnap?.revisions).toHaveLength(1);
+      expect(revSnap?.revisions[0]).toMatchObject({
+        pace:"deep",
+        styleOverride:"多举例子",
+        content:"Ch1 deeper revised explanation",
+      });
+    }
+
+    // Background recap refresh ran with the revised Ch1 explanation
+    expect(requests.some((r)=>r.includes("Ch1 deeper revised explanation")&&r.includes("<retelling>"))).toBe(true);
+
+    // Subsequent Q2 on Ch1 side-thread sees the revised explanation
+    await runtime.promptSideThread(ch1UserAnchor,"Q2 after revision",{});
+    const q2Req=requests.find((r)=>r.includes("Q2 after revision"))!;
+    expect(q2Req).toContain("Ch1 deeper revised explanation");
+    expect(q2Req).not.toContain("Ch1 original explanation");
+
+    // Switching back to original revision emits step_revision_selected
+    const sessionId=events.find((e)=>e.type==="session_created")?.sessionId!;
+    await runtime.selectStepRevision(sessionId,ch1StepAnchor,"__original__");
+    const selected=[...events].reverse().find((e)=>e.type==="step_revision_selected");
+    expect(selected && selected.type==="step_revision_selected" ? selected.stepRevisions?.[ch1StepAnchor]?.activeRevisionId : null).toBe("__original__");
+  });
+
+  it("supports tip-only undo, dismissing an incomplete tail attempt, and explicit chapter rollback",async()=>{
+    const {runtime,batches,events}=setup(undefined,null,[
+      takeStep({chapterIndex:0,toBlock:3}),"Ch1 explanation","title","Recap Ch1",
+      takeStep({chapterIndex:1}),"Ch2 explanation","Recap Ch2",
+      fauxAssistantMessage("Stopped before guide_step",{stopReason:"aborted"}),
+    ]);
+    await runtime.openBook("book",new ArrayBuffer(1));
+    await runtime.newSession(undefined,"guided");
+    const sessionId=events.find((e)=>e.type==="session_created")?.sessionId!;
+
+    await runtime.prompt("开始带读",{guideRequest:{}});
+    await runtime.settled();
+    await runtime.prompt("继续带读",{guideRequest:{}});
+    await runtime.settled();
+
+    // Uncommitted aborted tail attempt -> dismiss removes it cleanly leaving Ch2 intact
+    await runtime.prompt("继续带读",{guideRequest:{}});
+    await runtime.dismissIncompleteTailStep(sessionId);
+    const afterDismiss=[...events].reverse().find((e)=>e.type==="branch_switched");
+    expect(afterDismiss && afterDismiss.type==="branch_switched"
+      ? afterDismiss.messages.filter((m)=>m.role==="assistant").map((m)=>m.content)
+      : []).toEqual(["Ch1 explanation","Ch2 explanation"]);
+
+    // Tip-only undo removes Ch2 leaving Ch1 intact
+    await runtime.undoLatestGuidedStep(sessionId);
+    const afterUndo=[...events].reverse().find((e)=>e.type==="branch_switched");
+    expect(afterUndo && afterUndo.type==="branch_switched"
+      ? afterUndo.messages.filter((m)=>m.role==="assistant").map((m)=>m.content)
+      : []).toEqual(["Ch1 explanation"]);
+
+    // Explicit rollback to Ch1 removes Ch1 cleanly (even at root)
+    const ch1Anchor=batches.flat().find((entry)=>entry.type==="message"&&(entry.message as {role?:string}).role==="user")!.id;
+    await runtime.rollbackToChapterRun(sessionId,ch1Anchor);
+    const afterRollback=[...events].reverse().find((e)=>e.type==="branch_switched");
+    expect(afterRollback && afterRollback.type==="branch_switched" ? afterRollback.messages : null).toEqual([]);
   });
 });

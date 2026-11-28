@@ -3,12 +3,14 @@ import { guideController } from "@/agent/runtime/guide-controller";
 import { sideThreadKeyFor } from "@/agent/sessions/pi-session";
 import { agentReducer, createAgentState } from "@/lib/agent-reducer";
 import type {
+  ActiveStepRevisionTarget,
   AgentMessage,
   GuideRequest,
   GuideSelection,
   GuideStep,
   GuideStepOptions,
   RecordedGuideStep,
+  StepRevisionOptions,
 } from "@/types/agent";
 
 function id(prefix: string): string {
@@ -259,6 +261,68 @@ export function useGuideBridge(bookId: string) {
     return { requestId, promptId };
   }, []);
 
+  const reviseStep = useCallback(
+    async (targetAnchorId: string, options?: StepRevisionOptions) => {
+      const currentBookId = bookIdRef.current;
+      if (!currentBookId) throw new Error("No book is open");
+      if (statusRef.current !== "bookReady") throw new Error("Book is not ready");
+      const requestId = id("guide-revise-req");
+      const promptId = id("prompt");
+      const revisionId = id("rev");
+      const stepRevisionTarget: ActiveStepRevisionTarget = {
+        targetAnchorId,
+        revisionId,
+        ...(options?.pace ? { pace: options.pace } : {}),
+        ...(options?.styleOverride?.trim() ? { styleOverride: options.styleOverride.trim() } : {}),
+        ...(options?.modelOverride?.trim() ? { modelId: options.modelOverride.trim() } : {}),
+      };
+      dispatch({ type: "prompt_queued", bookId: currentBookId, promptId, stepRevisionTarget });
+      try {
+        await guideController.reviseStep(targetAnchorId, options, promptId, requestId, revisionId);
+      } catch (error) {
+        dispatch({ type: "prompt_queue_failed", promptId, message: String(error) });
+        throw error;
+      }
+      return { requestId, promptId, revisionId };
+    },
+    [],
+  );
+
+  const selectStepRevision = useCallback(
+    async (targetAnchorId: string, revisionId: string) => {
+      if (!bookIdRef.current || !state.sessionId) return;
+      await guideController.selectStepRevision(
+        state.sessionId,
+        targetAnchorId,
+        revisionId,
+        id("select-step-revision"),
+      );
+    },
+    [state.sessionId],
+  );
+
+  const undoLatestStep = useCallback(async () => {
+    if (!bookIdRef.current || !state.sessionId) return;
+    await guideController.undoLatestStep(state.sessionId, id("undo-latest-step"));
+  }, [state.sessionId]);
+
+  const dismissIncompleteTail = useCallback(async () => {
+    if (!bookIdRef.current || !state.sessionId) return;
+    await guideController.dismissIncompleteTail(state.sessionId, id("dismiss-incomplete-tail"));
+  }, [state.sessionId]);
+
+  const rollbackToChapterRun = useCallback(
+    async (runAnchorEntryId: string) => {
+      if (!bookIdRef.current || !state.sessionId) return;
+      await guideController.rollbackToChapterRun(
+        state.sessionId,
+        runAnchorEntryId,
+        id("rollback-chapter"),
+      );
+    },
+    [state.sessionId],
+  );
+
   const abort = useCallback(async () => guideController.abort(id("abort")), []);
   const switchBranchAtAnchor = useCallback(
     async (anchorId: string, direction: -1 | 1) => {
@@ -324,6 +388,11 @@ export function useGuideBridge(bookId: string) {
     editSideTurn,
     regenerateTurn,
     regenerateSideTurn,
+    reviseStep,
+    selectStepRevision,
+    undoLatestStep,
+    dismissIncompleteTail,
+    rollbackToChapterRun,
     abort,
     switchBranchAtAnchor,
     switchSideBranchAtAnchor,

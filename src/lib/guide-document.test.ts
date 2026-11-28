@@ -446,7 +446,8 @@ describe("guide-document chapter-scoped helpers", () => {
         ],
       },
     ];
-    return projectGuideDocument({ bookId: "b1", sessionId: "s1", messages });
+    const doc = projectGuideDocument({ bookId: "b1", sessionId: "s1", messages });
+    return doc;
   }
 
   it("resolves active run, falls back to latest on stale id, and flags history viewing", () => {
@@ -595,5 +596,62 @@ describe("guide-document chapter-scoped helpers", () => {
       runId: doc.runs[0].id,
       messageIndex: ch0QaIdx,
     });
+  });
+
+  it("projects off-spine step revisions onto canonical step explanation, marks strictly the latest step, and hides empty historical incomplete attempts", () => {
+    const messages: AgentMessage[] = [
+      { role: "user", content: "开始带读", guideRequest: { step: stepCh0 } },
+      {
+        role: "assistant",
+        content: "第一章原始讲解。",
+        blocks: [
+          { type: "toolCall", toolCall: { toolCallId: "t1", tool: "guide_step", params: {}, done: true, guide: stepCh0 } },
+          { type: "text", text: "第一章原始讲解。" },
+        ],
+      },
+      // Empty historical error attempt wedged before Chapter 2 — should be suppressed.
+      { role: "user", content: "继续带读", guideRequest: {} },
+      { role: "assistant", content: "", stopReason: "error", errorMessage: "Timeout" },
+      { role: "user", content: "继续带读", guideRequest: {} },
+      {
+        role: "assistant",
+        content: "第二章讲解。",
+        blocks: [
+          { type: "toolCall", toolCall: { toolCallId: "t2", tool: "guide_step", params: {}, done: true, guide: stepCh1 } },
+          { type: "text", text: "第二章讲解。" },
+        ],
+      },
+    ];
+
+    const doc = projectGuideDocument({
+      bookId: "b1",
+      sessionId: "s1",
+      messages,
+      branchAnchors: ["u0", "a0", "u-err", "a-err", "u1", "a1"],
+      stepRevisions: {
+        a0: {
+          targetAnchorId: "a0",
+          activeRevisionId: "rev-deep",
+          revisions: [
+            {
+              revisionId: "rev-deep",
+              timestamp: "2026-04-01T00:05:00Z",
+              pace: "deep",
+              styleOverride: "多举例子",
+              content: "第一章深入修订版，包含关键示例。",
+              blocks: [{ type: "text", text: "第一章深入修订版，包含关键示例。" }],
+            },
+          ],
+        },
+      },
+    });
+
+    expect(doc.incompleteSteps).toHaveLength(0);
+    expect(doc.steps[0].isLatestStep).toBe(false);
+    expect(doc.steps[1].isLatestStep).toBe(true);
+    expect(doc.steps[0].explanation).toBe("第一章深入修订版，包含关键示例。");
+    expect(doc.steps[0].revisions).toHaveLength(2);
+    expect(doc.steps[0].activeRevisionId).toBe("rev-deep");
+    expect(searchGuideDocument(doc, "关键示例")).toHaveLength(1);
   });
 });

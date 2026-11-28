@@ -24,6 +24,7 @@ const REFRESH_EVENTS = new Set<AgentEvent["type"]>([
   "prompt_end",
   "prompt_aborted",
   "branch_switched",
+  "step_revision_selected",
   "guide_window_updated",
   "guide_recap_added",
   "session_created",
@@ -140,6 +141,7 @@ export function useGuideDocument(bookId: string, toc: TocItem[]): UseGuideDocume
       branchAnchors: snapshot.anchors,
       branchNavigation: snapshot.navigation,
       sideThreads: snapshot.sideThreads,
+      stepRevisions: snapshot.stepRevisions,
       toc: flatToc.map((item) => ({ label: item.label, href: item.href })),
       tocProgress,
     });

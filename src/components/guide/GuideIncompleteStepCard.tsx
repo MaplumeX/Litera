@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { BookOpen, ChevronRight, RefreshCw } from "lucide-react";
+import { BookOpen, ChevronDown, ChevronRight, RefreshCw, X } from "lucide-react";
 import { AssistantMessage } from "@/components/chat/AssistantMessage";
-import { BranchSwitcher } from "@/components/chat/BranchSwitcher";
 import { HoldHeight } from "@/components/chat/HoldHeight";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import type { GuideIncompleteStepNode } from "@/lib/guide-document";
 import { useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -11,54 +11,52 @@ interface GuideIncompleteStepCardProps {
   node: GuideIncompleteStepNode;
   /** Auto-expand while this attempt sits at the timeline tail; collapse once superseded by newer steps. */
   defaultExpanded: boolean;
+  /** True when this attempt is the active tail of the guided spine (enables dismiss & model retry). */
+  isTail?: boolean;
   bookReady: boolean;
   isStreaming: boolean;
   readOnly?: boolean;
+  availableModels?: readonly string[];
+  currentModel?: string | null;
   onRegenerate: (messageIndex: number) => void;
-  onSwitchBranch: (anchorId: string, direction: -1 | 1) => void;
+  onRetryWithModel?: (model: string, messageIndex: number) => void;
+  onDismiss?: () => void;
   registerItem?: (index: number, element: HTMLDivElement | null) => void;
 }
 
 /**
- * Renders an uncommitted guided-step attempt (aborted, errored, pre-tool streaming,
- * or replied without calling `guide_step`) on the document timeline without turning
- * it into a follow-up side question.
+ * Compact tip recovery bar for an uncommitted guided-step attempt (aborted,
+ * errored, pre-tool streaming, or replied without calling `guide_step`).
+ * Never shows chat-style branch switchers; tail failures can be retried cleanly
+ * (optionally with another model) or dismissed off the active spine.
  */
 export function GuideIncompleteStepCard({
   node,
   defaultExpanded,
+  isTail = false,
   bookReady,
   isStreaming,
   readOnly = false,
+  availableModels = [],
+  currentModel = null,
   onRegenerate,
-  onSwitchBranch,
+  onRetryWithModel,
+  onDismiss,
   registerItem,
 }: GuideIncompleteStepCardProps) {
   const { t } = useT();
   const forceExpanded = node.streaming || node.status === "replied";
   const [expanded, setExpanded] = useState(defaultExpanded || forceExpanded);
+  const [modelMenuOpen, setModelMenuOpen] = useState(false);
 
   useEffect(() => {
     setExpanded(defaultExpanded || forceExpanded);
   }, [defaultExpanded, forceExpanded]);
 
-  const branchInfo = node.branchInfo;
-  const branchSwitcher =
-    !branchInfo || readOnly ? undefined : (
-      <BranchSwitcher
-        current={branchInfo.activeIndex + 1}
-        total={branchInfo.options.length}
-        disabled={isStreaming}
-        onPrev={() =>
-          onSwitchBranch(branchInfo.options[branchInfo.activeIndex - 1].anchorId, -1)
-        }
-        onNext={() =>
-          onSwitchBranch(branchInfo.options[branchInfo.activeIndex + 1].anchorId, 1)
-        }
-      />
-    );
-
   const canRetry = !isStreaming && bookReady && !readOnly;
+  const otherModels = availableModels.filter((m) => m && m !== currentModel);
+  const canRetryWithModel = canRetry && isTail && otherModels.length > 0 && Boolean(onRetryWithModel);
+  const canDismiss = canRetry && isTail && Boolean(onDismiss);
   const hasBody = node.assistantMessageIndex !== undefined;
   const statusBadge =
     node.status === "aborted" ? (
@@ -126,17 +124,58 @@ export function GuideIncompleteStepCard({
           </div>
         )}
 
-        <div className="ml-auto flex shrink-0 items-center gap-1.5">
-          {branchSwitcher}
+        <div className="ml-auto flex shrink-0 items-center gap-1">
           {canRetry && (
             <button
               type="button"
               aria-label={t("guide.stepRetry")}
               onClick={() => onRegenerate(node.requestMessageIndex)}
-              className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+              className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium text-foreground/85 transition-colors hover:bg-foreground/5 hover:text-foreground"
             >
               <RefreshCw className="h-3 w-3" aria-hidden />
               <span>{t("guide.stepRetry")}</span>
+            </button>
+          )}
+          {canRetryWithModel && (
+            <Popover open={modelMenuOpen} onOpenChange={setModelMenuOpen} modal={false}>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  aria-label={t("guide.stepRetryWithModel")}
+                  data-testid="guide-incomplete-model-retry"
+                  className="inline-flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+                >
+                  <span>{t("guide.stepRetryWithModel")}</span>
+                  <ChevronDown className="h-3 w-3 opacity-75" aria-hidden />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent align="end" sideOffset={6} className="max-h-56 w-56 overflow-y-auto p-1">
+                {otherModels.map((modelId) => (
+                  <button
+                    key={modelId}
+                    type="button"
+                    onClick={() => {
+                      setModelMenuOpen(false);
+                      onRetryWithModel?.(modelId, node.requestMessageIndex);
+                    }}
+                    className="flex w-full items-center rounded-md px-2 py-1.5 text-left font-mono text-2xs text-foreground transition-colors hover:bg-foreground/5"
+                  >
+                    <span className="truncate">{modelId}</span>
+                  </button>
+                ))}
+              </PopoverContent>
+            </Popover>
+          )}
+          {canDismiss && (
+            <button
+              type="button"
+              aria-label={t("guide.stepDismiss")}
+              data-testid="guide-incomplete-dismiss"
+              onClick={onDismiss}
+              className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground"
+            >
+              <X className="h-3 w-3" aria-hidden />
+              <span>{t("guide.stepDismiss")}</span>
             </button>
           )}
         </div>

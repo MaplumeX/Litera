@@ -10,10 +10,14 @@ import type {
   GuidePosition,
   GuideRecapMarker,
   GuideRequest,
+  GuideStepPace,
   RecordedGuideStep,
   SessionKind,
   SideThreadRef,
   SideThreadSnapshot,
+  StepRevisionEntry,
+  StepRevisionRef,
+  StepRevisionSnapshot,
 } from "@/types/agent";
 
 export interface PiSessionHeader {
@@ -239,6 +243,7 @@ export function isGuideRecapEntry(entry: PiSessionEntry): boolean {
 export const GUIDE_RECAP = "guideRecap";
 export const GUIDE_WINDOW_CUT = "guide_window_cut";
 export const ROOT_SIDE_THREAD_KEY = "__root__";
+export const ORIGINAL_STEP_REVISION_ID = "__original__";
 
 /** Stable map key for a side-thread anchor (`null` -> pre-guide root). */
 export function sideThreadKeyFor(anchorId: string | null): string {
@@ -268,6 +273,40 @@ export function isSideThreadEntry(entry: PiSessionEntry): boolean {
 export function entrySideThreadKey(entry: PiSessionEntry): string | null {
   const ref = decodeSideThread(entry);
   return ref ? sideThreadKeyFor(ref.anchorId) : null;
+}
+
+/** Decode an entry's `stepRevision` tag, or null when not an off-spine step revision. */
+export function decodeStepRevision(entry: PiSessionEntry): StepRevisionRef | null {
+  const ref = object(entry.stepRevision);
+  if (!ref) return null;
+  const targetAnchorId = string(ref.targetAnchorId);
+  const revisionId = string(ref.revisionId);
+  if (!targetAnchorId || !revisionId) return null;
+  const pace: GuideStepPace | undefined =
+    ref.pace === "standard" || ref.pace === "compact" || ref.pace === "deep"
+      ? ref.pace
+      : undefined;
+  const styleOverride = string(ref.styleOverride) ?? undefined;
+  const modelId = string(ref.modelId) ?? undefined;
+  const provider = string(ref.provider) ?? undefined;
+  return {
+    targetAnchorId,
+    revisionId,
+    ...(pace ? { pace } : {}),
+    ...(styleOverride ? { styleOverride } : {}),
+    ...(modelId ? { modelId } : {}),
+    ...(provider ? { provider } : {}),
+  };
+}
+
+/** True when `entry` belongs to an off-spine step revision. */
+export function isStepRevisionEntry(entry: PiSessionEntry): boolean {
+  return decodeStepRevision(entry) !== null;
+}
+
+/** True when `entry` lives off the guided spine (`sideThread` or `stepRevision`). */
+export function isOffSpineEntry(entry: PiSessionEntry): boolean {
+  return isSideThreadEntry(entry) || isStepRevisionEntry(entry);
 }
 
 /** A sliding-window advance or manual context reset in a Guided session. */
@@ -302,6 +341,25 @@ function decodeRecap(entry: PiSessionEntry): Omit<GuideRecapMarker, "role"> | nu
     ...(throughChapterTitle ? { throughChapterTitle } : {}),
     text,
   };
+}
+
+function recapRangeKey(entry: PiSessionEntry): string | null {
+  const decoded = decodeRecap(entry);
+  if (!decoded) return null;
+  return `${decoded.chapterIndex}:${decoded.throughChapterIndex ?? decoded.chapterIndex}`;
+}
+
+/** Keep only the latest recap entry for each chapter range (preserving order). */
+function dedupeRecapEntries(entries: readonly PiSessionEntry[]): PiSessionEntry[] {
+  const lastIndexByKey = new Map<string, number>();
+  entries.forEach((entry, index) => {
+    const key = recapRangeKey(entry);
+    if (key !== null) lastIndexByKey.set(key, index);
+  });
+  return entries.filter((entry, index) => {
+    const key = recapRangeKey(entry);
+    return key === null || lastIndexByKey.get(key) === index;
+  });
 }
 
 function prunedPlaceholder(toolName: string, args: Record<string, unknown> | undefined, guide: RecordedGuideStep | null): string {
@@ -365,6 +423,7 @@ export function contextBranch(session: DecodedPiSession): PiSessionEntry[] {
       ...path.slice(compactIndex + 1),
     ].filter((entry) => !isGuideWindowCutEntry(entry));
   }
+  projected = dedupeRecapEntries(projected);
   const throughIndex = latestPrune ? path.findIndex((entry) => entry.id === latestPrune.throughEntryId) : -1;
   if (throughIndex < 0) return projected;
   const prunedIds = new Set(path.slice(0, throughIndex + 1).filter(isPrunableEntry).map((entry) => entry.id));
@@ -419,8 +478,13 @@ export function entriesToPiContextMessages(entries: readonly PiSessionEntry[]): 
   });
 }
 
-export function piContextMessages(session: DecodedPiSession): PiAgentMessage[] {
-  return entriesToPiContextMessages(contextBranch(session));
+export function piContextMessages(
+  session: DecodedPiSession,
+  preferredRevisions?: ReadonlyMap<string, string>,
+): PiAgentMessage[] {
+  return entriesToPiContextMessages(
+    applyActiveStepRevisions(contextBranch(session), session, preferredRevisions),
+  );
 }
 
 export function convertPiContextToLlm(messages: PiAgentMessage[]): Message[] {
@@ -763,8 +827,8 @@ function computeBranchNavigation(
   includeSideThreads: boolean,
 ): Map<string, AnchorBranchInfo> {
   const entries = includeSideThreads
-    ? session.entries
-    : session.entries.filter((entry) => !isSideThreadEntry(entry));
+    ? session.entries.filter((entry) => !isStepRevisionEntry(entry))
+    : session.entries.filter((entry) => !isOffSpineEntry(entry));
   const byId = new Map(entries.map((entry) => [entry.id, entry]));
   const children = new Map<string, PiSessionEntry[]>();
   for (const entry of entries) {
@@ -882,8 +946,8 @@ function computeBranchLeafId(
   includeSideThreads: boolean,
 ): string | null {
   const entries = includeSideThreads
-    ? allEntries
-    : allEntries.filter((entry) => !isSideThreadEntry(entry));
+    ? allEntries.filter((entry) => !isStepRevisionEntry(entry))
+    : allEntries.filter((entry) => !isOffSpineEntry(entry));
   const byId = new Map(entries.map((entry) => [entry.id, entry]));
   const anchor = byId.get(anchorId);
   if (!anchor) return null;
@@ -1137,17 +1201,23 @@ export function resolveGuideRunForAnchor(
  *
  * Keeps the guided spine prefix byte-identical through the chapter's latest
  * step (maximizing Prompt Cache hits and excluding later chapters / later spine
- * window cuts), then appends the chapter's active side-thread Q&A chain.
+ * window cuts), applying active step revisions, then appends the chapter's
+ * active side-thread Q&A chain.
  */
 export function sideThreadContextEntries(
   session: DecodedPiSession,
   key: string,
   spineEndEntryId: string | null,
   preferredSideLeafId?: string | null,
+  preferredRevisions?: ReadonlyMap<string, string>,
 ): PiSessionEntry[] {
-  const spineEntries = session.entries.filter((entry) => !isSideThreadEntry(entry));
+  const spineEntries = session.entries.filter((entry) => !isOffSpineEntry(entry));
   const spineContext = spineEndEntryId
-    ? contextBranch({ header: session.header, entries: spineEntries, leafId: spineEndEntryId })
+    ? applyActiveStepRevisions(
+        contextBranch({ header: session.header, entries: spineEntries, leafId: spineEndEntryId }),
+        session,
+        preferredRevisions,
+      )
     : [];
   const sideMini = sideThreadMiniSession(session, key, preferredSideLeafId);
   const sideContext = contextBranch(sideMini);
@@ -1168,10 +1238,282 @@ export function piSideThreadContextMessages(
   key: string,
   spineEndEntryId: string | null,
   preferredSideLeafId?: string | null,
+  preferredRevisions?: ReadonlyMap<string, string>,
 ): PiAgentMessage[] {
   return entriesToPiContextMessages(
-    sideThreadContextEntries(session, key, spineEndEntryId, preferredSideLeafId),
+    sideThreadContextEntries(session, key, spineEndEntryId, preferredSideLeafId, preferredRevisions),
   );
+}
+
+interface GroupedRevisionBucket {
+  ref: StepRevisionRef;
+  timestamp: string;
+  entries: PiSessionEntry[];
+}
+
+function collectStepRevisionBuckets(
+  session: DecodedPiSession,
+): Map<string, GroupedRevisionBucket[]> {
+  const byTarget = new Map<string, Map<string, GroupedRevisionBucket>>();
+  for (const entry of session.entries) {
+    const ref = decodeStepRevision(entry);
+    if (!ref) continue;
+    let targetMap = byTarget.get(ref.targetAnchorId);
+    if (!targetMap) {
+      targetMap = new Map();
+      byTarget.set(ref.targetAnchorId, targetMap);
+    }
+    let bucket = targetMap.get(ref.revisionId);
+    if (!bucket) {
+      bucket = { ref, timestamp: entry.timestamp, entries: [] };
+      targetMap.set(ref.revisionId, bucket);
+    }
+    bucket.entries.push(entry);
+  }
+  const result = new Map<string, GroupedRevisionBucket[]>();
+  for (const [targetAnchorId, map] of byTarget) {
+    result.set(targetAnchorId, [...map.values()]);
+  }
+  return result;
+}
+
+function projectRevisionBucket(bucket: GroupedRevisionBucket): StepRevisionEntry {
+  const blocks: AssistantBlock[] = [];
+  const toolOwners = new Map<string, number>();
+  let stopReason: "aborted" | "error" | undefined;
+  let errorMessage: string | undefined;
+
+  for (const entry of bucket.entries) {
+    if (entry.type !== "message") continue;
+    const message = object(entry.message);
+    if (!message) continue;
+    if (message.role === "toolResult" && typeof message.toolCallId === "string") {
+      const idx = toolOwners.get(message.toolCallId);
+      const block = idx !== undefined ? blocks[idx] : undefined;
+      if (block?.type === "toolCall") {
+        block.toolCall = {
+          ...block.toolCall,
+          result: contentText(message.content),
+          ...(message.isError === true ? { isError: true } : {}),
+        };
+      }
+      continue;
+    }
+    if (message.role !== "assistant") continue;
+    const nextStop =
+      message.stopReason === "aborted" || message.stopReason === "error"
+        ? message.stopReason
+        : undefined;
+    const nextError = nextStop === "error" ? (string(message.errorMessage) ?? undefined) : undefined;
+    if (nextStop) stopReason = nextStop;
+    else stopReason = undefined;
+    if (nextError) errorMessage = nextError;
+    else errorMessage = undefined;
+
+    if (Array.isArray(message.content)) {
+      for (const part of message.content) {
+        const block = object(part);
+        if (!block) continue;
+        if (block.type === "thinking" && typeof block.thinking === "string") {
+          blocks.push({ type: "thinking", text: block.thinking });
+        } else if (block.type === "text" && typeof block.text === "string") {
+          blocks.push({ type: "text", text: block.text });
+        } else if (
+          block.type === "toolCall" &&
+          typeof block.id === "string" &&
+          typeof block.name === "string"
+        ) {
+          toolOwners.set(block.id, blocks.length);
+          blocks.push({
+            type: "toolCall",
+            toolCall: {
+              toolCallId: block.id,
+              tool: block.name,
+              params: block.arguments,
+              done: true,
+            },
+          });
+        }
+      }
+    }
+  }
+
+  return {
+    revisionId: bucket.ref.revisionId,
+    timestamp: bucket.timestamp,
+    ...(bucket.ref.pace ? { pace: bucket.ref.pace } : {}),
+    ...(bucket.ref.styleOverride ? { styleOverride: bucket.ref.styleOverride } : {}),
+    ...(bucket.ref.modelId ? { modelId: bucket.ref.modelId } : {}),
+    ...(bucket.ref.provider ? { provider: bucket.ref.provider } : {}),
+    content: textBlocksContent(blocks),
+    blocks,
+    ...(stopReason ? { stopReason } : {}),
+    ...(errorMessage ? { errorMessage } : {}),
+  };
+}
+
+function isEmptyFailedRevision(item: StepRevisionEntry): boolean {
+  if (item.stopReason !== "error" && item.stopReason !== "aborted") return false;
+  if (item.content.trim().length > 0) return false;
+  if ((item.blocks ?? []).some((block) => block.type === "toolCall")) return false;
+  return true;
+}
+
+/**
+ * Snapshots of every off-spine step revision present in `session`, keyed by
+ * `targetAnchorId` (the spine step's assistant anchor entry id).
+ */
+export function stepRevisionSnapshots(
+  session: DecodedPiSession,
+  preferredRevisions?: ReadonlyMap<string, string>,
+): Record<string, StepRevisionSnapshot> {
+  const bucketsByTarget = collectStepRevisionBuckets(session);
+  const snapshots: Record<string, StepRevisionSnapshot> = {};
+
+  for (const [targetAnchorId, buckets] of bucketsByTarget) {
+    const preferred = preferredRevisions?.get(targetAnchorId);
+    const projected = buckets.map(projectRevisionBucket);
+    const visible = projected.filter(
+      (item) => item.revisionId === preferred || !isEmptyFailedRevision(item),
+    );
+    if (visible.length === 0) continue;
+
+    let activeRevisionId: string;
+    if (preferred === ORIGINAL_STEP_REVISION_ID) {
+      activeRevisionId = ORIGINAL_STEP_REVISION_ID;
+    } else if (preferred && visible.some((item) => item.revisionId === preferred)) {
+      activeRevisionId = preferred;
+    } else {
+      const latestGood = [...visible]
+        .reverse()
+        .find((item) => item.stopReason !== "error" && item.stopReason !== "aborted");
+      activeRevisionId = (latestGood ?? visible[visible.length - 1]).revisionId;
+    }
+
+    snapshots[targetAnchorId] = {
+      targetAnchorId,
+      revisions: visible,
+      activeRevisionId,
+    };
+  }
+
+  return snapshots;
+}
+
+/**
+ * Substitute the active off-spine `stepRevision` assistant entries into a
+ * projected spine context entry list, keeping `guide_step` tool calls/results
+ * intact so step boundaries and `Guide cursor` never change.
+ */
+export function applyActiveStepRevisions(
+  entries: readonly PiSessionEntry[],
+  session: DecodedPiSession,
+  preferredRevisions?: ReadonlyMap<string, string>,
+): PiSessionEntry[] {
+  const snapshots = stepRevisionSnapshots(session, preferredRevisions);
+  if (Object.keys(snapshots).length === 0) return [...entries];
+
+  const bucketsByTarget = collectStepRevisionBuckets(session);
+  const activeEntriesByTarget = new Map<string, PiSessionEntry[]>();
+  for (const [targetAnchorId, snapshot] of Object.entries(snapshots)) {
+    if (snapshot.activeRevisionId === ORIGINAL_STEP_REVISION_ID) continue;
+    const bucket = bucketsByTarget
+      .get(targetAnchorId)
+      ?.find((item) => item.ref.revisionId === snapshot.activeRevisionId);
+    if (!bucket) continue;
+    const messageEntries = bucket.entries.filter((entry) => {
+      const role = messageRole(entry);
+      return role === "assistant" || role === "toolResult";
+    });
+    if (messageEntries.length > 0) {
+      activeEntriesByTarget.set(targetAnchorId, messageEntries);
+    }
+  }
+  if (activeEntriesByTarget.size === 0) return [...entries];
+
+  const output: PiSessionEntry[] = [];
+  let index = 0;
+  while (index < entries.length) {
+    const entry = entries[index];
+    const role = messageRole(entry);
+    const replacement = role === "assistant" ? activeEntriesByTarget.get(entry.id) : undefined;
+    if (!replacement) {
+      output.push(entry);
+      index += 1;
+      continue;
+    }
+
+    // Collect the entire spine assistant turn starting at `entry` (including any
+    // interleaved toolResult entries) until the next user or non-message entry.
+    const turnEntries: PiSessionEntry[] = [entry];
+    let end = index + 1;
+    while (end < entries.length) {
+      const nextRole = messageRole(entries[end]);
+      if (nextRole !== "assistant" && nextRole !== "toolResult") break;
+      turnEntries.push(entries[end]);
+      end += 1;
+    }
+
+    // Preserve any `guide_step` toolCall + toolResult prefix so tool pairing and
+    // step records remain valid; replace only the trailing explanation entries.
+    let lastGuideResultIdx = -1;
+    for (let i = 0; i < turnEntries.length; i += 1) {
+      if (messageRole(turnEntries[i]) === "toolResult" && decodeGuide(turnEntries[i].guide)) {
+        lastGuideResultIdx = i;
+      }
+    }
+
+    if (lastGuideResultIdx >= 0) {
+      output.push(...turnEntries.slice(0, lastGuideResultIdx + 1), ...replacement);
+    } else {
+      output.push(...replacement);
+    }
+    index = end;
+  }
+
+  return output;
+}
+
+/**
+ * Spoiler-free model-context prefix for revising a spine step anchored at
+ * `targetAnchorId`: takes `contextBranch` strictly *before* the owning step
+ * turn (preserving `bookSnapshot` and earlier `Chapter recap`s, excluding the
+ * target step's old explanation and all later chapters/steps), with active
+ * revisions applied to earlier steps in that prefix.
+ */
+export function stepRevisionContextEntries(
+  session: DecodedPiSession,
+  targetAnchorId: string,
+  preferredRevisions?: ReadonlyMap<string, string>,
+): PiSessionEntry[] {
+  const spineEntries = session.entries.filter((entry) => !isOffSpineEntry(entry));
+  const spine = activeBranch({ header: session.header, entries: spineEntries, leafId: session.leafId });
+  const targetIdx = spine.findIndex((entry) => entry.id === targetAnchorId);
+  if (targetIdx < 0) return [];
+
+  // Walk backward past the owning user request and any immediately preceding
+  // `readingContext` custom_message so we land on the entry before this turn
+  // (keeping `bookSnapshot` on the very first turn intact).
+  let beforeIdx = targetIdx - 1;
+  if (beforeIdx >= 0 && messageRole(spine[beforeIdx]) === "user") {
+    beforeIdx -= 1;
+  }
+  if (
+    beforeIdx >= 0 &&
+    spine[beforeIdx].type === "custom_message" &&
+    spine[beforeIdx].customType === "readingContext"
+  ) {
+    beforeIdx -= 1;
+  }
+  if (beforeIdx < 0) return [];
+
+  const prefixLeafId = spine[beforeIdx].id;
+  const prefixContext = contextBranch({
+    header: session.header,
+    entries: spineEntries,
+    leafId: prefixLeafId,
+  });
+  return applyActiveStepRevisions(prefixContext, session, preferredRevisions);
 }
 
 /**
@@ -1210,13 +1552,17 @@ export function sessionSummary(value: unknown): AgentSessionSummary {
 
 /**
  * The guided steps on the active branch, oldest first, each with the text of
- * the explanation that followed it (the assistant entries up to the next step
- * or user message). Side questions are left out.
+ * the explanation that followed it (respecting active off-spine step revisions
+ * when present). Side questions are left out.
  */
-export function guidedTurns(session: DecodedPiSession): Array<{ step: RecordedGuideStep; text: string }> {
+export function guidedTurns(
+  session: DecodedPiSession,
+  preferredRevisions?: ReadonlyMap<string, string>,
+): Array<{ step: RecordedGuideStep; text: string }> {
   const turns: Array<{ step: RecordedGuideStep; text: string }> = [];
   let current: { step: RecordedGuideStep; text: string } | null = null;
-  for (const entry of activeBranch(session)) {
+  const entries = applyActiveStepRevisions(activeBranch(session), session, preferredRevisions);
+  for (const entry of entries) {
     const role = messageRole(entry);
     const step = role ? decodeGuide(entry.guide) : null;
     if (step) {
@@ -1231,9 +1577,9 @@ export function guidedTurns(session: DecodedPiSession): Array<{ step: RecordedGu
   return turns;
 }
 
-/** All decoded chapter recaps (with text) on the active branch, oldest first. */
+/** All decoded chapter recaps (with text) on the active branch, oldest first (latest wins per chapter range). */
 export function guideRecaps(session: DecodedPiSession): Array<Omit<GuideRecapMarker, "role">> {
-  return activeBranch(session).flatMap((entry) => {
+  return dedupeRecapEntries(activeBranch(session)).flatMap((entry) => {
     const recap = decodeRecap(entry);
     return recap ? [recap] : [];
   });

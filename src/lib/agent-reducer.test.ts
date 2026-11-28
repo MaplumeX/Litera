@@ -437,4 +437,103 @@ describe("agentReducer branch navigation", () => {
     expect(state.branchAnchors).toEqual([]);
     expect(state.branchNavigation).toEqual({});
   });
+
+  it("streams off-spine step revisions in place without touching spine messages and handles selection/error rollback", () => {
+    const target = { targetAnchorId: "a1", revisionId: "rev-1", pace: "deep" as const, modelId: "sonnet" };
+    let state = createAgentState("book-a");
+    state = reduce(state, {
+      version: 1,
+      type: "session_switched",
+      bookId: "book-a",
+      sessionId: "s",
+      messages: [{ role: "user", content: "Start" }, { role: "assistant", content: "Original" }],
+      anchors: ["u1", "a1"],
+      navigation: {},
+      sideThreads: {},
+      stepRevisions: {},
+    });
+    state = agentReducer(state, {
+      type: "prompt_queued",
+      bookId: "book-a",
+      promptId: "p-rev",
+      stepRevisionTarget: target,
+    });
+    expect(state.activeRevisionTarget).toEqual(target);
+    expect(state.stepRevisions.a1.activeRevisionId).toBe("rev-1");
+
+    state = reduce(state, {
+      version: 2,
+      type: "prompt_started",
+      bookId: "book-a",
+      sessionId: "s",
+      promptId: "p-rev",
+      stepRevisionTarget: target,
+    });
+    state = reduce(state, {
+      version: 3,
+      type: "text_delta",
+      bookId: "book-a",
+      sessionId: "s",
+      promptId: "p-rev",
+      stepRevisionTarget: target,
+      delta: "Deeper ",
+    });
+    state = reduce(state, {
+      version: 4,
+      type: "text_delta",
+      bookId: "book-a",
+      sessionId: "s",
+      promptId: "p-rev",
+      stepRevisionTarget: target,
+      delta: "explanation",
+    });
+    expect(state.messages[1]).toEqual({ role: "assistant", content: "Original" });
+    expect(state.stepRevisions.a1.revisions[0].content).toBe("Deeper explanation");
+
+    state = reduce(state, {
+      version: 5,
+      type: "prompt_end",
+      bookId: "book-a",
+      sessionId: "s",
+      promptId: "p-rev",
+      stepRevisionTarget: target,
+      messages: state.messages,
+      anchors: ["u1", "a1"],
+      navigation: {},
+      stepRevisions: state.stepRevisions,
+    });
+    expect(state.activeRevisionTarget).toBeNull();
+    expect(state.status).toBe("bookReady");
+
+    // Selecting __original__ updates stepRevisions cleanly
+    state = reduce(state, {
+      version: 6,
+      type: "step_revision_selected",
+      bookId: "book-a",
+      sessionId: "s",
+      targetAnchorId: "a1",
+      revisionId: "__original__",
+      stepRevisions: {
+        a1: { ...state.stepRevisions.a1, activeRevisionId: "__original__" },
+      },
+    });
+    expect(state.stepRevisions.a1.activeRevisionId).toBe("__original__");
+
+    // Queue failure drops only the pending revision entry
+    const target2 = { targetAnchorId: "a1", revisionId: "rev-2" };
+    state = agentReducer(state, {
+      type: "prompt_queued",
+      bookId: "book-a",
+      promptId: "p-rev-2",
+      stepRevisionTarget: target2,
+    });
+    expect(state.stepRevisions.a1.revisions).toHaveLength(2);
+    state = agentReducer(state, {
+      type: "prompt_queue_failed",
+      promptId: "p-rev-2",
+      message: "network error",
+    });
+    expect(state.activeRevisionTarget).toBeNull();
+    expect(state.stepRevisions.a1.revisions.map((r) => r.revisionId)).toEqual(["rev-1"]);
+  });
 });
