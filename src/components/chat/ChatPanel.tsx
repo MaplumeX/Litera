@@ -786,7 +786,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
         <div
           data-testid="chat-panel"
           className={cn(
-            "relative flex h-full min-h-0 font-chat",
+            "relative flex h-full min-h-0",
             !isWorkspace && "bg-card",
           )}
         >
@@ -818,7 +818,7 @@ export const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(
           )}
           <div
             className={cn(
-              "relative flex min-h-0 min-w-0 flex-1 flex-col",
+              "relative flex min-h-0 min-w-0 flex-1 flex-col font-chat",
               // In Agent mode the conversation is a card on the window's ground.
               isWorkspace
                 ? cn("my-2 mr-1 overflow-hidden rounded-xl bg-background shadow-soft", railOpen ? "ml-1" : "ml-2")

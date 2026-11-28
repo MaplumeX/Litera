@@ -1263,7 +1263,7 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
       <CitationContext.Provider value={citationActions}>
         <div
           data-testid="guide-workspace"
-          className={cn("relative flex h-full min-h-0 font-chat", !isWorkspace && "bg-card")}
+          className={cn("relative flex h-full min-h-0", !isWorkspace && "bg-card")}
         >
           {hasNavRail && (
             <div
@@ -1294,7 +1294,7 @@ export const GuideWorkspace = forwardRef<GuideWorkspaceHandle, GuideWorkspacePro
 
           <div
             className={cn(
-              "relative flex min-h-0 min-w-0 flex-1 flex-col",
+              "relative flex min-h-0 min-w-0 flex-1 flex-col font-chat",
               isWorkspace
                 ? cn(
                     "my-2 mr-1 overflow-hidden rounded-xl bg-background shadow-soft",
